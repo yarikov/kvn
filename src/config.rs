@@ -24,9 +24,10 @@ pub fn load_config_at(path: &Path) -> Result<Config> {
     config
         .migrate()
         .with_context(|| format!("Failed to migrate {:?}", path))?;
-    if config.schema_version != loaded_schema_version && config.validate().is_ok() {
+    let normalized = config.normalize();
+    if (config.schema_version != loaded_schema_version || normalized) && config.validate().is_ok() {
         save_config_at_revision(path, &config, Some(contents.as_bytes()))
-            .with_context(|| format!("Failed to persist migration for {:?}", path))?;
+            .with_context(|| format!("Failed to persist normalized config for {:?}", path))?;
     }
 
     Ok(config)
@@ -53,6 +54,7 @@ pub(crate) fn load_config_bytes_read_only(contents: &[u8], path: &Path) -> Resul
     config
         .migrate()
         .with_context(|| format!("Failed to migrate {:?}", path))?;
+    config.normalize();
     Ok(config)
 }
 
@@ -69,13 +71,14 @@ pub fn save_config_at(path: &Path, config: &Config) -> Result<()> {
 }
 
 fn serialized_config(config: &Config) -> Result<String> {
-    config
+    let mut serializable = config.clone();
+    serializable.normalize();
+    serializable
         .validate()
         .context("Refusing to save invalid config")?;
 
     // Mirror `dns.strategy` into the legacy `dns_strategy` field so configs
     // remain readable by older kvn-tui builds during the deprecation window.
-    let mut serializable = config.clone();
     serializable.settings.dns_strategy = serializable.settings.dns.strategy.clone();
 
     Ok(serde_json::to_string_pretty(&serializable)?)
@@ -196,6 +199,34 @@ mod tests {
         save_config_at(&path, &config).unwrap();
         let loaded = load_config_at(&path).unwrap();
         assert_eq!(loaded, config);
+    }
+
+    #[test]
+    fn load_config_trims_and_persists_tun_interface() {
+        let file = NamedTempFile::new().unwrap();
+        let mut config = Config::default();
+        config.settings.tun_interface = " \tkvn0\n".into();
+        fs::write(file.path(), serde_json::to_string(&config).unwrap()).unwrap();
+
+        let loaded = load_config_at(file.path()).unwrap();
+        let persisted: Config =
+            serde_json::from_str(&fs::read_to_string(file.path()).unwrap()).unwrap();
+
+        assert_eq!(loaded.settings.tun_interface, "kvn0");
+        assert_eq!(persisted.settings.tun_interface, "kvn0");
+    }
+
+    #[test]
+    fn save_config_trims_tun_interface() {
+        let file = NamedTempFile::new().unwrap();
+        let mut config = Config::default();
+        config.settings.tun_interface = " kvn-work ".into();
+
+        save_config_at(file.path(), &config).unwrap();
+
+        let persisted: Config =
+            serde_json::from_str(&fs::read_to_string(file.path()).unwrap()).unwrap();
+        assert_eq!(persisted.settings.tun_interface, "kvn-work");
     }
 
     #[test]
@@ -433,6 +464,21 @@ mod tests {
         std::fs::write(&path, original).unwrap();
         let loaded = load_config_at_read_only(&path).unwrap();
         assert_eq!(loaded.schema_version, profile::CURRENT_SCHEMA_VERSION);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+    }
+
+    #[test]
+    fn read_only_load_trims_tun_interface_without_rewriting_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("recovery.json");
+        let mut config = Config::default();
+        config.settings.tun_interface = " kvn0 ".into();
+        let original = serde_json::to_string(&config).unwrap();
+        std::fs::write(&path, &original).unwrap();
+
+        let loaded = load_config_at_read_only(&path).unwrap();
+
+        assert_eq!(loaded.settings.tun_interface, "kvn0");
         assert_eq!(std::fs::read_to_string(path).unwrap(), original);
     }
 }
