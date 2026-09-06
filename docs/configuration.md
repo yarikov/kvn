@@ -42,7 +42,7 @@ A subscription contains `id`, `name`, `url`, `auto_update`, and an optional
 | Field | Default | Description |
 |-------|---------|-------------|
 | `default_profile` | `null` | UUID of the selected default profile |
-| `tun_interface` | `kvn0` | Name of the sing-box TUN interface |
+| `tun_interface` | `kvn0` | Name of the sing-box TUN interface; must start with `kvn` |
 | `dns` | Cloudflare DoH | DNS servers, rules, strategy, and fake-IP state |
 | `geo_routing` | no region | Country modes, rule-set updates, and service overrides |
 | `auto_connect` | `false` | Connect to `last_connected_profile` at startup |

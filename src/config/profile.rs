@@ -1560,6 +1560,9 @@ impl Settings {
                 self.tun_interface,
             );
         }
+        if !tun.starts_with("kvn") {
+            anyhow::bail!("settings.tun_interface must start with \"kvn\"");
+        }
 
         if self.theme != OMARCHY_THEME_SENTINEL
             && !BUNDLED_THEME_NAMES.contains(&self.theme.as_str())
@@ -1660,6 +1663,17 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Canonicalize user-provided values that tolerate surrounding whitespace.
+    /// Returns whether any value changed.
+    pub(crate) fn normalize(&mut self) -> bool {
+        let tun_interface = self.settings.tun_interface.trim();
+        if tun_interface == self.settings.tun_interface {
+            return false;
+        }
+        self.settings.tun_interface = tun_interface.to_string();
+        true
+    }
+
     /// Validate semantic constraints that serde cannot enforce.
     ///
     /// Checks:
@@ -2847,6 +2861,27 @@ mod tests {
         };
         let err = s.validate().unwrap_err().to_string();
         assert!(err.contains("disallowed"), "Error was: {}", err);
+    }
+
+    #[test]
+    fn settings_validate_accepts_tun_interfaces_with_kvn_prefix() {
+        for tun_interface in ["kvn", "kvn0", "kvn-work"] {
+            let s = Settings {
+                tun_interface: tun_interface.into(),
+                ..Settings::default()
+            };
+            s.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn settings_validate_rejects_tun_interface_without_kvn_prefix() {
+        let s = Settings {
+            tun_interface: "tun0".into(),
+            ..Settings::default()
+        };
+        let err = s.validate().unwrap_err().to_string();
+        assert!(err.contains("must start with \"kvn\""), "Error was: {err}");
     }
 
     #[test]
