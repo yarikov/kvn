@@ -6,9 +6,9 @@ expression: "snapshot_terminal(&model, 80, 40)"
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections         │
 └───────────┌──────────────────────────────────────────────────────┐───────────┘
 ┌ Profiles ─│ Navigation                                           │───────────┐
-│ No sources│ h/l, ←/→     Focus panes                             │           │
-│profile or │ j/k, ↑/↓     Move or scroll                          │           │
-│clipboard. │ gg/G         Go to first / last                      │           │
+│ No sources│ h/l, ←/→     Focus panes                             │ipboard.   │
+│           │ j/k, ↑/↓     Move or scroll                          │           │
+│           │ gg/G         Go to first / last                      │           │
 │           │                                                      │           │
 │           │ Profiles                                             │           │
 │           │ Enter        Connect selected profile                │           │
@@ -40,5 +40,5 @@ expression: "snapshot_terminal(&model, 80, 40)"
 │           │                                                      │           │
 │           │        j/k scroll · gg/G edges · q/Esc/? back        │           │
 │           └──────────────────────────────────────────────────────┘           │
-└──────────────────────────────────────┘└──────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────────────────┘
  DISCONNECTED                                                        DoH  Global

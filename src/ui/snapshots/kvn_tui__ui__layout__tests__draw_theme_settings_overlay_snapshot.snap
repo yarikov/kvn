@@ -6,9 +6,9 @@ expression: "snapshot_terminal(&model, 80, 32)"
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections         │
 └───────────────┌──────────────────────────────────────────────┐───────────────┘
 ┌ Profiles ─────│                 Select theme                 │───────────────┐
-│ No sources. Pr│                                              │               │
-│profile or subs│               catppuccin                     │               │
-│clipboard.     │               catppuccin-latte               │               │
+│ No sources. Pr│                                              │m clipboard.   │
+│               │               catppuccin                     │               │
+│               │               catppuccin-latte               │               │
 │               │               ethereal                       │               │
 │               │               everforest                     │               │
 │               │               flexoki-light                  │               │
@@ -32,5 +32,5 @@ expression: "snapshot_terminal(&model, 80, 32)"
 │               │                                              │               │
 │               │      Enter confirm, q/Esc cancel, ? help     │               │
 │               └──────────────────────────────────────────────┘               │
-└──────────────────────────────────────┘└──────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────────────────┘
  DISCONNECTED                                                        DoH  Global
