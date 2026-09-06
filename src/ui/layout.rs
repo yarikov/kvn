@@ -18,6 +18,13 @@ use crate::ui::widgets::{
 /// top/bottom borders = 3 lines.
 const TRAFFIC_PANEL_HEIGHT: u16 = 3;
 
+pub(crate) const MIN_TERMINAL_WIDTH: u16 = 70;
+pub(crate) const MIN_TERMINAL_HEIGHT: u16 = 15;
+
+/// Minimum terminal width that leaves enough room for both main panes. At
+/// narrower widths the Profiles pane uses the full row and Logs is hidden.
+pub(crate) const TWO_PANE_MIN_WIDTH: u16 = 90;
+
 pub(crate) const LOG_CURSOR_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// TUI-client-local keyboard state for the log pane. Log contents are local
@@ -426,26 +433,30 @@ fn log_display_line(
 }
 
 fn main_panes(terminal_area: Rect) -> (Rect, Rect) {
-    let main_area = if terminal_area.height > TRAFFIC_PANEL_HEIGHT + 5 {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(TRAFFIC_PANEL_HEIGHT),
-                Constraint::Min(0),
-                Constraint::Length(1),
-            ])
-            .split(terminal_area)[1]
-    } else {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
-            .split(terminal_area)[0]
-    };
+    let main_area = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(TRAFFIC_PANEL_HEIGHT),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(terminal_area)[1];
+    split_main_panes(main_area)
+}
+
+fn split_main_panes(area: Rect) -> (Rect, Rect) {
+    if !logs_visible(area) {
+        return (area, Rect::new(area.right(), area.y, 0, area.height));
+    }
     let panes = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(main_area);
+        .split(area);
     (panes[0], panes[1])
+}
+
+pub(crate) fn logs_visible(area: Rect) -> bool {
+    area.width >= TWO_PANE_MIN_WIDTH
 }
 
 fn panel_inner(area: Rect) -> Rect {
@@ -464,7 +475,7 @@ pub(crate) fn log_viewport_with_navigation(
     terminal_area: Rect,
     navigation: Option<&LogNavigation>,
 ) -> Option<LogViewport> {
-    if model.overlay != Overlay::None {
+    if model.overlay != Overlay::None || !terminal_size_supported(terminal_area) {
         return None;
     }
     let (_, logs) = main_panes(terminal_area);
@@ -489,7 +500,7 @@ pub(crate) fn source_hit_test(
     column: u16,
     row: u16,
 ) -> Option<usize> {
-    if model.overlay != Overlay::None {
+    if model.overlay != Overlay::None || !terminal_size_supported(terminal_area) {
         return None;
     }
     let (sources, _) = main_panes(terminal_area);
@@ -614,31 +625,24 @@ fn draw_impl(
     // override with their own `popup_bg()` (currently the same color).
     frame.render_widget(Block::default().style(model.theme.background()), area);
 
-    // Top-level vertical layout: traffic header, main content, status bar. Keep
-    // the header visible while disconnected so the layout does not jump when
-    // the connection state changes; only hide it in very short terminals.
-    let show_traffic = area.height > TRAFFIC_PANEL_HEIGHT + 5;
-    let (traffic_area, main_area, status_area) = if show_traffic {
-        let split = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(TRAFFIC_PANEL_HEIGHT),
-                Constraint::Min(0),
-                Constraint::Length(1),
-            ])
-            .split(area);
-        (Some(split[0]), split[1], split[2])
-    } else {
-        let split = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
-            .split(area);
-        (None, split[0], split[1])
-    };
-
-    if let Some(area) = traffic_area {
-        draw_traffic_panel(frame, model, area);
+    if !terminal_size_supported(area) {
+        draw_terminal_too_small(frame, model, area);
+        return;
     }
+
+    // Top-level vertical layout: traffic header, main content, status bar. The
+    // minimum-size guard above guarantees enough room for every section.
+    let split = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(TRAFFIC_PANEL_HEIGHT),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(area);
+    let (traffic_area, main_area, status_area) = (split[0], split[1], split[2]);
+
+    draw_traffic_panel(frame, model, traffic_area);
     draw_main(
         frame,
         model,
@@ -670,6 +674,36 @@ fn draw_impl(
     }
 }
 
+pub(crate) fn terminal_size_supported(area: Rect) -> bool {
+    area.width >= MIN_TERMINAL_WIDTH && area.height >= MIN_TERMINAL_HEIGHT
+}
+
+fn draw_terminal_too_small(frame: &mut Frame, model: &Model, area: Rect) {
+    let message_height = area.height.min(3);
+    let message_area = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(message_height) / 2,
+        area.width,
+        message_height,
+    );
+    let message = Paragraph::new(vec![
+        Line::from(Span::styled("Terminal too small", model.theme.error())),
+        Line::from(Span::styled(
+            format!(
+                "Minimum: {MIN_TERMINAL_WIDTH}×{MIN_TERMINAL_HEIGHT}  Current: {}×{}",
+                area.width, area.height
+            ),
+            model.theme.normal(),
+        )),
+        Line::from(Span::styled(
+            "Increase the window size",
+            model.theme.normal(),
+        )),
+    ])
+    .alignment(Alignment::Center);
+    frame.render_widget(message, message_area);
+}
+
 /// Draw the main content area with the Sources list and logs.
 fn draw_main(
     frame: &mut Frame,
@@ -681,17 +715,18 @@ fn draw_main(
 ) {
     let theme = &model.theme;
     let main_focus_active = model.overlay == Overlay::None;
-    let content_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
+    let (sources_area, logs_area) = split_main_panes(area);
 
     draw_sources(
         frame,
         model,
-        content_chunks[0],
-        main_focus_active && pane_focus == MainPaneFocus::Sources,
+        sources_area,
+        main_focus_active && (pane_focus == MainPaneFocus::Sources || !logs_visible(area)),
     );
+
+    if logs_area.width == 0 {
+        return;
+    }
 
     let log_block = Block::default()
         .title(" Logs ")
@@ -702,7 +737,7 @@ fn draw_main(
             theme.border()
         });
 
-    let inner = panel_inner(content_chunks[1]);
+    let inner = panel_inner(logs_area);
     let viewport = log_selection
         .map(|selection| &selection.viewport)
         .filter(|viewport| viewport.area == inner)
@@ -725,7 +760,7 @@ fn draw_main(
         .collect();
 
     let logs = Paragraph::new(log_text).block(log_block);
-    frame.render_widget(logs, content_chunks[1]);
+    frame.render_widget(logs, logs_area);
 }
 
 /// Render the full-width traffic header: instantaneous ↑/↓ rate, cumulative
@@ -1444,7 +1479,7 @@ mod tests {
     }
 
     #[test]
-    fn source_hit_test_maps_rows_in_both_vertical_layouts() {
+    fn source_hit_test_maps_rows_and_rejects_unsupported_height() {
         let model = mouse_model();
         // Tall: traffic panel occupies rows 0..=2, Sources content starts at 4.
         assert_eq!(
@@ -1459,30 +1494,18 @@ mod tests {
             source_hit_test(&model, Rect::new(0, 0, 80, 20), 2, 7),
             Some(2)
         );
-        // Short: traffic is hidden and Sources content starts at row 1.
-        assert_eq!(
-            source_hit_test(&model, Rect::new(0, 0, 80, 8), 2, 1),
-            Some(0)
-        );
-        assert_eq!(
-            source_hit_test(&model, Rect::new(0, 0, 80, 8), 2, 3),
-            Some(1)
-        );
-        assert_eq!(
-            source_hit_test(&model, Rect::new(0, 0, 80, 8), 2, 4),
-            Some(2)
-        );
+        assert_eq!(source_hit_test(&model, Rect::new(0, 0, 80, 8), 2, 1), None);
     }
 
     #[test]
     fn source_hit_test_ignores_labels_borders_separators_logs_clipping_and_overlays() {
         let mut model = mouse_model();
-        let area = Rect::new(0, 0, 80, 20);
+        let area = Rect::new(0, 0, 90, 20);
         assert_eq!(source_hit_test(&model, area, 2, 5), None); // separator
         assert_eq!(source_hit_test(&model, area, 0, 4), None); // border
         assert_eq!(source_hit_test(&model, area, 1, 4), None); // padding
         assert_eq!(source_hit_test(&model, area, 50, 4), None); // Logs
-        assert_eq!(source_hit_test(&model, Rect::new(0, 0, 80, 5), 2, 4), None);
+        assert_eq!(source_hit_test(&model, Rect::new(0, 0, 90, 5), 2, 4), None);
         model.overlay = Overlay::Help(crate::app::model::HelpState::default());
         assert_eq!(source_hit_test(&model, area, 2, 5), None);
     }
@@ -1491,11 +1514,11 @@ mod tests {
     fn log_viewport_hit_test_excludes_border_and_overlay() {
         let mut model = mouse_model();
         model.push_log("hello".into());
-        let area = Rect::new(0, 0, 80, 20);
+        let area = Rect::new(0, 0, 90, 20);
         let viewport = log_viewport(&model, area).unwrap();
-        assert!(viewport.contains(42, 4));
-        assert!(!viewport.contains(41, 4));
-        assert!(!viewport.contains(42, 3));
+        assert!(viewport.contains(47, 4));
+        assert!(!viewport.contains(46, 4));
+        assert!(!viewport.contains(47, 3));
         model.overlay = Overlay::Help(crate::app::model::HelpState::default());
         assert!(log_viewport(&model, area).is_none());
     }
@@ -1503,13 +1526,13 @@ mod tests {
     #[test]
     fn log_navigation_starts_j_at_top_and_k_at_bottom_of_visible_logs() {
         let mut model = mouse_model();
-        for index in 0..6 {
+        for index in 0..12 {
             model.push_log(format!("line {index}"));
         }
-        let area = Rect::new(0, 0, 80, 9); // three log content rows
+        let area = Rect::new(0, 0, 90, 15); // nine log content rows
         let viewport = log_viewport(&model, area).unwrap();
         assert_eq!(viewport.first_log_index(), Some(3));
-        assert_eq!(viewport.last_log_index(), Some(5));
+        assert_eq!(viewport.last_log_index(), Some(11));
 
         let now = Instant::now();
         let mut down = LogNavigation::default();
@@ -1518,7 +1541,7 @@ mod tests {
 
         let mut up = LogNavigation::default();
         up.select_edge(&viewport, false, now);
-        assert_eq!(up.cursor(), Some(5));
+        assert_eq!(up.cursor(), Some(11));
     }
 
     #[test]
@@ -1691,13 +1714,13 @@ mod tests {
     fn active_log_selection_freezes_viewport_until_it_is_cleared() {
         let mut model = mouse_model();
         model.push_log("visible before drag".into());
-        let area = Rect::new(0, 0, 80, 20);
+        let area = Rect::new(0, 0, 90, 20);
         let viewport = log_viewport(&model, area).unwrap();
-        let mut selection = LogSelection::start(viewport, 42, 4).unwrap();
-        selection.update(43, 4);
+        let mut selection = LogSelection::start(viewport, 47, 4).unwrap();
+        selection.update(48, 4);
 
         model.push_log("arrived during drag".into());
-        let backend = TestBackend::new(80, 20);
+        let backend = TestBackend::new(90, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| draw_with_log_selection(frame, &model, Some(&selection)))
@@ -1738,6 +1761,29 @@ mod tests {
             .unwrap();
         let output = buffer_to_string(terminal.backend().buffer());
         assert!(output.lines().nth(2).unwrap().contains("Saved"));
+    }
+
+    #[test]
+    fn toast_remains_visible_when_logs_are_hidden() {
+        let model = model_with_profiles(vec![]);
+        let status = crate::app::model::AppStatus::Info("Saved".into());
+        let mut terminal = Terminal::new(TestBackend::new(71, 20)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_with_toast(
+                    frame,
+                    &model,
+                    MainPaneFocus::Sources,
+                    None,
+                    None,
+                    Some(&status),
+                    false,
+                )
+            })
+            .unwrap();
+        let output = buffer_to_string(terminal.backend().buffer());
+        assert!(output.contains("Saved"));
+        assert!(!output.contains("Logs"));
     }
 
     #[test]
@@ -1893,7 +1939,86 @@ mod tests {
         model.logs.push_back("log line 2".to_string());
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[0].id);
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, 90, 20));
+    }
+
+    #[test]
+    fn narrow_layout_hides_logs_and_expands_sources() {
+        let mut model = mouse_model();
+        model.push_log("must stay hidden".into());
+
+        let output = snapshot_terminal(&model, TWO_PANE_MIN_WIDTH - 1, 20);
+
+        assert!(output.contains("Profiles"));
+        assert!(!output.contains("Logs"));
+        assert!(!output.contains("must stay hidden"));
+        assert_eq!(
+            source_hit_test(&model, Rect::new(0, 0, TWO_PANE_MIN_WIDTH - 1, 20), 60, 4),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn logs_use_the_ninety_column_breakpoint() {
+        let model = mouse_model();
+        let narrow = Rect::new(0, 0, TWO_PANE_MIN_WIDTH - 1, 20);
+        let wide = Rect::new(0, 0, TWO_PANE_MIN_WIDTH, 20);
+
+        assert!(!logs_visible(narrow));
+        assert!(logs_visible(wide));
+        assert!(log_viewport(&model, narrow).is_none());
+        assert!(log_viewport(&model, wide).is_some());
+    }
+
+    #[test]
+    fn minimum_terminal_size_is_inclusive() {
+        assert!(terminal_size_supported(Rect::new(
+            0,
+            0,
+            MIN_TERMINAL_WIDTH,
+            MIN_TERMINAL_HEIGHT
+        )));
+        assert!(!terminal_size_supported(Rect::new(
+            0,
+            0,
+            MIN_TERMINAL_WIDTH - 1,
+            MIN_TERMINAL_HEIGHT
+        )));
+        assert!(!terminal_size_supported(Rect::new(
+            0,
+            0,
+            MIN_TERMINAL_WIDTH,
+            MIN_TERMINAL_HEIGHT - 1
+        )));
+    }
+
+    #[test]
+    fn undersized_terminal_shows_resize_message_instead_of_ui() {
+        let model = mouse_model();
+        for (width, height) in [
+            (MIN_TERMINAL_WIDTH - 1, MIN_TERMINAL_HEIGHT),
+            (MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT - 1),
+        ] {
+            let area = Rect::new(0, 0, width, height);
+            let output = snapshot_terminal(&model, width, height);
+
+            assert!(output.contains("Terminal too small"));
+            assert!(output.contains(&format!("Current: {width}×{height}")));
+            assert!(!output.contains("Profiles"));
+            assert!(!output.contains("Logs"));
+            assert_eq!(source_hit_test(&model, area, 2, 4), None);
+            assert!(log_viewport(&model, area).is_none());
+        }
+    }
+
+    #[test]
+    fn exact_minimum_size_draws_the_single_pane_ui() {
+        let model = mouse_model();
+        let output = snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT);
+
+        assert!(output.contains("Profiles"));
+        assert!(!output.contains("Terminal too small"));
+        assert!(!output.contains("Logs"));
     }
 
     #[test]
@@ -1903,7 +2028,7 @@ mod tests {
         use ratatui::style::Color;
 
         let model = mouse_model();
-        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(90, 20)).unwrap();
         let navigation = LogNavigation::default();
         terminal
             .draw(|frame| {
@@ -1912,8 +2037,8 @@ mod tests {
             .unwrap();
 
         let buffer = terminal.backend().buffer();
-        let source_border = &buffer.content[3 * 80];
-        let log_border = &buffer.content[3 * 80 + 40];
+        let source_border = &buffer.content[3 * 90];
+        let log_border = &buffer.content[3 * 90 + 45];
         assert_eq!(source_border.style().fg, Some(Color::DarkGray));
         assert_eq!(log_border.style().fg, Some(Color::Cyan));
     }
@@ -1927,7 +2052,7 @@ mod tests {
         for pane_focus in [MainPaneFocus::Sources, MainPaneFocus::Logs] {
             let mut model = mouse_model();
             model.overlay = Overlay::ConfirmDelete;
-            let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(90, 20)).unwrap();
             terminal
                 .draw(|frame| {
                     draw_with_interaction(frame, &model, pane_focus, None, None);
@@ -1935,9 +2060,9 @@ mod tests {
                 .unwrap();
 
             let buffer = terminal.backend().buffer();
-            assert_eq!(buffer.content[3 * 80].style().fg, Some(Color::DarkGray));
+            assert_eq!(buffer.content[3 * 90].style().fg, Some(Color::DarkGray));
             assert_eq!(
-                buffer.content[3 * 80 + 79].style().fg,
+                buffer.content[3 * 90 + 89].style().fg,
                 Some(Color::DarkGray)
             );
 
@@ -1949,8 +2074,8 @@ mod tests {
                 .unwrap();
             let buffer = terminal.backend().buffer();
             let focused_border = match pane_focus {
-                MainPaneFocus::Sources => &buffer.content[3 * 80],
-                MainPaneFocus::Logs => &buffer.content[3 * 80 + 40],
+                MainPaneFocus::Sources => &buffer.content[3 * 90],
+                MainPaneFocus::Logs => &buffer.content[3 * 90 + 45],
             };
             assert_eq!(focused_border.style().fg, Some(Color::Cyan));
         }
@@ -2555,7 +2680,7 @@ mod tests {
         insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
     }
 
-    /// Pin the `[error]`-prefixed log styling path at `draw_main` L80–86.
+    /// Pin the `[error]`-prefixed log styling path in `draw_main`.
     #[test]
     fn draw_main_error_log_styling_snapshot() {
         let mut model = model_with_profiles(vec![Profile::new_vless(
@@ -2571,7 +2696,7 @@ mod tests {
         model
             .logs
             .push_back("[error] sing-box exited with code 1".to_string());
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, 90, 20));
     }
 
     /// Subscription rendered with a populated `last_updated` and a non-default

@@ -624,6 +624,13 @@ fn run_loop(
     use crate::ui::layout::LogNavigation;
 
     let mut pane_focus = model.main_pane_focus;
+    let terminal_area: ratatui::layout::Rect = terminal.size()?.into();
+    if !crate::ui::layout::logs_visible(terminal_area) && pane_focus == MainPaneFocus::Logs {
+        pane_focus = MainPaneFocus::Sources;
+        client.send(&IpcCommand::SetMainPaneFocus {
+            focus: MainPaneFocus::Sources,
+        })?;
+    }
     let mut log_navigation = LogNavigation::default();
     let mut go_first_sequence = GoFirstSequence::default();
     let mut toast = ToastState::new(model.status_revision);
@@ -746,6 +753,21 @@ fn run_loop(
             }
             Msg::Key(key) => {
                 use crossterm::event::{KeyCode, KeyModifiers};
+                let area: ratatui::layout::Rect = terminal.size()?.into();
+                if !crate::ui::layout::terminal_size_supported(area) {
+                    match key.code {
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            let _ = client.send(&IpcCommand::Quit);
+                            std::thread::sleep(Duration::from_millis(300));
+                            break;
+                        }
+                        KeyCode::Char('q') | KeyCode::Esc => {
+                            client.send(&IpcCommand::Detach)?;
+                            break;
+                        }
+                        _ => continue,
+                    }
+                }
                 let completes_gg = go_first_sequence.feed(&key.code);
                 let mut forward_key = || {
                     let (code, ch) = match key.code {
@@ -808,10 +830,13 @@ fn run_loop(
                     KeyCode::Char('l') | KeyCode::Right
                         if model.overlay == crate::app::model::Overlay::None =>
                     {
-                        pane_focus = MainPaneFocus::Logs;
-                        client.send(&IpcCommand::SetMainPaneFocus {
-                            focus: MainPaneFocus::Logs,
-                        })?;
+                        let area: ratatui::layout::Rect = terminal.size()?.into();
+                        if crate::ui::layout::logs_visible(area) {
+                            pane_focus = MainPaneFocus::Logs;
+                            client.send(&IpcCommand::SetMainPaneFocus {
+                                focus: MainPaneFocus::Logs,
+                            })?;
+                        }
                         needs_redraw = true;
                     }
                     KeyCode::Char('j') | KeyCode::Down
@@ -990,6 +1015,13 @@ fn run_loop(
                 };
                 toast.observe(snapshot.status_revision, toast_status, Instant::now());
                 apply_snapshot(model, *snapshot);
+                let area: ratatui::layout::Rect = terminal.size()?.into();
+                if !crate::ui::layout::logs_visible(area) && pane_focus == MainPaneFocus::Logs {
+                    pane_focus = MainPaneFocus::Sources;
+                    client.send(&IpcCommand::SetMainPaneFocus {
+                        focus: MainPaneFocus::Sources,
+                    })?;
+                }
                 if model.overlay != crate::app::model::Overlay::None {
                     log_selection = None;
                     log_dragging = false;
@@ -1017,6 +1049,13 @@ fn run_loop(
             Msg::Resize => {
                 log_selection = None;
                 log_dragging = false;
+                let area: ratatui::layout::Rect = terminal.size()?.into();
+                if !crate::ui::layout::logs_visible(area) && pane_focus == MainPaneFocus::Logs {
+                    pane_focus = MainPaneFocus::Sources;
+                    client.send(&IpcCommand::SetMainPaneFocus {
+                        focus: MainPaneFocus::Sources,
+                    })?;
+                }
                 update_pointer_shape(terminal, model, mouse_position, &mut pointer_shape)?;
                 needs_redraw = true;
             }
