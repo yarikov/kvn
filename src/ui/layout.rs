@@ -1135,10 +1135,12 @@ fn draw_selection_modal(
     ];
     for (i, label) in items.iter().enumerate().take(window_end).skip(window_start) {
         let is_active = active == Some(i);
-        let style = if is_active {
+        let style = if is_active && i == selected {
             theme.selected_connected()
         } else if i == selected {
             theme.selected()
+        } else if is_active {
+            theme.success()
         } else {
             theme.normal()
         };
@@ -2244,6 +2246,38 @@ mod tests {
         model.overlay = Overlay::RoutingMode;
         model.routing_selected = 2;
         insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+    }
+
+    #[test]
+    fn selection_overlay_styles_active_row_like_connected_profile() {
+        let mut model = model_with_profiles(vec![]);
+        model
+            .config
+            .settings
+            .geo_routing
+            .set_region(crate::config::profile::GeoRegion::Ru);
+        model.overlay = Overlay::RoutingMode;
+        model.routing_selected = 2;
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        terminal.draw(|frame| draw(frame, &model)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let active = find_text(buffer, "Global");
+        assert_eq!(buffer.content[active].style().fg, model.theme.success().fg);
+        assert_eq!(buffer.content[active].style().bg, model.theme.popup_bg().bg);
+
+        model.routing_selected = 0;
+        terminal.draw(|frame| draw(frame, &model)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let selected_active = find_text(buffer, "Global");
+        assert_eq!(
+            buffer.content[selected_active].style().fg,
+            model.theme.selected_connected().fg
+        );
+        assert_eq!(
+            buffer.content[selected_active].style().bg,
+            model.theme.selected_connected().bg
+        );
     }
 
     #[test]
