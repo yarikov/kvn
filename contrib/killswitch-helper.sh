@@ -1,5 +1,5 @@
 #!/bin/bash
-# Narrow privileged API used by the kvn-tui daemon through sudoers.
+# Narrow privileged API used by the kvn daemon through sudoers.
 set -euo pipefail
 
 UNIT="kvn-tui-killswitch.service"
@@ -58,11 +58,11 @@ check_installation() {
 
 main() {
     if [[ $EUID -ne 0 ]]; then
-        echo "kvn-tui kill-switch helper must run as root" >&2
+        echo "kvn kill-switch helper must run as root" >&2
         exit 1
     fi
     if [[ "$(stat -c %u "$0")" != "0" ]]; then
-        echo "kvn-tui kill-switch helper is not root-owned; refusing to run" >&2
+        echo "kvn kill-switch helper is not root-owned; refusing to run" >&2
         exit 1
     fi
     if ! validate_command_args "$@"; then

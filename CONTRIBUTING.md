@@ -1,4 +1,4 @@
-# Contributing to kvn-tui
+# Contributing to kvn
 
 Thank you for contributing. These guidelines keep changes reviewable and make
 the generated changelog useful to users.

@@ -36,7 +36,7 @@ if [[ -e "$RULE_FILE" ]]; then
     rm -- "$RULE_FILE"
     echo "Removed $RULE_FILE"
 else
-    echo "kvn-tui polkit rule is not installed."
+    echo "kvn polkit rule is not installed."
 fi
 
 cleanup_group_if_unused

@@ -1,4 +1,4 @@
-# Agent Guide: kvn-tui
+# Agent Guide: kvn
 
 This document contains project-specific context and conventions for AI coding agents. It supplements `README.md` with architectural details, coding styles, and rules of thumb.
 
@@ -6,7 +6,7 @@ This document contains project-specific context and conventions for AI coding ag
 
 ## Project Overview
 
-`kvn-tui` is a **terminal VPN client** for Arch Linux. It is a Rust TUI application that manages VPN profiles, generates sing-box configurations, and orchestrates the `sing-box` binary as a child process. Navigation is vim-style (`j`/`k`/`g`/`G`).
+`kvn` is a **terminal VPN client** for Arch Linux. It is a Rust TUI application that manages VPN profiles, generates sing-box configurations, and orchestrates the `sing-box` binary as a child process. Navigation is vim-style (`j`/`k`/`g`/`G`).
 
 The app does **not** implement VPN protocols itself. It is a configuration generator and process manager around the external `sing-box` binary.
 
@@ -162,7 +162,7 @@ The application follows **The Elm Architecture (TEA)**:
 4. **Effects** (`app/effect.rs`) are declarative descriptions of side effects (`Connect`, `DownloadGeo`, `SaveConfig`, `Quit`, etc.).
 5. **Daemon** (`daemon.rs`) owns the canonical `Model`, the `mpsc` channel, the sing-box `process_slot`, and all background services (ticker, suspend watcher, log tailer, IPC server). It exposes a Unix domain socket IPC server (`ipc.rs`) that accepts NDJSON commands from TUI clients.
 6. **TUI Client** (`tui_client.rs`) connects to the daemon socket, enters the alternate screen, renders the UI using ratatui, and forwards keyboard input (plus clipboard/editor actions) as IPC commands. It has its own local `Model` that is kept in sync via `StateSnapshot` broadcasts from the daemon.
-7. **IPC Protocol** (`ipc.rs`) uses newline-delimited JSON over a Unix socket. Commands: `Attach`, `Detach`, `Key`, `SelectSource`, `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `Paste`, `Copied`, `ReloadConfig`, `Quit`, `ClientError`. Responses: `StateSnapshot` pushed by the daemon after every state change. The semantic commands (`ConnectProfile` through `SetAutoConnect`) exist for non-TUI clients — the Omarchy Quickshell module and the `kvn-tui status/connect/disconnect/reconnect/toggle` CLI subcommands. Overlay commits (routing mode, geo region) are shared between the key handlers and IPC via `commit_routing_mode` / `commit_geo_region` in `update.rs` so both paths run identical logic.
+7. **IPC Protocol** (`ipc.rs`) uses newline-delimited JSON over a Unix socket. Commands: `Attach`, `Detach`, `Key`, `SelectSource`, `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `Paste`, `Copied`, `ReloadConfig`, `Quit`, `ClientError`. Responses: `StateSnapshot` pushed by the daemon after every state change. The semantic commands (`ConnectProfile` through `SetAutoConnect`) exist for non-TUI clients — the Omarchy Quickshell module and the `kvn status/connect/disconnect/reconnect/toggle` CLI subcommands. Overlay commits (routing mode, geo region) are shared between the key handlers and IPC via `commit_routing_mode` / `commit_geo_region` in `update.rs` so both paths run identical logic.
 
 This separation makes `update.rs` fully synchronous and trivial to unit-test.
 
@@ -215,7 +215,7 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 
 ### Kill Switch
 - Uses **nftables** + a systemd unit (`kvn-tui-killswitch.service`) that loads `/etc/kvn-tui/killswitch.nft`. The ruleset drops all outbound traffic except localhost, `tun*`/`kvn*` interfaces, and packets marked `0x29a` by sing-box.
-- Privilege escalation via **sudoers NOPASSWD** (not polkit) — grants the `network` group passwordless access to `/usr/lib/kvn-tui/killswitch-helper.sh`. Installed with `sudo kvn-tui setup --killswitch`.
+- Privilege escalation via **sudoers NOPASSWD** (not polkit) — grants the `network` group passwordless access to `/usr/lib/kvn-tui/killswitch-helper.sh`. Installed with `sudo kvn setup --killswitch`.
 - **Toggle flow**: `K` keybinding → `Effect::ApplyKillSwitch { enabled }` → daemon spawns thread calling `services::killswitch::apply(enabled)` → sends `Msg::KillSwitchApplied { enabled, error }` back. On success the boolean is flipped and config is saved; on error the boolean is unchanged and the error is shown.
 - **Reconciliation on startup**: daemon queries systemd to check whether the unit is actually active and aligns `settings.kill_switch` with the real state, preventing drift if the unit was manually disabled or the helper was uninstalled.
 - **Handshake window**: before spawning `sing-box run`, the daemon pre-resolves the VPN endpoint's IP addresses via DNS and adds them as temporary nftables exceptions (`allow <ip> tcp <port>`), ensuring the initial TLS/REALITY handshake is not blocked. Every non-`local`, non-`fakeip` DNS upstream from `settings.dns.servers` is also resolved and allowlisted with its protocol-appropriate port (UDP/53, TCP/53, DoT/853, DoH/443, DoQ/853) so sing-box's bootstrap resolver can reach the user-configured DoH/DoT endpoint instead of a hard-coded 1.1.1.1. These exceptions are revoked on disconnect.
@@ -225,7 +225,7 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 ### DNS Configuration
 - **Data model**: `settings.dns: DnsConfig` holds `servers: Vec<DnsServer>`, `rules: Vec<DnsRule>`, `final_server: String`, `strategy: DnsStrategy`, `fakeip_enabled: bool`. Server variants map 1:1 onto sing-box 1.12 server types: `Local`, `Udp`, `Tcp`, `Tls` (DoT), `Https` (DoH, with optional `path`), `Quic` (DoQ), `FakeIp` (with `inet4_range` / `inet6_range`).
 - **Validation** (`Config::validate`): server tags are non-empty and unique, `final_server` and every `rule.server` reference an existing tag, and when `fakeip_enabled` at least one `FakeIp` server is present.
-- **Legacy migration**: the old `settings.dns_strategy` field is still read; on load, `Config::migrate_legacy_dns_strategy` promotes it into `dns.strategy` if `dns.strategy` is at its default. On save, `save_config_at` mirrors `dns.strategy` back into `dns_strategy` so older kvn-tui builds keep loading the file.
+- **Legacy migration**: the old `settings.dns_strategy` field is still read; on load, `Config::migrate_legacy_dns_strategy` promotes it into `dns.strategy` if `dns.strategy` is at its default. On save, `save_config_at` mirrors `dns.strategy` back into `dns_strategy` so older kvn builds keep loading the file.
 - **Config generation** (`singbox::config::build_dns`): emits the modern sing-box 1.12 schema — no legacy top-level `dns.fakeip` block; the fake-IP server carries its own ranges. When `fakeip_enabled` is set and a `fakeip` server exists, the builder auto-prepends an `{ query_type: ["A","AAAA"], server: <tag> }` rule (skipped if the user already added one), flips `dns.independent_cache: true`, and sets `experimental.cache_file.store_fakeip: true` so the IP→domain map survives restarts.
 - **TUI overlay** (`Overlay::DnsSettings`, key `D`): six rows — four presets (Cloudflare DoH `1.1.1.1`, Google DoT `8.8.8.8`, Quad9 DoH `9.9.9.9`, system `local`), a strategy cycle, and the fake-IP toggle. Custom servers and per-domain rules are edited in `profiles.json` via `e`.
 - **Strategy draft**: `Model::dns_strategy_draft: Option<DnsStrategy>` previews strategy changes while the overlay is open. `h` / `l` on the Strategy row cycle the draft (`DnsStrategy::prev` / `next`); the label renders as `Strategy: ‹ value ›` with a trailing `*` when the draft differs from the saved setting. Enter on the Strategy row commits the draft (clears it, triggers `SaveConfig` + reconnect-if-connected); Esc/q discards it.
@@ -246,11 +246,11 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 - Used by the `--waybar-status` CLI flag and for crash recovery (state is cleared on startup).
 
 ### Daemon + TUI Client Architecture
-- **Daemon** (`kvn-tui --daemon`) runs headless. It owns the sing-box process, config, geo updates, suspend/resume handling, and log tailing. It binds a Unix domain socket for IPC.
-- **TUI Client** (`kvn-tui`) connects to the daemon socket, requests a state snapshot (`Attach`), enters the alternate screen, and renders the UI. Keyboard input is forwarded to the daemon as `IpcCommand::Key` (except `p` and `e`, which are handled locally because they need terminal/clipboard access).
+- **Daemon** (`kvn --daemon`) runs headless. It owns the sing-box process, config, geo updates, suspend/resume handling, and log tailing. It binds a Unix domain socket for IPC.
+- **TUI Client** (`kvn`) connects to the daemon socket, requests a state snapshot (`Attach`), enters the alternate screen, and renders the UI. Keyboard input is forwarded to the daemon as `IpcCommand::Key` (except `p` and `e`, which are handled locally because they need terminal/clipboard access).
 - Pressing `q` (or `Esc`) when no overlay is shown sends `Detach` to the daemon, leaves the alternate screen, disables raw mode, and **exits the TUI process**. The daemon and sing-box keep running. Shell regains the prompt immediately because the foreground TUI process actually exits. If an overlay is open (Help, ConfirmDelete, RoutingMode, GeoRegions, Error), `q`/`Esc` is forwarded to the daemon as a normal key, which closes the overlay.
 - Pressing `Ctrl+C` sends `Quit` to the daemon. The daemon stops sing-box, cleans up the Unix socket, and exits. The TUI waits briefly (300 ms) for cleanup to complete before exiting.
-- Running `kvn-tui` again connects to the same daemon and re-attaches, restoring the TUI instantly without restarting sing-box.
+- Running `kvn` again connects to the same daemon and re-attaches, restoring the TUI instantly without restarting sing-box.
 - The IPC protocol is NDJSON over a Unix socket. The daemon pushes a full `StateSnapshot` after every state change. The snapshot includes the complete config (`profiles` and `settings`) so the TUI client always renders the current data.
 - `handle_ipc_command` unconditionally appends `Effect::BroadcastState` to every IPC command result, ensuring the daemon always pushes state after user interaction.
 - `handle_geo_result`, `Msg::ConnectFailed`, and the `handle_tick` idle fallback also append `Effect::BroadcastState` so state mutations that don't produce other broadcast-triggering effects are still visible to the TUI.

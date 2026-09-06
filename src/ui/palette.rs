@@ -4,7 +4,7 @@
 //! `BUNDLED` table — see `bundled_palettes.rs` in `OUT_DIR`. At runtime the
 //! The TUI client reads Omarchy's active `colors.toml` in auto-follow mode;
 //! explicitly selected themes continue to resolve against the bundled table.
-//! [`Palette::legacy`] reproduces the original hardcoded look of kvn-tui.
+//! [`Palette::legacy`] reproduces the original hardcoded look of kvn.
 
 use ratatui::style::Color;
 use serde::Deserialize;
@@ -49,7 +49,7 @@ include!(concat!(env!("OUT_DIR"), "/bundled_palettes.rs"));
 impl Palette {
     /// Parse Omarchy's semantic `colors.toml` format into a runtime palette.
     /// Extra fields are accepted so custom themes may use the complete
-    /// Omarchy schema while kvn-tui consumes only the colors it needs.
+    /// Omarchy schema while kvn consumes only the colors it needs.
     pub fn from_omarchy_toml(raw: &str) -> Result<Palette, String> {
         let colors: OmarchyColors = toml::from_str(raw).map_err(|error| error.to_string())?;
         let parse = |value: &str| parse_hex_color(value);

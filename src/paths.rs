@@ -3,7 +3,7 @@ use std::path::PathBuf;
 /// Return the private directory used for secret runtime files.
 pub fn runtime_dir() -> anyhow::Result<PathBuf> {
     let base = dirs::runtime_dir().ok_or_else(|| {
-        anyhow::anyhow!("XDG_RUNTIME_DIR is not set; kvn-tui requires a desktop user session")
+        anyhow::anyhow!("XDG_RUNTIME_DIR is not set; kvn requires a desktop user session")
     })?;
     Ok(base.join("kvn-tui"))
 }

@@ -5,7 +5,7 @@
 //! command-oriented TUI needs: the physical key that is `j` on a PC-101
 //! layout remains `j` while the active layout produces Cyrillic, Arabic, or
 //! another script. This small reader keeps using Crossterm's public event
-//! types while decoding the subset of terminal input used by kvn-tui.
+//! types while decoding the subset of terminal input used by kvn.
 
 use std::io::{self, Read, Write};
 use std::sync::Arc;
@@ -25,7 +25,7 @@ use crate::app::msg::Msg;
 /// Push Kitty keyboard flags in the alternate screen:
 /// disambiguate escape codes, report alternate keys, and encode all keys.
 pub(super) const PUSH_KEYBOARD_PROTOCOL: &str = "\x1b[>13u";
-/// Restore the keyboard flags that were active before kvn-tui started.
+/// Restore the keyboard flags that were active before kvn started.
 pub(super) const POP_KEYBOARD_PROTOCOL: &str = "\x1b[<1u";
 pub(super) const ENABLE_MOUSE_CAPTURE: &str = "\x1b[?1003h\x1b[?1006h";
 pub(super) const DISABLE_MOUSE_CAPTURE: &str = "\x1b[?1006l\x1b[?1003l";

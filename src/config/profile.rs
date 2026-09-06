@@ -1753,13 +1753,13 @@ impl Config {
     /// [`CURRENT_SCHEMA_VERSION`]. Called by `load_config_at` after deserialise.
     /// Each migration step is idempotent.
     ///
-    /// Files written by a newer kvn-tui version (higher `schema_version` than
+    /// Files written by a newer kvn version (higher `schema_version` than
     /// this build knows about) are rejected here — loading them would silently
     /// drop future-only fields; the user must upgrade the client instead.
     pub fn migrate(&mut self) -> anyhow::Result<()> {
         if self.schema_version > CURRENT_SCHEMA_VERSION {
             anyhow::bail!(
-                "config schema_version {} is newer than this build supports (max {}); upgrade kvn-tui",
+                "config schema_version {} is newer than this build supports (max {}); upgrade kvn",
                 self.schema_version,
                 CURRENT_SCHEMA_VERSION,
             );
@@ -2985,7 +2985,7 @@ mod tests {
         };
         let err = cfg.migrate().unwrap_err().to_string();
         assert!(err.contains("newer than this build"), "Error was: {}", err);
-        assert!(err.contains("upgrade kvn-tui"), "Error was: {}", err);
+        assert!(err.contains("upgrade kvn"), "Error was: {}", err);
     }
 
     #[test]

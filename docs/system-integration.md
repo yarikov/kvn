@@ -1,8 +1,8 @@
 # System integration
 
-This document describes every system or desktop change made by the kvn-tui
-package and its optional setup commands. Review it before running commands with
-`sudo`.
+This document describes every system or desktop change made by kvn, the
+`kvn-tui` package, and its optional setup commands. Review it before running
+commands with `sudo`.
 
 ## Package installation
 
@@ -33,8 +33,9 @@ Before removing the package, stop and disable the service:
 systemctl --user disable --now kvn-tui.service
 ```
 
-Removing kvn-tui removes the ALPM hook but does not remove capabilities already
-set on sing-box. If no other software needs them, they can be revoked explicitly:
+Removing the `kvn-tui` package removes the ALPM hook but does not remove
+capabilities already set on sing-box. If no other software needs them, they can
+be revoked explicitly:
 
 ```bash
 sudo setcap -r /usr/bin/sing-box
@@ -67,7 +68,7 @@ authentication prompt:
 - `org.freedesktop.resolve1.set-domains`
 - `org.freedesktop.resolve1.set-default-route`
 No NetworkManager actions are granted. This authorization is group-wide and is
-not restricted to the kvn-tui process. After being added to `kvn-tui`, log out
+not restricted to the kvn process. After being added to `kvn-tui`, log out
 and back in and restart `kvn-tui.service`.
 
 To remove the rule:
@@ -183,7 +184,7 @@ The installer updates:
 - `~/.config/hypr/bindings.lua` — optional launcher binding;
 - `~/.config/hypr/hyprland.lua` — floating-window rule.
 - `~/.local/share/applications/kvn-tui.desktop` — Apps menu entry searchable by
-  `kvn-tui`, `tui`, and `vpn`; it opens or focuses the TUI directly.
+  `kvn`, `kvn-tui`, `tui`, and `vpn`; it opens or focuses the TUI directly.
 - `~/.local/share/icons/hicolor/scalable/apps/kvn-tui.svg` — high-contrast Apps
   icon styled like Omarchy's bundled applications for light and dark themes.
 
@@ -191,7 +192,7 @@ When `omarchy-shell` is running, the installer also triggers a plugin rescan
 and an idempotent `omarchy bar put yarikov.omakvn` so the widget appears without a
 re-login. Upgrades from the command-module integration replace the old entry.
 
-The selected shortcut is explicitly unbound before being assigned to kvn-tui.
+The selected shortcut is explicitly unbound before being assigned to kvn.
 The suggested `Super + Ctrl + K` shortcut replaces the default Herdr binding.
 Changes are applied as a transaction and rolled back if setup fails or
 Hyprland reports new configuration errors.
@@ -204,15 +205,15 @@ Changed configuration files receive timestamped backups such as:
 bindings.lua.bak.before-kvn-tui.20260821143012
 ```
 
-At most five kvn-tui backups are retained for each file. To fully remove the
+At most five kvn backups are retained for each file. To fully remove the
 integration on Omarchy 4, first remove the plugin with Omarchy's plugin manager:
 
 ```bash
 omarchy plugin remove yarikov.omakvn
 ```
 
-Then restore a suitable backup or manually remove the kvn-tui module, binding,
-and window-rule entries. Remove the launcher separately:
+Then restore a suitable backup or manually remove the legacy `kvn-tui` module,
+binding, and window-rule entries. Remove the launcher separately:
 
 ```bash
 rm ~/.local/bin/omarchy-launch-kvn-tui
@@ -221,7 +222,7 @@ rm ~/.local/share/icons/hicolor/scalable/apps/kvn-tui.svg
 ```
 
 After confirming the active configuration no longer needs the backups, delete
-only the backups created by kvn-tui with:
+only the backups created by kvn with:
 
 ```bash
 kvn clean --omarchy

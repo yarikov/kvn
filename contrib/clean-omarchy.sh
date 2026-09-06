@@ -32,7 +32,7 @@ for file in "${FILES[@]}"; do
 done
 
 if [ "$removed" -eq 0 ]; then
-  echo "No kvn-tui Omarchy backup files found."
+  echo "No kvn Omarchy backup files found."
 else
-  echo "Removed $removed kvn-tui Omarchy backup file(s)."
+  echo "Removed $removed kvn Omarchy backup file(s)."
 fi

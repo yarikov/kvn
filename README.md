@@ -1,4 +1,4 @@
-# kvn-tui
+# kvn
 
 [![CI](https://github.com/yarikov/kvn-tui/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/yarikov/kvn-tui/actions/workflows/ci.yml)
 [![AUR version](https://img.shields.io/aur/version/kvn-tui-bin?logo=arch-linux&label=AUR)](https://aur.archlinux.org/packages/kvn-tui-bin)
@@ -8,9 +8,9 @@
 
 > Terminal VPN client for Arch Linux with vim navigation.
 
-`kvn-tui` is a keyboard-driven TUI application for managing VPN connections. Its canonical command is `kvn`; the legacy `kvn-tui` command remains available during the deprecation period. It provides a fast, minimal interface for configuring profiles, connecting via the [sing-box](https://sing-box.sagernet.org/) backend, and routing traffic — all without leaving the terminal.
+`kvn` is a keyboard-driven TUI application for managing VPN connections. It provides a fast, minimal interface for configuring profiles, connecting via the [sing-box](https://sing-box.sagernet.org/) backend, and routing traffic — all without leaving the terminal.
 
-![kvn-tui screenshot](assets/screenshot.png)
+![kvn screenshot](assets/screenshot.png)
 
 ---
 
@@ -54,7 +54,7 @@
 
 ## Supported Protocols
 
-`kvn-tui` supports 11 sing-box outbound protocols. Profiles can be imported
+`kvn` supports 11 sing-box outbound protocols. Profiles can be imported
 from the listed share-link schemes via the clipboard or a subscription and
 exported with `y`.
 
@@ -179,8 +179,8 @@ user's configuration. `--omarchy` cannot be combined with `--polkit` or
 On **Omarchy 4 (Quattro)** this installs the standalone
 [omakvn](https://github.com/yarikov/omakvn) Quickshell bar plugin (`yarikov.omakvn`):
 it shows live VPN status and provides profile selection and common VPN controls
-directly from the bar. It also adds kvn-tui to the **Apps** menu; search for
-`kvn-tui`, `tui`, or `vpn` to open or focus the terminal client. On Omarchy 3
+directly from the bar. It also adds kvn to the **Apps** menu; search for
+`kvn`, `kvn-tui`, `tui`, or `vpn` to open or focus the terminal client. On Omarchy 3
 (or builds without the shell plugin
 registry), setup falls back to a Waybar status module that opens the TUI on
 click.
@@ -224,7 +224,7 @@ sudo ln -s kvn-tui /usr/local/bin/kvn
 sudo setcap cap_net_admin,cap_net_raw+ep "$(command -v sing-box)"
 ```
 
-The capabilities allow sing-box to use TUN without running kvn-tui as root. The
+The capabilities allow sing-box to use TUN without running kvn as root. The
 bundled service expects `/usr/bin/kvn-tui`; with a manual installation, use the
 automatic detached daemon or change its `ExecStart` to
 `/usr/local/bin/kvn-tui --daemon`. The legacy executable remains the real file
@@ -332,7 +332,7 @@ advanced DNS and routing, validation, migrations, and runtime file locations.
 
 ## Technology Stack
 
-`kvn-tui` is built with Rust 2024 and requires Rust 1.88 or newer.
+`kvn` is built with Rust 2024 and requires Rust 1.88 or newer.
 
 | Component | Library / Tool | Purpose |
 |-----------|--------------|---------|

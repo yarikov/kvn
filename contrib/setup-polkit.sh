@@ -55,6 +55,6 @@ if [[ "$ADDED_TO_GROUP" == "1" ]]; then
 fi
 if id -nG "$USER_NAME" | tr ' ' '\n' | grep -Fxq network; then
     echo
-    echo "Note: kvn-tui no longer uses the 'network' group. Existing membership"
+    echo "Note: kvn no longer uses the 'network' group. Existing membership"
     echo "was preserved because another application may rely on it."
 fi

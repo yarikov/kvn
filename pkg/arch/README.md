@@ -1,6 +1,6 @@
 # Arch Linux Build
 
-Local PKGBUILD for building `kvn-tui` from source.
+Local PKGBUILD for building `kvn` from source.
 
 ## Build & Install
 

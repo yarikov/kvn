@@ -22,7 +22,7 @@ pub const IPC_VERSION: u32 = 1;
 /// Return the path to the Unix domain socket used for IPC.
 pub fn socket_path() -> anyhow::Result<std::path::PathBuf> {
     let dir = dirs::runtime_dir().ok_or_else(|| {
-        anyhow::anyhow!("XDG_RUNTIME_DIR is not set; kvn-tui requires a desktop user session")
+        anyhow::anyhow!("XDG_RUNTIME_DIR is not set; kvn requires a desktop user session")
     })?;
     Ok(dir.join("kvn-tui.sock"))
 }
@@ -79,7 +79,7 @@ impl IpcServer {
         let path = socket_path()?;
         if path.exists() {
             if UnixStream::connect(&path).is_ok() {
-                anyhow::bail!("kvn-tui daemon is already running at {}", path.display());
+                anyhow::bail!("kvn daemon is already running at {}", path.display());
             }
             std::fs::remove_file(&path)
                 .with_context(|| format!("Failed to remove stale socket {}", path.display()))?;

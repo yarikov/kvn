@@ -119,7 +119,7 @@ install_desktop_entry() {
   cat >"$tmp" <<'EOF'
 [Desktop Entry]
 Type=Application
-Name=kvn-tui
+Name=kvn
 GenericName=VPN Client
 Comment=Terminal VPN client powered by sing-box
 Exec=omarchy-launch-or-focus-tui --app-id=org.omarchy.kvn-tui kvn
@@ -127,7 +127,7 @@ TryExec=kvn
 Terminal=false
 Icon=kvn-tui
 Categories=Network;Utility;
-Keywords=VPN;TUI;Terminal;sing-box;
+Keywords=kvn;kvn-tui;VPN;TUI;Terminal;sing-box;
 StartupNotify=false
 EOF
   chmod 0644 "$tmp"
@@ -179,7 +179,7 @@ install_omarchy_v3() {
 
   if [[ -f $waybar_config ]]; then
     if ! grep -q '"custom/kvn-tui"' "$waybar_config"; then
-      echo "Adding kvn-tui module to Waybar config..."
+      echo "Adding kvn module to Waybar config..."
       if tail -n 1 "$waybar_config" | grep -q '^}$'; then
         local tmp
         tmp=$(mktemp "${waybar_config}.tmp.XXXXXX")
@@ -195,7 +195,7 @@ install_omarchy_v3() {
     "return-type": "json",
     "interval": 5,
     "on-click": "omarchy-launch-kvn-tui",
-    "tooltip-format": "kvn-tui VPN client"
+    "tooltip-format": "kvn VPN client"
   }
 }
 EOF
@@ -212,7 +212,7 @@ EOF
 
   if [[ -f $waybar_style ]]; then
     if ! grep -q '#custom-kvn-tui' "$waybar_style"; then
-      echo "Adding kvn-tui styles to Waybar CSS..."
+      echo "Adding kvn styles to Waybar CSS..."
       append_atomic "$waybar_style" $'\n#custom-kvn-tui {\n  margin-right: 18px;\n}\n'
     else
       echo "Waybar CSS already present."
@@ -235,7 +235,7 @@ EOF
     echo "Hyprland keybinding already configured."
   else
     echo
-    read -r -p "Add Hyprland keybinding to launch kvn-tui? [y/N] " binding_answer
+    read -r -p "Add Hyprland keybinding to launch kvn? [y/N] " binding_answer
     if [[ $binding_answer =~ ^[Yy]$ ]]; then
       echo
       echo "Press Enter to accept the default, or type a custom Hyprland keybinding."
@@ -251,8 +251,8 @@ EOF
   fi
 
   if [[ -f $hypr_main ]] && ! grep -Fq "org.omarchy.kvn-tui" "$hypr_main"; then
-    echo "Adding Hyprland window rule for kvn-tui..."
-    append_atomic "$hypr_main" $'\n# kvn-tui: float, center, and size like other Omarchy TUIs\nwindowrule = tag +floating-window, match:class org.omarchy.kvn-tui\n'
+    echo "Adding Hyprland window rule for kvn..."
+    append_atomic "$hypr_main" $'\n# kvn: float, center, and size like other Omarchy TUIs\nwindowrule = tag +floating-window, match:class org.omarchy.kvn-tui\n'
   fi
 
   echo "Restarting Waybar..."
@@ -450,7 +450,7 @@ EOF
   }
   trap cleanup_v4 EXIT
 
-  echo "Adding kvn-tui module to Omarchy Shell..."
+  echo "Adding kvn module to Omarchy Shell..."
   local module plugin_installed=0 tmp
   local plugin_status=0
   install_omarchy_v4_plugin || plugin_status=$?
@@ -460,7 +460,7 @@ EOF
   elif (( plugin_status == 2 )); then
     return 1
   else
-    module='{"id":"kvn-tui","type":"command","exec":"kvn --waybar-status","interval":5,"tooltip":"kvn-tui VPN client","onClick":"omarchy-launch-kvn-tui"}'
+    module='{"id":"kvn-tui","type":"command","exec":"kvn --waybar-status","interval":5,"tooltip":"kvn VPN client","onClick":"omarchy-launch-kvn-tui"}'
   fi
   tmp=$(mktemp "${shell_config}.tmp.XXXXXX")
   jq --argjson module "$module" '
@@ -508,7 +508,7 @@ EOF
     echo "Keybinding already configured."
   else
     echo
-    read -r -p "Add Hyprland keybinding to launch kvn-tui? [y/N] " binding_answer
+    read -r -p "Add Hyprland keybinding to launch kvn? [y/N] " binding_answer
     if [[ $binding_answer =~ ^[Yy]$ ]]; then
       echo
       echo "Press Enter to accept the default, or type a custom Hyprland keybinding."
@@ -539,9 +539,9 @@ EOF
       echo "The selected shortcut will be explicitly replaced with hl.unbind()."
       printf -v block '%s\n%s\n%s\n%s\n%s' \
         '-- kvn-tui keybinding: begin' \
-        '-- Unbind the selected shortcut before assigning kvn-tui.' \
+        '-- Unbind the selected shortcut before assigning kvn.' \
         "hl.unbind(\"$binding_lua\")" \
-        "o.bind(\"$binding_lua\", \"kvn-tui VPN client\", \"omarchy-launch-kvn-tui\")" \
+        "o.bind(\"$binding_lua\", \"kvn VPN client\", \"omarchy-launch-kvn-tui\")" \
         '-- kvn-tui keybinding: end'
       append_marker_block "$hypr_bindings" "keybinding" "$block"
     else
@@ -550,7 +550,7 @@ EOF
   fi
 
   append_marker_block "$hypr_main" "window rule" '-- kvn-tui window rule: begin
--- Float, center, and size kvn-tui like other Omarchy TUIs.
+-- Float, center, and size kvn like other Omarchy TUIs.
 o.window("^org\\.omarchy\\.kvn-tui$", { tag = "+floating-window" })
 -- kvn-tui window rule: end'
 
@@ -580,7 +580,7 @@ o.window("^org\\.omarchy\\.kvn-tui$", { tag = "+floating-window" })
   trap - EXIT
 }
 
-echo "Installing kvn-tui Omarchy integration..."
+echo "Installing kvn Omarchy integration..."
 omarchy_major=$(detect_omarchy_major)
 if (( omarchy_major >= 4 )); then
   install_omarchy_v4

@@ -503,7 +503,7 @@ fn connect_to_current_daemon() -> Result<(IpcClient, crate::app::msg::StateSnaps
     let mut reconnect_profile = None;
 
     for attempt in 0..=1 {
-        let mut client = IpcClient::connect().context("Failed to connect to kvn-tui daemon")?;
+        let mut client = IpcClient::connect().context("Failed to connect to kvn daemon")?;
         client.send(&IpcCommand::Attach)?;
         let value = client
             .read_snapshot_value(Duration::from_secs(2))
@@ -546,7 +546,7 @@ fn connect_to_current_daemon() -> Result<(IpcClient, crate::app::msg::StateSnaps
 
         if io::stderr().is_terminal() {
             eprintln!(
-                "kvn-tui: restarting outdated daemon (version {})…",
+                "kvn: restarting outdated daemon (version {})…",
                 if daemon_version.is_empty() {
                     "unknown"
                 } else {

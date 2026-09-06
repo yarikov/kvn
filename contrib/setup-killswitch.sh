@@ -6,7 +6,7 @@
 #   - /etc/sudoers.d/kvn-tui-killswitch     (NOPASSWD for group `kvn-tui`)
 #
 # After install, members of the `kvn-tui` group can toggle the kill switch
-# from kvn-tui without a password prompt.
+# from kvn without a password prompt.
 set -euo pipefail
 
 if [[ $EUID -ne 0 ]]; then
@@ -22,7 +22,7 @@ fi
 HELPER_SOURCE="${1:?missing embedded kill-switch helper source}"
 GROUP_NAME="kvn-tui"
 
-echo "Installing kvn-tui kill switch for user '$USER_NAME'…"
+echo "Installing kvn kill switch for user '$USER_NAME'…"
 
 if ! getent group "$GROUP_NAME" >/dev/null; then
     groupadd --system "$GROUP_NAME"
@@ -181,6 +181,6 @@ if [[ "$NEW_GROUP" == "1" ]]; then
 fi
 if id -nG "$USER_NAME" | tr ' ' '\n' | grep -Fxq network; then
     echo
-    echo "Note: kvn-tui no longer uses the 'network' group. Existing membership"
+    echo "Note: kvn no longer uses the 'network' group. Existing membership"
     echo "was preserved because another application may rely on it."
 fi

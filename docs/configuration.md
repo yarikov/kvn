@@ -1,6 +1,6 @@
 # Configuration
 
-`kvn-tui` stores profiles, subscriptions, and application settings in:
+`kvn` stores profiles, subscriptions, and application settings in:
 
 ```text
 ~/.config/kvn-tui/profiles.json
@@ -10,7 +10,7 @@ This is the default location; `XDG_CONFIG_HOME` is respected when set.
 
 Press `e` in the TUI to edit the file with `$VISUAL` or `$EDITOR`. The daemon
 reloads and validates the result when the editor closes. Keep a backup before
-substantial manual changes. Saves performed by kvn-tui use an atomic temporary
+substantial manual changes. Saves performed by kvn use an atomic temporary
 file and rename, so an interrupted write cannot replace a valid configuration
 with a partial file.
 
@@ -209,8 +209,8 @@ Older files are migrated automatically:
 - v1 → v2 moves the legacy VLESS `fingerprint` into the shared TLS settings.
 - v4 → v5 sets the TUN interface name to `kvn0`, replacing any previous name.
 
-A file with a schema version newer than the running kvn-tui build is rejected;
-upgrade kvn-tui instead of downgrading the version manually.
+A file with a schema version newer than the running kvn build is rejected;
+upgrade kvn instead of downgrading the version manually.
 
 ## Runtime files
 
@@ -227,5 +227,5 @@ upgrade kvn-tui instead of downgrading the version manually.
 The application-owned runtime directory is created with mode `0700`; generated
 sing-box configs and the IPC socket use mode `0600`. No secret-bearing config is
 written directly into the shared `/tmp` namespace. `XDG_RUNTIME_DIR` is required;
-kvn-tui fails with a clear error outside a desktop user session instead of
+kvn fails with a clear error outside a desktop user session instead of
 falling back to a shared or persistent location.

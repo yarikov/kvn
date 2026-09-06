@@ -172,7 +172,7 @@ enum ConfigCommand {
 fn require_daemon_stopped() -> Result<()> {
     anyhow::ensure!(
         !crate::ipc::is_daemon_running(),
-        "stop the kvn-tui daemon before changing profiles.json"
+        "stop the kvn daemon before changing profiles.json"
     );
     Ok(())
 }
@@ -379,7 +379,7 @@ fn validate_current_integration_privileges(
 /// silently spawning a daemon would be surprising.
 fn attach_client() -> Result<IpcClient> {
     IpcClient::connect().context(
-        "Cannot reach the kvn-tui daemon. Start it with `kvn` or \
+        "Cannot reach the kvn daemon. Start it with `kvn` or \
          `systemctl --user start kvn-tui.service`.",
     )
 }
@@ -665,7 +665,7 @@ plugin:add)
   mkdir -p "$target"
   git -C "$target" init -q
   git -C "$target" remote add origin "${3:-}"
-  printf '%s\n' '{"schemaVersion":1,"id":"yarikov.omakvn","name":"kvn-tui VPN","version":"1.0.0","kinds":["bar-widget"],"entryPoints":{"barWidget":"Widget.qml"}}' >"$target/manifest.json"
+  printf '%s\n' '{"schemaVersion":1,"id":"yarikov.omakvn","name":"kvn VPN","version":"1.0.0","kinds":["bar-widget"],"entryPoints":{"barWidget":"Widget.qml"}}' >"$target/manifest.json"
   printf '%s\n' 'import QtQuick' >"$target/Widget.qml"
   printf '%s\n' 'import QtQuick' >"$target/KvnService.qml"
   ;;
@@ -1398,14 +1398,14 @@ esac
             fs::read_to_string(home.join(".local/share/applications/kvn-tui.desktop")).unwrap();
         for expected in [
             "Type=Application",
-            "Name=kvn-tui",
+            "Name=kvn",
             "GenericName=VPN Client",
             "Exec=omarchy-launch-or-focus-tui --app-id=org.omarchy.kvn-tui kvn",
             "TryExec=kvn",
             "Terminal=false",
             "Icon=kvn-tui",
             "Categories=Network;Utility;",
-            "Keywords=VPN;TUI;Terminal;sing-box;",
+            "Keywords=kvn;kvn-tui;VPN;TUI;Terminal;sing-box;",
         ] {
             assert!(desktop_entry.contains(expected), "missing {expected}");
         }
@@ -1490,8 +1490,8 @@ esac
         assert_success(&run_installer(&root, &home, "y\n\n"));
 
         let contents = fs::read_to_string(&desktop_entry).unwrap();
-        assert!(contents.contains("Name=kvn-tui"));
-        assert!(contents.contains("Keywords=VPN;TUI;Terminal;sing-box;"));
+        assert!(contents.contains("Name=kvn"));
+        assert!(contents.contains("Keywords=kvn;kvn-tui;VPN;TUI;Terminal;sing-box;"));
         assert_eq!(backup_files(&desktop_entry).len(), 1);
         let icon_contents = fs::read_to_string(&app_icon).unwrap();
         assert!(icon_contents.contains(r##"fill="#f5f1e8""##));
@@ -1785,7 +1785,7 @@ esac
         let bindings = fs::read_to_string(home.join(".config/hypr/bindings.lua")).unwrap();
         assert!(bindings.contains(r#"hl.unbind("SUPER + SHIFT + V")"#));
         assert!(bindings.contains(
-            r#"o.bind("SUPER + SHIFT + V", "kvn-tui VPN client", "omarchy-launch-kvn-tui")"#
+            r#"o.bind("SUPER + SHIFT + V", "kvn VPN client", "omarchy-launch-kvn-tui")"#
         ));
         assert!(!bindings.contains("SUPER + CTRL + K"));
     }
