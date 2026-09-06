@@ -10,7 +10,7 @@
 set -euo pipefail
 
 if [[ $EUID -ne 0 ]]; then
-    echo "This installer must be run as root (e.g. sudo kvn-tui setup --killswitch)" >&2
+    echo "This installer must be run as root (e.g. sudo kvn setup --killswitch)" >&2
     exit 1
 fi
 

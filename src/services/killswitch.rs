@@ -7,7 +7,7 @@
 //! exceptions while sing-box is establishing the VPN tunnel.
 //!
 //! See `contrib/setup-killswitch.sh` for the one-time setup that the user
-//! runs as `sudo kvn-tui setup --killswitch`.
+//! runs as `sudo kvn setup --killswitch`.
 
 use anyhow::{Context, Result, bail};
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -23,7 +23,7 @@ fn helper_present() -> bool {
 fn run_helper(args: &[&str]) -> Result<()> {
     if !helper_present() {
         bail!(
-            "kill switch helper not installed at {} — run `sudo kvn-tui setup --killswitch`",
+            "kill switch helper not installed at {} — run `sudo kvn setup --killswitch`",
             HELPER
         );
     }

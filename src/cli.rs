@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{ArgGroup, Parser, Subcommand};
-use std::io::{BufRead, Write};
+use std::ffi::{OsStr, OsString};
+use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use uuid::Uuid;
@@ -14,8 +15,11 @@ use crate::services::waybar;
 /// state snapshot before giving up.
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
 
+const LEGACY_COMMAND_WARNING: &str = "Warning: `kvn-tui` is a legacy command and will be removed in a future release.\nUse `kvn` instead.\n\n";
+const LEGACY_COMMAND_WARNING_YELLOW: &str = "\x1b[33mWarning: `kvn-tui` is a legacy command and will be removed in a future release.\nUse `kvn` instead.\x1b[0m\n\n";
+
 #[derive(Parser)]
-#[command(version, about)]
+#[command(name = "kvn", bin_name = "kvn", version, about)]
 pub struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -30,6 +34,42 @@ pub struct Cli {
     pub daemon: bool,
 }
 
+/// Warn when the legacy executable name is used for a CLI invocation.
+///
+/// A plain TUI launch and the systemd-compatible daemon invocation stay quiet.
+pub fn warn_if_legacy_invocation(args: &[OsString]) {
+    if !should_warn_for_legacy_invocation(args) {
+        return;
+    }
+
+    // A deprecation notice must never turn an otherwise successful command
+    // into a failure when stderr is unavailable.
+    let stderr = std::io::stderr();
+    let warning = legacy_command_warning(stderr.is_terminal());
+    let _ = stderr.lock().write_all(warning.as_bytes());
+}
+
+fn legacy_command_warning(use_color: bool) -> &'static str {
+    if use_color {
+        LEGACY_COMMAND_WARNING_YELLOW
+    } else {
+        LEGACY_COMMAND_WARNING
+    }
+}
+
+fn should_warn_for_legacy_invocation(args: &[OsString]) -> bool {
+    let Some(executable) = args.first() else {
+        return false;
+    };
+    let is_legacy = Path::new(executable)
+        .file_name()
+        .is_some_and(|name| name == OsStr::new("kvn-tui"));
+    let is_quiet_invocation =
+        args.len() == 1 || (args.len() == 2 && args.get(1).is_some_and(|arg| arg == "--daemon"));
+
+    is_legacy && !is_quiet_invocation
+}
+
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Render a side-effect-free fixture used to capture documentation images.
@@ -40,7 +80,7 @@ enum Command {
         theme: String,
     },
 
-    /// Check whether kvn-tui and its runtime dependencies are ready.
+    /// Check whether kvn and its runtime dependencies are ready.
     Doctor,
 
     /// Show the daemon's current status as a summary line.
@@ -71,7 +111,7 @@ enum Command {
         command: ConfigCommand,
     },
 
-    /// Set up one or more optional kvn-tui integrations.
+    /// Set up one or more optional kvn integrations.
     #[command(group(
         ArgGroup::new("targets")
             .required(true)
@@ -295,14 +335,14 @@ fn validate_integration_privileges(
 ) -> Result<()> {
     if omarchy && effective_uid == 0 {
         anyhow::bail!(
-            "Omarchy integration changes user files; run `kvn-tui {action} --omarchy` without sudo"
+            "Omarchy integration changes user files; run `kvn {action} --omarchy` without sudo"
         );
     }
 
     if system {
         if effective_uid != 0 {
             anyhow::bail!(
-                "system integration requires root privileges; run `sudo kvn-tui {action} --polkit` and/or `sudo kvn-tui {action} --killswitch`"
+                "system integration requires root privileges; run `sudo kvn {action} --polkit` and/or `sudo kvn {action} --killswitch`"
             );
         }
         if !matches!(sudo_user, Some(user) if !user.is_empty() && user != "root") {
@@ -339,7 +379,7 @@ fn validate_current_integration_privileges(
 /// silently spawning a daemon would be surprising.
 fn attach_client() -> Result<IpcClient> {
     IpcClient::connect().context(
-        "Cannot reach the kvn-tui daemon. Start it with `kvn-tui` or \
+        "Cannot reach the kvn-tui daemon. Start it with `kvn` or \
          `systemctl --user start kvn-tui.service`.",
     )
 }
@@ -420,7 +460,7 @@ fn run_toggle() -> Result<()> {
         return Ok(());
     }
     let Some(id) = snap.settings.last_connected_profile else {
-        anyhow::bail!("no previous profile to connect — run `kvn-tui connect <name>` first");
+        anyhow::bail!("no previous profile to connect — run `kvn connect <name>` first");
     };
     let snap = send_command(&mut client, IpcCommand::ConnectProfile { profile_id: id })?;
     println!("{}", format_status_line(&snap));
@@ -775,6 +815,73 @@ esac
     }
 
     #[test]
+    fn canonical_clap_name_is_kvn() {
+        use clap::CommandFactory;
+
+        let mut command = Cli::command();
+        assert_eq!(command.get_name(), "kvn");
+        let help = command.render_long_help().to_string();
+        assert!(help.contains("Usage: kvn"));
+    }
+
+    #[test]
+    fn legacy_warning_invocation_matrix() {
+        fn warns(args: &[&str]) -> bool {
+            let args = args.iter().map(OsString::from).collect::<Vec<_>>();
+            should_warn_for_legacy_invocation(&args)
+        }
+
+        for args in [
+            &["kvn"][..],
+            &["kvn", "doctor"],
+            &["kvn", "--daemon"],
+            &["kvn", "--help"],
+            &["kvn", "--version"],
+            &["kvn-tui"],
+            &["kvn-tui", "--daemon"],
+        ] {
+            assert!(!warns(args), "unexpected warning for {args:?}");
+        }
+
+        for args in [
+            &["kvn-tui", "doctor"][..],
+            &["kvn-tui", "setup"],
+            &["kvn-tui", "status"],
+            &["kvn-tui", "--help"],
+            &["kvn-tui", "--version"],
+        ] {
+            assert!(warns(args), "missing warning for {args:?}");
+        }
+    }
+
+    #[test]
+    fn legacy_warning_uses_executable_basename() {
+        let legacy = vec![
+            OsString::from("/usr/local/bin/kvn-tui"),
+            OsString::from("doctor"),
+        ];
+        let canonical = vec![
+            OsString::from("/usr/local/bin/kvn"),
+            OsString::from("doctor"),
+        ];
+
+        assert!(should_warn_for_legacy_invocation(&legacy));
+        assert!(!should_warn_for_legacy_invocation(&canonical));
+    }
+
+    #[test]
+    fn legacy_warning_is_yellow_only_for_terminals_and_has_a_blank_line() {
+        assert_eq!(
+            legacy_command_warning(false),
+            "Warning: `kvn-tui` is a legacy command and will be removed in a future release.\nUse `kvn` instead.\n\n"
+        );
+        assert_eq!(
+            legacy_command_warning(true),
+            "\x1b[33mWarning: `kvn-tui` is a legacy command and will be removed in a future release.\nUse `kvn` instead.\x1b[0m\n\n"
+        );
+    }
+
+    #[test]
     fn waybar_status_flag_detected() {
         let cli = Cli::parse_from(["kvn-tui", "--waybar-status"]);
         assert!(cli.waybar_status);
@@ -894,7 +1001,7 @@ esac
         let system_as_user = validate_integration_privileges(false, true, 1000, None, "clean")
             .unwrap_err()
             .to_string();
-        assert!(system_as_user.contains("sudo kvn-tui clean"));
+        assert!(system_as_user.contains("sudo kvn clean"));
     }
 
     #[test]
@@ -1293,8 +1400,8 @@ esac
             "Type=Application",
             "Name=kvn-tui",
             "GenericName=VPN Client",
-            "Exec=omarchy-launch-or-focus-tui --app-id=org.omarchy.kvn-tui kvn-tui",
-            "TryExec=kvn-tui",
+            "Exec=omarchy-launch-or-focus-tui --app-id=org.omarchy.kvn-tui kvn",
+            "TryExec=kvn",
             "Terminal=false",
             "Icon=kvn-tui",
             "Categories=Network;Utility;",
@@ -1346,7 +1453,7 @@ esac
             .iter()
             .find(|entry| entry["id"] == "kvn-tui")
             .expect("legacy command module entry");
-        assert_eq!(entry["exec"], "kvn-tui --waybar-status");
+        assert_eq!(entry["exec"], "kvn --waybar-status");
         assert!(!home.join(".config/omarchy/plugins/yarikov.omakvn").exists());
     }
 
@@ -1708,7 +1815,7 @@ esac
 
         let config = fs::read_to_string(waybar.join("config.jsonc")).unwrap();
         assert!(config.contains(r#""custom/kvn-tui""#));
-        assert!(config.contains(r#""exec": "kvn-tui --waybar-status""#));
+        assert!(config.contains(r#""exec": "kvn --waybar-status""#));
         assert!(
             fs::read_to_string(waybar.join("style.css"))
                 .unwrap()

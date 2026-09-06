@@ -11,6 +11,7 @@ The Arch package installs:
 | Path | Mode | Purpose |
 |------|------|---------|
 | `/usr/bin/kvn-tui` | `0755` | Application binary |
+| `/usr/bin/kvn` | symlink | Canonical command pointing to `kvn-tui` |
 | `/usr/lib/systemd/user/kvn-tui.service` | `0644` | Per-user daemon service |
 | `/usr/share/libalpm/hooks/kvn-tui-sing-box-capabilities.hook` | `0644` | Restores sing-box capabilities after package updates |
 | `/usr/share/licenses/kvn-tui/LICENSE` | `0644` | MIT license for the source package |
@@ -44,7 +45,7 @@ Do not revoke them while another TUN client relies on the same sing-box binary.
 ## Polkit setup
 
 ```bash
-sudo kvn-tui setup --polkit
+sudo kvn setup --polkit
 ```
 
 System integration setup and cleanup must be run through `sudo` from a
@@ -72,7 +73,7 @@ and back in and restart `kvn-tui.service`.
 To remove the rule:
 
 ```bash
-sudo kvn-tui clean --polkit
+sudo kvn clean --polkit
 ```
 
 Cleanup preserves the group while the kill switch still uses it. If neither
@@ -84,7 +85,7 @@ changing it manually.
 ## Kill switch setup
 
 ```bash
-sudo kvn-tui setup --killswitch
+sudo kvn setup --killswitch
 ```
 
 The command requires `nftables`, adds the invoking user to the dedicated
@@ -124,7 +125,7 @@ Toggling the kill switch with `K` runs `systemctl enable --now` or
 Use the cleanup command, which stops the active unit before deleting any files:
 
 ```bash
-sudo kvn-tui clean --killswitch
+sudo kvn clean --killswitch
 ```
 
 If the active unit cannot be stopped, cleanup aborts before removing its files.
@@ -136,7 +137,7 @@ persisted state is reconciled.
 ## Omarchy setup
 
 ```bash
-kvn-tui setup --omarchy
+kvn setup --omarchy
 ```
 
 This command runs without sudo and changes only the current user's files.
@@ -176,7 +177,7 @@ The installer updates:
   `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`) out.
   Existing embedded copies are migrated automatically. Without the plugin
   registry or when a fresh remote install fails, the installer falls back to
-  a `command` bar module running `kvn-tui --waybar-status`;
+  a `command` bar module running `kvn --waybar-status`;
 - `~/.config/omarchy/shell.json` — the `yarikov.omakvn` bar entry (or the legacy
   `kvn-tui` command module on fallback), inserted before `omarchy.bluetooth`;
 - `~/.config/hypr/bindings.lua` — optional launcher binding;
@@ -223,7 +224,7 @@ After confirming the active configuration no longer needs the backups, delete
 only the backups created by kvn-tui with:
 
 ```bash
-kvn-tui clean --omarchy
+kvn clean --omarchy
 ```
 
 `clean --omarchy` removes only these backups. It does not remove the plugin,

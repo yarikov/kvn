@@ -26,7 +26,7 @@ cleanup_group_if_unused() {
 }
 
 if [[ $EUID -ne 0 ]]; then
-    echo "This cleanup must be run as root (e.g. sudo kvn-tui clean --killswitch)" >&2
+    echo "This cleanup must be run as root (e.g. sudo kvn clean --killswitch)" >&2
     exit 1
 fi
 

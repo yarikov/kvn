@@ -5,7 +5,7 @@ RULE_FILE="/etc/polkit-1/rules.d/49-kvn-tui.rules"
 GROUP_NAME="kvn-tui"
 
 if [[ $EUID -ne 0 ]]; then
-    echo "This installer must be run as root (e.g. sudo kvn-tui setup --polkit)" >&2
+    echo "This installer must be run as root (e.g. sudo kvn setup --polkit)" >&2
     exit 1
 fi
 

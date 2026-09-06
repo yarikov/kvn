@@ -74,10 +74,7 @@ pub fn run() -> Result<()> {
 }
 
 fn collect() -> Vec<Check> {
-    let mut checks = vec![Check::pass(format!(
-        "kvn-tui {}",
-        env!("CARGO_PKG_VERSION")
-    ))];
+    let mut checks = vec![Check::pass(format!("kvn {}", env!("CARGO_PKG_VERSION")))];
 
     match find_singbox() {
         Some(path) => {
@@ -165,7 +162,7 @@ fn check_singbox_version(path: &Path) -> Check {
     if !output.status.success() {
         return Check::failure(
             format!("sing-box found at {display}, but `version` failed"),
-            "Reinstall sing-box and run `kvn-tui doctor` again.",
+            "Reinstall sing-box and run `kvn doctor` again.",
         );
     }
 
@@ -222,7 +219,7 @@ fn check_capabilities(path: &Path) -> Check {
     let Ok(output) = output else {
         return Check::warning(
             "could not inspect sing-box capabilities because `getcap` is unavailable",
-            "Install `libcap` and run `kvn-tui doctor` again.",
+            "Install `libcap` and run `kvn doctor` again.",
         );
     };
     let text = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
@@ -282,7 +279,7 @@ fn check_daemon() -> Vec<Check> {
     match crate::ipc::socket_path() {
         Err(error) => checks.push(Check::failure(
             format!("daemon IPC path is unavailable: {error}"),
-            "Run kvn-tui from a desktop user session with XDG_RUNTIME_DIR set.",
+            "Run kvn from a desktop user session with XDG_RUNTIME_DIR set.",
         )),
         Ok(path) if crate::ipc::is_daemon_running() => checks.push(Check::pass(format!(
             "daemon IPC socket is reachable: {}",
@@ -290,7 +287,7 @@ fn check_daemon() -> Vec<Check> {
         ))),
         Ok(_) => checks.push(Check::warning(
             "daemon IPC socket is not reachable",
-            "Start it with `systemctl --user start kvn-tui.service`; kvn-tui can also start it on demand.",
+            "Start it with `systemctl --user start kvn-tui.service`; kvn can also start it on demand.",
         )),
     }
     checks
@@ -343,7 +340,7 @@ fn check_killswitch() -> Check {
     let Ok(metadata) = path.metadata() else {
         return Check::warning(
             "kill switch helper metadata could not be read",
-            "Reinstall it with `sudo kvn-tui setup --killswitch`.",
+            "Reinstall it with `sudo kvn setup --killswitch`.",
         );
     };
     let mode = metadata.permissions().mode() & 0o777;
@@ -354,7 +351,7 @@ fn check_killswitch() -> Check {
                 metadata.uid(),
                 mode
             ),
-            "Reinstall it with `sudo kvn-tui setup --killswitch`.",
+            "Reinstall it with `sudo kvn setup --killswitch`.",
         );
     }
 
@@ -367,11 +364,11 @@ fn check_killswitch() -> Check {
         }
         Ok(_) => Check::warning(
             "kill switch helper is installed but passwordless authorization is unavailable",
-            "Run `sudo kvn-tui setup --killswitch`, then log out and back in.",
+            "Run `sudo kvn setup --killswitch`, then log out and back in.",
         ),
         Err(_) => Check::warning(
             "kill switch helper is installed but `sudo` could not be executed",
-            "Install sudo and run `sudo kvn-tui setup --killswitch`.",
+            "Install sudo and run `sudo kvn setup --killswitch`.",
         ),
     }
 }
@@ -380,7 +377,7 @@ fn check_polkit() -> Check {
     let Some(identity) = polkit_process_identity() else {
         return Check::warning(
             "polkit authorization could not be checked",
-            "Run `kvn-tui doctor` again or inspect polkit with `sudo kvn-tui setup --polkit`.",
+            "Run `kvn doctor` again or inspect polkit with `sudo kvn setup --polkit`.",
         );
     };
     for action in POLKIT_DNS_ACTIONS {
@@ -390,7 +387,7 @@ fn check_polkit() -> Check {
         let Ok(output) = output else {
             return Check::warning(
                 "`pkcheck` is unavailable, so polkit authorization could not be checked",
-                "Install the `polkit` package and run `kvn-tui doctor` again.",
+                "Install the `polkit` package and run `kvn doctor` again.",
             );
         };
 
@@ -401,7 +398,7 @@ fn check_polkit() -> Check {
             Some(1 | 2) => {
                 return Check::warning(
                     format!("passwordless polkit authorization is missing for {action}"),
-                    "Run `sudo kvn-tui setup --polkit`, then log out and back in.",
+                    "Run `sudo kvn setup --polkit`, then log out and back in.",
                 );
             }
             _ => {
@@ -411,7 +408,7 @@ fn check_polkit() -> Check {
                         "polkit authorization for {action} could not be checked: {}",
                         error.trim()
                     ),
-                    "Verify that polkit is running, then run `kvn-tui doctor` again.",
+                    "Verify that polkit is running, then run `kvn doctor` again.",
                 );
             }
         }
@@ -441,7 +438,7 @@ fn check_omarchy() -> Check {
     match crate::omarchy::detect_omarchy_theme() {
         Some(_) if omarchy_v4_detected() && !omakvn_plugin_installed() => Check::warning(
             format!("Omarchy 4 detected; {OMAKVN_PLUGIN_ID} plugin is not installed"),
-            "Run `kvn-tui setup --omarchy` to install the Omarchy Shell plugin.",
+            "Run `kvn setup --omarchy` to install the Omarchy Shell plugin.",
         ),
         Some(theme) => Check::pass(format!("Omarchy detected; active theme: {theme}")),
         None => Check::optional("Omarchy was not detected (optional)"),
@@ -689,7 +686,7 @@ mod tests {
         assert!(missing.message.contains(OMAKVN_PLUGIN_ID));
         assert_eq!(
             missing.remedy.as_deref(),
-            Some("Run `kvn-tui setup --omarchy` to install the Omarchy Shell plugin.")
+            Some("Run `kvn setup --omarchy` to install the Omarchy Shell plugin.")
         );
 
         let plugin = config.path().join("omarchy/plugins").join(OMAKVN_PLUGIN_ID);
@@ -718,7 +715,7 @@ mod tests {
         assert_eq!(check.level, Level::Warning);
         assert_eq!(
             check.remedy.as_deref(),
-            Some("Run `sudo kvn-tui setup --polkit`, then log out and back in.")
+            Some("Run `sudo kvn setup --polkit`, then log out and back in.")
         );
         executable(dir.path(), "pkcheck", "echo unavailable >&2; exit 127");
         assert_eq!(check_polkit().level, Level::Warning);

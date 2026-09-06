@@ -189,7 +189,7 @@ impl IpcClient {
     }
 
     /// Read a single state snapshot line, for one-shot CLI clients
-    /// (`kvn-tui status`, `kvn-tui connect`). Reads byte-wise from the raw
+    /// (`kvn status`, `kvn connect`). Reads byte-wise from the raw
     /// stream so nothing past the first `\n` is consumed — a follow-up read
     /// after sending a command still sees the daemon's next broadcast.
     pub fn read_snapshot(&mut self, timeout: Duration) -> anyhow::Result<StateSnapshot> {
