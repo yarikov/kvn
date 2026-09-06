@@ -317,13 +317,8 @@ impl<'a> Toast<'a> {
             return None;
         }
         let max_width = container.width.saturating_sub(2).min(50);
-        let title_width: u16 = if matches!(self.status, AppStatus::Error(_)) {
-            9
-        } else {
-            10
-        };
         let text_width = self.status.text().width().min(46) as u16;
-        let width = text_width.saturating_add(4).max(title_width).min(max_width);
+        let width = text_width.saturating_add(4).min(max_width);
         let inner_width = usize::from(width.saturating_sub(4)).max(1);
         let height = if self.status.text().width() > inner_width {
             4
@@ -345,9 +340,9 @@ impl Widget for Toast<'_> {
             return;
         }
         Clear.render(area, buf);
-        let (title, border_style) = match self.status {
-            AppStatus::Info(_) => (" Status ", self.theme.toast_info()),
-            AppStatus::Error(_) => (" Error ", self.theme.toast_error()),
+        let border_style = match self.status {
+            AppStatus::Info(_) => self.theme.toast_info(),
+            AppStatus::Error(_) => self.theme.toast_error(),
         };
         let inner_width = usize::from(area.width.saturating_sub(4));
         let text = truncate_to_width(self.status.text(), inner_width * 2);
@@ -358,7 +353,6 @@ impl Widget for Toast<'_> {
                 Block::default()
                     .borders(Borders::ALL)
                     .padding(Padding::horizontal(1))
-                    .title(title)
                     .border_style(border_style)
                     .style(self.theme.popup_bg()),
             )

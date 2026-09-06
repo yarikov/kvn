@@ -91,7 +91,7 @@ impl HelpGroup {
     fn title(self) -> &'static str {
         match self {
             Self::Navigation => "Navigation",
-            Self::Sources => "Sources",
+            Self::Sources => "Profiles",
             Self::Logs => "Logs",
             Self::Connection => "Connection",
             Self::Settings => "Settings",
@@ -202,7 +202,7 @@ mod tests {
             headings(HelpContext::Sources),
             [
                 "Navigation",
-                "Sources",
+                "Profiles",
                 "Logs",
                 "Connection",
                 "Settings",
@@ -215,7 +215,7 @@ mod tests {
             [
                 "Navigation",
                 "Logs",
-                "Sources",
+                "Profiles",
                 "Connection",
                 "Settings",
                 "Dialogs",
@@ -227,7 +227,7 @@ mod tests {
             [
                 "Navigation",
                 "Dialogs",
-                "Sources",
+                "Profiles",
                 "Logs",
                 "Connection",
                 "Settings",
@@ -252,7 +252,7 @@ mod tests {
             assert_eq!(headings.len(), 7);
             for expected in [
                 "Navigation",
-                "Sources",
+                "Profiles",
                 "Logs",
                 "Connection",
                 "Settings",

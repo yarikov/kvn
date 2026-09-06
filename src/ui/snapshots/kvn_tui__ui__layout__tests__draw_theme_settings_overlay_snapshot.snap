@@ -3,32 +3,32 @@ source: src/ui/layout.rs
 expression: "snapshot_terminal(&model, 80, 32)"
 ---
 ┌ Traffic ─────────────────────────────────────────────────────────────────────┐
-│↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections          │
-└───────────────┌ Theme ───────────────────────────────────────┐───────────────┘
-┌ Sources ──────│                 Select theme                 │───────────────┐
-│No sources. Pre│                                              │               │
-│or subscription│                  catppuccin                  │               │
-│               │               catppuccin-latte               │               │
-│               │                   ethereal                   │               │
-│               │                  everforest                  │               │
-│               │                 flexoki-light                │               │
-│               │                   > gruvbox                  │               │
-│               │                   hackerman                  │               │
-│               │                   kanagawa                   │               │
-│               │                 last-horizon                 │               │
-│               │                     lumon                    │               │
-│               │                    lupine                    │               │
-│               │                  matte-black                 │               │
-│               │                    miasma                    │               │
-│               │                     nord                     │               │
-│               │                  osaka-jade                  │               │
-│               │                   retro-82                   │               │
-│               │                   ristretto                  │               │
-│               │                   rose-pine                  │               │
-│               │                   solitude                   │               │
-│               │                  tokyo-night                 │               │
-│               │                  vantablack                  │               │
-│               │                     white                    │               │
+│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections         │
+└───────────────┌──────────────────────────────────────────────┐───────────────┘
+┌ Profiles ─────│                 Select theme                 │───────────────┐
+│ No sources. Pr│                                              │               │
+│profile or subs│               catppuccin                     │               │
+│clipboard.     │               catppuccin-latte               │               │
+│               │               ethereal                       │               │
+│               │               everforest                     │               │
+│               │               flexoki-light                  │               │
+│               │               gruvbox                        │               │
+│               │               hackerman                      │               │
+│               │               kanagawa                       │               │
+│               │               last-horizon                   │               │
+│               │               lumon                          │               │
+│               │               lupine                         │               │
+│               │               matte-black                    │               │
+│               │               miasma                         │               │
+│               │               nord                           │               │
+│               │               osaka-jade                     │               │
+│               │               retro-82                       │               │
+│               │               ristretto                      │               │
+│               │               rose-pine                      │               │
+│               │               solitude                       │               │
+│               │               tokyo-night                    │               │
+│               │               vantablack                     │               │
+│               │               white                          │               │
 │               │                                              │               │
 │               │      Enter confirm, q/Esc cancel, ? help     │               │
 │               └──────────────────────────────────────────────┘               │

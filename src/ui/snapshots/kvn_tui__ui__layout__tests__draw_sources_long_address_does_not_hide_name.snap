@@ -3,12 +3,12 @@ source: src/ui/layout.rs
 expression: output
 ---
 ┌ Traffic ─────────────────────────────────────────────────────────────────────┐
-│↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections          │
+│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections         │
 └──────────────────────────────────────────────────────────────────────────────┘
-┌ Sources ─────────────────────────────┐┌ Logs ────────────────────────────────┐
-│Standalone profiles (2)               ││                                      │
-│├ MyPro... vless  very-long-hostnam...││                                      │
-│└ Short    vless  1.1.1.1:443         ││                                      │
+┌ Profiles ────────────────────────────┐┌ Logs ────────────────────────────────┐
+│ ├ MyPro... vless  very-long-hostn... ││                                      │
+│ └ Short    vless  1.1.1.1:443        ││                                      │
+│                                      ││                                      │
 │                                      ││                                      │
 │                                      ││                                      │
 │                                      ││                                      │
