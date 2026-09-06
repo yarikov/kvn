@@ -32,7 +32,9 @@ use crate::paths::ensure_config_dirs;
 
 /// Entry point for the TUI VPN client.
 fn main() -> Result<()> {
-    let cli = cli::Cli::parse();
+    let args = std::env::args_os().collect::<Vec<_>>();
+    cli::warn_if_legacy_invocation(&args);
+    let cli = cli::Cli::parse_from(args);
 
     if let Some(result) = cli::try_run_from_parsed(&cli) {
         return result;

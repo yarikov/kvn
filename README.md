@@ -8,7 +8,7 @@
 
 > Terminal VPN client for Arch Linux with vim navigation.
 
-`kvn-tui` is a keyboard-driven TUI application for managing VPN connections. It provides a fast, minimal interface for configuring profiles, connecting via the [sing-box](https://sing-box.sagernet.org/) backend, and routing traffic — all without leaving the terminal.
+`kvn-tui` is a keyboard-driven TUI application for managing VPN connections. Its canonical command is `kvn`; the legacy `kvn-tui` command remains available during the deprecation period. It provides a fast, minimal interface for configuring profiles, connecting via the [sing-box](https://sing-box.sagernet.org/) backend, and routing traffic — all without leaving the terminal.
 
 ![kvn-tui screenshot](assets/screenshot.png)
 
@@ -76,10 +76,10 @@ exported with `y`.
 
 ## First Connection
 
-After installation, launch kvn-tui:
+After installation, launch the TUI:
 
 ```bash
-kvn-tui
+kvn
 ```
 
 Choose a regional routing preset on first launch, then:
@@ -119,7 +119,7 @@ it does not grant NetworkManager permissions:
 
 ```bash
 sudo pacman -S --needed polkit
-sudo kvn-tui setup --polkit
+sudo kvn setup --polkit
 ```
 
 If setup adds you to the `kvn-tui` group, log out and back in, then restart the
@@ -135,7 +135,7 @@ not active:
 
 ```bash
 sudo pacman -S --needed nftables
-sudo kvn-tui setup --killswitch
+sudo kvn setup --killswitch
 ```
 
 The kill-switch sudoers rule uses the same dedicated `kvn-tui` group and allows
@@ -146,7 +146,7 @@ Toggle it with `K`; the status bar shows `[KS]` while it is enabled. Polkit and
 the kill switch can also be installed together:
 
 ```bash
-sudo kvn-tui setup --polkit --killswitch
+sudo kvn setup --polkit --killswitch
 ```
 
 System setup and cleanup must be run through `sudo` from a non-root user.
@@ -156,8 +156,8 @@ rejected.
 Remove either system integration with:
 
 ```bash
-sudo kvn-tui clean --polkit
-sudo kvn-tui clean --killswitch
+sudo kvn clean --polkit
+sudo kvn clean --killswitch
 ```
 
 ### Omarchy integration (optional)
@@ -169,7 +169,7 @@ Omarchy users can enable Shell/Waybar, launcher, Hyprland, and floating-window
 integration with:
 
 ```bash
-kvn-tui setup --omarchy
+kvn setup --omarchy
 ```
 
 Run Omarchy setup and cleanup without `sudo`, because they modify the current
@@ -189,7 +189,7 @@ The idempotent installer detects Omarchy 3 or 4 and creates backups before
 editing user configuration. Remove those backups after verification with:
 
 ```bash
-kvn-tui clean --omarchy
+kvn clean --omarchy
 ```
 
 This removes only the backups and leaves the active integration unchanged.
@@ -220,18 +220,21 @@ Alternatively, install only the binary from the repository root:
 ```bash
 cargo build --release --locked
 sudo install -Dm755 target/release/kvn-tui /usr/local/bin/kvn-tui
+sudo ln -s kvn-tui /usr/local/bin/kvn
 sudo setcap cap_net_admin,cap_net_raw+ep "$(command -v sing-box)"
 ```
 
 The capabilities allow sing-box to use TUN without running kvn-tui as root. The
 bundled service expects `/usr/bin/kvn-tui`; with a manual installation, use the
 automatic detached daemon or change its `ExecStart` to
-`/usr/local/bin/kvn-tui --daemon`.
+`/usr/local/bin/kvn-tui --daemon`. The legacy executable remains the real file
+so the existing service and integrations continue to work; `kvn` is its
+canonical command alias.
 
 ## Diagnostics
 
 ```bash
-kvn-tui doctor
+kvn doctor
 ```
 
 Runs a read-only check of sing-box, configuration, the daemon, clipboard, and

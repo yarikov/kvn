@@ -30,6 +30,7 @@ jobs:
           VERSION=${VERSION#v}
           mkdir -p "kvn-tui-${VERSION}-x86_64-linux"
           cp target/release/kvn-tui "kvn-tui-${VERSION}-x86_64-linux/"
+          ln -s kvn-tui "kvn-tui-${VERSION}-x86_64-linux/kvn"
           cp contrib/kvn-tui.service "kvn-tui-${VERSION}-x86_64-linux/"
           cp contrib/kvn-tui-sing-box-capabilities.hook "kvn-tui-${VERSION}-x86_64-linux/"
           cp LICENSE "kvn-tui-${VERSION}-x86_64-linux/"

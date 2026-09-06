@@ -96,13 +96,13 @@ if [[ -f "$plugin_dir/manifest.json" ]] && command -v omarchy-shell >/dev/null 2
     exit 0
   fi
 fi
-exec omarchy-launch-or-focus-tui --app-id=org.omarchy.kvn-tui kvn-tui
+exec omarchy-launch-or-focus-tui --app-id=org.omarchy.kvn-tui kvn
 EOF
   else
     cat >"$tmp" <<'EOF'
 #!/bin/bash
 exec omarchy-launch-or-focus "org.omarchy.kvn-tui" \
-  "uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.kvn-tui -e kvn-tui"
+  "uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.kvn-tui -e kvn"
 EOF
   fi
   chmod 0755 "$tmp"
@@ -122,8 +122,8 @@ Type=Application
 Name=kvn-tui
 GenericName=VPN Client
 Comment=Terminal VPN client powered by sing-box
-Exec=omarchy-launch-or-focus-tui --app-id=org.omarchy.kvn-tui kvn-tui
-TryExec=kvn-tui
+Exec=omarchy-launch-or-focus-tui --app-id=org.omarchy.kvn-tui kvn
+TryExec=kvn
 Terminal=false
 Icon=kvn-tui
 Categories=Network;Utility;
@@ -191,7 +191,7 @@ install_omarchy_v3() {
         sed -i '$ s/[[:space:]]*$/,/' "$tmp"
         cat >>"$tmp" <<'EOF'
   "custom/kvn-tui": {
-    "exec": "kvn-tui --waybar-status",
+    "exec": "kvn --waybar-status",
     "return-type": "json",
     "interval": 5,
     "on-click": "omarchy-launch-kvn-tui",
@@ -460,7 +460,7 @@ EOF
   elif (( plugin_status == 2 )); then
     return 1
   else
-    module='{"id":"kvn-tui","type":"command","exec":"kvn-tui --waybar-status","interval":5,"tooltip":"kvn-tui VPN client","onClick":"omarchy-launch-kvn-tui"}'
+    module='{"id":"kvn-tui","type":"command","exec":"kvn --waybar-status","interval":5,"tooltip":"kvn-tui VPN client","onClick":"omarchy-launch-kvn-tui"}'
   fi
   tmp=$(mktemp "${shell_config}.tmp.XXXXXX")
   jq --argjson module "$module" '
