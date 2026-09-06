@@ -8,7 +8,7 @@ use uuid::Uuid;
 mod dns;
 mod share_link;
 
-pub use dns::{DnsConfig, DnsRule, DnsServer, DnsStrategy};
+pub use dns::{DnsConfig, DnsPreset, DnsRule, DnsServer, DnsStrategy};
 pub use share_link::{SUPPORTED_SHARE_SCHEMES, encode_share_link, parse_share_link};
 
 /// Supported VPN protocols.

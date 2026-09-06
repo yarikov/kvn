@@ -51,6 +51,143 @@ impl DnsStrategy {
     }
 }
 
+/// Built-in DNS server presets exposed by the TUI settings overlay.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsPreset {
+    CloudflareDoh,
+    GoogleDot,
+    Quad9Doh,
+    SystemLocal,
+}
+
+impl DnsPreset {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::CloudflareDoh => "Cloudflare DoH (1.1.1.1)",
+            Self::GoogleDot => "Google DoT (8.8.8.8)",
+            Self::Quad9Doh => "Quad9 DoH (9.9.9.9)",
+            Self::SystemLocal => "System resolver (local)",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::CloudflareDoh => Self::GoogleDot,
+            Self::GoogleDot => Self::Quad9Doh,
+            Self::Quad9Doh => Self::SystemLocal,
+            Self::SystemLocal => Self::CloudflareDoh,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::CloudflareDoh => Self::SystemLocal,
+            Self::GoogleDot => Self::CloudflareDoh,
+            Self::Quad9Doh => Self::GoogleDot,
+            Self::SystemLocal => Self::Quad9Doh,
+        }
+    }
+
+    pub fn detect(dns: &DnsConfig) -> Option<Self> {
+        let non_fakeip: Vec<&DnsServer> = dns
+            .servers
+            .iter()
+            .filter(|server| !matches!(server, DnsServer::FakeIp { .. }))
+            .collect();
+        let final_entry = non_fakeip
+            .iter()
+            .find(|server| server.tag() == dns.final_server)?;
+
+        if non_fakeip.len() == 1 {
+            return matches!(final_entry, DnsServer::Local { .. }).then_some(Self::SystemLocal);
+        }
+        if non_fakeip.len() != 2
+            || !non_fakeip
+                .iter()
+                .any(|server| matches!(server, DnsServer::Local { .. }))
+        {
+            return None;
+        }
+
+        match final_entry {
+            DnsServer::Https { server, path, .. }
+                if server == "1.1.1.1" && path == "/dns-query" =>
+            {
+                Some(Self::CloudflareDoh)
+            }
+            DnsServer::Tls { server, .. } if server == "8.8.8.8" => Some(Self::GoogleDot),
+            DnsServer::Https { server, path, .. }
+                if server == "9.9.9.9" && path == "/dns-query" =>
+            {
+                Some(Self::Quad9Doh)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn apply(self, dns: &mut DnsConfig) {
+        let fakeip_servers: Vec<DnsServer> = dns
+            .servers
+            .iter()
+            .filter(|server| matches!(server, DnsServer::FakeIp { .. }))
+            .cloned()
+            .collect();
+        let (mut servers, final_server) = match self {
+            Self::CloudflareDoh => (
+                vec![
+                    DnsServer::Local {
+                        tag: "local".to_string(),
+                    },
+                    DnsServer::Https {
+                        tag: "remote".to_string(),
+                        server: "1.1.1.1".to_string(),
+                        server_port: None,
+                        path: "/dns-query".to_string(),
+                    },
+                ],
+                "remote",
+            ),
+            Self::GoogleDot => (
+                vec![
+                    DnsServer::Local {
+                        tag: "local".to_string(),
+                    },
+                    DnsServer::Tls {
+                        tag: "remote".to_string(),
+                        server: "8.8.8.8".to_string(),
+                        server_port: Some(853),
+                    },
+                ],
+                "remote",
+            ),
+            Self::Quad9Doh => (
+                vec![
+                    DnsServer::Local {
+                        tag: "local".to_string(),
+                    },
+                    DnsServer::Https {
+                        tag: "remote".to_string(),
+                        server: "9.9.9.9".to_string(),
+                        server_port: None,
+                        path: "/dns-query".to_string(),
+                    },
+                ],
+                "remote",
+            ),
+            Self::SystemLocal => (
+                vec![DnsServer::Local {
+                    tag: "local".to_string(),
+                }],
+                "local",
+            ),
+        };
+        servers.extend(fakeip_servers);
+        dns.servers = servers;
+        dns.final_server = final_server.to_string();
+    }
+}
+
 /// A single sing-box DNS server. Variants map 1:1 onto sing-box 1.12 server types.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -262,6 +399,47 @@ impl DnsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preset_cycles_in_both_directions() {
+        assert_eq!(DnsPreset::CloudflareDoh.next(), DnsPreset::GoogleDot);
+        assert_eq!(DnsPreset::CloudflareDoh.prev(), DnsPreset::SystemLocal);
+        assert_eq!(DnsPreset::SystemLocal.next(), DnsPreset::CloudflareDoh);
+    }
+
+    #[test]
+    fn preset_detection_ignores_fakeip_and_rejects_custom_servers() {
+        let mut dns = DnsConfig::default();
+        dns.servers.push(DnsServer::FakeIp {
+            tag: "fakeip".into(),
+            inet4_range: "198.18.0.0/15".into(),
+            inet6_range: "fc00::/18".into(),
+        });
+        assert_eq!(DnsPreset::detect(&dns), Some(DnsPreset::CloudflareDoh));
+
+        dns.servers[1] = DnsServer::Https {
+            tag: "remote".into(),
+            server: "94.140.14.14".into(),
+            server_port: None,
+            path: "/dns-query".into(),
+        };
+        assert_eq!(DnsPreset::detect(&dns), None);
+    }
+
+    #[test]
+    fn applying_preset_preserves_fakeip_server() {
+        let mut dns = DnsConfig::default();
+        dns.servers.push(DnsServer::FakeIp {
+            tag: "fakeip".into(),
+            inet4_range: "198.18.0.0/15".into(),
+            inet6_range: "fc00::/18".into(),
+        });
+
+        DnsPreset::SystemLocal.apply(&mut dns);
+
+        assert_eq!(DnsPreset::detect(&dns), Some(DnsPreset::SystemLocal));
+        assert!(dns.fakeip_server().is_some());
+    }
 
     #[test]
     fn strategy_next_cycles_through_all_variants() {

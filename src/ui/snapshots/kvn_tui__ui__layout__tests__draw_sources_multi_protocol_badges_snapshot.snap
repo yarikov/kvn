@@ -3,21 +3,21 @@ source: src/ui/layout.rs
 expression: "snapshot_terminal(&model, 80, 26)"
 ---
 ┌ Traffic ─────────────────────────────────────────────────────────────────────┐
-│↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections          │
+│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections         │
 └──────────────────────────────────────────────────────────────────────────────┘
-┌ Sources ─────────────────────────────┐┌ Logs ────────────────────────────────┐
-│Standalone profiles (11)              ││                                      │
-│├ A-vless         vless  1.1.1.1:443  ││                                      │
-│├ B-vmess         vmess  2.2.2.2:443  ││                                      │
-│├ C-trojan        trojan 3.3.3.3:443  ││                                      │
-│├ D-ss            ss     4.4.4.4:8388 ││                                      │
-│├ E-hy2           hy2    5.5.5.5:443  ││                                      │
-│├ F-tuic          tuic   6.6.6.6:443  ││                                      │
-│├ G-stls          stls   7.7.7.7:443  ││                                      │
-│├ H-anytls        anytls 8.8.8.8:443  ││                                      │
-│├ I-socks         socks  9.9.9.9:1080 ││                                      │
-│├ J-http          http   10.0.0.1:8080││                                      │
-│└ K-ssh           ssh    10.0.0.2:22  ││                                      │
+┌ Profiles ────────────────────────────┐┌ Logs ────────────────────────────────┐
+│ ├ A-vless       vless  1.1.1.1:443   ││                                      │
+│ ├ B-vmess       vmess  2.2.2.2:443   ││                                      │
+│ ├ C-trojan      trojan 3.3.3.3:443   ││                                      │
+│ ├ D-ss          ss     4.4.4.4:8388  ││                                      │
+│ ├ E-hy2         hy2    5.5.5.5:443   ││                                      │
+│ ├ F-tuic        tuic   6.6.6.6:443   ││                                      │
+│ ├ G-stls        stls   7.7.7.7:443   ││                                      │
+│ ├ H-anytls      anytls 8.8.8.8:443   ││                                      │
+│ ├ I-socks       socks  9.9.9.9:1080  ││                                      │
+│ ├ J-http        http   10.0.0.1:8080 ││                                      │
+│ └ K-ssh         ssh    10.0.0.2:22   ││                                      │
+│                                      ││                                      │
 │                                      ││                                      │
 │                                      ││                                      │
 │                                      ││                                      │

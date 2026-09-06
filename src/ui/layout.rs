@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Row, Table, TableState, Wrap};
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthChar;
 
@@ -377,6 +377,7 @@ fn log_display_line(
     model: &Model,
     row: &LogDisplayRow,
     row_index: usize,
+    content_width: usize,
     selection: Option<&LogSelection>,
     navigation: Option<&LogNavigation>,
 ) -> Line<'static> {
@@ -385,25 +386,42 @@ fn log_display_line(
     } else {
         model.theme.normal()
     };
+    let row_selected = navigation.is_some_and(|nav| nav.contains(row.log_index));
     let mut column = 0_u16;
-    let spans = row
-        .text
-        .chars()
-        .map(|character| {
-            let width = UnicodeWidthChar::width(character).unwrap_or(0) as u16;
-            let selected = navigation.is_some_and(|nav| nav.contains(row.log_index))
-                || selection.is_some_and(|selection| selection.contains(row_index, column, width));
-            column = column.saturating_add(width);
-            Span::styled(
-                character.to_string(),
-                if selected {
-                    model.theme.selected()
-                } else {
-                    base
-                },
-            )
-        })
-        .collect::<Vec<_>>();
+    let mut spans = Vec::with_capacity(row.text.chars().count() + 2);
+    spans.push(Span::styled(
+        " ",
+        if row_selected {
+            model.theme.selected()
+        } else {
+            base
+        },
+    ));
+    spans.extend(row.text.chars().map(|character| {
+        let width = UnicodeWidthChar::width(character).unwrap_or(0) as u16;
+        let selected = row_selected
+            || selection.is_some_and(|selection| selection.contains(row_index, column, width));
+        column = column.saturating_add(width);
+        Span::styled(
+            character.to_string(),
+            if selected {
+                model.theme.selected()
+            } else {
+                base
+            },
+        )
+    }));
+    let trailing = content_width
+        .saturating_sub(visual_width(&row.text))
+        .saturating_add(1);
+    spans.push(Span::styled(
+        " ".repeat(trailing),
+        if row_selected {
+            model.theme.selected()
+        } else {
+            base
+        },
+    ));
     Line::from(spans)
 }
 
@@ -430,6 +448,13 @@ fn main_panes(terminal_area: Rect) -> (Rect, Rect) {
     (panes[0], panes[1])
 }
 
+fn panel_inner(area: Rect) -> Rect {
+    Block::default()
+        .borders(Borders::ALL)
+        .padding(Padding::horizontal(1))
+        .inner(area)
+}
+
 pub(crate) fn log_viewport(model: &Model, terminal_area: Rect) -> Option<LogViewport> {
     log_viewport_with_navigation(model, terminal_area, None)
 }
@@ -443,12 +468,7 @@ pub(crate) fn log_viewport_with_navigation(
         return None;
     }
     let (_, logs) = main_panes(terminal_area);
-    let area = Rect::new(
-        logs.x.saturating_add(1),
-        logs.y.saturating_add(1),
-        logs.width.saturating_sub(2),
-        logs.height.saturating_sub(2),
-    );
+    let area = panel_inner(logs);
     if area.width == 0 || area.height == 0 {
         return None;
     }
@@ -473,10 +493,11 @@ pub(crate) fn source_hit_test(
         return None;
     }
     let (sources, _) = main_panes(terminal_area);
-    let inside = column > sources.x
-        && column < sources.x.saturating_add(sources.width).saturating_sub(1)
-        && row > sources.y
-        && row < sources.y.saturating_add(sources.height).saturating_sub(1);
+    let content = panel_inner(sources);
+    let inside = column >= content.x
+        && column < content.x.saturating_add(content.width)
+        && row >= content.y
+        && row < content.y.saturating_add(content.height);
     if !inside {
         return None;
     }
@@ -490,7 +511,6 @@ pub(crate) fn source_hit_test(
         .map(|(index, _)| index)
         .collect();
     if !standalone.is_empty() {
-        visual_rows.push(None); // "Standalone profiles" is only a label.
         visual_rows.extend(standalone.into_iter().map(Some));
         visual_rows.push(None);
     }
@@ -504,7 +524,7 @@ pub(crate) fn source_hit_test(
         }));
         visual_rows.push(None);
     }
-    let line = row.saturating_sub(sources.y + 1) as usize;
+    let line = row.saturating_sub(content.y) as usize;
     visual_rows.get(line).copied().flatten()
 }
 
@@ -682,12 +702,7 @@ fn draw_main(
             theme.border()
         });
 
-    let inner = Rect::new(
-        content_chunks[1].x.saturating_add(1),
-        content_chunks[1].y.saturating_add(1),
-        content_chunks[1].width.saturating_sub(2),
-        content_chunks[1].height.saturating_sub(2),
-    );
+    let inner = panel_inner(content_chunks[1]);
     let viewport = log_selection
         .map(|selection| &selection.viewport)
         .filter(|viewport| viewport.area == inner)
@@ -698,7 +713,14 @@ fn draw_main(
         .iter()
         .enumerate()
         .map(|(row_index, row)| {
-            log_display_line(model, row, row_index, log_selection, log_navigation)
+            log_display_line(
+                model,
+                row,
+                row_index,
+                inner.width as usize,
+                log_selection,
+                log_navigation,
+            )
         })
         .collect();
 
@@ -720,7 +742,7 @@ fn draw_traffic_panel(frame: &mut Frame, model: &Model, area: Rect) {
         Span::styled("↓ ", theme.accent()),
         Span::styled(format_bps_field(t.down_rate_bps), theme.normal()),
         Span::raw("    "),
-        Span::styled("Total: ", theme.border()),
+        Span::styled("Total: ", theme.normal()),
         Span::styled("↑ ", theme.success()),
         Span::styled(format_bytes_field(t.up_total), theme.normal()),
         Span::raw("  "),
@@ -734,6 +756,7 @@ fn draw_traffic_panel(frame: &mut Frame, model: &Model, area: Rect) {
     let block = Block::default()
         .title(" Traffic ")
         .borders(Borders::ALL)
+        .padding(Padding::horizontal(1))
         .border_style(theme.border());
     let paragraph = Paragraph::new(line).block(block);
     frame.render_widget(paragraph, area);
@@ -765,7 +788,6 @@ fn draw_help(
     frame.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(" Help ")
         .borders(Borders::ALL)
         .border_style(theme.accent())
         .style(theme.popup_bg());
@@ -799,7 +821,7 @@ fn draw_help(
     let table = Table::new(rows, [Constraint::Length(12), Constraint::Min(1)])
         .style(theme.normal())
         .row_highlight_style(theme.selected())
-        .highlight_symbol("> ");
+        .highlight_symbol(" ");
     let mut table_state = TableState::default().with_selected(Some(selected - window_start));
     frame.render_stateful_widget(table, chunks[0], &mut table_state);
 
@@ -825,7 +847,6 @@ fn draw_confirm_delete(frame: &mut Frame, model: &Model, area: Rect) {
         frame,
         theme,
         area,
-        " Confirm ",
         vec![
             Line::from(Span::styled(message, theme.error())),
             Line::from(""),
@@ -843,20 +864,12 @@ const POPUP_HEIGHT_PERCENT: u16 = 50;
 const POPUP_HEIGHT_PERCENT_TALL: u16 = 90;
 
 /// Helper to render a centered popup with a border and text.
-fn draw_modal(
-    frame: &mut Frame,
-    theme: &Theme,
-    area: Rect,
-    title: &str,
-    lines: Vec<Line>,
-    height_percent: u16,
-) {
+fn draw_modal(frame: &mut Frame, theme: &Theme, area: Rect, lines: Vec<Line>, height_percent: u16) {
     let popup_area = centered_rect(POPUP_WIDTH_PERCENT, height_percent, area);
 
     frame.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(title)
         .borders(Borders::ALL)
         .border_style(theme.accent())
         .style(theme.popup_bg());
@@ -865,7 +878,7 @@ fn draw_modal(
         .block(block)
         .style(theme.normal())
         .alignment(Alignment::Center)
-        .wrap(Wrap { trim: true });
+        .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, popup_area);
 }
@@ -883,7 +896,6 @@ fn draw_routing_mode(frame: &mut Frame, model: &Model, area: Rect) {
         &model.theme,
         area,
         "Select routing mode",
-        " Routing Mode ",
         &labels,
         model.routing_selected,
         active,
@@ -897,12 +909,7 @@ fn draw_geo_region(frame: &mut Frame, model: &Model, area: Rect) {
     use crate::config::profile::GeoRegion;
     // Labels are aligned 1:1 with `GeoRegion::ALL`. The debug_assert catches
     // a missed entry when a new region is added.
-    let labels = [
-        "🇷🇺 Russia",
-        "🇨🇳 China",
-        "🇮🇷 Iran",
-        "🌍 Global (no geo rules)",
-    ];
+    let labels = ["🇷🇺 Russia", "🇨🇳 China", "🇮🇷 Iran", "🌍 Global"];
     debug_assert_eq!(labels.len(), GeoRegion::ALL.len());
     let active = model
         .config
@@ -915,7 +922,6 @@ fn draw_geo_region(frame: &mut Frame, model: &Model, area: Rect) {
         &model.theme,
         area,
         "Select geo region",
-        " Geo Region ",
         &labels,
         model.geo_region_selected,
         active,
@@ -928,37 +934,36 @@ fn draw_geo_region(frame: &mut Frame, model: &Model, area: Rect) {
     );
 }
 
-/// Draw the DNS settings overlay: built-in presets, strategy cycle, fake-IP
-/// toggle. Custom servers and per-domain rules are edited via the main
-/// profiles.json (`e` key in the sources list).
+/// Draw the DNS settings overlay: preset, strategy, and fake-IP selectors.
+/// Custom servers and per-domain rules are edited via profiles.json.
 fn draw_dns_settings(frame: &mut Frame, model: &Model, area: Rect) {
+    use crate::config::profile::DnsPreset;
+
     let dns = &model.config.settings.dns;
-    let strategy_label = if let Some(ref draft) = model.dns_strategy_draft {
-        if *draft == dns.strategy {
-            format!("Strategy: ‹ {} ›", draft.as_str())
-        } else {
-            format!("Strategy: ‹ {} › *", draft.as_str())
-        }
-    } else {
-        format!("Strategy: ‹ {} ›", dns.strategy.as_str())
-    };
+    let current_preset = DnsPreset::detect(dns);
+    let displayed_preset = model.dns_preset_draft.or(current_preset);
+    let preset_dirty = model.dns_preset_draft.is_some() && displayed_preset != current_preset;
+    let strategy = model.dns_strategy_draft.as_ref().unwrap_or(&dns.strategy);
+    let strategy_dirty = model
+        .dns_strategy_draft
+        .as_ref()
+        .is_some_and(|draft| *draft != dns.strategy);
     let fakeip = model.dns_fakeip_draft.unwrap_or(dns.fakeip_enabled);
-    let fakeip_label = format!(
-        "Fake-IP: ‹ {} ›{}",
-        if fakeip { "on" } else { "off" },
-        if model.dns_fakeip_draft.is_some() && fakeip != dns.fakeip_enabled {
-            " *"
-        } else {
-            ""
-        }
-    );
-    let labels: Vec<String> = vec![
-        "Preset: Cloudflare DoH (1.1.1.1)".to_string(),
-        "Preset: Google DoT (8.8.8.8)".to_string(),
-        "Preset: Quad9 DoH (9.9.9.9)".to_string(),
-        "Preset: System resolver (local)".to_string(),
-        strategy_label,
-        fakeip_label,
+    let fakeip_dirty = model.dns_fakeip_draft.is_some() && fakeip != dns.fakeip_enabled;
+    let setting_row = |name: &str, value: &str, dirty: bool| {
+        format!(
+            "{name:<8} ‹ {value:^24} ›{}",
+            if dirty { " *" } else { "  " }
+        )
+    };
+    let labels = [
+        setting_row(
+            "Preset",
+            displayed_preset.map(DnsPreset::label).unwrap_or("Custom"),
+            preset_dirty,
+        ),
+        setting_row("Strategy", strategy.as_str(), strategy_dirty),
+        setting_row("Fake-IP", if fakeip { "on" } else { "off" }, fakeip_dirty),
     ];
     let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
     draw_selection_modal(
@@ -966,10 +971,9 @@ fn draw_dns_settings(frame: &mut Frame, model: &Model, area: Rect) {
         &model.theme,
         area,
         "DNS settings",
-        " DNS ",
         &label_refs,
         model.dns_selected,
-        current_dns_preset_index(dns),
+        None,
         POPUP_HEIGHT_PERCENT,
         &["Enter confirm, q/Esc cancel, ? help"],
     );
@@ -979,9 +983,8 @@ fn draw_dns_settings(frame: &mut Frame, model: &Model, area: Rect) {
 /// draft route (`‹ value ›`, cycled with h/l); a `*` marks rows whose draft
 /// differs from the committed setting. Enter commits the whole draft.
 ///
-/// Rendered without the shared `draw_selection_modal`: that helper centers
-/// each line and trims whitespace, which would break the fixed columns this
-/// table-shaped overlay needs.
+/// Rendered without the shared `draw_selection_modal` because this overlay
+/// uses fixed service/route columns instead of a single centered label.
 fn draw_service_routing(frame: &mut Frame, model: &Model, area: Rect) {
     use crate::config::profile::RoutedService;
 
@@ -991,7 +994,6 @@ fn draw_service_routing(frame: &mut Frame, model: &Model, area: Rect) {
     let popup_area = centered_rect(POPUP_WIDTH_PERCENT, POPUP_HEIGHT_PERCENT, area);
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
-        .title(" Services ")
         .borders(Borders::ALL)
         .border_style(theme.accent())
         .style(theme.popup_bg());
@@ -1003,8 +1005,8 @@ fn draw_service_routing(frame: &mut Frame, model: &Model, area: Rect) {
         Line::from(""),
     ];
 
-    // marker(2) + name(9) + " ‹ " + route(8) + " ›" + dirty(2)
-    const ROW_WIDTH: usize = 2 + 9 + 3 + 8 + 2 + 2;
+    // name(9) + " ‹ " + route(8) + " ›" + dirty(2)
+    const ROW_WIDTH: usize = 9 + 3 + 8 + 2 + 2;
     let indent = " ".repeat((inner.width as usize).saturating_sub(ROW_WIDTH) / 2);
     for (i, service) in RoutedService::ALL.into_iter().enumerate() {
         let saved = committed.get(&service).copied().unwrap_or_default();
@@ -1016,16 +1018,16 @@ fn draw_service_routing(frame: &mut Frame, model: &Model, area: Rect) {
             None => saved,
         };
         let selected = i == model.service_routing_selected;
-        let row = format!(
-            "{}{}{:<9} ‹ {:^8} ›{}",
+        let mut row = format!(
+            "{}{:<9} ‹ {:^8} ›{}",
             indent,
-            if selected { "> " } else { "  " },
             service.label(),
             shown.label(),
             if shown != saved { " *" } else { "" },
         );
         let style = if selected {
-            theme.accent().add_modifier(Modifier::BOLD)
+            row = fit_to_visual_width(&row, inner.width as usize);
+            theme.selected()
         } else {
             theme.normal()
         };
@@ -1052,7 +1054,6 @@ fn draw_theme_settings(frame: &mut Frame, model: &Model, area: Rect) {
         &model.theme,
         area,
         "Select theme",
-        " Theme ",
         &label_refs,
         model.theme_selected,
         active,
@@ -1061,47 +1062,12 @@ fn draw_theme_settings(frame: &mut Frame, model: &Model, area: Rect) {
     );
 }
 
-/// Return the index of the built-in preset (0..=3) that matches the user's
-/// current `dns.servers + final_server`, or `None` for a custom config.
-fn current_dns_preset_index(dns: &crate::config::profile::DnsConfig) -> Option<usize> {
-    use crate::config::profile::DnsServer;
-    let non_fakeip: Vec<&DnsServer> = dns
-        .servers
-        .iter()
-        .filter(|s| !matches!(s, DnsServer::FakeIp { .. }))
-        .collect();
-    let final_entry = non_fakeip.iter().find(|s| s.tag() == dns.final_server)?;
-
-    // System: only one server, the local resolver.
-    if non_fakeip.len() == 1 {
-        return matches!(final_entry, DnsServer::Local { .. }).then_some(3);
-    }
-    if non_fakeip.len() != 2
-        || !non_fakeip
-            .iter()
-            .any(|s| matches!(s, DnsServer::Local { .. }))
-    {
-        return None;
-    }
-    match final_entry {
-        DnsServer::Https { server, path, .. } if server == "1.1.1.1" && path == "/dns-query" => {
-            Some(0)
-        }
-        DnsServer::Tls { server, .. } if server == "8.8.8.8" => Some(1),
-        DnsServer::Https { server, path, .. } if server == "9.9.9.9" && path == "/dns-query" => {
-            Some(2)
-        }
-        _ => None,
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn draw_selection_modal(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
     heading: &str,
-    modal_title: &str,
     items: &[&str],
     selected: usize,
     active: Option<usize>,
@@ -1109,6 +1075,13 @@ fn draw_selection_modal(
     footer: &[&str],
 ) {
     let popup_area = centered_rect(POPUP_WIDTH_PERCENT, height_percent, area);
+    let row_width = popup_area.width.saturating_sub(2) as usize;
+    let column_width = items
+        .iter()
+        .map(|label| visual_width(label))
+        .max()
+        .unwrap_or(0)
+        .min(row_width);
     let footer_height = footer.len() as u16;
     let max_visible_items = popup_area.height.saturating_sub(5 + footer_height) as usize;
     let visible_count = items.len().min(max_visible_items);
@@ -1126,30 +1099,27 @@ fn draw_selection_modal(
         Line::from(""),
     ];
     for (i, label) in items.iter().enumerate().take(window_end).skip(window_start) {
-        let marker = if i == selected { "> " } else { "  " };
         let is_active = active == Some(i);
         let style = if is_active {
-            theme.success().add_modifier(Modifier::BOLD)
+            theme.selected_connected()
         } else if i == selected {
-            theme.accent().add_modifier(Modifier::BOLD)
+            theme.selected()
         } else {
             theme.normal()
         };
-        lines.push(Line::from(Span::styled(
-            format!("{}{}", marker, label),
-            style,
-        )));
+        let text = align_in_centered_column(label, row_width, column_width);
+        lines.push(Line::from(Span::styled(text, style)));
     }
     lines.push(Line::from(""));
     lines.extend(footer.iter().map(|text| Line::from(*text)));
-    draw_modal(frame, theme, area, modal_title, lines, height_percent);
+    draw_modal(frame, theme, area, lines, height_percent);
 }
 
 /// Draw the unified Sources list: standalone profiles and subscription trees.
 fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused: bool) {
     let theme = &model.theme;
     let block = Block::default()
-        .title(" Sources ")
+        .title(" Profiles ")
         .borders(Borders::ALL)
         .border_style(if focused {
             theme.accent()
@@ -1157,15 +1127,18 @@ fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused: bool) {
             theme.border()
         });
 
-    let inner_width = area.width.saturating_sub(2) as usize;
+    let inner_width = panel_inner(area).width as usize;
     let mut lines: Vec<Line> = Vec::new();
     let rows = model.source_rows();
 
     if rows.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "No sources. Press p to paste a profile or subscription URL from clipboard.",
-            theme.normal(),
-        )));
+        lines.push(Line::from(vec![
+            Span::styled(" ", theme.normal()),
+            Span::styled(
+                "No sources. Press p to paste a profile or subscription URL from clipboard.",
+                theme.normal(),
+            ),
+        ]));
     } else {
         // Global address-column width: max across all visible profiles so every
         // row shares the same column layout and aligns vertically.
@@ -1203,10 +1176,6 @@ fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused: bool) {
 
         // Standalone profiles group.
         if !standalone.is_empty() {
-            lines.push(Line::from(Span::styled(
-                format!("Standalone profiles ({})", standalone.len()),
-                theme.accent().add_modifier(Modifier::BOLD),
-            )));
             let last = standalone.len() - 1;
             for (pos, (row_idx, profile_idx)) in standalone.iter().enumerate() {
                 lines.push(profile_line(
@@ -1232,18 +1201,17 @@ fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused: bool) {
                 theme.normal()
             };
             let profiles = &sub_profile_rows[sub_idx];
-            let header_text = format!(
-                "Subscription: {} ({}) {}",
-                sub.name,
-                profiles.len(),
-                sub.auto_update.label(),
-            );
+            let header_text = format!("Subscription: {} {}", sub.name, sub.auto_update.label());
             let header_text = if is_selected {
                 pad_to_visual_width(&header_text, inner_width)
             } else {
                 header_text
             };
-            lines.push(Line::from(Span::styled(header_text, header_style)));
+            lines.push(Line::from(vec![
+                Span::styled(" ", header_style),
+                Span::styled(header_text, header_style),
+                Span::styled(" ", header_style),
+            ]));
 
             let last = profiles.len().saturating_sub(1);
             for (pos, (row_idx, profile_idx)) in profiles.iter().enumerate() {
@@ -1313,6 +1281,13 @@ fn pad_to_visual_width(s: &str, target: usize) -> String {
 /// Truncate and pad a string to exactly the target visual width.
 fn fit_to_visual_width(s: &str, target: usize) -> String {
     pad_to_visual_width(&truncate_to_visual_width(s, target), target)
+}
+
+/// Left-align a string within a column that is centered in the target width.
+fn align_in_centered_column(s: &str, target: usize, column_width: usize) -> String {
+    let text = truncate_to_visual_width(s, column_width);
+    let left = target.saturating_sub(column_width) / 2;
+    pad_to_visual_width(&format!("{}{}", " ".repeat(left), text), target)
 }
 
 /// Width reserved for the tree prefix at the start of a profile row.
@@ -1388,6 +1363,7 @@ fn profile_line(
     let trailing = inner_width.saturating_sub(used);
 
     let mut spans = vec![
+        Span::styled(" ", style),
         Span::styled(prefix, style),
         Span::styled(name_col, style),
         Span::styled(" ", style),
@@ -1410,6 +1386,7 @@ fn profile_line(
     if is_selected && trailing > 0 {
         spans.push(Span::styled(" ".repeat(trailing), style));
     }
+    spans.push(Span::styled(" ", style));
     Line::from(spans)
 }
 
@@ -1471,28 +1448,28 @@ mod tests {
         let model = mouse_model();
         // Tall: traffic panel occupies rows 0..=2, Sources content starts at 4.
         assert_eq!(
-            source_hit_test(&model, Rect::new(0, 0, 80, 20), 2, 5),
+            source_hit_test(&model, Rect::new(0, 0, 80, 20), 2, 4),
             Some(0)
         );
         assert_eq!(
-            source_hit_test(&model, Rect::new(0, 0, 80, 20), 2, 7),
+            source_hit_test(&model, Rect::new(0, 0, 80, 20), 2, 6),
             Some(1)
         );
         assert_eq!(
-            source_hit_test(&model, Rect::new(0, 0, 80, 20), 2, 8),
+            source_hit_test(&model, Rect::new(0, 0, 80, 20), 2, 7),
             Some(2)
         );
         // Short: traffic is hidden and Sources content starts at row 1.
         assert_eq!(
-            source_hit_test(&model, Rect::new(0, 0, 80, 8), 2, 2),
+            source_hit_test(&model, Rect::new(0, 0, 80, 8), 2, 1),
             Some(0)
         );
         assert_eq!(
-            source_hit_test(&model, Rect::new(0, 0, 80, 8), 2, 4),
+            source_hit_test(&model, Rect::new(0, 0, 80, 8), 2, 3),
             Some(1)
         );
         assert_eq!(
-            source_hit_test(&model, Rect::new(0, 0, 80, 8), 2, 5),
+            source_hit_test(&model, Rect::new(0, 0, 80, 8), 2, 4),
             Some(2)
         );
     }
@@ -1501,10 +1478,10 @@ mod tests {
     fn source_hit_test_ignores_labels_borders_separators_logs_clipping_and_overlays() {
         let mut model = mouse_model();
         let area = Rect::new(0, 0, 80, 20);
-        assert_eq!(source_hit_test(&model, area, 2, 4), None); // standalone label
-        assert_eq!(source_hit_test(&model, area, 2, 6), None); // separator
-        assert_eq!(source_hit_test(&model, area, 0, 5), None); // border
-        assert_eq!(source_hit_test(&model, area, 50, 5), None); // Logs
+        assert_eq!(source_hit_test(&model, area, 2, 5), None); // separator
+        assert_eq!(source_hit_test(&model, area, 0, 4), None); // border
+        assert_eq!(source_hit_test(&model, area, 1, 4), None); // padding
+        assert_eq!(source_hit_test(&model, area, 50, 4), None); // Logs
         assert_eq!(source_hit_test(&model, Rect::new(0, 0, 80, 5), 2, 4), None);
         model.overlay = Overlay::Help(crate::app::model::HelpState::default());
         assert_eq!(source_hit_test(&model, area, 2, 5), None);
@@ -1516,9 +1493,9 @@ mod tests {
         model.push_log("hello".into());
         let area = Rect::new(0, 0, 80, 20);
         let viewport = log_viewport(&model, area).unwrap();
-        assert!(viewport.contains(41, 4));
-        assert!(!viewport.contains(40, 4));
-        assert!(!viewport.contains(41, 3));
+        assert!(viewport.contains(42, 4));
+        assert!(!viewport.contains(41, 4));
+        assert!(!viewport.contains(42, 3));
         model.overlay = Overlay::Help(crate::app::model::HelpState::default());
         assert!(log_viewport(&model, area).is_none());
     }
@@ -1716,8 +1693,8 @@ mod tests {
         model.push_log("visible before drag".into());
         let area = Rect::new(0, 0, 80, 20);
         let viewport = log_viewport(&model, area).unwrap();
-        let mut selection = LogSelection::start(viewport, 41, 4).unwrap();
-        selection.update(42, 4);
+        let mut selection = LogSelection::start(viewport, 42, 4).unwrap();
+        selection.update(43, 4);
 
         model.push_log("arrived during drag".into());
         let backend = TestBackend::new(80, 20);
@@ -1760,7 +1737,6 @@ mod tests {
             })
             .unwrap();
         let output = buffer_to_string(terminal.backend().buffer());
-        assert!(output.lines().nth(1).unwrap().contains("Status"));
         assert!(output.lines().nth(2).unwrap().contains("Saved"));
     }
 
@@ -1833,89 +1809,6 @@ mod tests {
     }
 
     #[test]
-    fn dns_preset_index_recognises_defaults() {
-        use crate::config::profile::DnsConfig;
-        let dns = DnsConfig::default();
-        assert_eq!(current_dns_preset_index(&dns), Some(0));
-    }
-
-    #[test]
-    fn dns_preset_index_recognises_quad9_doh() {
-        use crate::config::profile::{DnsConfig, DnsServer, DnsStrategy};
-        let dns = DnsConfig {
-            servers: vec![
-                DnsServer::Local {
-                    tag: "local".to_string(),
-                },
-                DnsServer::Https {
-                    tag: "remote".to_string(),
-                    server: "9.9.9.9".to_string(),
-                    server_port: None,
-                    path: "/dns-query".to_string(),
-                },
-            ],
-            rules: Vec::new(),
-            final_server: "remote".to_string(),
-            strategy: DnsStrategy::PreferIpv4,
-            fakeip_enabled: false,
-        };
-        assert_eq!(current_dns_preset_index(&dns), Some(2));
-    }
-
-    #[test]
-    fn dns_preset_index_recognises_system_only() {
-        use crate::config::profile::{DnsConfig, DnsServer, DnsStrategy};
-        let dns = DnsConfig {
-            servers: vec![DnsServer::Local {
-                tag: "local".to_string(),
-            }],
-            rules: Vec::new(),
-            final_server: "local".to_string(),
-            strategy: DnsStrategy::PreferIpv4,
-            fakeip_enabled: false,
-        };
-        assert_eq!(current_dns_preset_index(&dns), Some(3));
-    }
-
-    #[test]
-    fn dns_preset_index_ignores_fakeip_extras() {
-        // Fake-IP servers must not affect preset detection — they sit alongside
-        // any preset.
-        use crate::config::profile::{DnsConfig, DnsServer};
-        let mut dns = DnsConfig::default();
-        dns.servers.push(DnsServer::FakeIp {
-            tag: "fakeip".to_string(),
-            inet4_range: "198.18.0.0/15".to_string(),
-            inet6_range: "fc00::/18".to_string(),
-        });
-        dns.fakeip_enabled = true;
-        assert_eq!(current_dns_preset_index(&dns), Some(0));
-    }
-
-    #[test]
-    fn dns_preset_index_none_for_custom_endpoint() {
-        use crate::config::profile::{DnsConfig, DnsServer, DnsStrategy};
-        let dns = DnsConfig {
-            servers: vec![
-                DnsServer::Local {
-                    tag: "local".to_string(),
-                },
-                DnsServer::Https {
-                    tag: "remote".to_string(),
-                    server: "94.140.14.14".to_string(),
-                    server_port: None,
-                    path: "/dns-query".to_string(),
-                },
-            ],
-            rules: Vec::new(),
-            final_server: "remote".to_string(),
-            strategy: DnsStrategy::PreferIpv4,
-            fakeip_enabled: false,
-        };
-        assert_eq!(current_dns_preset_index(&dns), None);
-    }
-
-    #[test]
     fn centered_rect_100_100_fills_area() {
         let area = Rect::new(10, 20, 80, 40);
         let popup = centered_rect(100, 100, area);
@@ -1983,9 +1876,8 @@ mod tests {
                 "help catalog should contain {key}: {action}"
             );
         }
-        assert!(content.contains("Help"), "should contain Help title");
         assert!(content.contains("Navigation"));
-        assert!(content.contains("Sources"));
+        assert!(content.contains("Profiles"));
     }
 
     #[test]
@@ -2361,7 +2253,7 @@ mod tests {
         model.theme_selected = crate::app::update::theme_picker_slugs().len() - 1;
 
         let rendered = snapshot_terminal(&model, 80, 24);
-        assert!(rendered.contains("> white"));
+        assert!(rendered.contains("white"));
         assert!(rendered.contains("Enter confirm, q/Esc cancel, ? help"));
         assert!(!rendered.contains("j/k navigate"));
         assert!(!rendered.contains("catppuccin-latte"));

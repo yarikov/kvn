@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::config::load_config;
 use crate::config::profile::{
-    Config, DnsStrategy, GeoRegion, Profile, RoutedService, ServiceRoute,
+    Config, DnsPreset, DnsStrategy, GeoRegion, Profile, RoutedService, ServiceRoute,
 };
 use crate::ui::styles::Theme;
 use chrono::{DateTime, Local};
@@ -226,6 +226,9 @@ pub struct Model {
     pub routing_selected: usize,
     pub geo_region_selected: usize,
     pub dns_selected: usize,
+    /// Pending built-in DNS preset preview while the DNS overlay is open.
+    /// `None` means the persisted DNS configuration is being displayed.
+    pub dns_preset_draft: Option<DnsPreset>,
     /// Pending DNS strategy preview while the DNS overlay is open. Set by
     /// `h`/`l` on the Strategy row, committed by Enter, discarded by Esc.
     pub dns_strategy_draft: Option<DnsStrategy>,
@@ -442,6 +445,7 @@ impl Model {
             routing_selected: 0,
             geo_region_selected: 0,
             dns_selected: 0,
+            dns_preset_draft: None,
             dns_strategy_draft: None,
             dns_fakeip_draft: None,
             service_routing_selected: 0,
@@ -548,6 +552,7 @@ impl Model {
             routing_selected: 0,
             geo_region_selected: 0,
             dns_selected: 0,
+            dns_preset_draft: None,
             dns_strategy_draft: None,
             dns_fakeip_draft: None,
             service_routing_selected: 0,
@@ -774,6 +779,7 @@ impl Model {
             routing_selected: 0,
             geo_region_selected: 0,
             dns_selected: 0,
+            dns_preset_draft: None,
             dns_strategy_draft: None,
             dns_fakeip_draft: None,
             service_routing_selected: 0,

@@ -1,6 +1,6 @@
 use crate::app::model::{ConnectionState, MainPaneFocus, Overlay, TrafficStats};
 use crate::config::profile::{
-    DnsStrategy, GeoRegion, Profile, RoutedService, RoutingMode, Settings, Subscription,
+    DnsPreset, DnsStrategy, GeoRegion, Profile, RoutedService, RoutingMode, Settings, Subscription,
 };
 use crate::ui::styles::Theme;
 use chrono::{DateTime, Local};
@@ -388,6 +388,8 @@ pub struct StateSnapshot {
     pub routing_selected: usize,
     pub geo_region_selected: usize,
     pub dns_selected: usize,
+    #[serde(default)]
+    pub dns_preset_draft: Option<DnsPreset>,
     #[serde(default)]
     pub dns_strategy_draft: Option<DnsStrategy>,
     #[serde(default)]

@@ -1269,6 +1269,7 @@ fn build_snapshot(model: &Model, log_session_offsets: LogSessionOffsets) -> Stat
         routing_selected: model.routing_selected,
         geo_region_selected: model.geo_region_selected,
         dns_selected: model.dns_selected,
+        dns_preset_draft: model.dns_preset_draft,
         dns_strategy_draft: model.dns_strategy_draft.clone(),
         dns_fakeip_draft: model.dns_fakeip_draft,
         theme_selected: model.theme_selected,
