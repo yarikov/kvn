@@ -47,6 +47,28 @@ impl Theme {
         Style::default().fg(self.palette.foreground)
     }
 
+    /// Muted text used for log metadata such as timestamps.
+    pub fn muted(&self) -> Style {
+        Style::default().fg(self.palette.ansi[8])
+    }
+
+    /// Style for warning-level log entries.
+    pub fn warning(&self) -> Style {
+        Style::default()
+            .fg(self.palette.ansi[3])
+            .add_modifier(Modifier::BOLD)
+    }
+
+    /// Style for the source marker in a log entry.
+    pub fn log_source(&self) -> Style {
+        Style::default().fg(self.palette.accent)
+    }
+
+    /// Style for application-generated log source markers.
+    pub fn app_log_source(&self) -> Style {
+        Style::default().fg(self.palette.ansi[2])
+    }
+
     /// Style for error messages.
     pub fn error(&self) -> Style {
         Style::default()
@@ -184,6 +206,14 @@ mod tests {
     fn legacy_normal_is_gray() {
         let s = Theme::legacy().normal();
         assert_eq!(s.fg, Some(Color::Gray));
+    }
+
+    #[test]
+    fn log_sources_use_distinct_colors() {
+        let theme = Theme::legacy();
+        assert_eq!(theme.app_log_source().fg, Some(Color::Green));
+        assert_eq!(theme.log_source().fg, Some(Color::Cyan));
+        assert_ne!(theme.app_log_source().fg, theme.log_source().fg);
     }
 
     #[test]

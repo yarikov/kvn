@@ -103,7 +103,7 @@ impl LogNavigation {
         let lines = range
             .clone()
             .filter_map(|index| model.logs.get(index))
-            .cloned()
+            .map(|line| format_log_for_display(line).text)
             .collect::<Vec<_>>();
         (!lines.is_empty()).then(|| (lines.join("\n"), lines.len()))
     }
@@ -169,6 +169,98 @@ struct LogDisplayRow {
     hard_break_after: bool,
     error: bool,
     log_index: usize,
+    /// Character offset of this wrapped row in the complete formatted line.
+    source_offset: usize,
+    level: LogLevel,
+    structured: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Other,
+}
+
+impl LogLevel {
+    fn parse(value: &str) -> Self {
+        match value {
+            "TRACE" => Self::Trace,
+            "DEBUG" => Self::Debug,
+            "INFO" => Self::Info,
+            "WARN" | "WARNING" => Self::Warn,
+            "ERROR" | "FATAL" | "PANIC" => Self::Error,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FormattedLog {
+    text: String,
+    level: LogLevel,
+    structured: bool,
+}
+
+/// Convert the tailer's `[source] HH:MM:SS LEVEL ...` representation into the
+/// compact presentation used by the log pane. The connection context emitted
+/// by sing-box (`[id Nms]`) is useful in raw logs but too noisy for the TUI.
+fn format_log_for_display(line: &str) -> FormattedLog {
+    let Some(close_source) = line.strip_prefix('[').and_then(|rest| rest.find(']')) else {
+        return FormattedLog {
+            text: line.to_string(),
+            level: LogLevel::Other,
+            structured: false,
+        };
+    };
+    let source_end = close_source + 2;
+    let source = &line[1..=close_source];
+    let remainder = line[source_end..].trim_start();
+    let Some((time, after_time)) = remainder.split_once(' ') else {
+        return FormattedLog {
+            text: line.to_string(),
+            level: LogLevel::Other,
+            structured: false,
+        };
+    };
+    if time.len() != 8
+        || time.as_bytes().get(2) != Some(&b':')
+        || time.as_bytes().get(5) != Some(&b':')
+    {
+        return FormattedLog {
+            text: line.to_string(),
+            level: LogLevel::Other,
+            structured: false,
+        };
+    }
+    let Some((level_text, mut message)) = after_time.split_once(' ') else {
+        return FormattedLog {
+            text: line.to_string(),
+            level: LogLevel::Other,
+            structured: false,
+        };
+    };
+    let level = LogLevel::parse(level_text);
+
+    if let Some(rest) = message.strip_prefix('[')
+        && let Some(close) = rest.find(']')
+        && rest[..close]
+            .split_whitespace()
+            .nth(1)
+            .is_some_and(|value| value.ends_with("ms"))
+    {
+        message = rest[close + 1..].trim_start();
+    }
+
+    let source = if source == "sb" { "sbx" } else { source };
+    FormattedLog {
+        text: format!("{time} [{source}] {level_text} {message}"),
+        level,
+        structured: true,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -289,18 +381,26 @@ fn build_all_log_rows(model: &Model, width: usize) -> Vec<LogDisplayRow> {
     let mut rows = Vec::new();
     if width > 0 {
         for (log_index, line) in model.logs.iter().enumerate() {
-            let error = line.starts_with("[error]");
-            let wrapped = wrap_log_line(line, width);
+            let formatted = format_log_for_display(line);
+            let error = line.starts_with("[error]") || formatted.level == LogLevel::Error;
+            let wrapped = wrap_log_line_with_offsets(&formatted.text, width);
             let last = wrapped.len().saturating_sub(1);
             rows.extend(
                 wrapped
                     .into_iter()
                     .enumerate()
-                    .map(|(index, text)| LogDisplayRow {
+                    .map(|(index, (text, source_offset))| LogDisplayRow {
                         text,
                         hard_break_after: index == last,
                         error,
                         log_index,
+                        source_offset: if formatted.structured {
+                            source_offset
+                        } else {
+                            0
+                        },
+                        level: formatted.level,
+                        structured: formatted.structured,
                     }),
             );
         }
@@ -348,19 +448,33 @@ fn build_log_viewport(
     LogViewport { area, rows }
 }
 
-fn wrap_log_line(line: &str, width: usize) -> Vec<String> {
+fn wrap_log_line_with_offsets(line: &str, width: usize) -> Vec<(String, usize)> {
     if line.is_empty() || width == 0 {
-        return vec![String::new()];
+        return vec![(String::new(), 0)];
     }
-    let mut rows = vec![String::new()];
+    let mut rows = vec![(String::new(), 0)];
     let mut used = 0;
-    for character in line.chars() {
+    for (char_index, character) in line.chars().enumerate() {
+        let wrapped_row = rows.len() > 1;
+        if wrapped_row
+            && rows.last().is_some_and(|(text, _)| text.is_empty())
+            && character.is_whitespace()
+        {
+            continue;
+        }
         let char_width = UnicodeWidthChar::width(character).unwrap_or(0);
         if used > 0 && used + char_width > width {
-            rows.push(String::new());
+            rows.push((String::new(), char_index));
             used = 0;
+            if character.is_whitespace() {
+                continue;
+            }
         }
-        rows.last_mut().expect("one row exists").push(character);
+        let row = rows.last_mut().expect("one row exists");
+        if row.0.is_empty() {
+            row.1 = char_index;
+        }
+        row.0.push(character);
         used += char_width;
     }
     rows
@@ -404,19 +518,35 @@ fn log_display_line(
             base
         },
     ));
-    spans.extend(row.text.chars().map(|character| {
+    spans.extend(row.text.chars().enumerate().map(|(index, character)| {
+        let absolute_index = row.source_offset + index;
         let width = UnicodeWidthChar::width(character).unwrap_or(0) as u16;
         let selected = row_selected
             || selection.is_some_and(|selection| selection.contains(row_index, column, width));
         column = column.saturating_add(width);
-        Span::styled(
-            character.to_string(),
-            if selected {
-                model.theme.selected()
+        let style = if row_selected || selected {
+            model.theme.selected()
+        } else if row.structured && absolute_index < 8 {
+            model.theme.normal()
+        } else if row.structured && (9..14).contains(&absolute_index) {
+            if row.text.as_bytes().get(10..13) == Some(b"app") {
+                model.theme.app_log_source()
             } else {
-                base
-            },
-        )
+                model.theme.log_source()
+            }
+        } else if row.structured && (15..19).contains(&absolute_index) {
+            match row.level {
+                LogLevel::Warn => model.theme.warning(),
+                LogLevel::Error => model.theme.error(),
+                LogLevel::Trace | LogLevel::Debug => model.theme.muted(),
+                LogLevel::Info | LogLevel::Other => {
+                    model.theme.normal().add_modifier(Modifier::BOLD)
+                }
+            }
+        } else {
+            base
+        };
+        Span::styled(character.to_string(), style)
     }));
     let trailing = content_width
         .saturating_sub(visual_width(&row.text))
@@ -1451,6 +1581,56 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn format_log_for_display_compacts_singbox_context_and_reorders_fields() {
+        let formatted = format_log_for_display(
+            "[sb] 09:25:39 INFO [2083199607 81ms] dns: exchanged OPT OPT PSEUDOSECTION: EDNS: version 0 flags: udp: 1232",
+        );
+
+        assert_eq!(
+            formatted.text,
+            "09:25:39 [sbx] INFO dns: exchanged OPT OPT PSEUDOSECTION: EDNS: version 0 flags: udp: 1232"
+        );
+        assert_eq!(formatted.level, LogLevel::Info);
+        assert!(formatted.structured);
+    }
+
+    #[test]
+    fn format_log_for_display_preserves_unstructured_lines() {
+        let formatted = format_log_for_display("[app] Connected to 🇳🇱 Netherlands");
+
+        assert_eq!(formatted.text, "[app] Connected to 🇳🇱 Netherlands");
+        assert_eq!(formatted.level, LogLevel::Other);
+        assert!(!formatted.structured);
+    }
+
+    #[test]
+    fn log_navigation_copies_the_display_format() {
+        let mut model = mouse_model();
+        model.push_log(
+            "[sb] 09:25:39 INFO [2083199607 81ms] dns: exchanged OPT OPT PSEUDOSECTION: EDNS: version 0 flags: udp: 1232".into(),
+        );
+        let now = Instant::now();
+        let mut navigation = LogNavigation::default();
+        navigation.select_buffer_edge(model.logs.len(), true, now);
+
+        assert_eq!(
+            navigation.selected_text(&model),
+            Some((
+                "09:25:39 [sbx] INFO dns: exchanged OPT OPT PSEUDOSECTION: EDNS: version 0 flags: udp: 1232".into(),
+                1,
+            ))
+        );
+    }
+
+    #[test]
+    fn wrapped_log_rows_do_not_start_with_whitespace() {
+        assert_eq!(
+            wrap_log_line_with_offsets("abc def ghi", 3),
+            vec![("abc".into(), 0), ("def".into(), 4), ("ghi".into(), 8)]
+        );
+    }
     use crate::app::model::{ConnectionState, Overlay};
     use crate::config::profile::Profile;
     use crate::test_helpers::{buffer_to_string, model_with_profiles};
