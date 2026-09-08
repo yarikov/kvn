@@ -1,0 +1,37 @@
+# Keep Rust dependencies and GitHub Actions up to date.
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps):"
+    labels:
+      - deps
+    open-pull-requests-limit: 3
+    cooldown:
+      semver-major-days: 21
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      rust-minor:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+    labels:
+      - ci
+    open-pull-requests-limit: 3
