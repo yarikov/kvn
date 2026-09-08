@@ -670,7 +670,8 @@ pub(crate) fn source_hit_test(
 }
 
 /// Render the full application UI into the terminal frame.
-pub fn draw(frame: &mut Frame, model: &Model) {
+#[cfg(test)]
+fn draw(frame: &mut Frame, model: &Model) {
     draw_impl(
         frame,
         model,

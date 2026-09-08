@@ -10,7 +10,7 @@
 
 `kvn` is a keyboard-driven TUI application for managing VPN connections. It provides a fast, minimal interface for configuring profiles, connecting via the [sing-box](https://sing-box.sagernet.org/) backend, and routing traffic — all without leaving the terminal.
 
-![kvn screenshot](assets/screenshot.png)
+![kvn screenshot](assets/screenshot.webp)
 
 ---
 

@@ -7,15 +7,17 @@ mode=${1:---all}
 gallery_dir="$repo_dir/assets/themes"
 mapfile -t themes < <(find "$repo_dir/themes" -maxdepth 1 -type f -name '*.toml' -printf '%f\n' | sed 's/\.toml$//' | sort)
 
-check_gallery() {
-  local failed=0 theme image dimensions dark_ratio extra
+check_themes() {
+  local failed=0 theme image format dimensions dark_ratio extra
   [[ ${#themes[@]} -eq 22 ]] || { echo "expected 22 bundled themes, found ${#themes[@]}" >&2; failed=1; }
   for theme in "${themes[@]}"; do
-    image="$gallery_dir/$theme.png"
+    image="$gallery_dir/$theme.webp"
     [[ -f $image ]] || { echo "missing $image" >&2; failed=1; continue; }
+    format=$(identify -format '%m' "$image")
+    [[ $format == WEBP ]] || { echo "$image is $format, expected WEBP" >&2; failed=1; }
     dimensions=$(identify -format '%wx%h' "$image")
     [[ $dimensions == 1400x960 ]] || { echo "$image is $dimensions, expected 1400x960" >&2; failed=1; }
-    rg -q "assets/themes/$theme\.png" "$repo_dir/docs/themes.md" || { echo "docs/themes.md does not reference $theme" >&2; failed=1; }
+    rg -q "assets/themes/$theme\.webp" "$repo_dir/docs/themes.md" || { echo "docs/themes.md does not reference $theme.webp" >&2; failed=1; }
     if rg -q '^mode = "light"' "$repo_dir/themes/$theme.toml"; then
       dark_ratio=$(magick "$image" -colorspace gray -threshold 50% -format '%[fx:1-mean]' info:)
       awk -v ratio="$dark_ratio" 'BEGIN { exit !(ratio >= 0.002) }' || { echo "$image has no readable dark foreground" >&2; failed=1; }
@@ -23,13 +25,36 @@ check_gallery() {
   done
   while IFS= read -r extra; do
     [[ -z $extra ]] && continue
-    [[ -f $repo_dir/themes/${extra%.png}.toml ]] || { echo "stale gallery image: $extra" >&2; failed=1; }
+    [[ -f $repo_dir/themes/${extra%.webp}.toml ]] || { echo "stale gallery image: $extra" >&2; failed=1; }
+  done < <(find "$gallery_dir" -maxdepth 1 -type f -name '*.webp' -printf '%f\n' 2>/dev/null | sort)
+  while IFS= read -r extra; do
+    [[ -z $extra ]] || { echo "legacy gallery image: $extra" >&2; failed=1; }
   done < <(find "$gallery_dir" -maxdepth 1 -type f -name '*.png' -printf '%f\n' 2>/dev/null | sort)
-  [[ -f $repo_dir/assets/screenshot.png ]] || { echo "missing assets/screenshot.png" >&2; failed=1; }
   [[ $failed -eq 0 ]]
 }
 
-if [[ $mode == --check ]]; then command -v identify >/dev/null; command -v magick >/dev/null; check_gallery; exit; fi
+check_readme() {
+  local failed=0 image="$repo_dir/assets/screenshot.webp" format dimensions
+  [[ -f $image ]] || { echo "missing $image" >&2; failed=1; }
+  if [[ -f $image ]]; then
+    format=$(identify -format '%m' "$image")
+    [[ $format == WEBP ]] || { echo "$image is $format, expected WEBP" >&2; failed=1; }
+    dimensions=$(identify -format '%wx%h' "$image")
+    [[ $dimensions == 1920x1080 ]] || { echo "$image is $dimensions, expected 1920x1080" >&2; failed=1; }
+  fi
+  [[ ! -f $repo_dir/assets/screenshot.png ]] || { echo "legacy README image: assets/screenshot.png" >&2; failed=1; }
+  rg -q 'assets/screenshot\.webp' "$repo_dir/README.md" || { echo "README.md does not reference assets/screenshot.webp" >&2; failed=1; }
+  [[ $failed -eq 0 ]]
+}
+
+check_all() {
+  local failed=0
+  check_themes || failed=1
+  check_readme || failed=1
+  [[ $failed -eq 0 ]]
+}
+
+if [[ $mode == --check ]]; then command -v identify >/dev/null; command -v magick >/dev/null; check_all; exit; fi
 case $mode in --all|--readme|--themes) ;; *) echo "usage: $0 [--all|--readme|--themes|--check]" >&2; exit 2 ;; esac
 for command in hyprctl grim jq magick omarchy omarchy-launch-tui cargo wtype rg; do command -v "$command" >/dev/null || { echo "missing required command: $command" >&2; exit 1; }; done
 [[ ${XDG_SESSION_TYPE:-} == wayland && -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] || { echo "a Hyprland Wayland session is required" >&2; exit 1; }
@@ -42,9 +67,12 @@ original_focus=$(hyprctl activewindow -j | jq -r '.address // empty')
 original_system_theme=$(omarchy theme current)
 current_theme_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/current/theme"
 original_background=$(readlink "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/current/background" 2>/dev/null || true)
+shell_config="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/shell.json"
+shell_config_backup="$tmp_dir/shell.json"
 preview_address=
 windows_stashed=false
 system_theme_changed=false
+clock_format_changed=false
 
 dispatch() { hyprctl dispatch "$1" >/dev/null; }
 focus_workspace() { dispatch "hl.dsp.focus({ workspace = \"$1\" })"; }
@@ -87,14 +115,42 @@ restore_system_theme() {
   system_theme_changed=false
 }
 
+freeze_clock() {
+  [[ -f $shell_config ]] || { echo "missing Omarchy shell config: $shell_config" >&2; exit 1; }
+  cp -- "$shell_config" "$shell_config_backup"
+  clock_format_changed=true
+  omarchy bar set omarchy.clock format "dddd '15:30'" >/dev/null
+  sleep 0.5
+}
+
+restore_clock() {
+  $clock_format_changed || return 0
+  local restore_tmp="$shell_config.kvn-tui-screenshot.$$"
+  if ! cp -- "$shell_config_backup" "$restore_tmp"; then
+    echo "failed to prepare Omarchy shell config restore" >&2
+    return 1
+  fi
+  if ! mv -- "$restore_tmp" "$shell_config"; then
+    echo "failed to restore Omarchy shell config" >&2
+    return 1
+  fi
+  clock_format_changed=false
+}
+
 cleanup() {
+  local cleanup_status=$?
+  set +e
   close_preview
+  restore_clock
   restore_system_theme
   restore_windows
   find "$tmp_dir" -mindepth 1 -delete 2>/dev/null || true
   rmdir "$tmp_dir" 2>/dev/null || true
+  return "$cleanup_status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 cd "$repo_dir"
 cargo build --release
@@ -129,16 +185,18 @@ launch_preview() {
 }
 
 capture_window() {
-  local output=$1 geometry
+  local output=$1 geometry legacy_output
+  legacy_output="${output%.webp}.png"
   geometry=$(hyprctl clients -j | jq -r --arg address "$preview_address" '.[] | select(.address == $address) | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')
   grim -g "$geometry" "$tmp_dir/capture.png"
-  magick "$tmp_dir/capture.png" -strip "$tmp_dir/normalized.png"
-  mv "$tmp_dir/normalized.png" "$output"
+  magick "$tmp_dir/capture.png" -strip -define webp:lossless=true "$tmp_dir/normalized.webp"
+  mv "$tmp_dir/normalized.webp" "$output"
+  rm -f -- "$legacy_output"
   close_preview
 }
 
 if [[ $mode == --all || $mode == --themes ]]; then
-  for theme in "${themes[@]}"; do echo "capturing $theme"; launch_preview "$theme"; capture_window "$gallery_dir/$theme.png"; done
+  for theme in "${themes[@]}"; do echo "capturing $theme"; launch_preview "$theme"; capture_window "$gallery_dir/$theme.webp"; done
 fi
 if [[ $mode == --all || $mode == --readme ]]; then
   if [[ $original_system_theme != "Tokyo Night" ]]; then
@@ -146,21 +204,30 @@ if [[ $mode == --all || $mode == --readme ]]; then
     omarchy theme set "Tokyo Night" >/dev/null
     sleep 4
   fi
+  freeze_clock
   launch_preview tokyo-night
   monitor=$(hyprctl activeworkspace -j | jq -r '.monitor')
   grim -o "$monitor" "$tmp_dir/desktop.png"
   dimensions=$(identify -format '%wx%h' "$tmp_dir/desktop.png")
   [[ $dimensions == 1920x1080 ]] || { echo "active monitor is $dimensions, expected 1920x1080" >&2; exit 1; }
-  magick "$tmp_dir/desktop.png" -strip "$tmp_dir/readme.png"
-  mv "$tmp_dir/readme.png" "$repo_dir/assets/screenshot.png"
+  magick "$tmp_dir/desktop.png" -strip -define webp:lossless=true "$tmp_dir/readme.webp"
+  mv "$tmp_dir/readme.webp" "$repo_dir/assets/screenshot.webp"
+  rm -f -- "$repo_dir/assets/screenshot.png"
   close_preview
+  restore_clock
   restore_system_theme
 fi
 
-magick montage "$gallery_dir"/*.png -thumbnail 292x200 -tile 4x -geometry +8+8 "$repo_dir/target/theme-gallery-contact-sheet.png"
+if [[ $mode == --all || $mode == --themes ]]; then
+  magick montage "$gallery_dir"/*.webp -thumbnail 292x200 -tile 4x -geometry +8+8 "$repo_dir/target/theme-gallery-contact-sheet.png"
+  echo "contact sheet: $repo_dir/target/theme-gallery-contact-sheet.png"
+fi
 restore_windows
 before_mapping=$(jq -S '[.[] | select(.workspace.id > 0) | {address, workspace: .workspace.id}] | sort_by(.address)' "$clients_before")
 after_mapping=$(hyprctl clients -j | jq -S --argjson before "$before_mapping" '[.[] | select(.address as $address | $before | any(.address == $address)) | {address, workspace: .workspace.id}] | sort_by(.address)')
 [[ $before_mapping == "$after_mapping" ]] || { echo "window workspace mapping was not restored exactly" >&2; diff -u <(printf '%s\n' "$before_mapping") <(printf '%s\n' "$after_mapping") || true; exit 1; }
-echo "contact sheet: $repo_dir/target/theme-gallery-contact-sheet.png"
-check_gallery
+case $mode in
+  --all) check_all ;;
+  --readme) check_readme ;;
+  --themes) check_themes ;;
+esac
