@@ -71,7 +71,7 @@ jobs:
           name: release-assets
 
       - name: Generate categorized release notes
-        uses: orhun/git-cliff-action@v4.8.0
+        uses: orhun/git-cliff-action@v4.9.0
         with:
           version: v2.13.1
           config: cliff.toml
