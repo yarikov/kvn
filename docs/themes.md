@@ -8,130 +8,130 @@ Each screenshot uses the same side-effect-free demonstration state; no VPN conne
 
 Slug: `catppuccin`
 
-![Catppuccin theme](../assets/themes/catppuccin.png)
+![Catppuccin theme](../assets/themes/catppuccin.webp)
 
 ## Catppuccin Latte
 
 Slug: `catppuccin-latte`
 
-![Catppuccin Latte theme](../assets/themes/catppuccin-latte.png)
+![Catppuccin Latte theme](../assets/themes/catppuccin-latte.webp)
 
 ## Ethereal
 
 Slug: `ethereal`
 
-![Ethereal theme](../assets/themes/ethereal.png)
+![Ethereal theme](../assets/themes/ethereal.webp)
 
 ## Everforest
 
 Slug: `everforest`
 
-![Everforest theme](../assets/themes/everforest.png)
+![Everforest theme](../assets/themes/everforest.webp)
 
 ## Flexoki Light
 
 Slug: `flexoki-light`
 
-![Flexoki Light theme](../assets/themes/flexoki-light.png)
+![Flexoki Light theme](../assets/themes/flexoki-light.webp)
 
 ## Gruvbox
 
 Slug: `gruvbox`
 
-![Gruvbox theme](../assets/themes/gruvbox.png)
+![Gruvbox theme](../assets/themes/gruvbox.webp)
 
 ## Hackerman
 
 Slug: `hackerman`
 
-![Hackerman theme](../assets/themes/hackerman.png)
+![Hackerman theme](../assets/themes/hackerman.webp)
 
 ## Kanagawa
 
 Slug: `kanagawa`
 
-![Kanagawa theme](../assets/themes/kanagawa.png)
+![Kanagawa theme](../assets/themes/kanagawa.webp)
 
 ## Last Horizon
 
 Slug: `last-horizon`
 
-![Last Horizon theme](../assets/themes/last-horizon.png)
+![Last Horizon theme](../assets/themes/last-horizon.webp)
 
 ## Lumon
 
 Slug: `lumon`
 
-![Lumon theme](../assets/themes/lumon.png)
+![Lumon theme](../assets/themes/lumon.webp)
 
 ## Lupine
 
 Slug: `lupine`
 
-![Lupine theme](../assets/themes/lupine.png)
+![Lupine theme](../assets/themes/lupine.webp)
 
 ## Matte Black
 
 Slug: `matte-black`
 
-![Matte Black theme](../assets/themes/matte-black.png)
+![Matte Black theme](../assets/themes/matte-black.webp)
 
 ## Miasma
 
 Slug: `miasma`
 
-![Miasma theme](../assets/themes/miasma.png)
+![Miasma theme](../assets/themes/miasma.webp)
 
 ## Nord
 
 Slug: `nord`
 
-![Nord theme](../assets/themes/nord.png)
+![Nord theme](../assets/themes/nord.webp)
 
 ## Osaka Jade
 
 Slug: `osaka-jade`
 
-![Osaka Jade theme](../assets/themes/osaka-jade.png)
+![Osaka Jade theme](../assets/themes/osaka-jade.webp)
 
 ## Retro 82
 
 Slug: `retro-82`
 
-![Retro 82 theme](../assets/themes/retro-82.png)
+![Retro 82 theme](../assets/themes/retro-82.webp)
 
 ## Ristretto
 
 Slug: `ristretto`
 
-![Ristretto theme](../assets/themes/ristretto.png)
+![Ristretto theme](../assets/themes/ristretto.webp)
 
 ## Rose Pine
 
 Slug: `rose-pine`
 
-![Rose Pine theme](../assets/themes/rose-pine.png)
+![Rose Pine theme](../assets/themes/rose-pine.webp)
 
 ## Solitude
 
 Slug: `solitude`
 
-![Solitude theme](../assets/themes/solitude.png)
+![Solitude theme](../assets/themes/solitude.webp)
 
 ## Tokyo Night
 
 Slug: `tokyo-night`
 
-![Tokyo Night theme](../assets/themes/tokyo-night.png)
+![Tokyo Night theme](../assets/themes/tokyo-night.webp)
 
 ## Vantablack
 
 Slug: `vantablack`
 
-![Vantablack theme](../assets/themes/vantablack.png)
+![Vantablack theme](../assets/themes/vantablack.webp)
 
 ## White
 
 Slug: `white`
 
-![White theme](../assets/themes/white.png)
+![White theme](../assets/themes/white.webp)

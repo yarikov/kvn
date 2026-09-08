@@ -223,11 +223,59 @@ fn reset_terminal_colors() {
 
 /// Render a fixed, side-effect-free application state for documentation captures.
 pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
+    use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+
+    let DocsPreviewState { model, toast } = build_docs_preview_state(theme_slug)?;
+
+    let _terminal_session = TerminalSession::enter()?;
+    apply_terminal_colors(
+        model.theme.palette_foreground(),
+        model.theme.palette_background(),
+    );
+    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    loop {
+        terminal.draw(|frame| {
+            crate::ui::layout::draw_with_toast(
+                frame,
+                &model,
+                crate::app::model::MainPaneFocus::Sources,
+                None,
+                None,
+                Some(&toast),
+                false,
+            )
+        })?;
+        if event::poll(Duration::from_millis(250))?
+            && let Event::Key(key) = event::read()?
+            && (matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+                || (key.code == KeyCode::Char('c')
+                    && key.modifiers.contains(KeyModifiers::CONTROL)))
+        {
+            return Ok(());
+        }
+    }
+}
+
+const DOCS_PREVIEW_TOAST: &str = "Kill switch enabled";
+
+struct DocsPreviewState {
+    model: Model,
+    toast: AppStatus,
+}
+
+fn build_docs_preview_state(theme_slug: &str) -> Result<DocsPreviewState> {
+    build_docs_preview_state_at(theme_slug, chrono::Local::now())
+}
+
+fn build_docs_preview_state_at(
+    theme_slug: &str,
+    preview_now: chrono::DateTime<chrono::Local>,
+) -> Result<DocsPreviewState> {
     use crate::config::profile::{
         Config, GeoAutoUpdate, GeoRegion, Hysteria2Config, ProtocolConfig, RoutingMode,
         Subscription, SubscriptionAutoUpdate, TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
     };
-    use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+    use chrono::Timelike;
     use uuid::Uuid;
 
     let Some(palette) = crate::ui::palette::Palette::lookup(theme_slug) else {
@@ -240,7 +288,7 @@ pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
         preview_profile(
             1,
             "🇳🇱 Netherlands",
-            "nl.demo.example",
+            "nl-1.demo.example",
             ProtocolConfig::Vless(VlessConfig {
                 uuid: preview_uuid(),
                 ..Default::default()
@@ -250,7 +298,7 @@ pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
         preview_profile(
             2,
             "🇨🇳 China",
-            "cn.demo.example",
+            "cn-1.demo.example",
             ProtocolConfig::Vmess(VmessConfig {
                 uuid: preview_uuid(),
                 ..Default::default()
@@ -260,7 +308,7 @@ pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
         preview_profile(
             3,
             "🇺🇸 United States",
-            "us.demo.example",
+            "us-1.demo.example",
             ProtocolConfig::Trojan(TrojanConfig {
                 password: "demo".into(),
                 ..Default::default()
@@ -270,7 +318,7 @@ pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
         preview_profile(
             4,
             "🇨🇦 Canada",
-            "ca.demo.example",
+            "ca-1.demo.example",
             ProtocolConfig::Hysteria2(Hysteria2Config {
                 password: "demo".into(),
                 ..Default::default()
@@ -280,7 +328,7 @@ pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
         preview_profile(
             5,
             "🇩🇪 Germany",
-            "de.demo.example",
+            "de-1.demo.example",
             ProtocolConfig::Tuic(TuicConfig {
                 uuid: preview_uuid(),
                 password: "demo".into(),
@@ -347,7 +395,7 @@ pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
     config.subscriptions.push(Subscription {
         id: finland_subscription_id,
         name: "🇫🇮 Finland VLESS".into(),
-        url: "https://finland-subscription.demo.example/list".into(),
+        url: "http://finland-subscription.demo.example/list".into(),
         auto_update: SubscriptionAutoUpdate::Every1d,
         last_updated: None,
         next_auto_update: None,
@@ -369,9 +417,16 @@ pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
     config.settings.theme = theme_slug.into();
     config.settings.auto_connect = true;
     config.settings.kill_switch = true;
+    config.settings.allow_insecure_http_subscriptions = true;
     config.settings.geo_routing.set_region(GeoRegion::Ru);
     config.settings.geo_routing.set_mode(RoutingMode::Global);
     config.settings.geo_routing.auto_update = GeoAutoUpdate::Every3d;
+
+    let deprecated_http_warning = crate::config::subscription::deprecated_http_warning(
+        &config.subscriptions[0],
+        &config.settings,
+    )
+    .context("first documentation-preview subscription should use deprecated HTTP")?;
 
     let mut model = Model::in_memory(config);
     model.theme = crate::ui::styles::Theme::from_palette(palette);
@@ -380,7 +435,14 @@ pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
     model.selected = 2;
     model.main_pane_focus = crate::app::model::MainPaneFocus::Sources;
     model.status = AppStatus::Info("Connected to 🇺🇸 United States".into());
-    model.geo_last_checked_at = Some(chrono::Local::now());
+    model.geo_last_checked_at = Some(
+        preview_now
+            .with_hour(8)
+            .and_then(|time| time.with_minute(0))
+            .and_then(|time| time.with_second(0))
+            .and_then(|time| time.with_nanosecond(0))
+            .context("could not set documentation-preview rule-set time to 08:00")?,
+    );
     model.traffic = TrafficStats {
         up_rate_bps: 731 * 1024,
         down_rate_bps: 5_033_165,
@@ -388,50 +450,67 @@ pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
         down_total: 822 * 1024 * 1024,
         conn_count: 25,
     };
+    let log_time = |second: u8| format!("15:30:{second:02}");
     for line in [
-        "[app] Starting connection to 🇺🇸 United States",
-        "[sb] 17:43:01 INFO network: updated default interface wlp1s0, index 2",
-        "[sb] 17:43:01 INFO inbound/tun[tun-in]: started at kvn0",
-        "[sb] 17:43:02 INFO outbound/trojan[proxy]: connected to us.demo.example:443",
-        "[app] Connection established; traffic statistics are live",
-        "[sb] 17:43:03 INFO inbound/tun[tun-in]: inbound packet connection to 10.222.0.2:53",
-        "[sb] 17:43:03 INFO dns: exchanged A docs.example. 291 IN A 192.0.2.10",
-        "[sb] 17:43:04 INFO outbound/trojan[proxy]: outbound connection to 192.0.2.10:443",
-        "[sb] 17:43:05 INFO inbound/tun[tun-in]: inbound packet connection to 198.51.100.20:443",
-        "[sb] 17:43:05 INFO outbound/trojan[proxy]: outbound connection to 198.51.100.20:443",
-        "[sb] 17:43:06 INFO dns: exchanged AAAA api.demo.example. 300 IN AAAA 2001:db8::20",
-        "[sb] 17:43:07 INFO inbound/tun[tun-in]: inbound packet connection to [2001:db8::20]:443",
-        "[sb] 17:43:07 INFO outbound/trojan[proxy]: outbound connection to [2001:db8::20]:443",
-        "[sb] 17:43:08 INFO dns: exchanged A cdn.demo.example. 180 IN A 203.0.113.40",
-        "[sb] 17:43:09 INFO inbound/tun[tun-in]: inbound packet connection to 203.0.113.40:443",
-        "[sb] 17:43:09 INFO outbound/trojan[proxy]: outbound connection to 203.0.113.40:443",
-        "[sb] 17:43:10 INFO dns: exchanged A updates.demo.example. 240 IN A 192.0.2.55",
-        "[sb] 17:43:11 INFO outbound/trojan[proxy]: outbound connection to 192.0.2.55:443",
-        "[sb] 17:43:12 INFO inbound/tun[tun-in]: inbound packet connection to 198.51.100.72:443",
-        "[sb] 17:43:12 INFO outbound/trojan[proxy]: outbound connection to 198.51.100.72:443",
-        "[sb] 17:43:13 INFO dns: exchanged A status.demo.example. 120 IN A 203.0.113.80",
-        "[sb] 17:43:14 INFO outbound/trojan[proxy]: outbound connection to 203.0.113.80:443",
+        format!("[app] {} INFO Connected to 🇺🇸 United States", log_time(1)),
+        format!("[app] {} WARN {deprecated_http_warning}", log_time(1)),
+        format!(
+            "[app] {} INFO Imported 2 profile(s) from subscription",
+            log_time(1)
+        ),
+        format!(
+            "[sb] {} INFO inbound/tun[tun-in]: inbound connection from 10.222.0.1:57460",
+            log_time(2)
+        ),
+        format!(
+            "[sb] {} INFO inbound/tun[tun-in]: inbound connection to 198.51.100.20:443",
+            log_time(2)
+        ),
+        format!(
+            "[sb] {} INFO outbound/trojan[proxy]: outbound connection to 198.51.100.20:443",
+            log_time(2)
+        ),
+        format!(
+            "[sb] {} INFO inbound/tun[tun-in]: inbound packet connection from 10.222.0.1:46808",
+            log_time(3)
+        ),
+        format!(
+            "[sb] {} INFO inbound/tun[tun-in]: inbound packet connection to 10.222.0.2:53",
+            log_time(3)
+        ),
+        format!(
+            "[sb] {} INFO dns: exchanged A docs.demo.example. 291 IN A 192.0.2.10",
+            log_time(3)
+        ),
+        format!(
+            "[sb] {} INFO outbound/trojan[proxy]: outbound connection to 192.0.2.10:443",
+            log_time(4)
+        ),
+        format!(
+            "[sb] {} INFO inbound/tun[tun-in]: inbound connection from 10.222.0.1:42130",
+            log_time(4)
+        ),
+        format!(
+            "[sb] {} INFO inbound/tun[tun-in]: inbound connection to 203.0.113.40:443",
+            log_time(4)
+        ),
+        format!(
+            "[sb] {} INFO outbound/trojan[proxy]: outbound connection to 203.0.113.40:443",
+            log_time(4)
+        ),
+        format!(
+            "[sb] {} INFO dns: exchanged AAAA api.demo.example. 300 IN AAAA 2001:db8::20",
+            log_time(5)
+        ),
+        format!("[app] {} INFO {DOCS_PREVIEW_TOAST}", log_time(7)),
     ] {
-        model.push_log(line.into());
+        model.push_log(line);
     }
 
-    let _terminal_session = TerminalSession::enter()?;
-    apply_terminal_colors(
-        model.theme.palette_foreground(),
-        model.theme.palette_background(),
-    );
-    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-    loop {
-        terminal.draw(|frame| crate::ui::draw(frame, &model))?;
-        if event::poll(Duration::from_millis(250))?
-            && let Event::Key(key) = event::read()?
-            && (matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
-                || (key.code == KeyCode::Char('c')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)))
-        {
-            return Ok(());
-        }
-    }
+    Ok(DocsPreviewState {
+        model,
+        toast: AppStatus::Info(DOCS_PREVIEW_TOAST.into()),
+    })
 }
 
 fn preview_profile(
@@ -1209,6 +1288,97 @@ fn spawn_ticker(tx: Sender<Msg>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn docs_preview_shows_realistic_logs_and_kill_switch_toast() {
+        let preview_now = chrono::Local
+            .with_ymd_and_hms(2026, 9, 8, 11, 19, 42)
+            .single()
+            .unwrap();
+        let state = build_docs_preview_state_at("tokyo-night", preview_now).unwrap();
+        let logs: Vec<_> = state.model.logs.iter().map(String::as_str).collect();
+        let endpoints: Vec<_> = state
+            .model
+            .config
+            .profiles
+            .iter()
+            .map(|profile| format!("{}:{}", profile.address, profile.port))
+            .collect();
+
+        assert!(
+            endpoints
+                .windows(2)
+                .all(|pair| pair[0].len() == pair[1].len())
+        );
+        assert_eq!(endpoints[0].len(), 21);
+        assert_eq!(
+            logs.first().copied(),
+            Some("[app] 15:30:01 INFO Connected to 🇺🇸 United States")
+        );
+        assert!(logs[1].starts_with(
+            "[app] 15:30:01 WARN HTTP subscription '🇫🇮 Finland VLESS' uses deprecated"
+        ));
+        assert!(!logs[1].contains(&state.model.config.subscriptions[0].url));
+        assert_eq!(
+            logs.last().copied(),
+            Some("[app] 15:30:07 INFO Kill switch enabled")
+        );
+        assert_eq!(
+            state.model.geo_last_checked_at.unwrap(),
+            chrono::Local
+                .with_ymd_and_hms(2026, 9, 8, 8, 0, 0)
+                .single()
+                .unwrap()
+        );
+        assert!(logs.iter().any(|line| line.starts_with("[sb] ")));
+        assert!(logs.iter().all(|line| !line.contains(" ERROR ")));
+        assert_eq!(state.toast.text(), DOCS_PREVIEW_TOAST);
+
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(109, 35)).unwrap();
+        terminal
+            .draw(|frame| {
+                crate::ui::layout::draw_with_toast(
+                    frame,
+                    &state.model,
+                    crate::app::model::MainPaneFocus::Sources,
+                    None,
+                    None,
+                    Some(&state.toast),
+                    false,
+                )
+            })
+            .unwrap();
+        let output = crate::test_helpers::buffer_to_string(terminal.backend().buffer());
+        let lines: Vec<_> = output.lines().collect();
+        let connected_row = lines
+            .iter()
+            .position(|line| line.contains("15:30:01 [app] INFO Connected to"))
+            .unwrap();
+        let warning_row = lines
+            .iter()
+            .position(|line| line.contains("15:30:01 [app] WARN HTTP subscription"))
+            .unwrap();
+
+        assert_eq!(warning_row, connected_row + 1);
+        assert!(output.contains("[sbx] INFO"));
+        assert!(output.contains(" (3d) 08 Sep 08:00"));
+        assert!(!output.contains("ERROR"));
+        assert!(output.matches(DOCS_PREVIEW_TOAST).count() >= 2);
+
+        let buffer = terminal.backend().buffer();
+        for row in 4..33 {
+            assert!(
+                (56..108).any(|column| {
+                    buffer
+                        .cell((column, row))
+                        .is_some_and(|cell| !cell.symbol().trim().is_empty())
+                }),
+                "log viewport row {row} should not be blank"
+            );
+        }
+    }
 
     #[test]
     fn snapshot_compatibility_requires_matching_binary_and_ipc_versions() {
