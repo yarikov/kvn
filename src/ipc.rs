@@ -19,6 +19,11 @@ const BROADCAST_WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 /// Current daemon/client wire-schema epoch.
 pub const IPC_VERSION: u32 = 1;
 
+/// Transactional migration protocol understood by the daemon. This is
+/// intentionally independent of the application and general IPC versions so
+/// a daemon from the previous release can keep the VPN alive during upgrade.
+pub const MIGRATION_PROTOCOL_VERSION: u32 = 1;
+
 /// Return the path to the Unix domain socket used for IPC.
 pub fn socket_path() -> anyhow::Result<std::path::PathBuf> {
     let dir = dirs::runtime_dir().ok_or_else(|| {
@@ -298,6 +303,8 @@ mod tests {
         StateSnapshot {
             daemon_version: env!("CARGO_PKG_VERSION").into(),
             ipc_version: IPC_VERSION,
+            migration_protocol_version: MIGRATION_PROTOCOL_VERSION,
+            migration: None,
             connection: ConnectionState::Idle,
             status: "ok".into(),
             status_is_error: false,

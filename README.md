@@ -110,6 +110,33 @@ systemctl --user enable --now kvn-tui.service
 available after login. The package also restores the TUN capabilities on
 `/usr/bin/sing-box` automatically after pacman upgrades it.
 
+To update the package and run breaking migrations in the same visible
+terminal, use:
+
+```bash
+kvn update
+```
+
+The command prefers `yay` and falls back to `paru`. A normal `yay -Syu` is
+also supported: pending migrations run automatically the next time `kvn` is
+opened. Before running the ordered migration queue, kvn puts the daemon into a
+non-mutable migration mode, records the active profile, and saves the exact
+`profiles.json` bytes under `~/.config/kvn-tui/recovery/`. A separate candidate
+is created from that backup and every config migration runs against the
+candidate. The daemon, VPN, live config, and kill switch stay active while
+scripts run. Any attached TUI shows a blocking progress overlay; `q`/`Esc` only
+detach the TUI. After the whole queue succeeds, kvn briefly stops the old daemon,
+atomically promotes the candidate, starts the new daemon, and reconnects the
+profile. The previous live file remains temporarily available for crash
+recovery during this handoff and is removed after success; the durable copy is
+the backup in `recovery/`. Schema changes are never applied implicitly while
+loading the config. The queue can be inspected or retried explicitly:
+
+```bash
+kvn migrate --pending
+kvn migrate
+```
+
 ### Polkit setup (optional, recommended for unattended reconnects)
 
 Install the polkit rule to avoid repeated authentication prompts when sing-box
@@ -237,10 +264,10 @@ canonical command alias.
 kvn doctor
 ```
 
-Runs a read-only check of sing-box, configuration, the daemon, clipboard, and
-optional integrations, with remediation hints for detected problems. Run it as
-your regular user; it exits with an error only when a required dependency is
-unusable.
+Runs a read-only check of sing-box, configuration, pending package migrations,
+the daemon, clipboard, and optional integrations, with remediation hints for
+detected problems. Run it as your regular user; it exits with an error only
+when a required dependency is unusable or a required migration is pending.
 
 ---
 

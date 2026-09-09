@@ -14,6 +14,9 @@ use crate::app::model::{AppStatus, HelpContext, HelpState, MainPaneFocus, Model,
 use super::*;
 
 pub(super) fn handle_key(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
+    if model.overlay == Overlay::Migration {
+        return vec![];
+    }
     if key.code == KeyCode::Char('?') && !matches!(model.overlay, Overlay::Help(_)) {
         open_help(model);
         return vec![];
@@ -30,6 +33,7 @@ pub(super) fn handle_key(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
         Overlay::DnsSettings => handle_dns_settings(model, key),
         Overlay::ThemeSettings => handle_theme_picker(model, key),
         Overlay::ServiceRouting => handle_service_routing(model, key),
+        Overlay::Migration => vec![],
     }
 }
 
@@ -61,6 +65,7 @@ fn open_help(model: &mut Model) {
         Overlay::DnsSettings => HelpContext::DnsSettings,
         Overlay::ThemeSettings => HelpContext::ThemeSettings,
         Overlay::ServiceRouting => HelpContext::ServiceRouting,
+        Overlay::Migration => return,
         Overlay::Help(_) => return,
     };
     model.overlay = Overlay::Help(HelpState {
@@ -514,6 +519,65 @@ pub(super) fn handle_ipc_command(
     cmd: crate::app::msg::IpcCommand,
 ) -> Vec<Effect> {
     use crate::app::msg::IpcCommand;
+    match cmd {
+        IpcCommand::MigrationBegin { status } => {
+            if model
+                .migration
+                .as_ref()
+                .is_none_or(|active| active.session_id == status.session_id)
+                && model.kill_switch_pending.is_none()
+                && !matches!(
+                    model.connection,
+                    ConnectionState::Connecting | ConnectionState::ConnectPending
+                )
+            {
+                model.migration = Some(status);
+                model.overlay = Overlay::Migration;
+            }
+            return finish_ipc_effects(vec![]);
+        }
+        IpcCommand::MigrationProgress { status } => {
+            if model
+                .migration
+                .as_ref()
+                .is_some_and(|active| active.session_id == status.session_id)
+            {
+                model.migration = Some(status);
+                model.overlay = Overlay::Migration;
+            }
+            return finish_ipc_effects(vec![]);
+        }
+        IpcCommand::MigrationEnd { session_id } => {
+            if model
+                .migration
+                .as_ref()
+                .is_some_and(|active| active.session_id == session_id)
+            {
+                model.migration = None;
+                model.overlay = if model.config.settings.geo_routing.current_region.is_none() {
+                    Overlay::GeoRegions
+                } else {
+                    Overlay::None
+                };
+            }
+            return finish_ipc_effects(vec![]);
+        }
+        IpcCommand::MigrationStopDaemon { session_id } => {
+            let authorized = model.migration.as_ref().is_some_and(|active| {
+                active.session_id == session_id
+                    && active.phase == crate::app::model::MigrationPhase::Finalizing
+            });
+            return finish_ipc_effects(if authorized {
+                vec![Effect::Quit]
+            } else {
+                vec![]
+            });
+        }
+        _ if model.migration.is_some() => {
+            return finish_ipc_effects(vec![]);
+        }
+        _ => {}
+    }
     let effects = match cmd {
         IpcCommand::Attach => vec![],
         IpcCommand::Detach => vec![],
@@ -634,6 +698,10 @@ pub(super) fn handle_ipc_command(
             }
             vec![Effect::CommitEditedConfig { base, edited }]
         }
+        IpcCommand::MigrationBegin { .. }
+        | IpcCommand::MigrationProgress { .. }
+        | IpcCommand::MigrationEnd { .. }
+        | IpcCommand::MigrationStopDaemon { .. } => unreachable!("handled above"),
         IpcCommand::Quit => vec![Effect::Quit],
         IpcCommand::ClientError { message } => {
             let mut inner = Vec::new();
@@ -667,6 +735,7 @@ fn handle_go_first(model: &mut Model) -> Vec<Effect> {
             model.overlay = Overlay::Help(state);
         }
         Overlay::ConfirmDelete => {}
+        Overlay::Migration => {}
     }
     vec![]
 }
@@ -2331,5 +2400,115 @@ mod tests {
         assert_eq!(model.dns_selected, 1);
         assert_eq!(model.dns_preset_draft, Some(DnsPreset::GoogleDot));
         assert_eq!(model.dns_strategy_draft, Some(DnsStrategy::PreferIpv6));
+    }
+
+    #[test]
+    fn migration_session_blocks_commands_and_authorizes_only_its_cutover() {
+        use crate::app::model::{MigrationPhase, MigrationStatus};
+        use crate::app::msg::IpcCommand;
+
+        let mut model = model_with_profiles(vec![]);
+        let status = MigrationStatus {
+            session_id: "session-a".into(),
+            phase: MigrationPhase::Running,
+            completed: 1,
+            total: 3,
+            summary: "Migrating profiles".into(),
+            error: None,
+        };
+        handle_ipc_command(
+            &mut model,
+            IpcCommand::MigrationBegin {
+                status: status.clone(),
+            },
+        );
+        assert_eq!(model.overlay, Overlay::Migration);
+        assert_eq!(model.migration.as_ref(), Some(&status));
+
+        assert_eq!(
+            handle_ipc_command(&mut model, IpcCommand::Quit),
+            vec![Effect::BroadcastState]
+        );
+        assert_eq!(
+            handle_ipc_command(
+                &mut model,
+                IpcCommand::MigrationStopDaemon {
+                    session_id: "session-a".into(),
+                },
+            ),
+            vec![Effect::BroadcastState]
+        );
+
+        let finalizing = MigrationStatus {
+            phase: MigrationPhase::Finalizing,
+            ..status
+        };
+        handle_ipc_command(
+            &mut model,
+            IpcCommand::MigrationProgress { status: finalizing },
+        );
+        assert_eq!(
+            handle_ipc_command(
+                &mut model,
+                IpcCommand::MigrationStopDaemon {
+                    session_id: "wrong-session".into(),
+                },
+            ),
+            vec![Effect::BroadcastState]
+        );
+        assert_eq!(
+            handle_ipc_command(
+                &mut model,
+                IpcCommand::MigrationStopDaemon {
+                    session_id: "session-a".into(),
+                },
+            ),
+            vec![Effect::Quit, Effect::BroadcastState]
+        );
+
+        handle_ipc_command(
+            &mut model,
+            IpcCommand::MigrationEnd {
+                session_id: "wrong-session".into(),
+            },
+        );
+        assert!(model.migration.is_some());
+        handle_ipc_command(
+            &mut model,
+            IpcCommand::MigrationEnd {
+                session_id: "session-a".into(),
+            },
+        );
+        assert!(model.migration.is_none());
+        assert_eq!(model.overlay, Overlay::GeoRegions);
+    }
+
+    #[test]
+    fn migration_begin_waits_for_connection_and_kill_switch_transitions() {
+        use crate::app::model::{MigrationPhase, MigrationStatus};
+        use crate::app::msg::IpcCommand;
+
+        let status = MigrationStatus {
+            session_id: "session".into(),
+            phase: MigrationPhase::Running,
+            completed: 0,
+            total: 1,
+            summary: "Preparing".into(),
+            error: None,
+        };
+        let mut model = model_with_profiles(vec![]);
+        model.connection = ConnectionState::Connecting;
+        handle_ipc_command(
+            &mut model,
+            IpcCommand::MigrationBegin {
+                status: status.clone(),
+            },
+        );
+        assert!(model.migration.is_none());
+
+        model.connection = ConnectionState::Idle;
+        model.kill_switch_pending = Some(true);
+        handle_ipc_command(&mut model, IpcCommand::MigrationBegin { status });
+        assert!(model.migration.is_none());
     }
 }

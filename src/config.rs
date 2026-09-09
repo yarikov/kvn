@@ -2,7 +2,6 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-
 pub(crate) mod merge;
 pub mod profile;
 pub(crate) mod recovery;
@@ -19,13 +18,9 @@ pub fn load_config_at(path: &Path) -> Result<Config> {
     let contents =
         fs::read_to_string(path).with_context(|| format!("Failed to read {:?}", path))?;
 
-    let mut config = parse_config(&contents, path)?;
-    let loaded_schema_version = config.schema_version;
-    config
-        .migrate()
-        .with_context(|| format!("Failed to migrate {:?}", path))?;
+    let mut config = parse_current_config(&contents, path)?;
     let normalized = config.normalize();
-    if (config.schema_version != loaded_schema_version || normalized) && config.validate().is_ok() {
+    if normalized && config.validate().is_ok() {
         save_config_at_revision(path, &config, Some(contents.as_bytes()))
             .with_context(|| format!("Failed to persist normalized config for {:?}", path))?;
     }
@@ -37,7 +32,27 @@ fn parse_config(contents: &str, path: &Path) -> Result<Config> {
     serde_json::from_str(contents).with_context(|| format!("Failed to parse {:?}", path))
 }
 
-/// Load and migrate a configuration without modifying the source file.
+fn parse_current_config(contents: &str, path: &Path) -> Result<Config> {
+    let config = parse_config(contents, path)?;
+    if config.schema_version > profile::CURRENT_SCHEMA_VERSION {
+        anyhow::bail!(
+            "config {:?} uses schema_version {}, newer than this build supports (max {}); upgrade kvn",
+            path,
+            config.schema_version,
+            profile::CURRENT_SCHEMA_VERSION
+        );
+    }
+    anyhow::ensure!(
+        config.schema_version == profile::CURRENT_SCHEMA_VERSION,
+        "config {:?} uses schema_version {}; expected {}. Run `kvn migrate`",
+        path,
+        config.schema_version,
+        profile::CURRENT_SCHEMA_VERSION
+    );
+    Ok(config)
+}
+
+/// Load a current-schema configuration without modifying the source file.
 pub(crate) fn load_config_at_read_only(path: &Path) -> Result<Config> {
     if !path.exists() {
         return Ok(Config::default());
@@ -50,11 +65,65 @@ pub(crate) fn load_config_at_read_only(path: &Path) -> Result<Config> {
 pub(crate) fn load_config_bytes_read_only(contents: &[u8], path: &Path) -> Result<Config> {
     let contents = std::str::from_utf8(contents)
         .with_context(|| format!("Config {:?} is not valid UTF-8", path))?;
+    let mut config = parse_current_config(contents, path)?;
+    config.normalize();
+    Ok(config)
+}
+
+pub(crate) fn schema_migration_required_at(path: &Path) -> Result<bool> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error).with_context(|| format!("Failed to read {:?}", path)),
+    };
+    Ok(parse_config(&contents, path)?.schema_version != profile::CURRENT_SCHEMA_VERSION)
+}
+
+/// Load and migrate a configuration supplied explicitly for recovery without
+/// modifying the source file.
+pub(crate) fn load_config_for_recovery(path: &Path) -> Result<Config> {
+    let contents =
+        fs::read_to_string(path).with_context(|| format!("Failed to read {:?}", path))?;
+    migrate_config_contents(&contents, path)
+}
+
+/// Migrate an explicit disposable config candidate in place. The package
+/// migration runner points scripts at this file; the live profiles.json is
+/// never touched by this path.
+pub(crate) fn migrate_candidate_at(path: &Path) -> Result<bool> {
+    migrate_candidate_to_at(path, profile::CURRENT_SCHEMA_VERSION)
+}
+
+pub(crate) fn migrate_candidate_to_at(path: &Path, target_version: u32) -> Result<bool> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read migration candidate {:?}", path))?;
+    let mut config = parse_config(&contents, path)?;
+    config
+        .migrate_to(target_version)
+        .with_context(|| format!("Failed to migrate {:?} to schema {target_version}", path))?;
+    let config = normalize_and_validate_migrated(config, path)?;
+    let migrated = serialized_config(&config)?;
+    if migrated == contents {
+        return Ok(false);
+    }
+    crate::atomic_write::write_if_unchanged(path, migrated.as_bytes(), Some(contents.as_bytes()))
+        .with_context(|| format!("Failed to update migration candidate {:?}", path))?;
+    Ok(true)
+}
+
+fn migrate_config_contents(contents: &str, path: &Path) -> Result<Config> {
     let mut config = parse_config(contents, path)?;
     config
         .migrate()
         .with_context(|| format!("Failed to migrate {:?}", path))?;
+    normalize_and_validate_migrated(config, path)
+}
+
+fn normalize_and_validate_migrated(mut config: Config, path: &Path) -> Result<Config> {
     config.normalize();
+    config
+        .validate()
+        .with_context(|| format!("Migrated config {:?} is invalid", path))?;
     Ok(config)
 }
 
@@ -230,45 +299,6 @@ mod tests {
     }
 
     #[test]
-    fn load_persists_v3_update_interval_migration() {
-        let file = NamedTempFile::new().unwrap();
-        let mut config = Config {
-            schema_version: 2,
-            ..Config::default()
-        };
-        config.subscriptions.push(profile::Subscription {
-            id: uuid::Uuid::new_v4(),
-            name: "legacy".into(),
-            url: "https://example.com/sub".into(),
-            auto_update: profile::SubscriptionAutoUpdate::Every1h,
-            last_updated: None,
-            next_auto_update: None,
-            retry_state: None,
-            send_hwid: false,
-            hwid: None,
-        });
-        config.settings.geo_routing.auto_update = profile::GeoAutoUpdate::Every12h;
-        save_config_at(file.path(), &config).unwrap();
-
-        let loaded = load_config_at(file.path()).unwrap();
-        let persisted = fs::read_to_string(file.path()).unwrap();
-
-        assert_eq!(loaded.schema_version, profile::CURRENT_SCHEMA_VERSION);
-        assert_eq!(
-            loaded.subscriptions[0].auto_update,
-            profile::SubscriptionAutoUpdate::Every1d
-        );
-        assert_eq!(
-            loaded.settings.geo_routing.auto_update,
-            profile::GeoAutoUpdate::Every1d
-        );
-        assert!(persisted.contains("\"schema_version\": 5"));
-        assert!(persisted.contains("\"auto_update\": \"every1d\""));
-        assert!(!persisted.contains("every1h"));
-        assert!(!persisted.contains("every_12h"));
-    }
-
-    #[test]
     fn save_config_creates_parent_dirs() {
         let dir = tempfile::tempdir().unwrap();
         let nested = dir.path().join("a/b/c/profiles.json");
@@ -407,7 +437,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{legacy}").unwrap();
 
-        let config = load_config_at(file.path()).unwrap();
+        let config = load_config_for_recovery(file.path()).unwrap();
         assert_eq!(config.settings.hwid, "");
         assert!(!config.subscriptions[0].send_hwid);
         assert_eq!(config.subscriptions[0].hwid, None);
@@ -457,14 +487,42 @@ mod tests {
     }
 
     #[test]
-    fn read_only_load_migrates_without_rewriting_source() {
+    fn explicit_recovery_load_migrates_without_rewriting_source() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("recovery.json");
         let original = r#"{"schema_version":4,"profiles":[],"settings":{}}"#;
         std::fs::write(&path, original).unwrap();
-        let loaded = load_config_at_read_only(&path).unwrap();
+        let loaded = load_config_for_recovery(&path).unwrap();
         assert_eq!(loaded.schema_version, profile::CURRENT_SCHEMA_VERSION);
         assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+    }
+
+    #[test]
+    fn normal_load_rejects_legacy_schema_without_rewriting_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.json");
+        let original = r#"{"schema_version":4,"profiles":[],"settings":{}}"#;
+        std::fs::write(&path, original).unwrap();
+
+        let error = load_config_at(&path).unwrap_err();
+
+        assert!(error.to_string().contains("kvn migrate"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+    }
+
+    #[test]
+    fn schema_migration_requirement_is_read_only_and_handles_missing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.json");
+        assert!(!schema_migration_required_at(&path).unwrap());
+
+        let legacy = r#"{"schema_version":4,"profiles":[],"settings":{}}"#;
+        std::fs::write(&path, legacy).unwrap();
+        assert!(schema_migration_required_at(&path).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), legacy);
+
+        save_config_at(&path, &Config::default()).unwrap();
+        assert!(!schema_migration_required_at(&path).unwrap());
     }
 
     #[test]

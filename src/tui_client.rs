@@ -539,7 +539,15 @@ fn preview_uuid() -> String {
 pub fn run() -> Result<()> {
     let (mut client, initial_snapshot) = connect_to_current_daemon()?;
 
-    let config = crate::config::load_config().unwrap_or_default();
+    // The daemon snapshot is canonical. Reading profiles.json here would let
+    // the client normalize or otherwise rewrite a file concurrently owned by
+    // the daemon.
+    let config = crate::config::profile::Config {
+        profiles: initial_snapshot.profiles.clone(),
+        subscriptions: initial_snapshot.subscriptions.clone(),
+        settings: initial_snapshot.settings.clone(),
+        ..crate::config::profile::Config::default()
+    };
     let mut model = Model::from_config(config.clone());
     model.theme = theme_watch::resolve_active(&model.config.settings.theme);
 
@@ -621,7 +629,7 @@ fn connect_to_current_daemon() -> Result<(IpcClient, crate::app::msg::StateSnaps
             crate::ipc::IPC_VERSION
         );
 
-        reconnect_profile = reconnect_profile_after_restart(&value);
+        reconnect_profile = crate::migrations::reconnect_profile_from_snapshot(&value);
 
         if io::stderr().is_terminal() {
             eprintln!(
@@ -658,21 +666,6 @@ fn snapshot_is_compatible(value: &serde_json::Value) -> bool {
         == Some(env!("CARGO_PKG_VERSION"))
         && value.get("ipc_version").and_then(serde_json::Value::as_u64)
             == Some(u64::from(crate::ipc::IPC_VERSION))
-}
-
-fn reconnect_profile_after_restart(value: &serde_json::Value) -> Option<uuid::Uuid> {
-    if value.get("connection").and_then(serde_json::Value::as_str) != Some("Connected") {
-        return None;
-    }
-    value
-        .get("active_profile_id")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            value
-                .pointer("/settings/last_connected_profile")
-                .and_then(serde_json::Value::as_str)
-        })
-        .and_then(|id| uuid::Uuid::parse_str(id).ok())
 }
 
 fn apply_initial_snapshot(
@@ -738,6 +731,9 @@ fn run_loop(
 
         match msg {
             Msg::Mouse(mouse) => {
+                if model.overlay == crate::app::model::Overlay::Migration {
+                    continue;
+                }
                 use crossterm::event::{MouseButton, MouseEventKind};
                 mouse_position = Some((mouse.column, mouse.row));
                 let hit =
@@ -832,6 +828,16 @@ fn run_loop(
             }
             Msg::Key(key) => {
                 use crossterm::event::{KeyCode, KeyModifiers};
+                if model.overlay == crate::app::model::Overlay::Migration {
+                    let detach = matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+                        || (key.code == KeyCode::Char('c')
+                            && key.modifiers.contains(KeyModifiers::CONTROL));
+                    if detach {
+                        client.send(&IpcCommand::Detach)?;
+                        break;
+                    }
+                    continue;
+                }
                 let area: ratatui::layout::Rect = terminal.size()?.into();
                 if !crate::ui::layout::terminal_size_supported(area) {
                     match key.code {
@@ -1211,6 +1217,7 @@ fn update_pointer_shape(
 }
 
 fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
+    model.migration = snapshot.migration;
     model.connection = snapshot.connection;
     model.status = if snapshot.status_is_error {
         crate::app::model::AppStatus::Error(snapshot.status)
@@ -1405,13 +1412,19 @@ mod tests {
             "connection": "Connected",
             "active_profile_id": id.to_string(),
         });
-        assert_eq!(reconnect_profile_after_restart(&connected), Some(id));
+        assert_eq!(
+            crate::migrations::reconnect_profile_from_snapshot(&connected),
+            Some(id)
+        );
 
         let idle = serde_json::json!({
             "connection": "Idle",
             "active_profile_id": id.to_string(),
         });
-        assert_eq!(reconnect_profile_after_restart(&idle), None);
+        assert_eq!(
+            crate::migrations::reconnect_profile_from_snapshot(&idle),
+            None
+        );
     }
 
     #[test]
@@ -1422,7 +1435,10 @@ mod tests {
             "active_profile_id": null,
             "settings": { "last_connected_profile": id.to_string() },
         });
-        assert_eq!(reconnect_profile_after_restart(&snapshot), Some(id));
+        assert_eq!(
+            crate::migrations::reconnect_profile_from_snapshot(&snapshot),
+            Some(id)
+        );
     }
 
     #[test]

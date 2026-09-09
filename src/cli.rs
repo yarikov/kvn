@@ -83,6 +83,16 @@ enum Command {
     /// Check whether kvn and its runtime dependencies are ready.
     Doctor,
 
+    /// Update the AUR package, then run every newly installed migration.
+    Update,
+
+    /// Run migrations installed by newer kvn packages.
+    Migrate {
+        /// List pending migrations without running them.
+        #[arg(long)]
+        pending: bool,
+    },
+
     /// Show the daemon's current status as a summary line.
     Status {
         /// Print the full state snapshot as JSON instead of a summary.
@@ -156,6 +166,13 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
+    /// Migrate the package runner's disposable profiles.json candidate.
+    #[command(hide = true)]
+    Migrate {
+        /// Schema version owned by the migration script invoking this step.
+        #[arg(long)]
+        to: u32,
+    },
     /// Archive the current file and create a default configuration.
     Reset {
         /// Confirm the reset (the old file is preserved, not deleted).
@@ -244,7 +261,7 @@ fn run_config_recover(file: &Path) -> Result<()> {
             "recovery file is already profiles.json"
         );
     }
-    let recovered = crate::config::load_config_at_read_only(file)
+    let recovered = crate::config::load_config_for_recovery(file)
         .with_context(|| format!("failed to load recovery file {}", file.display()))?;
     recovered.validate().context("recovery config is invalid")?;
     let archived = archive_current(&path)?;
@@ -568,6 +585,14 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
             return Some(crate::tui_client::run_docs_preview(theme));
         }
         Some(Command::Doctor) => return Some(crate::doctor::run()),
+        Some(Command::Update) => return Some(crate::migrations::run_update()),
+        Some(Command::Migrate { pending }) => {
+            return Some(if *pending {
+                crate::migrations::print_pending().map(|_| ())
+            } else {
+                crate::migrations::run_command()
+            });
+        }
         Some(Command::Status { json }) => return Some(run_status(*json)),
         Some(Command::Connect { profile }) => return Some(run_connect(profile)),
         Some(Command::Disconnect) => return Some(run_disconnect()),
@@ -575,6 +600,7 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
         Some(Command::Toggle) => return Some(run_toggle()),
         Some(Command::Config { command }) => {
             return Some(match command {
+                ConfigCommand::Migrate { to } => crate::migrations::prepare_profile_migration(*to),
                 ConfigCommand::Reset { yes } => run_config_reset(*yes),
                 ConfigCommand::Recover { file } => run_config_recover(file),
             });
@@ -733,6 +759,12 @@ esac
 
     #[test]
     fn parses_config_recovery_commands() {
+        assert!(matches!(
+            Cli::parse_from(["kvn", "config", "migrate", "--to", "5"]).command,
+            Some(Command::Config {
+                command: ConfigCommand::Migrate { to: 5 }
+            })
+        ));
         assert!(matches!(
             Cli::parse_from(["kvn-tui", "config", "reset", "--yes"]).command,
             Some(Command::Config {
@@ -1184,6 +1216,22 @@ esac
     }
 
     #[test]
+    fn update_and_migrate_subcommands_are_parsed() {
+        assert!(matches!(
+            Cli::parse_from(["kvn", "update"]).command,
+            Some(Command::Update)
+        ));
+        assert!(matches!(
+            Cli::parse_from(["kvn", "migrate"]).command,
+            Some(Command::Migrate { pending: false })
+        ));
+        assert!(matches!(
+            Cli::parse_from(["kvn", "migrate", "--pending"]).command,
+            Some(Command::Migrate { pending: true })
+        ));
+    }
+
+    #[test]
     fn docs_preview_subcommand_is_parseable_but_hidden() {
         use clap::CommandFactory;
 
@@ -1225,6 +1273,8 @@ esac
         let mut snap = StateSnapshot {
             daemon_version: env!("CARGO_PKG_VERSION").into(),
             ipc_version: crate::ipc::IPC_VERSION,
+            migration_protocol_version: crate::ipc::MIGRATION_PROTOCOL_VERSION,
+            migration: None,
             connection: ConnectionState::Idle,
             status: "ok".into(),
             status_is_error: false,
