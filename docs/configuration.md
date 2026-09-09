@@ -190,7 +190,9 @@ is never truncated in place.
 
 ## Validation and migrations
 
-Configuration is parsed, migrated, and semantically validated before use.
+Configuration is parsed and semantically validated before use. Schema changes
+are applied only by the transactional migration runner; ordinary daemon and TUI
+loads reject an older schema instead of modifying it implicitly.
 Validation checks profile references and required values, DNS tags and server
 references, the TUN interface, theme slug, log level, and minimum log limits.
 
@@ -203,7 +205,16 @@ without flattened TLS reject unknown fields. Protocol variants containing a
 flattened TLS block cannot enforce this serde rule, so do not rely on unknown
 fields being rejected everywhere.
 
-Older files are migrated automatically:
+When an update includes a schema change, `kvn migrate` puts the daemon into a
+non-mutable migration mode, saves an exact backup, creates a candidate from it,
+and runs every migration in global filename order against that candidate while
+the existing VPN and live `profiles.json` stay untouched. The candidate is
+promoted atomically only after the whole queue succeeds and during a brief
+daemon restart. The previous live file is retained only until the updated
+daemon restores the VPN; the exact backup under `recovery/` remains afterward.
+The kill switch stays enabled throughout. The configuration schema has the
+following historical steps; installations predating the v0.30.0 migration
+framework reach its baseline using the corresponding manual upgrade guides:
 
 - v0 → v1 moves the legacy `dns_strategy` value into `dns.strategy`.
 - v1 → v2 moves the legacy VLESS `fingerprint` into the shared TLS settings.
@@ -221,6 +232,8 @@ upgrade kvn instead of downgrading the version manually.
 | Application log | `~/.config/kvn-tui/logs/app.log` |
 | sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |
 | Waybar and recovery state | `~/.config/kvn-tui/state.json` |
+| Migration recovery backups | `~/.config/kvn-tui/recovery/profiles.json.before-migration-*.json` |
+| Active migration journal | `$XDG_STATE_HOME/kvn-tui/migration-session.json` |
 | IPC socket | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
 | Generated sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
 

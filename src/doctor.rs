@@ -76,6 +76,8 @@ pub fn run() -> Result<()> {
 fn collect() -> Vec<Check> {
     let mut checks = vec![Check::pass(format!("kvn {}", env!("CARGO_PKG_VERSION")))];
 
+    checks.push(check_migrations());
+
     match find_singbox() {
         Some(path) => {
             checks.push(check_singbox_version(&path));
@@ -94,6 +96,72 @@ fn collect() -> Vec<Check> {
     checks.push(check_polkit());
     checks.push(check_omarchy());
     checks
+}
+
+fn check_migrations() -> Check {
+    match crate::migrations::session_diagnostic() {
+        Ok(Some(summary)) => {
+            return Check::failure(
+                summary,
+                "Run `kvn migrate` in an interactive terminal to resume it.",
+            );
+        }
+        Err(error) => {
+            return Check::failure(
+                format!("migration transaction could not be inspected: {error:#}"),
+                "Repair the private migration journal, then run `kvn migrate`.",
+            );
+        }
+        Ok(None) => {}
+    }
+    check_migration_result(
+        crate::migrations::pending(),
+        crate::migrations::profile_migration_required(),
+        crate::migrations::package_transaction_active(),
+    )
+}
+
+fn check_migration_result(
+    result: anyhow::Result<Vec<crate::migrations::Migration>>,
+    profile_migration_required: anyhow::Result<bool>,
+    package_transaction: bool,
+) -> Check {
+    if package_transaction {
+        return Check::failure(
+            "A pacman package transaction is active; daemon startup is deferred",
+            "Wait for pacman/AUR updates to finish, then launch `kvn` or run `kvn migrate`.",
+        );
+    }
+    match (result, profile_migration_required) {
+        (Ok(pending), Ok(false)) if pending.is_empty() => {
+            Check::pass("All kvn migrations are applied")
+        }
+        (Ok(pending), Ok(schema_required)) => {
+            if pending.is_empty() && schema_required {
+                return Check::failure(
+                    "profiles.json requires migration",
+                    "Run `kvn migrate` in an interactive terminal.",
+                );
+            }
+            let first = &pending[0];
+            Check::failure(
+                format!(
+                    "{} kvn migration(s) are pending (first: {})",
+                    pending.len(),
+                    first.id
+                ),
+                "Run `kvn migrate` in an interactive terminal.",
+            )
+        }
+        (Err(error), _) => Check::failure(
+            format!("kvn migration state could not be inspected: {error:#}"),
+            "Repair the reported permissions or files, then run `kvn migrate`.",
+        ),
+        (_, Err(error)) => Check::failure(
+            format!("profile schema migration could not be inspected: {error:#}"),
+            "Repair profiles.json, then run `kvn migrate`.",
+        ),
+    }
 }
 
 fn print_report(checks: &[Check]) -> io::Result<()> {
@@ -253,7 +321,7 @@ fn check_config() -> Check {
             path.display()
         ));
     }
-    match crate::config::load_config_at(&path).and_then(|config| config.validate()) {
+    match crate::config::load_config_at_read_only(&path).and_then(|config| config.validate()) {
         Ok(()) => Check::pass(format!("configuration is valid: {}", path.display())),
         Err(error) => Check::failure(
             format!("configuration is invalid: {error:#}"),
@@ -472,6 +540,39 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    #[test]
+    fn migration_check_reports_pass_pending_and_inspection_error() {
+        assert_eq!(
+            check_migration_result(Ok(Vec::new()), Ok(false), false).level,
+            Level::Pass
+        );
+        let schema = check_migration_result(Ok(Vec::new()), Ok(true), false);
+        assert_eq!(schema.level, Level::Failure);
+        assert!(schema.message.contains("profiles.json requires migration"));
+        let pending = crate::migrations::Migration {
+            id: "123-test.sh".into(),
+            path: PathBuf::from("/migration"),
+            summary: "Test".into(),
+        };
+        let check = check_migration_result(Ok(vec![pending]), Ok(false), false);
+        assert_eq!(check.level, Level::Failure);
+        assert!(check.message.contains("123-test.sh"));
+        assert!(check.remedy.unwrap().contains("kvn migrate"));
+
+        let check = check_migration_result(Err(anyhow::anyhow!("broken state")), Ok(false), false);
+        assert_eq!(check.level, Level::Failure);
+        assert!(check.message.contains("broken state"));
+
+        let check =
+            check_migration_result(Ok(Vec::new()), Err(anyhow::anyhow!("bad stage")), false);
+        assert_eq!(check.level, Level::Failure);
+        assert!(check.message.contains("bad stage"));
+
+        let check = check_migration_result(Ok(Vec::new()), Ok(false), true);
+        assert_eq!(check.level, Level::Failure);
+        assert!(check.message.contains("pacman"));
+    }
+
     struct EnvGuard {
         key: &'static str,
         previous: Option<std::ffi::OsString>,
@@ -636,7 +737,11 @@ mod tests {
         assert_eq!(check_config().level, Level::Pass);
         let path = crate::paths::profiles_path().unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "{}").unwrap();
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&crate::config::profile::Config::default()).unwrap(),
+        )
+        .unwrap();
         assert_eq!(check_config().level, Level::Pass);
         std::fs::write(path, "not json").unwrap();
         assert_eq!(check_config().level, Level::Failure);

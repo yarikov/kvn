@@ -792,6 +792,7 @@ fn draw_impl(
         Overlay::DnsSettings => draw_dns_settings(frame, model, area),
         Overlay::ThemeSettings => draw_theme_settings(frame, model, area),
         Overlay::ServiceRouting => draw_service_routing(frame, model, area),
+        Overlay::Migration => draw_migration(frame, model, area),
         Overlay::None => {}
     }
 
@@ -1047,6 +1048,39 @@ fn draw_modal(frame: &mut Frame, theme: &Theme, area: Rect, lines: Vec<Line>, he
         .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, popup_area);
+}
+
+fn draw_migration(frame: &mut Frame, model: &Model, area: Rect) {
+    use crate::app::model::MigrationPhase;
+
+    let Some(status) = &model.migration else {
+        return;
+    };
+    let (heading, detail) = match status.phase {
+        MigrationPhase::Running => ("Updating kvn", status.summary.as_str()),
+        MigrationPhase::Finalizing => ("Finishing update", status.summary.as_str()),
+        MigrationPhase::Failed => ("Migration failed", status.summary.as_str()),
+    };
+    let mut lines = vec![
+        Line::from(Span::styled(heading, model.theme.accent())),
+        Line::from(""),
+        Line::from(detail.to_string()),
+        Line::from(format!(
+            "Step {} of {}",
+            status.completed.min(status.total),
+            status.total
+        )),
+    ];
+    if let Some(error) = &status.error {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(error.clone(), model.theme.error())));
+        lines.push(Line::from("Run `kvn migrate` in a terminal to retry."));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(
+        "q/Esc leaves the TUI; the migration stays active",
+    ));
+    draw_modal(frame, &model.theme, area, lines, POPUP_HEIGHT_PERCENT);
 }
 
 /// Draw the routing mode selection modal.
@@ -2559,6 +2593,35 @@ mod tests {
             .position(|s| s == &model.config.settings.theme)
             .unwrap_or(0);
         insta::assert_snapshot!(snapshot_terminal(&model, 80, 32));
+    }
+
+    #[test]
+    fn migration_overlay_shows_progress_and_failure_without_cancel_action() {
+        use crate::app::model::{MigrationPhase, MigrationStatus};
+
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::Migration;
+        model.migration = Some(MigrationStatus {
+            session_id: "session".into(),
+            phase: MigrationPhase::Running,
+            completed: 2,
+            total: 4,
+            summary: "Updating integration".into(),
+            error: None,
+        });
+        let running = snapshot_terminal(&model, 80, 24);
+        assert!(running.contains("Updating kvn"));
+        assert!(running.contains("Updating integration"));
+        assert!(running.contains("Step 2 of 4"));
+        assert!(running.contains("q/Esc leaves the TUI"));
+
+        let status = model.migration.as_mut().unwrap();
+        status.phase = MigrationPhase::Failed;
+        status.error = Some("sudo command failed".into());
+        let failed = snapshot_terminal(&model, 80, 24);
+        assert!(failed.contains("Migration failed"));
+        assert!(failed.contains("sudo command failed"));
+        assert!(failed.contains("kvn migrate"));
     }
 
     /// Theme picker rendered with a light palette — sanity check for

@@ -13,6 +13,8 @@ The Arch package installs:
 | `/usr/bin/kvn-tui` | `0755` | Application binary |
 | `/usr/bin/kvn` | symlink | Canonical command pointing to `kvn-tui` |
 | `/usr/lib/systemd/user/kvn-tui.service` | `0644` | Per-user daemon service |
+| `/usr/lib/kvn-tui/migrations/` | `0755` | Root-owned, ordered breaking-migration scripts |
+| `/var/lib/kvn-tui/migration-baseline` | `0644` | Scripts included by the initial package installation |
 | `/usr/share/libalpm/hooks/kvn-tui-sing-box-capabilities.hook` | `0644` | Restores sing-box capabilities after package updates |
 | `/usr/share/licenses/kvn-tui/LICENSE` | `0644` | MIT license for the source package |
 | `/usr/share/licenses/kvn-tui-bin/LICENSE` | `0644` | MIT license for the binary package |
@@ -42,6 +44,41 @@ sudo setcap -r /usr/bin/sing-box
 ```
 
 Do not revoke them while another TUN client relies on the same sing-box binary.
+
+## Package migrations
+
+`kvn update` updates the AUR package and invokes the migration runner from the
+new binary. Updates performed directly through `yay` or `paru` are detected on
+the next `kvn` launch. Successful scripts are recorded per user under
+`$XDG_STATE_HOME/kvn-tui/migrations/`; machine-wide operations use their own
+root-owned markers under `/var/lib/kvn-tui/migrations/`.
+
+The runner first sends the daemon a versioned migration command. The daemon
+rejects config mutations and the TUI displays a non-dismissible overlay, while
+the existing sing-box process and kill switch keep running. Only after the
+daemon acknowledges this state does the runner copy the exact `profiles.json`
+bytes to `~/.config/kvn-tui/recovery/profiles.json.before-migration-*.json`
+(mode `0600`) and create a private `.profiles.json.migrating-*` candidate from
+that backup. Scripts receive the candidate path through a runner-owned
+environment variable; they never edit the live file.
+
+A new daemon does not start while migrations are pending, except for the
+explicit post-cutover start recorded in the private
+`$XDG_STATE_HOME/kvn-tui/migration-session.json` journal. After the ordered
+queue, the runner validates the candidate and verifies that the live source
+still matches the backup. It then briefly stops the old daemon, atomically
+exchanges the live and candidate files, starts the new daemon, releases migration
+mode, and reconnects the prior profile. The former live file stays at the
+private candidate path until the handoff succeeds, then is removed; the exact
+backup under `recovery/` remains available. On failure before the exchange, the
+existing daemon and tunnel keep running and the candidate/journal are retained
+for `kvn migrate`. The journal also makes crashes on either side of the atomic
+exchange resumable without guessing or overwriting a backup.
+The schema version in `profiles.json` is checked separately from package
+markers, so restoring an old config after reinstalling the package cannot skip
+its schema migration.
+Run `kvn migrate --pending` to inspect the queue or `kvn doctor` for a read-only
+health check.
 
 ## Polkit setup
 

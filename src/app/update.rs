@@ -28,6 +28,14 @@ const TRAFFIC_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// Pure function: Model + Msg → updated Model + list of Effects.
 /// No I/O, no threads, no system calls.
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
+    if model.migration.is_some()
+        && !matches!(
+            &msg,
+            Msg::IpcCommand(_) | Msg::Resize | Msg::StateUpdate(_) | Msg::IpcReadFailed(_)
+        )
+    {
+        return vec![];
+    }
     match msg {
         Msg::Key(key) => handle_key(model, key),
         Msg::Tick => handle_tick(model),

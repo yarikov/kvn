@@ -1,4 +1,4 @@
-use crate::app::model::{ConnectionState, MainPaneFocus, Overlay, TrafficStats};
+use crate::app::model::{ConnectionState, MainPaneFocus, MigrationStatus, Overlay, TrafficStats};
 use crate::config::profile::{
     DnsPreset, DnsStrategy, GeoRegion, Profile, RoutedService, RoutingMode, Settings, Subscription,
 };
@@ -261,6 +261,18 @@ pub enum IpcCommand {
         base: Box<crate::config::profile::Config>,
         edited: Box<crate::config::profile::Config>,
     },
+    MigrationBegin {
+        status: MigrationStatus,
+    },
+    MigrationProgress {
+        status: MigrationStatus,
+    },
+    MigrationEnd {
+        session_id: String,
+    },
+    MigrationStopDaemon {
+        session_id: String,
+    },
     Quit,
     /// Client-side failure the daemon owns none of — e.g. the external editor
     /// path rejecting an edit. The daemon writes it into its model's status
@@ -305,6 +317,14 @@ mod tests {
 
     #[test]
     fn ipc_command_serde_roundtrip_each_variant() {
+        let migration_status = MigrationStatus {
+            session_id: "session".into(),
+            phase: crate::app::model::MigrationPhase::Running,
+            completed: 1,
+            total: 2,
+            summary: "Migrating".into(),
+            error: None,
+        };
         let cmds = vec![
             IpcCommand::Attach,
             IpcCommand::Detach,
@@ -343,6 +363,18 @@ mod tests {
                 base: Box::new(crate::config::profile::Config::default()),
                 edited: Box::new(crate::config::profile::Config::default()),
             },
+            IpcCommand::MigrationBegin {
+                status: migration_status.clone(),
+            },
+            IpcCommand::MigrationProgress {
+                status: migration_status,
+            },
+            IpcCommand::MigrationEnd {
+                session_id: "session".into(),
+            },
+            IpcCommand::MigrationStopDaemon {
+                session_id: "session".into(),
+            },
             IpcCommand::Quit,
         ];
         for cmd in cmds {
@@ -375,6 +407,12 @@ pub struct StateSnapshot {
     /// intentionally broken independently of the application version.
     #[serde(default)]
     pub ipc_version: u32,
+    /// Version of the transactional migration commands understood by this
+    /// daemon. Zero identifies daemons from before the migration framework.
+    #[serde(default)]
+    pub migration_protocol_version: u32,
+    #[serde(default)]
+    pub migration: Option<MigrationStatus>,
     pub connection: ConnectionState,
     pub status: String,
     pub status_is_error: bool,

@@ -1410,7 +1410,8 @@ pub struct Settings {
     pub theme: String,
     #[serde(default)]
     pub logs: LogsConfig,
-    /// Pre-v4 compatibility field migrated into `logs.level` on load.
+    /// Pre-v4 compatibility field promoted into `logs.level` by the explicit
+    /// profile-schema migration.
     #[serde(default, rename = "log_level", skip_serializing)]
     pub(crate) legacy_log_level: Option<String>,
     /// Stable installation identifier (`lnx-` + UUID v4), generated once on
@@ -1629,8 +1630,8 @@ impl Default for Settings {
 pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 fn default_schema_version() -> u32 {
-    // Files written before the version was introduced are treated as v0
-    // and run through the v0 → v1 migration on load.
+    // Files written before the version was introduced are treated as v0 by
+    // the explicit package migration path.
     0
 }
 
@@ -1639,8 +1640,8 @@ fn default_schema_version() -> u32 {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Schema version of the persisted file. See [`CURRENT_SCHEMA_VERSION`].
-    /// Absent in pre-versioned files; defaults to 0 in that case so the load
-    /// path runs the v0 → v1 migration.
+    /// Absent in pre-versioned files; defaults to 0 for the explicit package
+    /// migration path.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     #[serde(default)]
@@ -1749,14 +1750,30 @@ impl Config {
         Ok(())
     }
 
-    /// Apply schema migrations needed to bring the loaded config up to
-    /// [`CURRENT_SCHEMA_VERSION`]. Called by `load_config_at` after deserialise.
-    /// Each migration step is idempotent.
+    /// Apply schema migrations needed to bring an explicitly staged config up
+    /// to [`CURRENT_SCHEMA_VERSION`]. Package migration scripts call this via
+    /// `kvn config migrate`; ordinary config loading never calls it. Each
+    /// migration step is idempotent.
     ///
     /// Files written by a newer kvn version (higher `schema_version` than
     /// this build knows about) are rejected here — loading them would silently
     /// drop future-only fields; the user must upgrade the client instead.
     pub fn migrate(&mut self) -> anyhow::Result<()> {
+        self.migrate_to(CURRENT_SCHEMA_VERSION)
+    }
+
+    /// Apply only the ordered schema steps up to `target_version`. Migration
+    /// scripts pin this value so a package jump cannot run later config steps
+    /// before the intervening release scripts.
+    pub(crate) fn migrate_to(&mut self, target_version: u32) -> anyhow::Result<()> {
+        self.migrate_with_update_date_to(target_version, next_update_window_date(Local::now()))
+    }
+
+    fn migrate_with_update_date_to(
+        &mut self,
+        target_version: u32,
+        next_update_date: NaiveDate,
+    ) -> anyhow::Result<()> {
         if self.schema_version > CURRENT_SCHEMA_VERSION {
             anyhow::bail!(
                 "config schema_version {} is newer than this build supports (max {}); upgrade kvn",
@@ -1764,27 +1781,39 @@ impl Config {
                 CURRENT_SCHEMA_VERSION,
             );
         }
-        if self.schema_version == 0 {
+        if target_version > CURRENT_SCHEMA_VERSION {
+            anyhow::bail!(
+                "target config schema_version {target_version} is newer than this build supports (max {CURRENT_SCHEMA_VERSION})"
+            );
+        }
+        if self.schema_version > target_version {
+            anyhow::bail!(
+                "config schema_version {} is already newer than migration target {}",
+                self.schema_version,
+                target_version
+            );
+        }
+        if self.schema_version == 0 && target_version >= 1 {
             self.migrate_v0_to_v1();
             self.schema_version = 1;
         }
-        if self.schema_version == 1 {
+        if self.schema_version == 1 && target_version >= 2 {
             self.migrate_v1_to_v2();
             self.schema_version = 2;
         }
-        if self.schema_version == 2 {
-            self.migrate_v2_to_v3();
+        if self.schema_version == 2 && target_version >= 3 {
+            self.migrate_v2_to_v3(next_update_date);
             self.schema_version = 3;
         }
-        if self.schema_version == 3 {
+        if self.schema_version == 3 && target_version >= 4 {
             self.migrate_v3_to_v4();
             self.schema_version = 4;
         }
-        if self.schema_version == 4 {
+        if self.schema_version == 4 && target_version >= 5 {
             self.migrate_v4_to_v5();
             self.schema_version = 5;
         }
-        debug_assert_eq!(self.schema_version, CURRENT_SCHEMA_VERSION);
+        debug_assert_eq!(self.schema_version, target_version);
         Ok(())
     }
 
@@ -1816,8 +1845,7 @@ impl Config {
         }
     }
 
-    fn migrate_v2_to_v3(&mut self) {
-        let next = next_update_window_date(Local::now());
+    fn migrate_v2_to_v3(&mut self, next: NaiveDate) {
         for subscription in &mut self.subscriptions {
             if matches!(
                 subscription.auto_update,
@@ -2993,6 +3021,31 @@ mod tests {
         let mut cfg = Config::default();
         cfg.migrate().unwrap();
         assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migrate_to_stops_at_the_release_owned_schema() {
+        let mut cfg = Config {
+            schema_version: 0,
+            ..Config::default()
+        };
+
+        cfg.migrate_to(3).unwrap();
+        assert_eq!(cfg.schema_version, 3);
+        cfg.migrate_to(CURRENT_SCHEMA_VERSION).unwrap();
+        assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migrate_to_rejects_downgrades_and_unknown_targets() {
+        let mut current = Config::default();
+        assert!(current.migrate_to(CURRENT_SCHEMA_VERSION - 1).is_err());
+
+        let mut legacy = Config {
+            schema_version: 0,
+            ..Config::default()
+        };
+        assert!(legacy.migrate_to(CURRENT_SCHEMA_VERSION + 1).is_err());
     }
 
     #[test]

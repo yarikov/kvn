@@ -22,6 +22,25 @@ pub enum Overlay {
     DnsSettings,
     ThemeSettings,
     ServiceRouting,
+    Migration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MigrationPhase {
+    Running,
+    Failed,
+    Finalizing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MigrationStatus {
+    pub session_id: String,
+    pub phase: MigrationPhase,
+    pub completed: usize,
+    pub total: usize,
+    pub summary: String,
+    pub error: Option<String>,
 }
 
 /// Screen that was active when help was opened.
@@ -204,6 +223,9 @@ pub struct Model {
     /// Prevents a fallback config from overwriting an unreadable persisted
     /// config. Cleared only after a successful reload from disk.
     pub config_persistence_blocked: bool,
+    /// Active package migration. While set, the daemon keeps the current VPN
+    /// alive but rejects every user/config mutation.
+    pub migration: Option<MigrationStatus>,
     pub selected: usize,
     pub status: AppStatus,
     /// Monotonic revision of the latest status event. TUI clients use it to
@@ -379,6 +401,7 @@ impl Model {
             }
         };
 
+        let migration = crate::migrations::load_ui_status().ok().flatten();
         let (mut connection, selected, mut status) =
             Self::resolve_startup_state(&config, default_selected);
         if stale_cleanup_failed {
@@ -391,6 +414,12 @@ impl Model {
         if config.settings.geo_routing.current_region.is_none() {
             connection = ConnectionState::Idle;
             status = AppStatus::Info("Press ? for help".to_string());
+        }
+        // A daemon started for the cutover must wait for MigrationEnd. The
+        // runner restores the previous connection explicitly afterwards.
+        if migration.is_some() {
+            connection = ConnectionState::Idle;
+            status = AppStatus::Info("Finishing configuration migration…".to_string());
         }
         let connecting_profile_id = (connection == ConnectionState::Connecting)
             .then_some(config.settings.last_connected_profile)
@@ -434,6 +463,7 @@ impl Model {
             connection,
             config,
             config_persistence_blocked,
+            migration,
             selected,
             status: AppStatus::Info(String::new()),
             status_revision: 0,
@@ -482,6 +512,9 @@ impl Model {
         };
         if model.config.settings.geo_routing.current_region.is_none() {
             model.overlay = Overlay::GeoRegions;
+        }
+        if model.migration.is_some() {
+            model.overlay = Overlay::Migration;
         }
         if status.text() == "Press ? for help" {
             model.status = status;
@@ -541,6 +574,7 @@ impl Model {
             connection: ConnectionState::Idle,
             config,
             config_persistence_blocked: false,
+            migration: None,
             selected,
             status: AppStatus::Info(String::new()),
             status_revision: 0,
@@ -768,6 +802,7 @@ impl Model {
             connection: ConnectionState::Idle,
             config,
             config_persistence_blocked: false,
+            migration: None,
             selected,
             status: AppStatus::Info(String::new()),
             status_revision: 0,
@@ -1035,7 +1070,7 @@ mod tests {
         let path = crate::paths::profiles_path().unwrap();
         // Handwritten JSON — bypasses save_config's fail-close guard.
         let json = r#"{
-            "schema_version": 2,
+            "schema_version": 5,
             "profiles": [{
                 "name": "Broken",
                 "protocol": "vless",

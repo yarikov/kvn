@@ -12,6 +12,7 @@ mod daemon;
 mod doctor;
 mod geo;
 mod ipc;
+mod migrations;
 mod omarchy;
 mod paths;
 mod redaction;
@@ -40,11 +41,35 @@ fn main() -> Result<()> {
         return result;
     }
 
-    // Ensure configuration directories exist before reading the config so
-    // logging can be initialized from `settings.logs.level`.
-    ensure_config_dirs()?;
+    if cli.daemon {
+        if migrations::block_daemon_if_pending()? {
+            return Ok(());
+        }
+        initialize_logging()?;
+        let model = Model::new()?;
+        daemon::run(model)?;
+    } else {
+        migrations::run_pending_interactive()?;
+        initialize_logging()?;
+        if !ipc::is_daemon_running() {
+            start_daemon()?;
+            if !ipc::wait_for_daemon(std::time::Duration::from_millis(2000)) {
+                anyhow::bail!("daemon failed to start within 2s");
+            }
+        }
+        tui_client::run()?;
+    }
 
-    let cfg = crate::config::load_config().unwrap_or_default();
+    Ok(())
+}
+
+/// Initialize logging without mutating profiles.json. In particular, this
+/// must remain safe while an older daemon is still serving the active VPN.
+fn initialize_logging() -> Result<()> {
+    ensure_config_dirs()?;
+    let cfg = crate::paths::profiles_path()
+        .and_then(|path| crate::config::load_config_at_read_only(&path).ok())
+        .unwrap_or_default();
     let (filter, bad_level) = resolve_log_filter(cfg.settings.logs.level.as_str());
     tracing_subscriber::registry()
         .with(filter)
@@ -56,20 +81,6 @@ fn main() -> Result<()> {
             invalid
         );
     }
-
-    if cli.daemon {
-        let model = Model::new()?;
-        daemon::run(model)?;
-    } else {
-        if !ipc::is_daemon_running() {
-            start_daemon()?;
-            if !ipc::wait_for_daemon(std::time::Duration::from_millis(2000)) {
-                anyhow::bail!("daemon failed to start within 2s");
-            }
-        }
-        tui_client::run()?;
-    }
-
     Ok(())
 }
 

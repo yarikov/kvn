@@ -205,6 +205,10 @@ fn commit_config_change(
     edited: &crate::config::profile::Config,
 ) -> anyhow::Result<crate::config::profile::Config> {
     anyhow::ensure!(
+        model.migration.is_none(),
+        "configuration is frozen during migration"
+    );
+    anyhow::ensure!(
         !model.config_persistence_blocked,
         "persisted config previously failed to load"
     );
@@ -1259,6 +1263,8 @@ fn build_snapshot(model: &Model, log_session_offsets: LogSessionOffsets) -> Stat
     StateSnapshot {
         daemon_version: env!("CARGO_PKG_VERSION").to_string(),
         ipc_version: crate::ipc::IPC_VERSION,
+        migration_protocol_version: crate::ipc::MIGRATION_PROTOCOL_VERSION,
+        migration: model.migration.clone(),
         connection: model.connection,
         status: model.status.text().to_string(),
         status_is_error: matches!(model.status, AppStatus::Error(_)),
