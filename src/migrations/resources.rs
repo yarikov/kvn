@@ -1,6 +1,7 @@
 //! Download-only preparation. Never run downloaded code or change the live installation.
 
 use super::*;
+use semver::{Version, VersionReq};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -19,34 +20,48 @@ struct ResourceManifest {
     git: Vec<GitResource>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ResourceCondition {
-    #[serde(rename = "omarchy_4")]
-    Omarchy4,
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResourceCondition {
+    omarchy: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    version: Option<VersionReq>,
 }
 
-fn applies_to(manifest: &ResourceManifest, omarchy_major: Option<u64>) -> bool {
-    match manifest.when {
-        None => true,
-        Some(ResourceCondition::Omarchy4) => omarchy_major == Some(4),
+fn applies_to(manifest: &ResourceManifest, omarchy_version: Option<&str>) -> Result<bool> {
+    let Some(condition) = &manifest.when else {
+        return Ok(true);
+    };
+    let Some(version) = omarchy_version else {
+        return Ok(false);
+    };
+    match &condition.version {
+        None => Ok(true),
+        Some(requirement) => {
+            let version = parse_omarchy_version(version).context(
+                "unrecognized Omarchy version; cannot determine whether migration resources apply",
+            )?;
+            Ok(requirement.matches(&version))
+        }
     }
 }
 
-fn parse_omarchy_major(version: &str) -> Option<u64> {
+fn parse_omarchy_version(version: &str) -> Option<Version> {
     let version = version.trim();
     let version = version.strip_prefix("Omarchy ").unwrap_or(version);
     let version = version.strip_prefix('v').unwrap_or(version);
-    let (major, remainder) = version.split_once('.')?;
-    if !major.bytes().all(|byte| byte.is_ascii_digit())
-        || !remainder.starts_with(|ch: char| ch.is_ascii_digit())
-    {
-        return None;
-    }
-    major.parse().ok()
+    let version = version
+        .rsplit_once('-')
+        .filter(|(_, release)| {
+            release
+                .split('.')
+                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+        .map_or(version, |(version, _)| version);
+    Version::parse(version).ok()
 }
 
-fn detect_omarchy_major() -> Result<Option<u64>> {
+fn detect_omarchy_version() -> Result<Option<String>> {
     let output = match Command::new("omarchy")
         .arg("version")
         .stdin(Stdio::null())
@@ -63,9 +78,7 @@ fn detect_omarchy_major() -> Result<Option<u64>> {
         "omarchy version failed; cannot determine whether plugin resources apply"
     );
     let version = String::from_utf8(output.stdout).context("invalid Omarchy version output")?;
-    parse_omarchy_major(&version)
-        .map(Some)
-        .context("unrecognized Omarchy version; cannot determine whether plugin resources apply")
+    Ok(Some(version.trim().to_owned()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -109,6 +122,12 @@ fn valid_id(id: &str) -> bool {
 }
 
 fn validate_manifest(manifest: &ResourceManifest) -> Result<()> {
+    if let Some(condition) = &manifest.when {
+        ensure!(
+            condition.omarchy,
+            "migration resource condition `omarchy` must be true"
+        );
+    }
     let mut ids = HashSet::new();
     for resource in &manifest.git {
         ensure!(valid_id(&resource.id), "invalid migration resource ID");
@@ -280,13 +299,13 @@ pub(super) fn prepare(store: &Store, pending: &[Migration]) -> Result<Vec<Prepar
 }
 
 fn prepare_downloads(store: &Store, pending: &[Migration]) -> Result<Vec<PreparedMigration>> {
-    prepare_downloads_with_detection(store, pending, detect_omarchy_major)
+    prepare_downloads_with_detection(store, pending, detect_omarchy_version)
 }
 
 fn prepare_downloads_with_detection(
     store: &Store,
     pending: &[Migration],
-    detect: impl FnOnce() -> Result<Option<u64>>,
+    detect: impl FnOnce() -> Result<Option<String>>,
 ) -> Result<Vec<PreparedMigration>> {
     // Validate the entire queue before making any network requests.
     let manifests = pending
@@ -295,7 +314,7 @@ fn prepare_downloads_with_detection(
         .collect::<Result<Vec<_>>>()?;
     // Inspect the environment once, before any Git command or cache creation.
     // A resource-free/unconditional queue never needs an Omarchy executable.
-    let omarchy_major = if manifests
+    let omarchy_version = if manifests
         .iter()
         .any(|manifest| manifest.when.is_some() && !manifest.git.is_empty())
     {
@@ -303,9 +322,13 @@ fn prepare_downloads_with_detection(
     } else {
         None
     };
+    let applicable = manifests
+        .iter()
+        .map(|manifest| applies_to(manifest, omarchy_version.as_deref()))
+        .collect::<Result<Vec<_>>>()?;
     let mut prepared = Vec::new();
-    for (migration, manifest) in pending.iter().zip(manifests) {
-        if manifest.git.is_empty() || !applies_to(&manifest, omarchy_major) {
+    for ((migration, manifest), applies) in pending.iter().zip(manifests).zip(applicable) {
+        if manifest.git.is_empty() || !applies {
             continue;
         }
         let digest = migration_digest(&manifest_path(migration))?;
@@ -471,38 +494,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn omarchy_condition_is_exact_and_unknown_conditions_are_rejected() {
-        let conditional: ResourceManifest =
-            serde_json::from_str(r#"{"when":"omarchy_4","git":[]}"#).unwrap();
-        for version in [None, Some(3), Some(5), Some(40)] {
-            assert!(!applies_to(&conditional, version));
+    fn omarchy_condition_uses_an_optional_semver_requirement() {
+        let conditional: ResourceManifest = serde_json::from_str(
+            r#"{"when":{"omarchy":true,"version":">=4.0.0, <5.0.0"},"git":[]}"#,
+        )
+        .unwrap();
+        for version in [None, Some("3.9.9"), Some("5.0.0"), Some("40.0.0")] {
+            assert!(!applies_to(&conditional, version).unwrap());
         }
-        assert!(applies_to(&conditional, Some(4)));
-        assert!(applies_to(&ResourceManifest::default(), None));
+        for version in ["4.0.0", "4.0.3-1", "4.9.9"] {
+            assert!(applies_to(&conditional, Some(version)).unwrap());
+        }
+        assert!(applies_to(&conditional, Some("unrecognized")).is_err());
+        assert!(!applies_to(&conditional, Some("4.0.0-beta.1")).unwrap());
+        assert!(applies_to(&ResourceManifest::default(), None).unwrap());
+        let any_omarchy: ResourceManifest =
+            serde_json::from_str(r#"{"when":{"omarchy":true},"git":[]}"#).unwrap();
+        assert!(!applies_to(&any_omarchy, None).unwrap());
+        assert!(applies_to(&any_omarchy, Some("unrecognized")).unwrap());
         assert!(
-            serde_json::from_str::<ResourceManifest>(r#"{"when":"omarchy","git":[]}"#).is_err()
+            serde_json::from_str::<ResourceManifest>(r#"{"when":"omarchy_4","git":[]}"#).is_err()
         );
+        for manifest in [
+            r#"{"when":{"omarchy":false},"git":[]}"#,
+            r#"{"when":{"version":"^4.0.0"},"git":[]}"#,
+            r#"{"when":{"omarchy":true,"version":"not-semver"},"git":[]}"#,
+            r#"{"when":{"omarchy":true,"unknown":1},"git":[]}"#,
+        ] {
+            let parsed = serde_json::from_str::<ResourceManifest>(manifest);
+            assert!(parsed.is_err() || validate_manifest(&parsed.unwrap()).is_err());
+        }
         assert_eq!(
             serde_json::to_value(conditional).unwrap()["when"],
-            "omarchy_4"
+            serde_json::json!({"omarchy": true, "version": ">=4.0.0, <5.0.0"})
         );
     }
 
     #[test]
-    fn parses_omarchy_release_versions_without_guessing_from_other_numbers() {
-        for version in [
-            "4.0.0",
-            " 4.2.0-1\n",
-            "v4.0.0-beta",
-            "Omarchy 4.0.0",
-            "Omarchy v4.0.0",
+    fn parses_omarchy_semver_and_ignores_numeric_package_release() {
+        for (input, expected) in [
+            ("4.0.0", "4.0.0"),
+            (" 4.2.0-1\n", "4.2.0"),
+            ("4.2.0-1.2", "4.2.0"),
+            ("v4.0.0-beta.1", "4.0.0-beta.1"),
+            ("Omarchy 4.0.0", "4.0.0"),
+            ("Omarchy v4.0.0", "4.0.0"),
         ] {
-            assert_eq!(parse_omarchy_major(version), Some(4));
+            assert_eq!(parse_omarchy_version(input).unwrap().to_string(), expected);
         }
-        assert_eq!(parse_omarchy_major("3.4.0"), Some(3));
-        assert_eq!(parse_omarchy_major("5.0.0"), Some(5));
         for version in ["", "unknown", "error 404", "4.invalid", "release 2026.09"] {
-            assert_eq!(parse_omarchy_major(version), None);
+            assert_eq!(parse_omarchy_version(version), None);
         }
     }
 
@@ -511,20 +552,18 @@ mod tests {
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let scratch = tempfile::tempdir().unwrap();
         let _path = crate::test_helpers::EnvVarGuard::set("PATH", scratch.path());
-        assert_eq!(detect_omarchy_major().unwrap(), None);
+        assert_eq!(detect_omarchy_version().unwrap(), None);
         let command = scratch.path().join("omarchy");
         for (script, expected) in [
-            ("#!/bin/sh\nprintf '4.0.0-1\\n'\n", Some(4)),
-            ("#!/bin/sh\nprintf '3.4.0\\n'\n", Some(3)),
+            ("#!/bin/sh\nprintf '4.0.0-1\\n'\n", "4.0.0-1"),
+            ("#!/bin/sh\nprintf '3.4.0\\n'\n", "3.4.0"),
         ] {
             fs::write(&command, script).unwrap();
             fs::set_permissions(&command, fs::Permissions::from_mode(0o755)).unwrap();
-            assert_eq!(detect_omarchy_major().unwrap(), expected);
+            assert_eq!(detect_omarchy_version().unwrap().as_deref(), Some(expected));
         }
-        for script in ["#!/bin/sh\nexit 1\n", "#!/bin/sh\nprintf 'unknown\\n'\n"] {
-            fs::write(&command, script).unwrap();
-            assert!(detect_omarchy_major().is_err());
-        }
+        fs::write(&command, "#!/bin/sh\nexit 1\n").unwrap();
+        assert!(detect_omarchy_version().is_err());
     }
 
     fn conditional_fixture(scratch: &Path) -> (Store, Migration) {
@@ -537,7 +576,10 @@ mod tests {
         };
         fs::write(&migration.path, b"#!/bin/bash\nexit 0\n").unwrap();
         let manifest = ResourceManifest {
-            when: Some(ResourceCondition::Omarchy4),
+            when: Some(ResourceCondition {
+                omarchy: true,
+                version: Some(VersionReq::parse(">=4.0.0, <5.0.0").unwrap()),
+            }),
             git: vec![GitResource {
                 id: "omakvn".into(),
                 url: "https://example.invalid/plugin.git".into(),
@@ -560,10 +602,10 @@ mod tests {
         // No Git executable is available: a skipped resource must not need it.
         let _path = crate::test_helpers::EnvVarGuard::set("PATH", scratch.path());
         let (store, migration) = conditional_fixture(scratch.path());
-        for version in [None, Some(3), Some(5)] {
+        for version in [None, Some("3.4.0"), Some("5.0.0")] {
             let prepared =
                 prepare_downloads_with_detection(&store, std::slice::from_ref(&migration), || {
-                    Ok(version)
+                    Ok(version.map(str::to_owned))
                 })
                 .unwrap();
             assert!(prepared.is_empty());
@@ -739,7 +781,11 @@ mod tests {
         let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", scratch.path());
         let (store, migration, old_directory) = cached_fixture(scratch.path());
         let mut manifest = read_manifest(&store, &migration).unwrap();
-        manifest.when = Some(ResourceCondition::Omarchy4);
+        let condition = ResourceCondition {
+            omarchy: true,
+            version: Some(VersionReq::parse(">=4.0.0, <5.0.0").unwrap()),
+        };
+        manifest.when = Some(condition.clone());
         fs::write(
             manifest_path(&migration),
             serde_json::to_vec(&manifest).unwrap(),
@@ -749,9 +795,10 @@ mod tests {
         let directory = root().unwrap().join(format!("{}-{digest}", migration.id));
         fs::rename(old_directory, &directory).unwrap();
         let prepared =
-            prepare_downloads_with_detection(&store, &[migration], || Ok(Some(4))).unwrap();
+            prepare_downloads_with_detection(&store, &[migration], || Ok(Some("4.0.3-1".into())))
+                .unwrap();
         assert_eq!(prepared.len(), 1);
-        assert_eq!(prepared[0].manifest.when, Some(ResourceCondition::Omarchy4));
+        assert_eq!(prepared[0].manifest.when, Some(condition));
         // Verification consumes the recorded selection, not today's desktop.
         verify(&prepared).unwrap();
         assert_eq!(prepared[0].directory, directory);

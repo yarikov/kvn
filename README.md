@@ -123,7 +123,8 @@ opened. If migrations declare Git resources, kvn first downloads their pinned
 commits while the existing daemon and VPN remain fully usable. A failed
 download leaves the daemon, config and kill switch unchanged; restore network
 access (connect the VPN if needed) and retry `kvn migrate`.
-Resources declared with `"when": "omarchy_4"` are prepared only for Omarchy 4;
+Resources declared with
+`"when": {"omarchy": true, "version": ">=4.0.0, <5.0.0"}` are prepared only for Omarchy 4;
 plain Arch and other Omarchy major versions skip them without Git or downloads.
 Before running the ordered migration queue, kvn puts the daemon into a
 non-mutable migration mode, records the active profile, and saves the exact

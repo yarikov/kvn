@@ -56,7 +56,8 @@ root-owned markers under `/var/lib/kvn-tui/migrations/`.
 Optional root-owned `*.resources.json` files (`0644`) declare Git resources
 pinned to full commits. The runner prepares these in private per-user
 `$XDG_STATE_HOME/kvn-tui/migration-resources/` storage before entering migration
-mode. A manifest with `"when": "omarchy_4"` is prepared only when
+mode. A manifest with
+`"when": {"omarchy": true, "version": ">=4.0.0, <5.0.0"}` is prepared only when
 `omarchy version` reports major version 4; on ordinary Arch without Omarchy,
 or with another major version, its downloads are skipped before calling Git.
 Preparation errors are recorded separately from the transaction journal
