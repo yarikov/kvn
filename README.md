@@ -119,7 +119,13 @@ kvn update
 
 The command prefers `yay` and falls back to `paru`. A normal `yay -Syu` is
 also supported: pending migrations run automatically the next time `kvn` is
-opened. Before running the ordered migration queue, kvn puts the daemon into a
+opened. If migrations declare Git resources, kvn first downloads their pinned
+commits while the existing daemon and VPN remain fully usable. A failed
+download leaves the daemon, config and kill switch unchanged; restore network
+access (connect the VPN if needed) and retry `kvn migrate`.
+Resources declared with `"when": "omarchy_4"` are prepared only for Omarchy 4;
+plain Arch and other Omarchy major versions skip them without Git or downloads.
+Before running the ordered migration queue, kvn puts the daemon into a
 non-mutable migration mode, records the active profile, and saves the exact
 `profiles.json` bytes under `~/.config/kvn-tui/recovery/`. A separate candidate
 is created from that backup and every config migration runs against the
@@ -136,6 +142,12 @@ loading the config. The queue can be inspected or retried explicitly:
 kvn migrate --pending
 kvn migrate
 ```
+
+Prepared checkouts live under `$XDG_STATE_HOME/kvn-tui/migration-resources`
+(normally `~/.local/state/kvn-tui/migration-resources`). They are removed only
+after the transaction and VPN handoff succeed; failures retain them for a
+local retry. The installed Omarchy plugin is an independent copy and is not
+removed with this cache. `kvn doctor` also reports resource preparation errors.
 
 ### Polkit setup (optional, recommended for unattended reconnects)
 

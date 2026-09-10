@@ -9,6 +9,7 @@ license=('MIT')
 install=kvn-tui.install
 depends=('gcc-libs' 'dbus' 'libcap' 'sing-box')
 optdepends=(
+    'git: prepare Git resources required by package migrations'
     'wl-clipboard: clipboard integration on Wayland'
     'xclip: clipboard integration on X11 (preferred)'
     'xsel: clipboard integration on X11 (alternative)'
@@ -32,6 +33,10 @@ package() {
     for migration in contrib/migrations/*.sh; do
         [[ -f "$migration" ]] || continue
         install -m755 "$migration" "$pkgdir/usr/lib/kvn-tui/migrations/"
+    done
+    for resources in contrib/migrations/*.resources.json; do
+        [[ -f "$resources" ]] || continue
+        install -m644 "$resources" "$pkgdir/usr/lib/kvn-tui/migrations/"
     done
     install -Dm644 contrib/kvn-tui.service "$pkgdir/usr/lib/systemd/user/kvn-tui.service"
     install -Dm644 contrib/kvn-tui-sing-box-capabilities.hook \

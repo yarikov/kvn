@@ -4,6 +4,22 @@ set -euo pipefail
 BACKUP_SUFFIX=".bak.before-kvn-tui"
 BACKUP_LIMIT=5
 OMAKVN_REPO="https://github.com/yarikov/omakvn.git"
+PLUGIN_SOURCE=""
+while (( $# )); do
+  case "$1" in
+  --plugin-source)
+    [[ $# -ge 2 && -n $2 && -z $PLUGIN_SOURCE ]] || { echo "Error: --plugin-source requires one path." >&2; exit 1; }
+    PLUGIN_SOURCE=$2
+    shift 2
+    ;;
+  *) echo "Error: unknown setup argument: $1" >&2; exit 1 ;;
+  esac
+done
+# Refuse the network-backed installer before touching any user configuration.
+if [[ -n ${KVN_MIGRATION_SESSION_ID:-} && -z $PLUGIN_SOURCE ]]; then
+  echo "Error: migrations must pass --plugin-source with a prepared checkout." >&2
+  exit 1
+fi
 declare -A RUN_BACKUPS=()
 
 backup_file() {
@@ -283,6 +299,103 @@ append_marker_block() {
 plugin_dir_created=0
 legacy_plugin_staged=0
 legacy_plugin_target=""
+local_plugin_stage=""
+
+plugin_git() (
+  local variable
+  for variable in ${!GIT_@}; do unset "$variable"; done
+  export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_LFS_SKIP_SMUDGE=1
+  git -c core.hooksPath=/dev/null -c protocol.allow=never "$@"
+)
+
+validate_local_plugin() {
+  local dir="$1" origin dirty links
+  [[ -d $dir && ! -L $dir && -d $dir/.git && ! -L $dir/.git ]] || return 1
+  [[ ! -e $dir/.git/objects/info/alternates ]] || return 1
+  links=$(find "$dir/.git" -type l -print -quit) || return 1
+  [[ -z $links ]] || return 1
+  [[ $(plugin_git -C "$dir" rev-parse --show-toplevel) == "$(realpath -- "$dir")" ]] || return 1
+  origin=$(plugin_git -C "$dir" remote get-url origin) || return 1
+  case "$origin" in
+  https://github.com/yarikov/omakvn | https://github.com/yarikov/omakvn.git | git@github.com:yarikov/omakvn.git) ;;
+  *) return 1 ;;
+  esac
+  dirty=$(plugin_git -C "$dir" status --porcelain --untracked-files=all --ignored) || return 1
+  [[ -z $dirty ]] || return 1
+  jq -e '.id == "yarikov.omakvn"' "$dir/manifest.json" >/dev/null 2>&1
+}
+
+# Make a standalone copy: deleting the migration cache must never invalidate
+# the installed plugin. No clone, fetch, pull or Omarchy plugin add/update here.
+install_omarchy_v4_plugin_from_source() {
+  local dir="$HOME/.config/omarchy/plugins/yarikov.omakvn"
+  local legacy_dir="$HOME/.config/omarchy/plugins/kvn.tui"
+  local source commit remote_branch local_commits local_commit
+  source=$(realpath -e -- "$PLUGIN_SOURCE") || return 2
+  if ! validate_local_plugin "$source"; then
+    echo "Error: plugin source must be a clean, independent yarikov.omakvn Git checkout." >&2
+    return 2
+  fi
+  if [[ $source == "$dir" || $source == "$dir/"* || $dir == "$source/"* ]]; then
+    echo "Error: plugin source and installation must be separate directories." >&2
+    return 2
+  fi
+  commit=$(plugin_git -C "$source" rev-parse HEAD) || return 2
+  if [[ -e $dir || -L $dir ]]; then
+    if [[ -L $dir || ! -d $dir ]] ||
+      { [[ -e $dir/.git || -L $dir/.git ]] && ! validate_local_plugin "$dir"; } ||
+      ! jq -e '.id == "yarikov.omakvn"' "$dir/manifest.json" >/dev/null 2>&1; then
+      echo "Error: refusing to overwrite a dirty or unrecognized plugin: $dir" >&2
+      return 2
+    fi
+    if [[ -d $dir/.git ]]; then
+      # Clean worktrees can still contain unpublished commits or a stash.
+      # Do not discard them when replacing the repository with a prepared copy.
+      local_commits=$(plugin_git -C "$dir" for-each-ref --format='%(objectname)' refs/heads refs/tags refs/stash) || return 2
+      local_commits+=$'\n'$(plugin_git -C "$dir" rev-parse HEAD) || return 2
+      while IFS= read -r local_commit; do
+        [[ -n $local_commit ]] || continue
+        if ! plugin_git -C "$source" cat-file -e "$local_commit" 2>/dev/null; then
+          echo "Error: refusing to discard local Git history or a stash in $dir." >&2
+          return 2
+        fi
+      done <<<"$local_commits"
+    fi
+  elif [[ -e $legacy_dir || -L $legacy_dir ]]; then
+    if [[ -L $legacy_dir || -e $legacy_dir/.git ]] ||
+      ! jq -e '.id == "kvn.tui"' "$legacy_dir/manifest.json" >/dev/null 2>&1; then
+      echo "Error: refusing to overwrite an unrecognized legacy plugin: $legacy_dir" >&2
+      return 2
+    fi
+  fi
+
+  mkdir -p -- "${dir%/*}" || return 2
+  local_plugin_stage=$(mktemp -d "${dir%/*}/.kvn-plugin.XXXXXX") || return 2
+  cp -a -- "$source" "$local_plugin_stage/checkout" || return 2
+  validate_local_plugin "$local_plugin_stage/checkout" || return 2
+  [[ $(plugin_git -C "$local_plugin_stage/checkout" rev-parse HEAD) == "$commit" ]] || return 2
+  # A pinned resource is detached. Restore default-branch tracking locally so
+  # a later, ordinary `omarchy plugin update` can still pull from the origin.
+  remote_branch=$(plugin_git -C "$local_plugin_stage/checkout" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  if [[ $remote_branch == origin/* ]]; then
+    plugin_git -C "$local_plugin_stage/checkout" checkout -B "${remote_branch#origin/}" "$commit" || return 2
+    plugin_git -C "$local_plugin_stage/checkout" branch --set-upstream-to="$remote_branch" || return 2
+  fi
+  if [[ -e $dir ]]; then
+    mv -- "$dir" "$V4_TRANSACTION_DIR/legacy-kvn.tui" || return 2
+    legacy_plugin_staged=1
+    legacy_plugin_target=$dir
+  elif [[ -e $legacy_dir ]]; then
+    mv -- "$legacy_dir" "$V4_TRANSACTION_DIR/legacy-kvn.tui" || return 2
+    legacy_plugin_staged=1
+    legacy_plugin_target=$legacy_dir
+  fi
+  plugin_dir_created=1
+  mv -- "$local_plugin_stage/checkout" "$dir" || return 2
+  rmdir -- "$local_plugin_stage" || return 2
+  local_plugin_stage=""
+  echo "Installed yarikov.omakvn from prepared commit $commit."
+}
 
 # Install or update the standalone Git-managed Quickshell plugin. Legacy
 # releases copied the QML files directly; stage that copy until the remote
@@ -291,6 +404,11 @@ install_omarchy_v4_plugin() {
   local dir="$HOME/.config/omarchy/plugins/yarikov.omakvn"
   local legacy_dir="$HOME/.config/omarchy/plugins/kvn.tui"
   local origin=""
+
+  if [[ -n $PLUGIN_SOURCE ]]; then
+    install_omarchy_v4_plugin_from_source
+    return $?
+  fi
 
   omarchy plugin add --help >/dev/null 2>&1 || {
     echo "This Omarchy build lacks the shell plugin registry;" >&2
@@ -445,6 +563,9 @@ EOF
       echo "Rolling back Omarchy 4 integration changes..." >&2
       rollback_v4
     fi
+    if [[ -n $local_plugin_stage ]]; then
+      rm -rf -- "$local_plugin_stage"
+    fi
     rm -rf -- "$V4_TRANSACTION_DIR"
     exit "$status"
   }
@@ -585,6 +706,10 @@ omarchy_major=$(detect_omarchy_major)
 if (( omarchy_major >= 4 )); then
   install_omarchy_v4
 else
+  if [[ -n $PLUGIN_SOURCE ]]; then
+    echo "Error: --plugin-source requires Omarchy 4." >&2
+    exit 1
+  fi
   install_omarchy_v3
 fi
 echo "Done."

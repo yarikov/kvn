@@ -133,6 +133,10 @@ enum Command {
         #[arg(long, conflicts_with_all = ["polkit", "killswitch"])]
         omarchy: bool,
 
+        /// Install the Omarchy plugin from a prepared local Git checkout.
+        #[arg(long, requires = "omarchy")]
+        plugin_source: Option<PathBuf>,
+
         /// Set up polkit access for passwordless DNS management.
         #[arg(long)]
         polkit: bool,
@@ -292,11 +296,17 @@ fn run_embedded_script(name: &str, script: &str, args: &[&str]) -> Result<()> {
 }
 
 /// Run the embedded Omarchy integration installer script.
-fn install_omarchy() -> Result<()> {
+fn install_omarchy(plugin_source: Option<&Path>) -> Result<()> {
+    let source = plugin_source
+        .map(|path| path.to_str().context("plugin source path is not UTF-8"))
+        .transpose()?;
+    let args = source
+        .map(|path| vec!["--plugin-source", path])
+        .unwrap_or_default();
     run_embedded_script(
         "setup-omarchy.sh",
         include_str!("../contrib/setup-omarchy.sh"),
-        &[],
+        &args,
     )
 }
 
@@ -607,13 +617,14 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
         }
         Some(Command::Setup {
             omarchy,
+            plugin_source,
             polkit,
             killswitch,
         }) => {
             let result = (|| {
                 validate_current_integration_privileges(*omarchy, *polkit, *killswitch, "setup")?;
                 if *omarchy {
-                    install_omarchy()?;
+                    install_omarchy(plugin_source.as_deref())?;
                 }
                 if *polkit {
                     install_polkit()?;
@@ -714,6 +725,16 @@ esac
     }
 
     fn run_installer(root: &TempDir, home: &Path, input: &str) -> std::process::Output {
+        run_installer_with_source(root, home, input, None, false)
+    }
+
+    fn run_installer_with_source(
+        root: &TempDir,
+        home: &Path,
+        input: &str,
+        source: Option<&Path>,
+        migration: bool,
+    ) -> std::process::Output {
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let script = root.path().join("setup-omarchy.sh");
         fs::write(&script, include_str!("../contrib/setup-omarchy.sh")).unwrap();
@@ -722,15 +743,22 @@ esac
             root.path().join("bin").display(),
             std::env::var("PATH").unwrap()
         );
-        let mut child = ProcessCommand::new("bash")
+        let mut command = ProcessCommand::new("bash");
+        command
             .arg(&script)
             .env("HOME", home)
             .env("PATH", path)
+            .env_remove("KVN_MIGRATION_SESSION_ID")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::piped());
+        if let Some(source) = source {
+            command.arg("--plugin-source").arg(source);
+        }
+        if migration {
+            command.env("KVN_MIGRATION_SESSION_ID", "fixture-session");
+        }
+        let mut child = command.spawn().unwrap();
         child
             .stdin
             .take()
@@ -926,6 +954,7 @@ esac
             cli.command,
             Some(Command::Setup {
                 omarchy: true,
+                plugin_source: None,
                 polkit: false,
                 killswitch: false,
             })
@@ -939,6 +968,7 @@ esac
             cli.command,
             Some(Command::Setup {
                 omarchy: false,
+                plugin_source: None,
                 polkit: true,
                 killswitch: false,
             })
@@ -952,6 +982,7 @@ esac
             cli.command,
             Some(Command::Setup {
                 omarchy: false,
+                plugin_source: None,
                 polkit: false,
                 killswitch: true,
             })
@@ -965,6 +996,7 @@ esac
             cli.command,
             Some(Command::Setup {
                 omarchy: false,
+                plugin_source: None,
                 polkit: true,
                 killswitch: true,
             })
@@ -975,6 +1007,22 @@ esac
     fn setup_omarchy_conflicts_with_system_integrations() {
         assert!(Cli::try_parse_from(["kvn-tui", "setup", "--omarchy", "--polkit"]).is_err());
         assert!(Cli::try_parse_from(["kvn-tui", "setup", "--omarchy", "--killswitch"]).is_err());
+    }
+
+    #[test]
+    fn plugin_source_requires_omarchy() {
+        let cli = Cli::try_parse_from([
+            "kvn", "setup", "--omarchy", "--plugin-source", "/tmp/plugin source",
+        ]).unwrap();
+        assert!(
+            matches!(cli.command, Some(Command::Setup { plugin_source: Some(path), .. })
+                if path == Path::new("/tmp/plugin source"))
+        );
+        assert!(Cli::try_parse_from(["kvn", "setup", "--plugin-source", "/tmp/plugin"]).is_err());
+        assert!(
+            Cli::try_parse_from(["kvn", "setup", "--polkit", "--plugin-source", "/tmp/plugin"])
+                .is_err()
+        );
     }
 
     #[test]
@@ -1379,6 +1427,118 @@ esac
         assert_eq!(format_rate(1024), "1.0 KiB");
         assert_eq!(format_rate(1024 * 1024), "1.0 MiB");
         assert_eq!(format_rate(3 * 1024 * 1024 * 1024), "3.0 GiB");
+    }
+
+    fn local_plugin_fixture(root: &TempDir) -> PathBuf {
+        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let source = root.path().join("prepared plugin");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("manifest.json"), r#"{"id":"yarikov.omakvn"}"#).unwrap();
+        fs::write(source.join("Widget.qml"), "prepared widget").unwrap();
+        for args in [
+            vec!["init", "-qb", "main"],
+            vec!["add", "."],
+            vec![
+                "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture",
+            ],
+            vec!["remote", "add", "origin", "https://github.com/yarikov/omakvn.git"],
+            vec!["update-ref", "refs/remotes/origin/main", "HEAD"],
+            vec![
+                "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main",
+            ],
+            vec!["checkout", "--detach"],
+        ] {
+            assert_success(
+                &ProcessCommand::new("git")
+                    .env("GIT_CONFIG_NOSYSTEM", "1")
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .args(["-c", "core.hooksPath=/dev/null", "-C"])
+                    .arg(&source)
+                    .args(args)
+                    .output()
+                    .unwrap(),
+            );
+        }
+        // Any network-backed Omarchy installer call makes the test fail.
+        write_executable(&root.path().join("bin/omarchy"),
+            "#!/bin/bash\nif [[ ${1:-} == version ]]; then echo '4.0.0'; elif [[ ${1:-}:${2:-} == plugin:add || ${1:-}:${2:-} == plugin:update ]]; then touch \"$HOME/network-called\"; exit 99; else exit 0; fi\n");
+        source
+    }
+
+    #[test]
+    fn omarchy_local_install_survives_resource_cleanup_and_rejects_dirty_destination() {
+        let (root, home) = installer_fixture(4);
+        write_omarchy_v4_config(&home);
+        let source = local_plugin_fixture(&root);
+        assert_success(&run_installer_with_source(
+            &root, &home, "n\n", Some(&source), true,
+        ));
+        let plugin = home.join(".config/omarchy/plugins/yarikov.omakvn");
+        fs::write(plugin.join("personal-note"), "keep").unwrap();
+        let output = run_installer_with_source(&root, &home, "", Some(&source), true);
+        assert!(!output.status.success());
+        assert_eq!(
+            fs::read_to_string(plugin.join("personal-note")).unwrap(),
+            "keep"
+        );
+        fs::remove_dir_all(&source).unwrap();
+        assert_eq!(
+            fs::read_to_string(plugin.join("Widget.qml")).unwrap(),
+            "prepared widget"
+        );
+        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        assert_success(
+            &ProcessCommand::new("git")
+                .arg("-C")
+                .arg(&plugin)
+                .args(["fsck", "--full"])
+                .output()
+                .unwrap(),
+        );
+        assert_eq!(
+            fs::read_to_string(plugin.join(".git/HEAD")).unwrap(),
+            "ref: refs/heads/main\n"
+        );
+        assert!(!home.join("network-called").exists());
+    }
+
+    #[test]
+    fn omarchy_local_install_rolls_back_on_later_configuration_failure() {
+        let (root, home) = installer_fixture(4);
+        write_omarchy_v4_config(&home);
+        let source = local_plugin_fixture(&root);
+        let legacy = home.join(".config/omarchy/plugins/kvn.tui");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("manifest.json"), r#"{"id":"kvn.tui"}"#).unwrap();
+        fs::write(legacy.join("Widget.qml"), "original").unwrap();
+        let shell_path = home.join(".config/omarchy/shell.json");
+        let before = fs::read(&shell_path).unwrap();
+        write_executable(&root.path().join("bin/hyprctl"),
+            "#!/bin/bash\ncase ${1:-} in\nconfigerrors) marker=$HOME/.hypr-errors-seen; if [[ -e $marker ]]; then echo 'new error'; else touch \"$marker\"; fi;;\nreload) exit 0;;\nesac\n");
+        let output = run_installer_with_source(&root, &home, "n\n", Some(&source), true);
+        assert!(!output.status.success());
+        assert_eq!(fs::read(shell_path).unwrap(), before);
+        assert_eq!(
+            fs::read_to_string(legacy.join("Widget.qml")).unwrap(),
+            "original"
+        );
+        assert!(!home.join(".config/omarchy/plugins/yarikov.omakvn").exists());
+        assert!(!home.join("network-called").exists());
+        assert!(source.join("Widget.qml").exists());
+    }
+
+    #[test]
+    fn omarchy_migration_requires_source_before_changing_config() {
+        let (root, home) = installer_fixture(4);
+        write_omarchy_v4_config(&home);
+        let shell = home.join(".config/omarchy/shell.json");
+        let before = fs::read(&shell).unwrap();
+        let output = run_installer_with_source(&root, &home, "", None, true);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--plugin-source"));
+        assert_eq!(fs::read(shell).unwrap(), before);
+        assert!(!home.join(".config/omarchy/plugins/yarikov.omakvn").exists());
     }
 
     #[test]

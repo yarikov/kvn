@@ -20,6 +20,8 @@ const INSTALLED_DIR: &str = "/usr/lib/kvn-tui/migrations";
 const BASELINE_PATH: &str = "/var/lib/kvn-tui/migration-baseline";
 const SESSION_STATE_NAME: &str = "migration-session.json";
 
+mod resources;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Migration {
     pub id: String,
@@ -213,14 +215,39 @@ pub fn run_pending_interactive() -> Result<bool> {
 
 fn run_interactive(store: &Store) -> Result<bool> {
     let _lock = MigrationLock::acquire()?;
-    wait_for_pacman()?;
-    let pending = store.pending()?;
-    let profile_migration_required = profile_migration_required()?;
-    let existing = load_session()?;
-    if pending.is_empty() && !profile_migration_required && existing.is_none() {
-        return Ok(false);
+    loop {
+        wait_for_pacman()?;
+        let pending = store.pending()?;
+        let profile_migration_required = profile_migration_required()?;
+        let existing = load_session()?;
+        if pending.is_empty() && !profile_migration_required && existing.is_none() {
+            return Ok(false);
+        }
+        if let Some(session) = &existing {
+            // Never download during recovery of an already frozen transaction.
+            if !matches!(
+                session.phase,
+                SessionPhase::Swapped | SessionPhase::StartingDaemon
+            ) {
+                resources::verify(&session.resources)?;
+                ensure!(
+                    session.manifest == manifest(&pending)?,
+                    "migration queue changed during an active transaction; finish recovery with its original package before preparing new resources"
+                );
+            }
+            return run_transaction(store, pending, existing, Vec::new(), prompt_retry);
+        }
+        let before = manifest(&pending)?;
+        let prepared = resources::prepare(store, &pending)?;
+        wait_for_pacman()?;
+        if before != manifest(&store.pending()?)? {
+            resources::cleanup(&prepared)?;
+            resources::clear_preparation_status()?;
+            continue;
+        }
+        resources::verify(&prepared)?;
+        return run_transaction(store, pending, None, prepared, prompt_retry);
     }
-    run_transaction(store, pending, existing, prompt_retry)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -249,6 +276,8 @@ struct MigrationSession {
     completed: Vec<String>,
     backup_path: Option<PathBuf>,
     candidate_path: Option<PathBuf>,
+    #[serde(default)]
+    resources: Vec<resources::PreparedMigration>,
     #[serde(default)]
     connection_captured: bool,
     reconnect_profile: Option<uuid::Uuid>,
@@ -347,7 +376,14 @@ fn manifest(migrations: &[Migration]) -> Result<Vec<MigrationRecord>> {
             Ok(MigrationRecord {
                 id: migration.id.clone(),
                 summary: migration.summary.clone(),
-                digest: migration_digest(&migration.path)?,
+                digest: {
+                    let script = migration_digest(&migration.path)?;
+                    if let Some(resources) = resources::manifest_digest(migration)? {
+                        format!("{script}:{resources}")
+                    } else {
+                        script
+                    }
+                },
             })
         })
         .collect()
@@ -357,6 +393,7 @@ fn run_transaction<F>(
     store: &Store,
     pending: Vec<Migration>,
     existing: Option<MigrationSession>,
+    prepared: Vec<resources::PreparedMigration>,
     mut retry: F,
 ) -> Result<bool>
 where
@@ -370,6 +407,7 @@ where
         completed: Vec::new(),
         backup_path: None,
         candidate_path: None,
+        resources: prepared,
         connection_captured: false,
         reconnect_profile: None,
         summary: "Preparing migration workspace…".into(),
@@ -391,6 +429,7 @@ where
         session.summary = "Migration set changed; rebuilding candidate…".into();
     }
     save_session(&session)?;
+    resources::clear_preparation_status()?;
 
     let mut daemon = attach_daemon_for_migration(&mut session)?;
     let result = (|| -> Result<bool> {
@@ -453,6 +492,16 @@ where
                     .stderr(Stdio::inherit());
                 if let Some(candidate) = &session.candidate_path {
                     command.env("KVN_MIGRATION_PROFILES_PATH", candidate);
+                } else {
+                    command.env_remove("KVN_MIGRATION_PROFILES_PATH");
+                }
+                command.env_remove("KVN_MIGRATION_RESOURCES_DIR");
+                if let Some(prepared) = session
+                    .resources
+                    .iter()
+                    .find(|entry| entry.migration_id == migration.id)
+                {
+                    command.env("KVN_MIGRATION_RESOURCES_DIR", &prepared.directory);
                 }
                 let status = command
                     .status()
@@ -858,6 +907,7 @@ fn finish_daemon_handoff(
     }
     restore_connection(session.reconnect_profile)?;
     remove_previous_live_candidate(session)?;
+    resources::cleanup(&session.resources)?;
     // Keep the journal until the previous connection is restored as well.
     // If reconnecting fails, `kvn migrate` can retry the handoff instead of
     // silently reporting a completed transaction with the VPN left idle.
@@ -1109,15 +1159,16 @@ pub fn print_pending() -> Result<bool> {
 }
 
 pub(crate) fn session_diagnostic() -> Result<Option<String>> {
-    Ok(load_session()?.map(|session| {
-        format!(
+    if let Some(session) = load_session()? {
+        return Ok(Some(format!(
             "transactional migration {:?}: {} ({}/{})",
             session.phase,
             session.summary,
             session.completed.len(),
             session.manifest.len()
-        )
-    }))
+        )));
+    }
+    resources::preparation_diagnostic()
 }
 
 pub fn run_command() -> Result<()> {
@@ -1293,6 +1344,7 @@ mod tests {
             completed: vec![],
             backup_path: None,
             candidate_path: None,
+            resources: Vec::new(),
             connection_captured: false,
             reconnect_profile: None,
             summary: String::new(),
@@ -1451,6 +1503,7 @@ mod tests {
             completed: vec![],
             backup_path: None,
             candidate_path: None,
+            resources: Vec::new(),
             connection_captured: false,
             reconnect_profile: None,
             summary: String::new(),

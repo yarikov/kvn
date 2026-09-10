@@ -12,7 +12,14 @@ resumable, and retained across releases, so jumping over several breaking
 releases applies every intermediate migration in sequence.
 
 A normal `yay -Syu` remains supported. In that case migrations run before the
-next interactive `kvn` launch. Before the first script, kvn puts the daemon into
+next interactive `kvn` launch. Git resources declared by the package are cloned
+at pinned commits first, while the old daemon and VPN remain usable. If this
+preparation fails, no migration session or profile backup is created and the
+kill switch is not changed; restore network access and retry `kvn migrate`.
+Scripts themselves must use the prepared local resources without downloads.
+Omarchy plugin resources use the `omarchy_4` condition: only Omarchy major
+version 4 downloads them. Plain Arch and other Omarchy versions skip them.
+Before the first script, kvn puts the daemon into
 migration mode, records the active profile, stores the exact source under
 `~/.config/kvn-tui/recovery/`, and creates a candidate from that backup. The
 daemon keeps the existing tunnel, live config, and kill switch active while all
@@ -23,6 +30,9 @@ candidate, starts the new daemon, and reconnects the profile. The former live
 file is retained temporarily during this handoff and removed after success;
 the durable recovery copy remains under `recovery/`. If a script fails, the
 running VPN is left alone and the candidate plus private transaction journal are retained.
+Prepared resources are also retained on failure. They are removed from
+`$XDG_STATE_HOME/kvn-tui/migration-resources/` after a successful daemon/VPN
+handoff; this does not remove an installed plugin or recovery backups.
 Use `kvn migrate` to resume, `kvn migrate --pending` to inspect the queue, and
 `kvn doctor` to diagnose it. An old `profiles.json` is detected independently
 of the package baseline, so a restored config is migrated even after a fresh
