@@ -33,6 +33,9 @@ pub(super) fn handle_key(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
         Overlay::DnsSettings => handle_dns_settings(model, key),
         Overlay::ThemeSettings => handle_theme_picker(model, key),
         Overlay::ServiceRouting => handle_service_routing(model, key),
+        // Navigation and activation are client-local because the selected
+        // action may need to launch a browser in that client's GUI session.
+        Overlay::Support => vec![],
         Overlay::Migration => vec![],
     }
 }
@@ -65,6 +68,7 @@ fn open_help(model: &mut Model) {
         Overlay::DnsSettings => HelpContext::DnsSettings,
         Overlay::ThemeSettings => HelpContext::ThemeSettings,
         Overlay::ServiceRouting => HelpContext::ServiceRouting,
+        Overlay::Support => HelpContext::Support,
         Overlay::Migration => return,
         Overlay::Help(_) => return,
     };
@@ -580,6 +584,16 @@ pub(super) fn handle_ipc_command(
     }
     let effects = match cmd {
         IpcCommand::Attach => vec![],
+        IpcCommand::CheckSupportPrompt => {
+            if model.overlay == Overlay::None
+                && model.config.settings.geo_routing.current_region.is_some()
+                && model.support_prompt.is_due(chrono::Utc::now())
+            {
+                model.support_selected = 0;
+                model.overlay = Overlay::Support;
+            }
+            vec![]
+        }
         IpcCommand::Detach => vec![],
         IpcCommand::Key { code, char, ctrl } => {
             let key_event = rebuild_key_event(&code, char, ctrl);
@@ -675,6 +689,23 @@ pub(super) fn handle_ipc_command(
                 effects
             }
         }
+        IpcCommand::ResolveSupportPrompt { resolution } => {
+            if model.overlay != Overlay::Support {
+                vec![]
+            } else {
+                let previous = model.support_prompt.clone();
+                match resolution {
+                    crate::app::msg::SupportPromptResolution::RemindLater => {
+                        model.support_prompt.remind_later(chrono::Utc::now());
+                    }
+                    crate::app::msg::SupportPromptResolution::Dismiss => {
+                        model.support_prompt.dismiss();
+                    }
+                }
+                model.overlay = Overlay::None;
+                vec![Effect::PersistSupportPrompt { previous }]
+            }
+        }
         IpcCommand::Paste { text } => handle_clipboard_text(model, &text),
         IpcCommand::Copied { name, count } => handle_copied_status(model, name, count),
         IpcCommand::ReloadConfig => {
@@ -730,6 +761,7 @@ fn handle_go_first(model: &mut Model) -> Vec<Effect> {
         Overlay::ServiceRouting => {
             crate::ui::nav::select_first(&mut model.service_routing_selected);
         }
+        Overlay::Support => crate::ui::nav::select_first(&mut model.support_selected),
         Overlay::Help(mut state) => {
             state.selected = crate::ui::help::first_command(&crate::ui::help::rows(state.context));
             model.overlay = Overlay::Help(state);
@@ -1228,6 +1260,7 @@ fn is_connection_affected(model: &Model) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::msg::IpcCommand;
     use crate::config::profile::{
         DnsPreset, DnsServer, DnsStrategy, Profile, Subscription, SubscriptionAutoUpdate,
     };
@@ -1235,6 +1268,64 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent};
     use uuid::Uuid;
 
+    #[test]
+    fn support_prompt_check_requires_geo_and_due_deadline() {
+        let mut model = crate::test_helpers::model_with_profiles(vec![]);
+        model.support_prompt.next_show_at = Some(chrono::Utc::now() - chrono::Duration::seconds(1));
+
+        let effects = handle_ipc_command(&mut model, IpcCommand::CheckSupportPrompt);
+        assert_eq!(model.overlay, Overlay::None);
+        assert_eq!(effects, vec![Effect::BroadcastState]);
+
+        model
+            .config
+            .settings
+            .geo_routing
+            .set_region(crate::config::profile::GeoRegion::Global);
+        let effects = handle_ipc_command(&mut model, IpcCommand::CheckSupportPrompt);
+        assert_eq!(model.overlay, Overlay::Support);
+        assert_eq!(model.support_selected, 0);
+        assert_eq!(effects, vec![Effect::BroadcastState]);
+    }
+
+    #[test]
+    fn support_prompt_resolutions_persist_and_close() {
+        use crate::app::msg::SupportPromptResolution;
+
+        let mut model = crate::test_helpers::model_with_profiles(vec![]);
+        model.overlay = Overlay::Support;
+        model.support_prompt.next_show_at = Some(chrono::Utc::now() - chrono::Duration::days(1));
+        let previous = model.support_prompt.clone();
+        let effects = handle_ipc_command(
+            &mut model,
+            IpcCommand::ResolveSupportPrompt {
+                resolution: SupportPromptResolution::RemindLater,
+            },
+        );
+        assert_eq!(model.overlay, Overlay::None);
+        assert!(
+            model.support_prompt.next_show_at
+                > Some(chrono::Utc::now() + chrono::Duration::days(29))
+        );
+        assert_eq!(
+            effects,
+            vec![
+                Effect::PersistSupportPrompt { previous },
+                Effect::BroadcastState
+            ]
+        );
+
+        model.overlay = Overlay::Support;
+        let effects = handle_ipc_command(
+            &mut model,
+            IpcCommand::ResolveSupportPrompt {
+                resolution: SupportPromptResolution::Dismiss,
+            },
+        );
+        assert!(model.support_prompt.dismissed);
+        assert_eq!(model.support_prompt.next_show_at, None);
+        assert!(matches!(effects[0], Effect::PersistSupportPrompt { .. }));
+    }
     fn enter() -> KeyEvent {
         KeyEvent::from(KeyCode::Enter)
     }

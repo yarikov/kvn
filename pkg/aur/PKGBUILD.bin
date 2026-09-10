@@ -10,6 +10,7 @@ install=kvn-tui.install
 depends=('gcc-libs' 'dbus' 'libcap' 'sing-box')
 optdepends=(
     'git: prepare Git resources required by package migrations'
+    'xdg-utils: open the project support page from the TUI'
     'wl-clipboard: clipboard integration on Wayland'
     'xclip: clipboard integration on X11 (preferred)'
     'xsel: clipboard integration on X11 (alternative)'

@@ -792,6 +792,7 @@ fn draw_impl(
         Overlay::DnsSettings => draw_dns_settings(frame, model, area),
         Overlay::ThemeSettings => draw_theme_settings(frame, model, area),
         Overlay::ServiceRouting => draw_service_routing(frame, model, area),
+        Overlay::Support => draw_support(frame, model, area),
         Overlay::Migration => draw_migration(frame, model, area),
         Overlay::None => {}
     }
@@ -1315,6 +1316,92 @@ fn draw_selection_modal(
     lines.push(Line::from(""));
     lines.extend(footer.iter().map(|text| Line::from(*text)));
     draw_modal(frame, theme, area, lines, height_percent);
+}
+
+fn draw_support(frame: &mut Frame, model: &Model, area: Rect) {
+    const ITEMS: [&str; 3] = ["Support development", "Remind me later", "Don't show again"];
+    let width = if area.width < 80 {
+        100
+    } else {
+        POPUP_WIDTH_PERCENT
+    };
+    let horizontal_area = centered_rect(width, 100, area);
+    let row_width = horizontal_area.width.saturating_sub(2) as usize;
+    let column_width = ITEMS
+        .iter()
+        .map(|label| visual_width(label))
+        .max()
+        .unwrap_or(0)
+        .min(row_width);
+    let build_lines = |compact: bool| {
+        let mut lines = vec![Line::from(Span::styled(
+            "Support kvn 🚀",
+            model.theme.accent(),
+        ))];
+        if !compact {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from("kvn is free, open source, and built with care."));
+        if !compact {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(
+            "If you find it useful, consider supporting its continued development.",
+        ));
+        if !compact {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(
+            "Your support helps cover AI tools, testing, bug fixes, improvements, and new features.",
+        ));
+        if !compact {
+            lines.push(Line::from(""));
+        }
+        for (index, label) in ITEMS.iter().enumerate() {
+            let style = if index == model.support_selected {
+                model.theme.selected()
+            } else {
+                model.theme.normal()
+            };
+            let text = align_in_centered_column(label, row_width, column_width);
+            lines.push(Line::from(Span::styled(text, style)));
+        }
+        if !compact {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from("Enter confirm, q/Esc cancel, ? help"));
+        lines
+    };
+    let content_width = row_width.max(1);
+    let measure = |lines: &[Line]| -> u16 {
+        lines
+            .iter()
+            .map(|line| line.width().max(1).div_ceil(content_width) as u16)
+            .sum()
+    };
+    let mut lines = build_lines(false);
+    let mut content_height = measure(&lines);
+    if content_height.saturating_add(2) > area.height {
+        lines = build_lines(true);
+        content_height = measure(&lines);
+    }
+    let paragraph = Paragraph::new(lines)
+        .style(model.theme.normal())
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: false });
+    let popup_height = content_height.saturating_add(2).min(area.height);
+    let popup_area = Rect::new(
+        horizontal_area.x,
+        area.y + area.height.saturating_sub(popup_height) / 2,
+        horizontal_area.width,
+        popup_height,
+    );
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(model.theme.accent())
+        .style(model.theme.popup_bg());
+    frame.render_widget(paragraph.block(block), popup_area);
 }
 
 /// Draw the unified Sources list: standalone profiles and subscription trees.
@@ -2323,18 +2410,25 @@ mod tests {
         ] {
             let mut model = mouse_model();
             model.overlay = overlay;
-            let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
             terminal
                 .draw(|frame| {
                     draw_with_interaction(frame, &model, MainPaneFocus::Logs, None, None);
                 })
                 .unwrap();
 
-            let popup = centered_rect(width_percent, height_percent, Rect::new(0, 0, 80, 20));
+            let popup = centered_rect(width_percent, height_percent, Rect::new(0, 0, 80, 24));
             let corner =
                 &terminal.backend().buffer().content[popup.y as usize * 80 + popup.x as usize];
             assert_eq!(corner.style().fg, Some(Color::Cyan), "overlay: {overlay:?}");
         }
+
+        let mut model = mouse_model();
+        model.overlay = Overlay::Support;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| draw(frame, &model)).unwrap();
+        let support_corner = &terminal.backend().buffer().content[3 * 80 + 16];
+        assert_eq!(support_corner.style().fg, Some(Color::Cyan));
     }
 
     #[test]
@@ -2593,6 +2687,76 @@ mod tests {
             .position(|s| s == &model.config.settings.theme)
             .unwrap_or(0);
         insta::assert_snapshot!(snapshot_terminal(&model, 80, 32));
+    }
+
+    #[test]
+    fn support_overlay_preserves_copy_and_actions_at_supported_sizes() {
+        for (width, height, popup_height) in [(80, 24, 17), (70, 24, 17), (70, 15, 12)] {
+            let mut model = model_with_profiles(vec![]);
+            model.overlay = Overlay::Support;
+            model.support_selected = 1;
+            let rendered = snapshot_terminal(&model, width, height);
+            for expected in [
+                "Support kvn 🚀",
+                "kvn is free, open source, and built with care.",
+                "development.",
+                "Your support helps cover AI tools",
+                "and new features.",
+                "Support development",
+                "Remind me later",
+                "Don't show again",
+                "Enter confirm, q/Esc cancel, ? help",
+            ] {
+                assert!(
+                    rendered.contains(expected),
+                    "missing {expected:?} at {width}x{height}:\n{rendered}"
+                );
+            }
+            assert!(!rendered.contains("> Support development"));
+
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| draw(frame, &model)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let footer = find_text(buffer, "Enter confirm");
+            let footer_row = footer / width as usize;
+            let popup_y = (height - popup_height) / 2;
+            assert_eq!(footer_row, (popup_y + popup_height - 2) as usize);
+            let popup_x = if width < 80 || height < 24 {
+                0
+            } else {
+                centered_rect(POPUP_WIDTH_PERCENT, 100, Rect::new(0, 0, width, height)).x
+            };
+            assert_eq!(
+                buffer.content[(popup_y * width + popup_x) as usize].symbol(),
+                "┌"
+            );
+            assert_eq!(
+                buffer.content[((popup_y + popup_height - 1) * width + popup_x) as usize].symbol(),
+                "└"
+            );
+        }
+    }
+
+    #[test]
+    fn support_overlay_uses_standard_full_row_selection() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::Support;
+        model.support_selected = 1;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| draw(frame, &model)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let selected = find_text(buffer, "Remind me later");
+        let row_start = selected / 80 * 80;
+        let popup = centered_rect(
+            POPUP_WIDTH_PERCENT,
+            POPUP_HEIGHT_PERCENT_TALL,
+            Rect::new(0, 0, 80, 24),
+        );
+        let expected = model.theme.selected().bg;
+        for x in popup.x + 1..popup.x + popup.width - 1 {
+            assert_eq!(buffer.content[row_start + x as usize].style().bg, expected);
+        }
     }
 
     #[test]

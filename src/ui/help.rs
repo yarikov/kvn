@@ -122,7 +122,8 @@ fn relevant_group(context: HelpContext) -> HelpGroup {
         | HelpContext::GeoRegions
         | HelpContext::DnsSettings
         | HelpContext::ThemeSettings
-        | HelpContext::ServiceRouting => HelpGroup::Dialogs,
+        | HelpContext::ServiceRouting
+        | HelpContext::Support => HelpGroup::Dialogs,
     }
 }
 
@@ -247,6 +248,7 @@ mod tests {
             HelpContext::DnsSettings,
             HelpContext::ThemeSettings,
             HelpContext::ServiceRouting,
+            HelpContext::Support,
         ] {
             let headings = headings(context);
             assert_eq!(headings.len(), 7);

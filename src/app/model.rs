@@ -22,6 +22,7 @@ pub enum Overlay {
     DnsSettings,
     ThemeSettings,
     ServiceRouting,
+    Support,
     Migration,
 }
 
@@ -55,6 +56,7 @@ pub enum HelpContext {
     DnsSettings,
     ThemeSettings,
     ServiceRouting,
+    Support,
 }
 
 impl HelpContext {
@@ -67,6 +69,7 @@ impl HelpContext {
             Self::DnsSettings => Overlay::DnsSettings,
             Self::ThemeSettings => Overlay::ThemeSettings,
             Self::ServiceRouting => Overlay::ServiceRouting,
+            Self::Support => Overlay::Support,
         }
     }
 }
@@ -226,6 +229,11 @@ pub struct Model {
     /// Active package migration. While set, the daemon keeps the current VPN
     /// alive but rejects every user/config mutation.
     pub migration: Option<MigrationStatus>,
+    /// Persisted schedule for the optional project-support prompt.
+    pub support_prompt: crate::support_prompt::SupportPromptState,
+    /// TUI-local cursor inside the support prompt. It is intentionally not
+    /// broadcast: opening a browser belongs to the client that pressed Enter.
+    pub support_selected: usize,
     pub selected: usize,
     pub status: AppStatus,
     /// Monotonic revision of the latest status event. TUI clients use it to
@@ -402,6 +410,10 @@ impl Model {
         };
 
         let migration = crate::migrations::load_ui_status().ok().flatten();
+        let support_prompt = crate::support_prompt::load_for_daemon(
+            config.settings.geo_routing.current_region.is_some(),
+            chrono::Utc::now(),
+        );
         let (mut connection, selected, mut status) =
             Self::resolve_startup_state(&config, default_selected);
         if stale_cleanup_failed {
@@ -464,6 +476,8 @@ impl Model {
             config,
             config_persistence_blocked,
             migration,
+            support_prompt,
+            support_selected: 0,
             selected,
             status: AppStatus::Info(String::new()),
             status_revision: 0,
@@ -575,6 +589,8 @@ impl Model {
             config,
             config_persistence_blocked: false,
             migration: None,
+            support_prompt: crate::support_prompt::SupportPromptState::default(),
+            support_selected: 0,
             selected,
             status: AppStatus::Info(String::new()),
             status_revision: 0,
@@ -803,6 +819,8 @@ impl Model {
             config,
             config_persistence_blocked: false,
             migration: None,
+            support_prompt: crate::support_prompt::SupportPromptState::default(),
+            support_selected: 0,
             selected,
             status: AppStatus::Info(String::new()),
             status_revision: 0,

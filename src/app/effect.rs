@@ -29,6 +29,9 @@ pub enum Effect {
     ResetGeoUpdateSchedules,
     WriteState,
     SaveConfig,
+    PersistSupportPrompt {
+        previous: crate::support_prompt::SupportPromptState,
+    },
     SaveConfigConflict {
         edited: Box<Config>,
         conflicts: Vec<String>,
