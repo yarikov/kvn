@@ -24,11 +24,12 @@ Every script must start with an interpreter and summary:
 set -euo pipefail
 ```
 
-The runner first puts the daemon into migration mode, then saves an exact
+The runner first prepares any declared Git resources while the daemon remains
+fully usable. Only then does it put the daemon into migration mode and save an exact
 `profiles.json` backup and creates a disposable candidate from it. It keeps the
 daemon, VPN, live config, and kill switch online until the whole ordered queue
 succeeds, then performs one short daemon restart for the atomic config and
-binary handoff. Do not introduce migration classes or phases: a later migration
+binary handoff. Do not split the script queue into migration classes: a later migration
 may depend on every earlier migration having completed.
 
 Scripts must be idempotent, exit successfully when they do not apply, and call
@@ -45,6 +46,86 @@ it prevents a direct jump across several releases from applying later config
 steps before intervening package scripts. Ordinary config loading rejects an
 old schema. The runner validates and promotes the candidate only after every
 pending script has succeeded.
+
+## Git resources
+
+Migration scripts must not access the network, including through setup helpers.
+Declare downloads beside the script in `<script-stem>.resources.json`, for
+example `1789000000-refresh-plugin.resources.json` for
+`1789000000-refresh-plugin.sh`:
+
+```json
+{
+  "when": "omarchy_4",
+  "git": [
+    {
+      "id": "omakvn",
+      "url": "https://github.com/yarikov/omakvn.git",
+      "commit": "<replace with the full immutable commit SHA>"
+    }
+  ]
+}
+```
+
+Manifests are optional, root-owned package payloads with mode `0644`. Resource
+IDs may contain ASCII letters, digits, hyphens and underscores. URLs must be
+HTTPS without embedded credentials, query parameters or fragments; branches
+and tags are not accepted as commits. Submodules and Git LFS are unsupported.
+Scripts and manifests are immutable after release.
+
+`"when": "omarchy_4"` applies to the entire resource manifest and is required
+for Omarchy 4 plugin resources. Before any Git command or cache creation, the
+runner checks `omarchy version`. Only major version **4** matches; Omarchy 3,
+future major versions, and plain Arch without the `omarchy` command skip these
+resources without needing Git or network access. If an installed Omarchy
+command fails or returns an unrecognized version, preparation fails before
+downloading rather than guessing. Unknown conditions are rejected. Omitting
+`when` makes resources unconditional and does not require an Omarchy probe.
+
+The runner clones and verifies every applicable resource before freezing the daemon or
+creating a profile backup. It rechecks the package queue afterwards. Downloads
+do not execute repository code, hooks, submodules or user-configured filters.
+No resources means no Git dependency and no download. This is a script-author
+contract, not an OS-level network sandbox for arbitrary shell scripts.
+
+Scripts with applicable resources receive `KVN_MIGRATION_RESOURCES_DIR`,
+pointing to their own resource directory. The variable is unset when resources
+are skipped. The condition does not skip the script itself: a plugin-only
+migration should exit successfully when its resources do not apply:
+
+```bash
+[[ -n ${KVN_MIGRATION_RESOURCES_DIR:-} ]] || exit 0
+kvn setup --omarchy --plugin-source "${KVN_MIGRATION_RESOURCES_DIR:?}/omakvn"
+```
+
+For scripts with other migration work, guard only the plugin step instead of
+exiting the whole script. Skipped plugin work does not prevent later migrations
+from running. The transaction retains its original resource selection on retry;
+it never re-detects the desktop and starts additional downloads while frozen.
+
+During a migration, `setup --omarchy` refuses to run without `--plugin-source`.
+Local installation validates the plugin identity and clean Git checkout,
+copies it independently (including `.git` and its origin), and uses the existing
+installer rollback on failure. It never invokes remote plugin add/update and
+never silently falls back to a command module. A dirty or unrelated installed
+Git checkout is not overwritten. Ordinary manual setup still uses Omarchy's
+network-backed installer.
+
+Prepared resources and `ready.json` metadata are private per-user cache data at
+`$XDG_STATE_HOME/kvn-tui/migration-resources/<migration-id>-<manifest-digest>/`.
+Preparation errors are recorded separately in `preparation.json` for `kvn doctor`;
+they do not start a migration session or block the TUI. Re-running preparation
+reuses valid completed downloads and discards incomplete temporary clones.
+An active transaction records its resource references in `migration-session.json`:
+retry only verifies local resources, never fetches while migration mode is active.
+If those resources are missing or changed, restore them before retrying. An
+installed package changed mid-transaction requires recovery with the original
+package before preparing its replacement queue.
+
+After successful config/daemon/VPN handoff the runner deletes that transaction's
+resource directories. On failure it retains them. Interrupted handoff recovery
+does not need the checkouts to reconnect and can finish partially completed
+cleanup. Profile recovery backups and the independently installed plugin remain.
 
 Never remove a released migration while upgrades from the release preceding
 it remain supported. This is what makes a direct jump across several breaking
