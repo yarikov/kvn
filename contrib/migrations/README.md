@@ -56,7 +56,10 @@ example `1789000000-refresh-plugin.resources.json` for
 
 ```json
 {
-  "when": "omarchy_4",
+  "when": {
+    "omarchy": true,
+    "version": ">=4.0.0, <5.0.0"
+  },
   "git": [
     {
       "id": "omakvn",
@@ -73,14 +76,18 @@ HTTPS without embedded credentials, query parameters or fragments; branches
 and tags are not accepted as commits. Submodules and Git LFS are unsupported.
 Scripts and manifests are immutable after release.
 
-`"when": "omarchy_4"` applies to the entire resource manifest and is required
-for Omarchy 4 plugin resources. Before any Git command or cache creation, the
-runner checks `omarchy version`. Only major version **4** matches; Omarchy 3,
-future major versions, and plain Arch without the `omarchy` command skip these
-resources without needing Git or network access. If an installed Omarchy
-command fails or returns an unrecognized version, preparation fails before
-downloading rather than guessing. Unknown conditions are rejected. Omitting
-`when` makes resources unconditional and does not require an Omarchy probe.
+`when` applies to the entire resource manifest. Set `"omarchy": true` for
+Omarchy-only resources and optionally constrain its version with a standard
+semver requirement. For example, `">=4.0.0, <5.0.0"` selects Omarchy 4.
+Omitting `version` accepts any installed Omarchy version. Before any Git command
+or cache creation, the runner checks `omarchy version`; its numeric package
+release suffix (for example `-1` in `4.0.3-1`) is ignored for matching. Plain
+Arch and versions outside the declared range skip these resources without
+needing Git or network access. If the command fails, or its version is invalid
+when a version constraint is present, preparation fails before downloading.
+Unknown conditions, `"omarchy": false`, and the legacy string `"omarchy_4"`
+are rejected. Omitting `when` makes resources unconditional and does not require
+an Omarchy probe.
 
 The runner clones and verifies every applicable resource before freezing the daemon or
 creating a profile backup. It rechecks the package queue afterwards. Downloads

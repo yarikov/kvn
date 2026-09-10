@@ -17,7 +17,8 @@ at pinned commits first, while the old daemon and VPN remain usable. If this
 preparation fails, no migration session or profile backup is created and the
 kill switch is not changed; restore network access and retry `kvn migrate`.
 Scripts themselves must use the prepared local resources without downloads.
-Omarchy plugin resources use the `omarchy_4` condition: only Omarchy major
+Omarchy plugin resources use an Omarchy semver condition such as
+`{"omarchy": true, "version": ">=4.0.0, <5.0.0"}`: only Omarchy major
 version 4 downloads them. Plain Arch and other Omarchy versions skip them.
 Before the first script, kvn puts the daemon into
 migration mode, records the active profile, stores the exact source under
