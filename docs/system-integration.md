@@ -66,6 +66,14 @@ transaction. `setup --omarchy --plugin-source PATH` installs an independent
 local plugin copy without remote add/update. Resources survive failed
 transactions and are deleted only after successful daemon/VPN handoff.
 
+The runner keeps the daemon IPC client through all progress acknowledgements
+and requires a confirmed daemon exit before exchanging `profiles.json`. The
+journal, rather than a freshly discovered package queue, controls recovery and
+completion markers. Its file identities make a crash between atomic exchange
+and phase persistence recoverable. During this brief daemon replacement, an
+attached TUI retains the blocking overlay, reconnects without starting a daemon
+itself, and re-executes the installed client after the journal is cleared.
+
 The runner first sends the daemon a versioned migration command. The daemon
 rejects config mutations and the TUI displays a non-dismissible overlay, while
 the existing sing-box process and kill switch keep running. Only after the

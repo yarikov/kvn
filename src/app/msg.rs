@@ -113,11 +113,25 @@ pub enum Msg {
     },
 
     IpcCommand(IpcCommand),
-    StateUpdate(Box<StateSnapshot>),
+    StateUpdate {
+        generation: u64,
+        snapshot: Box<StateSnapshot>,
+    },
     /// The local TUI's IPC reader stopped or received a snapshot it could not
     /// decode. Daemon-side reducers ignore this; the TUI turns it into a
-    /// visible error instead of waiting forever with a stale screen.
-    IpcReadFailed(String),
+    /// visible error, except during the expected migration daemon handoff.
+    IpcReadFailed {
+        generation: u64,
+        message: String,
+    },
+    MigrationReconnectReady {
+        generation: u64,
+        snapshot: Box<StateSnapshot>,
+    },
+    MigrationReconnectFailed {
+        generation: u64,
+        message: String,
+    },
     ConfigReloaded(Box<Result<crate::config::profile::Config, IpcError>>),
     KillSwitchApplied {
         enabled: bool,

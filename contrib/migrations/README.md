@@ -122,6 +122,21 @@ If those resources are missing or changed, restore them before retrying. An
 installed package changed mid-transaction requires recovery with the original
 package before preparing its replacement queue.
 
+The private transaction journal is authoritative after migration mode begins.
+It records the runner version, exact script/resource manifest, completed IDs,
+planned workspace paths, readiness, and the device/inode identities used for
+cutover recovery. Never derive completion markers from a newly discovered
+package queue. A package change before cutover stops recovery until the original
+package is restored; a new queue discovered after the old cutover completes is
+processed as a separate ordered transaction.
+
+Workspace paths are journaled before either file is created. On retry the runner
+finishes only those planned files and verifies their contents. Device/inode pairs
+distinguish pre-exchange and post-exchange layouts even when both JSON files have
+identical bytes. Any third layout is ambiguous and must stop without replacing
+or deleting user data. Journals from older framework builds may use content
+inference only when it proves one unambiguous state.
+
 After successful config/daemon/VPN handoff the runner deletes that transaction's
 resource directories. On failure it retains them. Interrupted handoff recovery
 does not need the checkouts to reconnect and can finish partially completed

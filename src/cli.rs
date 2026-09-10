@@ -134,7 +134,7 @@ enum Command {
         omarchy: bool,
 
         /// Install the Omarchy plugin from a prepared local Git checkout.
-        #[arg(long, requires = "omarchy")]
+        #[arg(long, requires = "omarchy", conflicts_with_all = ["polkit", "killswitch"])]
         plugin_source: Option<PathBuf>,
 
         /// Set up polkit access for passwordless DNS management.
@@ -1012,8 +1012,13 @@ esac
     #[test]
     fn plugin_source_requires_omarchy() {
         let cli = Cli::try_parse_from([
-            "kvn", "setup", "--omarchy", "--plugin-source", "/tmp/plugin source",
-        ]).unwrap();
+            "kvn",
+            "setup",
+            "--omarchy",
+            "--plugin-source",
+            "/tmp/plugin source",
+        ])
+        .unwrap();
         assert!(
             matches!(cli.command, Some(Command::Setup { plugin_source: Some(path), .. })
                 if path == Path::new("/tmp/plugin source"))
@@ -1022,6 +1027,16 @@ esac
         assert!(
             Cli::try_parse_from(["kvn", "setup", "--polkit", "--plugin-source", "/tmp/plugin"])
                 .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "kvn",
+                "setup",
+                "--killswitch",
+                "--plugin-source",
+                "/tmp/plugin"
+            ])
+            .is_err()
         );
     }
 
@@ -1439,13 +1454,27 @@ esac
             vec!["init", "-qb", "main"],
             vec!["add", "."],
             vec![
-                "-c", "user.name=Test", "-c", "user.email=test@example.com",
-                "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                "Fixture",
             ],
-            vec!["remote", "add", "origin", "https://github.com/yarikov/omakvn.git"],
+            vec![
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/yarikov/omakvn.git",
+            ],
             vec!["update-ref", "refs/remotes/origin/main", "HEAD"],
             vec![
-                "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main",
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
             ],
             vec!["checkout", "--detach"],
         ] {
@@ -1461,8 +1490,10 @@ esac
             );
         }
         // Any network-backed Omarchy installer call makes the test fail.
-        write_executable(&root.path().join("bin/omarchy"),
-            "#!/bin/bash\nif [[ ${1:-} == version ]]; then echo '4.0.0'; elif [[ ${1:-}:${2:-} == plugin:add || ${1:-}:${2:-} == plugin:update ]]; then touch \"$HOME/network-called\"; exit 99; else exit 0; fi\n");
+        write_executable(
+            &root.path().join("bin/omarchy"),
+            "#!/bin/bash\nif [[ ${1:-} == version ]]; then echo '4.0.0'; elif [[ ${1:-}:${2:-} == plugin:add || ${1:-}:${2:-} == plugin:update ]]; then touch \"$HOME/network-called\"; exit 99; else exit 0; fi\n",
+        );
         source
     }
 
@@ -1472,7 +1503,11 @@ esac
         write_omarchy_v4_config(&home);
         let source = local_plugin_fixture(&root);
         assert_success(&run_installer_with_source(
-            &root, &home, "n\n", Some(&source), true,
+            &root,
+            &home,
+            "n\n",
+            Some(&source),
+            true,
         ));
         let plugin = home.join(".config/omarchy/plugins/yarikov.omakvn");
         fs::write(plugin.join("personal-note"), "keep").unwrap();
@@ -1514,8 +1549,10 @@ esac
         fs::write(legacy.join("Widget.qml"), "original").unwrap();
         let shell_path = home.join(".config/omarchy/shell.json");
         let before = fs::read(&shell_path).unwrap();
-        write_executable(&root.path().join("bin/hyprctl"),
-            "#!/bin/bash\ncase ${1:-} in\nconfigerrors) marker=$HOME/.hypr-errors-seen; if [[ -e $marker ]]; then echo 'new error'; else touch \"$marker\"; fi;;\nreload) exit 0;;\nesac\n");
+        write_executable(
+            &root.path().join("bin/hyprctl"),
+            "#!/bin/bash\ncase ${1:-} in\nconfigerrors) marker=$HOME/.hypr-errors-seen; if [[ -e $marker ]]; then echo 'new error'; else touch \"$marker\"; fi;;\nreload) exit 0;;\nesac\n",
+        );
         let output = run_installer_with_source(&root, &home, "n\n", Some(&source), true);
         assert!(!output.status.success());
         assert_eq!(fs::read(shell_path).unwrap(), before);

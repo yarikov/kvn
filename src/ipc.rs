@@ -231,7 +231,7 @@ impl IpcClient {
 
     /// Spawn a background thread that reads state snapshots from the daemon
     /// and forwards them into the given mpsc channel.
-    pub fn spawn_reader(&self, tx: Sender<Msg>) -> anyhow::Result<()> {
+    pub fn spawn_reader(&self, tx: Sender<Msg>, generation: u64) -> anyhow::Result<()> {
         let stream = self
             .stream
             .try_clone()
@@ -250,29 +250,37 @@ impl IpcClient {
                 match line {
                     Ok(line) => match serde_json::from_str::<StateSnapshot>(&line) {
                         Ok(snapshot) => {
-                            let _ = tx.send(Msg::StateUpdate(Box::new(snapshot)));
+                            let _ = tx.send(Msg::StateUpdate {
+                                generation,
+                                snapshot: Box::new(snapshot),
+                            });
                         }
                         Err(error) => {
-                            let _ = tx.send(Msg::IpcReadFailed(format!(
-                                "Malformed state snapshot from the daemon: {error}"
-                            )));
+                            let _ = tx.send(Msg::IpcReadFailed {
+                                generation,
+                                message: format!(
+                                    "Malformed state snapshot from the daemon: {error}"
+                                ),
+                            });
                             failure_reported = true;
                             break;
                         }
                     },
                     Err(error) => {
-                        let _ = tx.send(Msg::IpcReadFailed(format!(
-                            "Lost connection to the daemon: {error}"
-                        )));
+                        let _ = tx.send(Msg::IpcReadFailed {
+                            generation,
+                            message: format!("Lost connection to the daemon: {error}"),
+                        });
                         failure_reported = true;
                         break;
                     }
                 }
             }
             if !failure_reported {
-                let _ = tx.send(Msg::IpcReadFailed(
-                    "Daemon closed the IPC connection".to_string(),
-                ));
+                let _ = tx.send(Msg::IpcReadFailed {
+                    generation,
+                    message: "Daemon closed the IPC connection".to_string(),
+                });
             }
         });
         Ok(())
@@ -353,7 +361,7 @@ mod tests {
 
         let mut client = IpcClient::connect().expect("client connect");
         let (client_tx, client_rx) = channel::<Msg>();
-        client.spawn_reader(client_tx).expect("reader spawn");
+        client.spawn_reader(client_tx, 0).expect("reader spawn");
 
         // Client → server.
         client.send(&IpcCommand::Quit).expect("send quit");
@@ -368,7 +376,10 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
         server.broadcast(&sample_snapshot());
         match drain_one(&client_rx, Duration::from_secs(2)) {
-            Some(Msg::StateUpdate(snap)) => {
+            Some(Msg::StateUpdate {
+                generation: 0,
+                snapshot: snap,
+            }) => {
                 assert_eq!(snap.status, "ok");
                 assert!(matches!(snap.connection, ConnectionState::Idle));
             }
@@ -390,7 +401,7 @@ mod tests {
             stream: client_stream,
         };
         let (tx, rx) = channel();
-        client.spawn_reader(tx).unwrap();
+        client.spawn_reader(tx, 7).unwrap();
 
         // Wait well past the inherited handshake timeout before publishing a
         // snapshot. The persistent reader must still be alive and blocked.
@@ -400,9 +411,34 @@ mod tests {
         daemon_stream.flush().unwrap();
 
         match rx.recv_timeout(Duration::from_secs(1)) {
-            Ok(Msg::StateUpdate(snapshot)) => assert_eq!(snapshot.status, "ok"),
+            Ok(Msg::StateUpdate {
+                generation: 7,
+                snapshot,
+            }) => assert_eq!(snapshot.status, "ok"),
             Ok(_) => panic!("expected StateUpdate after idle period, got another message"),
             Err(error) => panic!("reader did not receive snapshot after idle period: {error}"),
+        }
+    }
+
+    #[test]
+    fn snapshot_reader_tags_disconnect_with_its_generation() {
+        let (client_stream, daemon_stream) = UnixStream::pair().unwrap();
+        let client = IpcClient {
+            stream: client_stream,
+        };
+        let (tx, rx) = channel();
+        client.spawn_reader(tx, 42).unwrap();
+        drop(daemon_stream);
+
+        match rx.recv_timeout(Duration::from_secs(1)) {
+            Ok(Msg::IpcReadFailed {
+                generation: 42,
+                message,
+            }) => {
+                assert!(message.contains("closed"));
+            }
+            Ok(_) => panic!("expected a generation-tagged disconnect"),
+            Err(error) => panic!("reader did not report disconnect: {error}"),
         }
     }
 
