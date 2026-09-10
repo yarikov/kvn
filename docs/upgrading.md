@@ -33,6 +33,15 @@ running VPN is left alone and the candidate plus private transaction journal are
 Prepared resources are also retained on failure. They are removed from
 `$XDG_STATE_HOME/kvn-tui/migration-resources/` after a successful daemon/VPN
 handoff; this does not remove an installed plugin or recovery backups.
+The journal records the exact migration manifest, runner version, planned
+workspace paths, and pre-cutover file identities. Completion markers are made
+only for that recorded manifest. If another package changes the queue before
+cutover, kvn preserves all artifacts and asks for the package version that
+started the transaction instead of replaying system actions. After cutover,
+newly installed migrations remain pending and run as a separate transaction.
+An attached TUI keeps its blocking migration overlay while the daemon socket is
+replaced, reconnects to a compatible daemon, and restarts itself after the
+journal is cleared.
 Use `kvn migrate` to resume, `kvn migrate --pending` to inspect the queue, and
 `kvn doctor` to diagnose it. An old `profiles.json` is detected independently
 of the package baseline, so a restored config is migrated even after a fresh
@@ -61,6 +70,10 @@ migration.
 The migration framework does not retroactively execute changes from releases
 older than 0.30.0. The historical guides below remain the source of truth when
 upgrading an older installation to the 0.30.0 baseline.
+When upgrading directly from a pre-0.30 release to a later release, migrations
+introduced after the installed version remain pending; they are not marked as
+applied by the package hook. Follow the historical guides and stop the
+pre-framework daemon first, then run `kvn migrate` for the later releases.
 
 ## v0.28.0
 

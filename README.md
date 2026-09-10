@@ -133,7 +133,9 @@ non-mutable migration mode, records the active profile, and saves the exact
 is created from that backup and every config migration runs against the
 candidate. The daemon, VPN, live config, and kill switch stay active while
 scripts run. Any attached TUI shows a blocking progress overlay; `q`/`Esc` only
-detach the TUI. After the whole queue succeeds, kvn briefly stops the old daemon,
+detach the TUI. It keeps the overlay across the expected daemon socket restart
+and reopens itself with the installed client after the transaction finishes.
+After the whole queue succeeds, kvn briefly stops the old daemon,
 atomically promotes the candidate, starts the new daemon, and reconnects the
 profile. The previous live file remains temporarily available for crash
 recovery during this handoff and is removed after success; the durable copy is

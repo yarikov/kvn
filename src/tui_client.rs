@@ -4,8 +4,8 @@ mod input;
 pub(crate) mod theme_watch;
 
 use std::io::{self, IsTerminal, Write};
-use std::sync::Arc;
 use std::sync::mpsc::{Sender, channel};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -537,6 +537,9 @@ fn preview_uuid() -> String {
 
 /// Run the TUI client: connects to daemon, renders UI, forwards input.
 pub fn run() -> Result<()> {
+    // Resolve the installed path before a package update can unlink this
+    // process's executable (current_exe would then report " (deleted)").
+    let executable = std::env::current_exe().context("Failed to resolve kvn for TUI restart")?;
     let (mut client, initial_snapshot) = connect_to_current_daemon()?;
 
     // The daemon snapshot is canonical. Reading profiles.json here would let
@@ -555,7 +558,7 @@ pub fn run() -> Result<()> {
     let event_reader_control = Arc::new(input::EventReaderControl::new());
     spawn_ticker(tx.clone());
     theme_watch::spawn_theme_watcher(tx.clone());
-    client.spawn_reader(tx.clone())?;
+    client.spawn_reader(tx.clone(), 0)?;
 
     let mut log_tailer = LogTailer::new(vec![
         (crate::paths::app_log_path(), "[app]"),
@@ -563,7 +566,7 @@ pub fn run() -> Result<()> {
     ]);
     apply_initial_snapshot(&mut model, initial_snapshot, &mut log_tailer);
 
-    let _terminal_session = TerminalSession::enter()?;
+    let terminal_session = TerminalSession::enter()?;
     apply_terminal_colors(
         model.theme.palette_foreground(),
         model.theme.palette_background(),
@@ -571,16 +574,31 @@ pub fn run() -> Result<()> {
     let stdout = io::stdout();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    input::spawn_event_reader(tx, event_reader_control.clone());
+    input::spawn_event_reader(tx.clone(), event_reader_control.clone());
 
-    run_loop(
+    let outcome = run_loop(
         &mut terminal,
         &mut model,
+        tx,
         rx,
         &mut client,
         &mut log_tailer,
         event_reader_control,
-    )
+    )?;
+    drop(terminal);
+    drop(terminal_session);
+    if outcome == TuiExit::Reexec {
+        use std::os::unix::process::CommandExt;
+        let error = std::process::Command::new(executable).exec();
+        return Err(anyhow::Error::new(error).context("Failed to restart TUI after migration"));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TuiExit {
+    Normal,
+    Reexec,
 }
 
 /// Attach to a daemon built from the same package as this client. Upgrades can
@@ -687,14 +705,16 @@ fn apply_initial_snapshot(
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     model: &mut Model,
+    tx: Sender<Msg>,
     rx: std::sync::mpsc::Receiver<Msg>,
     client: &mut IpcClient,
     log_tailer: &mut LogTailer,
     event_reader_control: Arc<input::EventReaderControl>,
-) -> Result<()> {
+) -> Result<TuiExit> {
     use crate::app::model::MainPaneFocus;
     use crate::ui::layout::LogNavigation;
 
+    let replacement_client = Arc::new(Mutex::new(None::<IpcClient>));
     let mut pane_focus = model.main_pane_focus;
     let terminal_area: ratatui::layout::Rect = terminal.size()?.into();
     if !crate::ui::layout::logs_visible(terminal_area) && pane_focus == MainPaneFocus::Logs {
@@ -724,6 +744,11 @@ fn run_loop(
     let mut click_tracker = ClickTracker::default();
     let mut log_selection: Option<crate::ui::layout::LogSelection> = None;
     let mut log_dragging = false;
+    let mut ipc_generation = 0_u64;
+    let mut migration_reconnecting = false;
+    let mut reconnect_attempt_running = false;
+    let mut next_reconnect_at = Instant::now();
+    let mut migration_disconnected_at = None;
 
     loop {
         let msg = rx.recv()?;
@@ -833,8 +858,8 @@ fn run_loop(
                         || (key.code == KeyCode::Char('c')
                             && key.modifiers.contains(KeyModifiers::CONTROL));
                     if detach {
-                        client.send(&IpcCommand::Detach)?;
-                        break;
+                        let _ = client.send(&IpcCommand::Detach);
+                        return Ok(TuiExit::Normal);
                     }
                     continue;
                 }
@@ -1091,7 +1116,17 @@ fn run_loop(
                     }
                 }
             }
-            Msg::StateUpdate(snapshot) => {
+            Msg::StateUpdate {
+                generation,
+                snapshot,
+            } if generation == ipc_generation => {
+                let mut snapshot = *snapshot;
+                if snapshot.migration.is_none()
+                    && model.migration.is_some()
+                    && let Some(status) = crate::migrations::load_ui_status()?
+                {
+                    snapshot.migration = Some(status);
+                }
                 pane_focus = snapshot.main_pane_focus;
                 let toast_status = if snapshot.status_is_error {
                     AppStatus::Error(snapshot.status.clone())
@@ -1099,13 +1134,18 @@ fn run_loop(
                     AppStatus::Info(snapshot.status.clone())
                 };
                 toast.observe(snapshot.status_revision, toast_status, Instant::now());
-                apply_snapshot(model, *snapshot);
+                apply_snapshot(model, snapshot);
+                if model.migration.is_some() {
+                    model.overlay = crate::app::model::Overlay::Migration;
+                }
                 let area: ratatui::layout::Rect = terminal.size()?.into();
                 if !crate::ui::layout::logs_visible(area) && pane_focus == MainPaneFocus::Logs {
                     pane_focus = MainPaneFocus::Sources;
-                    client.send(&IpcCommand::SetMainPaneFocus {
-                        focus: MainPaneFocus::Sources,
-                    })?;
+                    if model.migration.is_none() && !migration_reconnecting {
+                        client.send(&IpcCommand::SetMainPaneFocus {
+                            focus: MainPaneFocus::Sources,
+                        })?;
+                    }
                 }
                 if model.overlay != crate::app::model::Overlay::None {
                     log_selection = None;
@@ -1114,11 +1154,81 @@ fn run_loop(
                 update_pointer_shape(terminal, model, mouse_position, &mut pointer_shape)?;
                 needs_redraw = true;
             }
-            Msg::IpcReadFailed(message) => anyhow::bail!(message),
+            Msg::StateUpdate { .. } => {}
+            Msg::IpcReadFailed {
+                generation,
+                message,
+            } if generation == ipc_generation => {
+                if model.migration.is_none() {
+                    anyhow::bail!(message);
+                }
+                migration_reconnecting = true;
+                reconnect_attempt_running = false;
+                migration_disconnected_at.get_or_insert_with(Instant::now);
+                next_reconnect_at = Instant::now();
+                needs_redraw = true;
+            }
+            Msg::IpcReadFailed { .. } => {}
+            Msg::MigrationReconnectReady {
+                generation,
+                snapshot,
+            } if generation == ipc_generation + 1 => {
+                let mut slot = replacement_client.lock().unwrap();
+                let replacement = slot
+                    .take()
+                    .context("migration reconnect client is missing")?;
+                replacement.spawn_reader(tx.clone(), generation)?;
+                *client = replacement;
+                ipc_generation = generation;
+                reconnect_attempt_running = false;
+                migration_reconnecting = false;
+                migration_disconnected_at = None;
+                let mut snapshot = *snapshot;
+                if snapshot.migration.is_none()
+                    && let Some(status) = crate::migrations::load_ui_status()?
+                {
+                    snapshot.migration = Some(status);
+                }
+                apply_snapshot(model, snapshot);
+                if model.migration.is_some() {
+                    model.overlay = crate::app::model::Overlay::Migration;
+                }
+                needs_redraw = true;
+            }
+            Msg::MigrationReconnectReady { .. } => {}
+            Msg::MigrationReconnectFailed {
+                generation,
+                message,
+            } if generation == ipc_generation + 1 => {
+                reconnect_attempt_running = false;
+                next_reconnect_at = Instant::now() + Duration::from_secs(1);
+                if migration_disconnected_at
+                    .is_some_and(|started| started.elapsed() >= Duration::from_secs(30))
+                    && let Some(status) = &mut model.migration
+                {
+                    status.summary = format!(
+                        "Waiting for updated daemon… {message}. Run `kvn migrate` if this persists."
+                    );
+                }
+                needs_redraw = true;
+            }
+            Msg::MigrationReconnectFailed { .. } => {}
             Msg::Tick => {
                 let now = Instant::now();
                 log_navigation.expire_if_idle(now);
                 toast.expire(now);
+                if model.migration.is_some() && crate::migrations::load_ui_status()?.is_none() {
+                    return Ok(TuiExit::Reexec);
+                }
+                if migration_reconnecting && !reconnect_attempt_running && now >= next_reconnect_at
+                {
+                    reconnect_attempt_running = true;
+                    spawn_migration_reconnect(
+                        tx.clone(),
+                        replacement_client.clone(),
+                        ipc_generation + 1,
+                    );
+                }
                 let new_lines = log_tailer.tail();
                 if !new_lines.is_empty() && !log_dragging {
                     log_selection = None;
@@ -1137,9 +1247,11 @@ fn run_loop(
                 let area: ratatui::layout::Rect = terminal.size()?.into();
                 if !crate::ui::layout::logs_visible(area) && pane_focus == MainPaneFocus::Logs {
                     pane_focus = MainPaneFocus::Sources;
-                    client.send(&IpcCommand::SetMainPaneFocus {
-                        focus: MainPaneFocus::Sources,
-                    })?;
+                    if model.migration.is_none() && !migration_reconnecting {
+                        client.send(&IpcCommand::SetMainPaneFocus {
+                            focus: MainPaneFocus::Sources,
+                        })?;
+                    }
                 }
                 update_pointer_shape(terminal, model, mouse_position, &mut pointer_shape)?;
                 needs_redraw = true;
@@ -1178,7 +1290,43 @@ fn run_loop(
             })?;
         }
     }
-    Ok(())
+    Ok(TuiExit::Normal)
+}
+
+fn spawn_migration_reconnect(
+    tx: Sender<Msg>,
+    replacement: Arc<Mutex<Option<IpcClient>>>,
+    generation: u64,
+) {
+    thread::spawn(move || {
+        let result = (|| -> Result<(IpcClient, crate::app::msg::StateSnapshot)> {
+            let mut client = IpcClient::connect().context("updated daemon is not available")?;
+            client.send(&IpcCommand::Attach)?;
+            let value = client.read_snapshot_value(Duration::from_secs(2))?;
+            anyhow::ensure!(
+                snapshot_is_compatible(&value),
+                "updated daemon is not compatible with this TUI"
+            );
+            let snapshot = serde_json::from_value(value)
+                .context("Malformed state snapshot from the updated daemon")?;
+            Ok((client, snapshot))
+        })();
+        match result {
+            Ok((client, snapshot)) => {
+                *replacement.lock().unwrap() = Some(client);
+                let _ = tx.send(Msg::MigrationReconnectReady {
+                    generation,
+                    snapshot: Box::new(snapshot),
+                });
+            }
+            Err(error) => {
+                let _ = tx.send(Msg::MigrationReconnectFailed {
+                    generation,
+                    message: format!("{error:#}"),
+                });
+            }
+        }
+    });
 }
 
 fn update_pointer_shape(

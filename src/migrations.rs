@@ -131,11 +131,15 @@ impl Store {
         Ok(migrations)
     }
 
-    fn mark_applied(&self, migration: &Migration) -> Result<()> {
+    fn mark_applied_id(&self, id: &str) -> Result<()> {
+        ensure!(
+            id.ends_with(".sh") && !id.contains('/') && !id.contains('\\'),
+            "invalid migration marker ID"
+        );
         fs::create_dir_all(&self.state_dir)
             .context("failed to create migration state directory")?;
-        crate::atomic_write::write(&self.state_dir.join(&migration.id), b"applied\n")
-            .with_context(|| format!("failed to mark migration {} as applied", migration.id))
+        crate::atomic_write::write(&self.state_dir.join(id), b"applied\n")
+            .with_context(|| format!("failed to mark migration {id} as applied"))
     }
 }
 
@@ -215,27 +219,27 @@ pub fn run_pending_interactive() -> Result<bool> {
 
 fn run_interactive(store: &Store) -> Result<bool> {
     let _lock = MigrationLock::acquire()?;
+    let mut ran_any = false;
     loop {
         wait_for_pacman()?;
         let pending = store.pending()?;
         let profile_migration_required = profile_migration_required()?;
-        let existing = load_session()?;
+        let mut existing = load_session()?;
         if pending.is_empty() && !profile_migration_required && existing.is_none() {
-            return Ok(false);
+            return Ok(ran_any);
         }
-        if let Some(session) = &existing {
-            // Never download during recovery of an already frozen transaction.
-            if !matches!(
-                session.phase,
-                SessionPhase::Swapped | SessionPhase::StartingDaemon
-            ) {
-                resources::verify(&session.resources)?;
-                ensure!(
-                    session.manifest == manifest(&pending)?,
-                    "migration queue changed during an active transaction; finish recovery with its original package before preparing new resources"
-                );
-            }
-            return run_transaction(store, pending, existing, Vec::new(), prompt_retry);
+        if let Some(session) = &mut existing {
+            ensure!(
+                session
+                    .runner_version
+                    .as_deref()
+                    .is_none_or(|version| version == env!("CARGO_PKG_VERSION")),
+                "this migration transaction was started by kvn {}; restore that package version and run `kvn migrate`",
+                session.runner_version.as_deref().unwrap_or("unknown")
+            );
+            recover_and_check_queue(session, &pending)?;
+            ran_any |= run_transaction(store, pending, existing, Vec::new(), prompt_retry)?;
+            continue;
         }
         let before = manifest(&pending)?;
         let prepared = resources::prepare(store, &pending)?;
@@ -246,7 +250,7 @@ fn run_interactive(store: &Store) -> Result<bool> {
             continue;
         }
         resources::verify(&prepared)?;
-        return run_transaction(store, pending, None, prepared, prompt_retry);
+        ran_any |= run_transaction(store, pending, None, prepared, prompt_retry)?;
     }
 }
 
@@ -268,14 +272,30 @@ struct MigrationRecord {
     digest: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct FileIdentity {
+    device: u64,
+    inode: u64,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct MigrationSession {
     id: String,
+    #[serde(default)]
+    journal_version: u32,
+    #[serde(default)]
+    runner_version: Option<String>,
     phase: SessionPhase,
     manifest: Vec<MigrationRecord>,
     completed: Vec<String>,
     backup_path: Option<PathBuf>,
     candidate_path: Option<PathBuf>,
+    #[serde(default)]
+    workspace_ready: bool,
+    #[serde(default)]
+    live_identity: Option<FileIdentity>,
+    #[serde(default)]
+    candidate_identity: Option<FileIdentity>,
     #[serde(default)]
     resources: Vec<resources::PreparedMigration>,
     #[serde(default)]
@@ -347,9 +367,17 @@ fn load_session() -> Result<Option<MigrationSession>> {
         metadata.permissions().mode() & 0o077 == 0,
         "migration session exposes private paths to other users"
     );
-    Ok(Some(
-        serde_json::from_slice(&fs::read(&path)?).context("failed to parse migration session")?,
-    ))
+    let mut session: MigrationSession =
+        serde_json::from_slice(&fs::read(&path)?).context("failed to parse migration session")?;
+    if session.journal_version == 0
+        && session.backup_path.is_some()
+        && session.candidate_path.is_some()
+    {
+        // Before journal v1, paths were written only after both workspace
+        // files had been created successfully.
+        session.workspace_ready = true;
+    }
+    Ok(Some(session))
 }
 
 fn clear_session() -> Result<()> {
@@ -389,6 +417,24 @@ fn manifest(migrations: &[Migration]) -> Result<Vec<MigrationRecord>> {
         .collect()
 }
 
+fn recover_and_check_queue(session: &mut MigrationSession, pending: &[Migration]) -> Result<()> {
+    // The exchange may have succeeded before its journal update. Determine
+    // the physical state before requiring scripts/resources that are no longer
+    // needed once the candidate has become the live config.
+    recover_cutover_phase(session)?;
+    if !matches!(
+        session.phase,
+        SessionPhase::Swapped | SessionPhase::StartingDaemon
+    ) {
+        resources::verify(&session.resources)?;
+        ensure!(
+            session.manifest == manifest(pending)?,
+            "migration queue changed during an active transaction; finish recovery with its original package before preparing new resources"
+        );
+    }
+    Ok(())
+}
+
 fn run_transaction<F>(
     store: &Store,
     pending: Vec<Migration>,
@@ -402,11 +448,16 @@ where
     let expected_manifest = manifest(&pending)?;
     let mut session = existing.unwrap_or_else(|| MigrationSession {
         id: uuid::Uuid::new_v4().to_string(),
+        journal_version: 1,
+        runner_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         phase: SessionPhase::Initializing,
         manifest: expected_manifest.clone(),
         completed: Vec::new(),
         backup_path: None,
         candidate_path: None,
+        workspace_ready: false,
+        live_identity: None,
+        candidate_identity: None,
         resources: prepared,
         connection_captured: false,
         reconnect_profile: None,
@@ -414,33 +465,35 @@ where
         error: None,
     });
 
-    if !matches!(
-        session.phase,
-        SessionPhase::Swapped | SessionPhase::StartingDaemon
-    ) && session.manifest != expected_manifest
-    {
-        abandon_candidate(&session)?;
-        session.phase = SessionPhase::Initializing;
-        session.manifest = expected_manifest;
-        session.completed.clear();
-        session.backup_path = None;
-        session.candidate_path = None;
-        session.error = None;
-        session.summary = "Migration set changed; rebuilding candidate…".into();
-    }
+    recover_cutover_phase(&mut session)?;
+    ensure!(
+        matches!(
+            session.phase,
+            SessionPhase::Swapped | SessionPhase::StartingDaemon
+        ) || session.manifest == expected_manifest,
+        "migration queue changed during an active transaction; restore the package that started it and run `kvn migrate`"
+    );
     save_session(&session)?;
     resources::clear_preparation_status()?;
 
-    let mut daemon = attach_daemon_for_migration(&mut session)?;
+    let mut daemon = if matches!(
+        session.phase,
+        SessionPhase::Swapped | SessionPhase::StartingDaemon
+    ) {
+        None
+    } else {
+        attach_daemon_for_migration(&mut session, false)?
+    };
     let result = (|| -> Result<bool> {
-        recover_cutover_phase(&mut session)?;
         if matches!(
             session.phase,
             SessionPhase::Swapped | SessionPhase::StartingDaemon
         ) {
-            return finish_daemon_handoff(store, &pending, &mut session, daemon.take());
+            drop(daemon.take());
+            return finish_daemon_handoff(store, &mut session, None);
         }
 
+        recover_legacy_workspace_paths(&mut session)?;
         let workspace_invalid = workspace_needs_rebuild(&session)?;
         if workspace_invalid || source_changed(&session)? {
             abandon_candidate(&session)?;
@@ -448,6 +501,9 @@ where
             session.completed.clear();
             session.backup_path = None;
             session.candidate_path = None;
+            session.workspace_ready = false;
+            session.live_identity = None;
+            session.candidate_identity = None;
             session.error = None;
             session.summary = if workspace_invalid {
                 "Migration workspace is incomplete; rebuilding candidate…".into()
@@ -455,16 +511,16 @@ where
                 "profiles.json changed; rebuilding migration candidate…".into()
             };
             save_session(&session)?;
-            daemon = attach_daemon_for_migration(&mut session)?;
+            daemon = attach_daemon_for_migration(&mut session, false)?;
         }
 
-        if session.backup_path.is_none() {
+        if !session.workspace_ready {
             create_workspace(&mut session)?;
         }
         session.phase = SessionPhase::Running;
         session.error = None;
         save_session(&session)?;
-        send_migration_status(&mut daemon, &session, false)?;
+        update_migration_status(&mut daemon, &session)?;
 
         for migration in &pending {
             if session.completed.iter().any(|id| id == &migration.id) {
@@ -475,7 +531,7 @@ where
                 session.phase = SessionPhase::Running;
                 session.error = None;
                 save_session(&session)?;
-                send_migration_status(&mut daemon, &session, false)?;
+                update_migration_status(&mut daemon, &session)?;
                 println!(
                     "[{}/{}] {}",
                     session.completed.len() + 1,
@@ -516,7 +572,7 @@ where
                 session.phase = SessionPhase::Failed;
                 session.error = Some(message.clone());
                 save_session(&session)?;
-                send_migration_status(&mut daemon, &session, false)?;
+                update_migration_status(&mut daemon, &session)?;
                 eprintln!("\n{message}.");
                 if !retry()? {
                     anyhow::bail!("migration stopped; fix the problem and run `kvn migrate`");
@@ -524,6 +580,14 @@ where
             }
         }
 
+        ensure!(
+            !pacman_is_running(),
+            "package transaction started during migration; restore the package that started this transaction and retry"
+        );
+        ensure!(
+            session.manifest == manifest(&store.pending()?)?,
+            "migration queue changed before config cutover; restore the package that started this transaction and retry"
+        );
         if let Some(candidate) = &session.candidate_path {
             crate::config::migrate_candidate_at(candidate)?;
         }
@@ -531,11 +595,12 @@ where
         verify_source(&session)?;
         session.phase = SessionPhase::Finalizing;
         session.summary = "Switching to the migrated configuration…".into();
+        session.error = None;
         save_session(&session)?;
-        send_migration_status(&mut daemon, &session, false)?;
-        stop_daemon_for_cutover(&mut daemon, &session)?;
+        update_migration_status(&mut daemon, &session)?;
+        stop_daemon_for_cutover(&mut daemon, &mut session)?;
         swap_candidate(&mut session)?;
-        finish_daemon_handoff(store, &pending, &mut session, None)
+        finish_daemon_handoff(store, &mut session, None)
     })();
     if let Err(error) = &result {
         record_session_failure(&mut session, &mut daemon, error);
@@ -553,19 +618,26 @@ fn record_session_failure(
     if matches!(
         session.phase,
         SessionPhase::Swapped | SessionPhase::StartingDaemon
-    ) {
+    ) || (session.phase == SessionPhase::Finalizing
+        && session.live_identity.is_some()
+        && session.candidate_identity.is_some())
+    {
+        session.summary = "Migration cutover paused".into();
+        session.error = Some(format!("{error:#}"));
+        let _ = save_session(session);
+        let _ = update_migration_status(daemon, session);
         return;
     }
     if session.phase == SessionPhase::Failed && session.error.is_some() {
         let _ = save_session(session);
-        let _ = send_migration_status(daemon, session, false);
+        let _ = update_migration_status(daemon, session);
         return;
     }
     session.phase = SessionPhase::Failed;
     session.summary = "Migration paused".into();
     session.error = Some(format!("{error:#}"));
     let _ = save_session(session);
-    let _ = send_migration_status(daemon, session, false);
+    let _ = update_migration_status(daemon, session);
 }
 
 #[cfg(test)]
@@ -620,7 +692,7 @@ where
                 .status()
                 .with_context(|| format!("failed to start migration {}", migration.id))?;
             if status.success() {
-                store.mark_applied(migration)?;
+                store.mark_applied_id(&migration.id)?;
                 *completed += 1;
                 println!("      Done\n");
                 break;
@@ -636,6 +708,7 @@ where
 
 fn attach_daemon_for_migration(
     session: &mut MigrationSession,
+    require_current_version: bool,
 ) -> Result<Option<crate::ipc::IpcClient>> {
     if !crate::ipc::is_daemon_running() {
         if !session.connection_captured {
@@ -657,22 +730,29 @@ fn attach_daemon_for_migration(
             == Some(u64::from(crate::ipc::MIGRATION_PROTOCOL_VERSION)),
         "the running daemon predates transactional migrations; follow the upgrade guide first"
     );
+    if require_current_version {
+        ensure!(
+            snapshot
+                .get("daemon_version")
+                .and_then(serde_json::Value::as_str)
+                == Some(env!("CARGO_PKG_VERSION")),
+            "the daemon started after migration is not the current kvn version"
+        );
+    }
     if !session.connection_captured {
         session.reconnect_profile = reconnect_profile_from_snapshot(&snapshot);
         session.connection_captured = true;
         save_session(session)?;
     }
-    send_migration_status(&mut Some(client), session, true)
+    send_migration_status(&mut client, session, true)?;
+    Ok(Some(client))
 }
 
 fn send_migration_status(
-    client: &mut Option<crate::ipc::IpcClient>,
+    client: &mut crate::ipc::IpcClient,
     session: &MigrationSession,
     begin: bool,
-) -> Result<Option<crate::ipc::IpcClient>> {
-    let Some(mut client) = client.take() else {
-        return Ok(None);
-    };
+) -> Result<()> {
     let status = session.ui_status();
     let command = if begin {
         crate::app::msg::IpcCommand::MigrationBegin { status }
@@ -680,18 +760,43 @@ fn send_migration_status(
         crate::app::msg::IpcCommand::MigrationProgress { status }
     };
     client.send(&command)?;
-    let snapshot = client
-        .read_snapshot(Duration::from_secs(2))
+    read_migration_ack(client, &session.id, true)
         .context("daemon did not acknowledge migration state")?;
-    ensure!(
-        snapshot
-            .migration
-            .as_ref()
-            .map(|state| state.session_id.as_str())
-            == Some(session.id.as_str()),
-        "daemon rejected migration session"
-    );
-    Ok(Some(client))
+    Ok(())
+}
+
+fn read_migration_ack(
+    client: &mut crate::ipc::IpcClient,
+    session_id: &str,
+    active: bool,
+) -> Result<()> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        ensure!(!remaining.is_zero(), "daemon acknowledgement timed out");
+        let snapshot = client.read_snapshot(remaining)?;
+        let acknowledged = if active {
+            snapshot
+                .migration
+                .as_ref()
+                .is_some_and(|state| state.session_id == session_id)
+        } else {
+            snapshot.migration.is_none()
+        };
+        if acknowledged {
+            return Ok(());
+        }
+    }
+}
+
+fn update_migration_status(
+    client: &mut Option<crate::ipc::IpcClient>,
+    session: &MigrationSession,
+) -> Result<()> {
+    if let Some(client) = client {
+        send_migration_status(client, session, false)?;
+    }
+    Ok(())
 }
 
 fn create_workspace(session: &mut MigrationSession) -> Result<()> {
@@ -705,29 +810,125 @@ fn create_workspace(session: &mut MigrationSession) -> Result<()> {
     let recovery_dir = config_dir.join("recovery");
     fs::create_dir_all(&recovery_dir)?;
     fs::set_permissions(&recovery_dir, fs::Permissions::from_mode(0o700))?;
-    let stamp = chrono::Local::now().format("%Y%m%dT%H%M%S%6f");
-    let backup = recovery_dir.join(format!(
-        "profiles.json.before-migration-{stamp}-{}.json",
-        session.id
-    ));
-    let candidate = config_dir.join(format!(".profiles.json.migrating-{}", session.id));
-    ensure!(
-        !backup.exists() && !candidate.exists(),
-        "refusing to overwrite an existing migration artifact"
-    );
-    crate::atomic_write::write(&backup, &contents)?;
-    crate::atomic_write::write(&candidate, &fs::read(&backup)?)?;
-    session.backup_path = Some(backup.clone());
-    session.candidate_path = Some(candidate);
+    if session.backup_path.is_none() && session.candidate_path.is_none() {
+        let stamp = chrono::Local::now().format("%Y%m%dT%H%M%S%6f");
+        session.backup_path = Some(recovery_dir.join(format!(
+            "profiles.json.before-migration-{stamp}-{}.json",
+            session.id
+        )));
+        session.candidate_path =
+            Some(config_dir.join(format!(".profiles.json.migrating-{}", session.id)));
+        session.workspace_ready = false;
+        save_session(session)?;
+    }
+    let backup = session
+        .backup_path
+        .clone()
+        .context("migration backup path is missing")?;
+    let candidate = session
+        .candidate_path
+        .clone()
+        .context("migration candidate path is missing")?;
+    if regular_file_exists(&backup)? {
+        ensure!(
+            fs::read(&backup)? == contents,
+            "planned migration backup does not match profiles.json"
+        );
+    } else {
+        crate::atomic_write::write(&backup, &contents)?;
+    }
+    let backup_contents = fs::read(&backup)?;
+    if regular_file_exists(&candidate)? {
+        ensure!(
+            fs::read(&candidate)? == backup_contents,
+            "planned migration candidate is not pristine"
+        );
+    } else {
+        crate::atomic_write::write(&candidate, &backup_contents)?;
+    }
+    session.workspace_ready = true;
     save_session(session)?;
     println!("Saved profiles.json backup at {}", backup.display());
     Ok(())
+}
+
+fn regular_file_exists(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            ensure!(
+                metadata.file_type().is_file(),
+                "migration artifact is not a regular file: {}",
+                path.display()
+            );
+            Ok(true)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error)
+            .with_context(|| format!("failed to inspect migration artifact {}", path.display())),
+    }
+}
+
+fn recover_legacy_workspace_paths(session: &mut MigrationSession) -> Result<()> {
+    if session.backup_path.is_some() || session.candidate_path.is_some() {
+        return Ok(());
+    }
+    let live = crate::paths::profiles_path().context("failed to determine profiles path")?;
+    let config_dir = live.parent().context("profiles.json has no parent")?;
+    let candidate = config_dir.join(format!(".profiles.json.migrating-{}", session.id));
+    let recovery_dir = config_dir.join("recovery");
+    let suffix = format!("-{}.json", session.id);
+    let mut backups = Vec::new();
+    match fs::read_dir(&recovery_dir) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                if entry.file_name().to_str().is_some_and(|name| {
+                    name.starts_with("profiles.json.before-migration-") && name.ends_with(&suffix)
+                }) {
+                    backups.push(entry.path());
+                }
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("failed to inspect migration recovery backups"),
+    }
+    let candidate_exists = regular_file_exists(&candidate)?;
+    if backups.is_empty() && !candidate_exists {
+        return Ok(());
+    }
+    ensure!(
+        backups.len() == 1,
+        "legacy migration workspace is ambiguous; expected one backup for session {}",
+        session.id
+    );
+    let backup = backups.remove(0);
+    regular_file_exists(&backup)?;
+    let source = fs::read(&backup)?;
+    ensure!(
+        fs::read(&live)? == source,
+        "profiles.json changed while recovering an unjournaled migration workspace"
+    );
+    if candidate_exists {
+        ensure!(
+            fs::read(&candidate)? == source,
+            "unjournaled migration candidate is not pristine"
+        );
+    }
+    session.backup_path = Some(backup);
+    session.candidate_path = Some(candidate);
+    session.workspace_ready = candidate_exists;
+    save_session(session)
 }
 
 fn source_changed(session: &MigrationSession) -> Result<bool> {
     let (Some(backup), Some(_)) = (&session.backup_path, &session.candidate_path) else {
         return Ok(false);
     };
+    // A planned backup may already be durable even though readiness was not
+    // journaled. Compare it too, so an edited source triggers a fresh workspace.
+    if !session.workspace_ready && !regular_file_exists(backup)? {
+        return Ok(false);
+    }
     let live = crate::paths::profiles_path().context("failed to determine profiles path")?;
     Ok(fs::read(live)? != fs::read(backup)?)
 }
@@ -748,7 +949,7 @@ fn workspace_needs_rebuild(session: &MigrationSession) -> Result<bool> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     };
-    Ok(!is_regular_file(backup)? || !is_regular_file(candidate)?)
+    Ok(session.workspace_ready && (!is_regular_file(backup)? || !is_regular_file(candidate)?))
 }
 
 fn verify_source(session: &MigrationSession) -> Result<()> {
@@ -771,11 +972,13 @@ fn validate_candidate(session: &MigrationSession) -> Result<()> {
 }
 
 fn abandon_candidate(session: &MigrationSession) -> Result<()> {
-    let Some(candidate) = &session.candidate_path else {
+    let Some(candidate) = session.candidate_path.clone() else {
         return Ok(());
     };
-    if !candidate.exists() {
-        return Ok(());
+    match fs::symlink_metadata(&candidate) {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error).context("failed to inspect migration candidate"),
     }
     let abandoned = candidate.with_file_name(format!(
         "profiles.json.abandoned-migration-{}-{}.json",
@@ -791,15 +994,31 @@ fn abandon_candidate(session: &MigrationSession) -> Result<()> {
 
 fn stop_daemon_for_cutover(
     client: &mut Option<crate::ipc::IpcClient>,
-    session: &MigrationSession,
+    session: &mut MigrationSession,
 ) -> Result<()> {
+    if client.is_none() && crate::ipc::is_daemon_running() {
+        match attach_daemon_for_migration(session, false) {
+            Ok(attached) => *client = attached,
+            Err(_) if !crate::ipc::is_daemon_running() => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
     let Some(mut client) = client.take() else {
+        ensure!(
+            !crate::ipc::is_daemon_running(),
+            "daemon is running but its migration stop could not be authorized"
+        );
         return Ok(());
     };
-    client.send(&crate::app::msg::IpcCommand::MigrationStopDaemon {
+    let send_result = client.send(&crate::app::msg::IpcCommand::MigrationStopDaemon {
         session_id: session.id.clone(),
-    })?;
+    });
     drop(client);
+    if let Err(error) = send_result
+        && !crate::ipc::wait_for_daemon_exit(Duration::from_millis(250))
+    {
+        return Err(error).context("failed to request migration daemon stop");
+    }
     ensure!(
         crate::ipc::wait_for_daemon_exit(Duration::from_secs(5)),
         "daemon did not stop within 5s; config was not switched"
@@ -830,12 +1049,26 @@ fn atomic_exchange(left: &Path, right: &Path) -> Result<()> {
     Ok(())
 }
 
-fn sync_parent(path: &Path) {
-    if let Some(parent) = path.parent()
-        && let Ok(dir) = File::open(parent)
-    {
-        let _ = dir.sync_all();
-    }
+fn sync_parent(path: &Path) -> Result<()> {
+    let parent = path.parent().context("migration path has no parent")?;
+    File::open(parent)
+        .with_context(|| format!("failed to open migration directory {}", parent.display()))?
+        .sync_all()
+        .with_context(|| format!("failed to sync migration directory {}", parent.display()))
+}
+
+fn file_identity(path: &Path) -> Result<FileIdentity> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect migration file {}", path.display()))?;
+    ensure!(
+        metadata.file_type().is_file(),
+        "migration path is not a regular file: {}",
+        path.display()
+    );
+    Ok(FileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    })
 }
 
 fn swap_candidate(session: &mut MigrationSession) -> Result<()> {
@@ -845,8 +1078,11 @@ fn swap_candidate(session: &mut MigrationSession) -> Result<()> {
         return Ok(());
     };
     let live = crate::paths::profiles_path().context("failed to determine profiles path")?;
+    session.live_identity = Some(file_identity(&live)?);
+    session.candidate_identity = Some(file_identity(candidate)?);
+    save_session(session)?;
     atomic_exchange(&live, candidate)?;
-    sync_parent(&live);
+    sync_parent(&live)?;
     session.phase = SessionPhase::Swapped;
     save_session(session)?;
     session.phase = SessionPhase::StartingDaemon;
@@ -855,14 +1091,34 @@ fn swap_candidate(session: &mut MigrationSession) -> Result<()> {
 
 fn recover_cutover_phase(session: &mut MigrationSession) -> Result<()> {
     let live = crate::paths::profiles_path().context("failed to determine profiles path")?;
-    if session.phase == SessionPhase::Finalizing
-        && let (Some(candidate), Some(backup)) = (&session.candidate_path, &session.backup_path)
-        && candidate.exists()
-        && fs::read(candidate)? == fs::read(backup)?
-        && fs::read(&live)? != fs::read(backup)?
-    {
-        session.phase = SessionPhase::Swapped;
-        save_session(session)?;
+    if session.phase == SessionPhase::Finalizing {
+        if let (Some(candidate), Some(live_id), Some(candidate_id)) = (
+            session.candidate_path.as_ref(),
+            session.live_identity,
+            session.candidate_identity,
+        ) {
+            let current_live = file_identity(&live)?;
+            let current_candidate = file_identity(candidate)?;
+            if current_live == candidate_id && current_candidate == live_id {
+                session.phase = SessionPhase::Swapped;
+                save_session(session)?;
+            } else {
+                ensure!(
+                    current_live == live_id && current_candidate == candidate_id,
+                    "migration cutover state is ambiguous; profiles.json and its candidate were changed, so no automatic replacement is safe"
+                );
+            }
+        } else if let (Some(candidate), Some(backup)) =
+            (&session.candidate_path, &session.backup_path)
+            && candidate.exists()
+            && fs::read(candidate)? == fs::read(backup)?
+            && fs::read(&live)? != fs::read(backup)?
+        {
+            // Backward compatibility for journals created before inode
+            // identities were recorded. Only the old unambiguous state is accepted.
+            session.phase = SessionPhase::Swapped;
+            save_session(session)?;
+        }
     }
     if session.phase == SessionPhase::Swapped {
         // After RENAME_EXCHANGE the candidate path temporarily contains the
@@ -876,7 +1132,6 @@ fn recover_cutover_phase(session: &mut MigrationSession) -> Result<()> {
 
 fn finish_daemon_handoff(
     store: &Store,
-    pending: &[Migration],
     session: &mut MigrationSession,
     mut daemon: Option<crate::ipc::IpcClient>,
 ) -> Result<bool> {
@@ -888,22 +1143,17 @@ fn finish_daemon_handoff(
         );
     }
     if daemon.is_none() {
-        daemon = attach_daemon_for_migration(session)?;
+        daemon = attach_daemon_for_migration(session, true)?;
     }
-    for migration in pending {
-        store.mark_applied(migration)?;
+    for id in completed_manifest_ids(session)? {
+        store.mark_applied_id(id)?;
     }
     if let Some(client) = &mut daemon {
         client.send(&crate::app::msg::IpcCommand::MigrationEnd {
             session_id: session.id.clone(),
         })?;
-        let snapshot = client
-            .read_snapshot(Duration::from_secs(2))
+        read_migration_ack(client, &session.id, false)
             .context("updated daemon did not acknowledge migration completion")?;
-        ensure!(
-            snapshot.migration.is_none(),
-            "updated daemon did not release migration mode"
-        );
     }
     restore_connection(session.reconnect_profile)?;
     remove_previous_live_candidate(session)?;
@@ -916,13 +1166,34 @@ fn finish_daemon_handoff(
     Ok(true)
 }
 
+fn completed_manifest_ids(session: &MigrationSession) -> Result<Vec<&str>> {
+    ensure!(
+        session.completed.len() == session.manifest.len()
+            && session
+                .manifest
+                .iter()
+                .all(|record| session.completed.iter().any(|id| id == &record.id)),
+        "migration journal is incomplete; refusing to create completion markers"
+    );
+    let unique: HashSet<_> = session.manifest.iter().map(|record| &record.id).collect();
+    ensure!(
+        unique.len() == session.manifest.len(),
+        "migration journal contains duplicate IDs"
+    );
+    Ok(session
+        .manifest
+        .iter()
+        .map(|record| record.id.as_str())
+        .collect())
+}
+
 fn remove_previous_live_candidate(session: &MigrationSession) -> Result<()> {
     let Some(candidate) = &session.candidate_path else {
         return Ok(());
     };
     match fs::remove_file(candidate) {
         Ok(()) => {
-            sync_parent(candidate);
+            sync_parent(candidate)?;
             Ok(())
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -1037,6 +1308,19 @@ impl MigrationLock {
         let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
         ensure!(result == 0, "another kvn migration is already running");
         Ok(Self { _file: file })
+    }
+}
+
+impl Drop for MigrationLock {
+    fn drop(&mut self) {
+        // close() alone can leave the lock held by a concurrently forked child
+        // until exec closes its inherited CLOEXEC descriptor. Release it
+        // explicitly when the runner finishes, regardless of those copies.
+        #[allow(unsafe_code)]
+        let result = unsafe { libc::flock(self._file.as_raw_fd(), libc::LOCK_UN) };
+        if result != 0 {
+            tracing::warn!(error = %io::Error::last_os_error(), "Failed to release migration lock");
+        }
     }
 }
 
@@ -1160,13 +1444,22 @@ pub fn print_pending() -> Result<bool> {
 
 pub(crate) fn session_diagnostic() -> Result<Option<String>> {
     if let Some(session) = load_session()? {
-        return Ok(Some(format!(
+        let mut diagnostic = format!(
             "transactional migration {:?}: {} ({}/{})",
             session.phase,
             session.summary,
             session.completed.len(),
             session.manifest.len()
-        )));
+        );
+        if let Some(error) = session.error {
+            diagnostic.push_str(&format!(": {error}"));
+        }
+        if !session.workspace_ready
+            && (session.backup_path.is_some() || session.candidate_path.is_some())
+        {
+            diagnostic.push_str("; migration workspace preparation is incomplete");
+        }
+        return Ok(Some(diagnostic));
     }
     resources::preparation_diagnostic()
 }
@@ -1280,6 +1573,74 @@ mod tests {
     }
 
     #[test]
+    fn package_baseline_preserves_migrations_when_skipping_framework_release() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        for hook in [
+            include_str!("../pkg/arch/kvn-tui.install"),
+            include_str!("../pkg/aur/kvn-tui.install"),
+        ] {
+            for installed in ["", "0.29.0", "0.30.0", "0.31.0"] {
+                let root = tempfile::tempdir().unwrap();
+                let store = Store::fixture(root.path());
+                for (id, version) in [("100-first.sh", "0.31.0"), ("200-second.sh", "0.35.0")] {
+                    script_body(
+                        &store.migrations_dir,
+                        id,
+                        id,
+                        &format!("# kvn:introduced={version}\nexit 0"),
+                    );
+                }
+                let state = root.path().join("machine-state");
+                let hook = hook
+                    .replace("/var/lib/kvn-tui", state.to_str().unwrap())
+                    .replace(
+                        "/usr/lib/kvn-tui/migrations",
+                        store.migrations_dir.to_str().unwrap(),
+                    );
+                // CI need not have pacman/vercmp; these fixtures use plain
+                // numeric releases for which sort -V has the same ordering.
+                let command = format!(
+                    "{hook}\n{}",
+                    r#"
+vercmp() {
+    if [[ $1 == "$2" ]]; then echo 0
+    elif [[ $(printf '%s\n' "$1" "$2" | sort -V | head -n1) == "$1" ]]; then echo -1
+    else echo 1
+    fi
+}
+seed_migration_baseline "$1"
+print_migration_notice "$1"
+"#
+                );
+                let output = Command::new("bash")
+                    .args(["-euc", &command, "kvn-install-test", installed])
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let baseline = read_marker_set(&state.join("migration-baseline")).unwrap();
+                let expected: HashSet<String> = match installed {
+                    "" => ["100-first.sh", "200-second.sh"]
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                    "0.31.0" => ["100-first.sh"].into_iter().map(str::to_string).collect(),
+                    _ => HashSet::new(),
+                };
+                assert_eq!(baseline, expected, "upgrading from {installed}");
+                if !installed.is_empty() {
+                    assert!(
+                        String::from_utf8_lossy(&output.stdout).contains("kvn has new migrations")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn pending_is_ordered_and_filters_baseline_and_markers() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::fixture(root.path());
@@ -1339,11 +1700,16 @@ mod tests {
 
         let mut session = MigrationSession {
             id: uuid::Uuid::new_v4().to_string(),
+            journal_version: 1,
+            runner_version: Some(env!("CARGO_PKG_VERSION").into()),
             phase: SessionPhase::Initializing,
             manifest: vec![],
             completed: vec![],
             backup_path: None,
             candidate_path: None,
+            workspace_ready: false,
+            live_identity: None,
+            candidate_identity: None,
             resources: Vec::new(),
             connection_captured: false,
             reconnect_profile: None,
@@ -1380,7 +1746,7 @@ mod tests {
         let store = Store::fixture(root.path());
         script(&store.migrations_dir, "100-first.sh", "First");
         let migration = store.pending().unwrap().remove(0);
-        store.mark_applied(&migration).unwrap();
+        store.mark_applied_id(&migration.id).unwrap();
         assert!(store.pending().unwrap().is_empty());
     }
 
@@ -1498,11 +1864,16 @@ mod tests {
     fn workspace_session() -> MigrationSession {
         MigrationSession {
             id: uuid::Uuid::new_v4().to_string(),
+            journal_version: 1,
+            runner_version: Some(env!("CARGO_PKG_VERSION").into()),
             phase: SessionPhase::Initializing,
             manifest: vec![],
             completed: vec![],
             backup_path: None,
             candidate_path: None,
+            workspace_ready: false,
+            live_identity: None,
+            candidate_identity: None,
             resources: Vec::new(),
             connection_captured: false,
             reconnect_profile: None,
@@ -1572,6 +1943,206 @@ mod tests {
     }
 
     #[test]
+    fn inode_recovery_detects_exchange_when_file_contents_are_equal() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", root.path());
+        let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", root.path());
+        let live = crate::paths::profiles_path().unwrap();
+        fs::create_dir_all(live.parent().unwrap()).unwrap();
+        fs::write(&live, b"same config").unwrap();
+        let mut session = workspace_session();
+        create_workspace(&mut session).unwrap();
+        let candidate = session.candidate_path.as_ref().unwrap().clone();
+        session.phase = SessionPhase::Finalizing;
+        session.live_identity = Some(file_identity(&live).unwrap());
+        session.candidate_identity = Some(file_identity(&candidate).unwrap());
+        save_session(&session).unwrap();
+
+        atomic_exchange(&live, &candidate).unwrap();
+        recover_cutover_phase(&mut session).unwrap();
+
+        assert_eq!(session.phase, SessionPhase::StartingDaemon);
+    }
+
+    #[test]
+    fn cutover_recovery_rejects_unknown_file_identities() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", root.path());
+        let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", root.path());
+        let live = crate::paths::profiles_path().unwrap();
+        fs::create_dir_all(live.parent().unwrap()).unwrap();
+        fs::write(&live, b"old config").unwrap();
+        let mut session = workspace_session();
+        create_workspace(&mut session).unwrap();
+        session.phase = SessionPhase::Finalizing;
+        session.live_identity = Some(file_identity(&live).unwrap());
+        session.candidate_identity =
+            Some(file_identity(session.candidate_path.as_ref().unwrap()).unwrap());
+        fs::remove_file(&live).unwrap();
+        fs::write(&live, b"unrelated replacement").unwrap();
+
+        assert!(
+            recover_cutover_phase(&mut session)
+                .unwrap_err()
+                .to_string()
+                .contains("ambiguous")
+        );
+    }
+
+    #[test]
+    fn recovery_checks_changed_queue_only_before_exchange() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        for exchanged in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", root.path());
+            let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", root.path());
+            let live = crate::paths::profiles_path().unwrap();
+            fs::create_dir_all(live.parent().unwrap()).unwrap();
+            fs::write(&live, b"source").unwrap();
+            let mut session = workspace_session();
+            create_workspace(&mut session).unwrap();
+            let candidate = session.candidate_path.as_ref().unwrap().clone();
+            session.manifest.push(MigrationRecord {
+                id: "100-original.sh".into(),
+                summary: "Original migration".into(),
+                digest: "original".into(),
+            });
+            session.completed.push("100-original.sh".into());
+            session.phase = SessionPhase::Finalizing;
+            session.live_identity = Some(file_identity(&live).unwrap());
+            session.candidate_identity = Some(file_identity(&candidate).unwrap());
+            save_session(&session).unwrap();
+            if exchanged {
+                atomic_exchange(&live, &candidate).unwrap();
+            }
+
+            // Simulate a restart with the original script no longer installed.
+            let mut recovered = load_session().unwrap().unwrap();
+            let result = recover_and_check_queue(&mut recovered, &[]);
+            if exchanged {
+                result.unwrap();
+                assert_eq!(recovered.phase, SessionPhase::StartingDaemon);
+                assert_eq!(
+                    load_session().unwrap().unwrap().phase,
+                    SessionPhase::StartingDaemon
+                );
+            } else {
+                assert!(result.unwrap_err().to_string().contains("queue changed"));
+                assert_eq!(recovered.phase, SessionPhase::Finalizing);
+            }
+            assert_eq!(recovered.completed, vec!["100-original.sh"]);
+        }
+    }
+
+    #[test]
+    fn partial_workspace_detects_source_changes_and_preserves_backup() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        for candidate_created in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", root.path());
+            let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", root.path());
+            let live = crate::paths::profiles_path().unwrap();
+            fs::create_dir_all(live.parent().unwrap()).unwrap();
+            fs::write(&live, b"source").unwrap();
+            let mut session = workspace_session();
+            create_workspace(&mut session).unwrap();
+            let backup = session.backup_path.clone().unwrap();
+            if !candidate_created {
+                fs::remove_file(session.candidate_path.as_ref().unwrap()).unwrap();
+            }
+            session.workspace_ready = false;
+            save_session(&session).unwrap();
+            let mut recovered = load_session().unwrap().unwrap();
+            assert!(!source_changed(&recovered).unwrap());
+            fs::write(&live, b"edited source").unwrap();
+            assert!(source_changed(&recovered).unwrap());
+
+            abandon_candidate(&recovered).unwrap();
+            recovered.backup_path = None;
+            recovered.candidate_path = None;
+            create_workspace(&mut recovered).unwrap();
+            assert!(recovered.workspace_ready);
+            assert_ne!(recovered.backup_path.as_ref().unwrap(), &backup);
+            assert_eq!(fs::read(&backup).unwrap(), b"source");
+            assert_eq!(
+                fs::read(recovered.candidate_path.as_ref().unwrap()).unwrap(),
+                b"edited source"
+            );
+        }
+    }
+
+    #[test]
+    fn planned_workspace_resumes_after_each_partial_creation_step() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", root.path());
+        let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", root.path());
+        let live = crate::paths::profiles_path().unwrap();
+        fs::create_dir_all(live.parent().unwrap()).unwrap();
+        fs::write(&live, b"source").unwrap();
+        let mut session = workspace_session();
+        let recovery = live.parent().unwrap().join("recovery");
+        fs::create_dir_all(&recovery).unwrap();
+        session.backup_path = Some(recovery.join(format!(
+            "profiles.json.before-migration-test-{}.json",
+            session.id
+        )));
+        session.candidate_path = Some(
+            live.parent()
+                .unwrap()
+                .join(format!(".profiles.json.migrating-{}", session.id)),
+        );
+        save_session(&session).unwrap();
+
+        create_workspace(&mut session).unwrap();
+        assert!(session.workspace_ready);
+        assert_eq!(
+            fs::read(session.backup_path.as_ref().unwrap()).unwrap(),
+            b"source"
+        );
+        assert_eq!(
+            fs::read(session.candidate_path.as_ref().unwrap()).unwrap(),
+            b"source"
+        );
+
+        fs::remove_file(session.candidate_path.as_ref().unwrap()).unwrap();
+        session.workspace_ready = false;
+        create_workspace(&mut session).unwrap();
+        assert_eq!(
+            fs::read(session.candidate_path.as_ref().unwrap()).unwrap(),
+            b"source"
+        );
+    }
+
+    #[test]
+    fn completion_markers_are_derived_only_from_the_recorded_manifest() {
+        let mut session = workspace_session();
+        session.manifest = vec![
+            MigrationRecord {
+                id: "100-first.sh".into(),
+                summary: "First".into(),
+                digest: "one".into(),
+            },
+            MigrationRecord {
+                id: "200-second.sh".into(),
+                summary: "Second".into(),
+                digest: "two".into(),
+            },
+        ];
+        session.completed = vec!["100-first.sh".into(), "200-second.sh".into()];
+        assert_eq!(
+            completed_manifest_ids(&session).unwrap(),
+            vec!["100-first.sh", "200-second.sh"]
+        );
+        session.completed.pop();
+        assert!(completed_manifest_ids(&session).is_err());
+        session.completed.push("300-new.sh".into());
+        assert!(completed_manifest_ids(&session).is_err());
+    }
+
+    #[test]
     fn cutover_recovery_does_not_guess_when_candidate_is_unchanged() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -1627,7 +2198,7 @@ mod tests {
             SessionPhase::Swapped,
             SessionPhase::StartingDaemon,
         ] {
-            session.phase = phase;
+            session.phase = phase.clone();
             assert_eq!(
                 session.ui_status().phase,
                 crate::app::model::MigrationPhase::Finalizing
@@ -1635,6 +2206,21 @@ mod tests {
         }
         clear_session().unwrap();
         assert!(load_session().unwrap().is_none());
+    }
+
+    #[test]
+    fn legacy_journal_with_both_paths_implies_ready_workspace() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", root.path());
+        let mut session = workspace_session();
+        session.journal_version = 0;
+        session.workspace_ready = false;
+        session.backup_path = Some(root.path().join("backup"));
+        session.candidate_path = Some(root.path().join("candidate"));
+        save_session(&session).unwrap();
+
+        assert!(load_session().unwrap().unwrap().workspace_ready);
     }
 
     #[test]
@@ -1742,8 +2328,119 @@ mod tests {
 
         let first = MigrationLock::acquire().unwrap();
         assert!(MigrationLock::acquire().is_err());
+        // A duplicate refers to the same open file description, just like a
+        // descriptor temporarily inherited by a child before exec.
+        let inherited = first._file.try_clone().unwrap();
         drop(first);
         assert!(MigrationLock::acquire().is_ok());
+        drop(inherited);
+    }
+
+    #[test]
+    fn legacy_workspace_recovery_handles_partial_and_ambiguous_artifacts() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        for case in [
+            "empty",
+            "backup",
+            "both",
+            "orphan",
+            "duplicate",
+            "edited",
+            "dirty",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", root.path());
+            let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", root.path());
+            let live = crate::paths::profiles_path().unwrap();
+            fs::create_dir_all(live.parent().unwrap()).unwrap();
+            fs::write(&live, b"original").unwrap();
+            let mut session = workspace_session();
+            // An entirely absent workspace is a valid first-run state.
+            recover_legacy_workspace_paths(&mut session).unwrap();
+            assert!(session.backup_path.is_none());
+            create_workspace(&mut session).unwrap();
+            let backup = session.backup_path.take().unwrap();
+            let candidate = session.candidate_path.take().unwrap();
+            session.workspace_ready = false;
+            match case {
+                "empty" => {
+                    fs::remove_file(&backup).unwrap();
+                    fs::remove_file(&candidate).unwrap();
+                }
+                "backup" => fs::remove_file(&candidate).unwrap(),
+                "orphan" => fs::remove_file(&backup).unwrap(),
+                "duplicate" => {
+                    fs::copy(
+                        &backup,
+                        backup.with_file_name(format!(
+                            "profiles.json.before-migration-duplicate-{}.json",
+                            session.id
+                        )),
+                    )
+                    .unwrap();
+                }
+                "edited" => fs::write(&live, b"edited").unwrap(),
+                "dirty" => fs::write(&candidate, b"dirty").unwrap(),
+                "both" => {}
+                _ => unreachable!(),
+            }
+            let result = recover_legacy_workspace_paths(&mut session);
+            match case {
+                "empty" => {
+                    result.unwrap();
+                    assert!(session.backup_path.is_none());
+                }
+                "backup" | "both" => {
+                    result.unwrap();
+                    assert_eq!(session.backup_path.as_ref(), Some(&backup));
+                    assert_eq!(session.workspace_ready, case == "both");
+                    create_workspace(&mut session).unwrap();
+                    assert_eq!(fs::read(&candidate).unwrap(), b"original");
+                    recover_legacy_workspace_paths(&mut session).unwrap();
+                }
+                _ => {
+                    assert!(result.is_err(), "{case}");
+                    assert!(session.backup_path.is_none());
+                    assert!(candidate.exists());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cutover_failure_preserves_phase_and_existing_script_error() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", root.path());
+        for phase in [
+            SessionPhase::Finalizing,
+            SessionPhase::Swapped,
+            SessionPhase::StartingDaemon,
+        ] {
+            let mut session = workspace_session();
+            session.phase = phase.clone();
+            session.live_identity = Some(FileIdentity {
+                device: 1,
+                inode: 2,
+            });
+            session.candidate_identity = Some(FileIdentity {
+                device: 1,
+                inode: 3,
+            });
+            record_session_failure(&mut session, &mut None, &anyhow::anyhow!("fsync failed"));
+            let saved = load_session().unwrap().unwrap();
+            assert_eq!(saved.phase, phase);
+            assert_eq!(saved.error.as_deref(), Some("fsync failed"));
+            assert_eq!(saved.summary, "Migration cutover paused");
+        }
+        let mut session = workspace_session();
+        session.phase = SessionPhase::Failed;
+        session.error = Some("specific script error".into());
+        record_session_failure(&mut session, &mut None, &anyhow::anyhow!("generic error"));
+        assert_eq!(
+            load_session().unwrap().unwrap().error.as_deref(),
+            Some("specific script error")
+        );
     }
 
     #[test]

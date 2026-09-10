@@ -31,7 +31,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     if model.migration.is_some()
         && !matches!(
             &msg,
-            Msg::IpcCommand(_) | Msg::Resize | Msg::StateUpdate(_) | Msg::IpcReadFailed(_)
+            Msg::IpcCommand(_)
+                | Msg::Resize
+                | Msg::StateUpdate { .. }
+                | Msg::IpcReadFailed { .. }
+                | Msg::MigrationReconnectReady { .. }
+                | Msg::MigrationReconnectFailed { .. }
         )
     {
         return vec![];
@@ -270,8 +275,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             vec![]
         }
         Msg::IpcCommand(cmd) => handle_ipc_command(model, cmd),
-        Msg::StateUpdate(_) => vec![],
-        Msg::IpcReadFailed(_) => vec![],
+        Msg::StateUpdate { .. }
+        | Msg::IpcReadFailed { .. }
+        | Msg::MigrationReconnectReady { .. }
+        | Msg::MigrationReconnectFailed { .. } => vec![],
         Msg::ConfigReloaded(result) => handle_config_reloaded(model, *result),
         Msg::KillSwitchApplied { enabled, error } => {
             handle_kill_switch_applied(model, enabled, error)

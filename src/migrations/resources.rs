@@ -364,7 +364,7 @@ fn prepare_downloads_with_detection(
             git_output(&checkout, &["checkout", "--detach", &resource.commit])?;
             validate_checkout(&checkout, resource)?;
             fs::rename(checkout, &destination)?;
-            sync_parent(&destination);
+            sync_parent(&destination)?;
         }
         // Only a fully downloaded and verified set is published as ready.
         crate::atomic_write::write(

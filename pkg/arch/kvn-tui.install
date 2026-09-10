@@ -16,10 +16,10 @@ seed_migration_baseline() {
     tmp=$(mktemp "$state_dir/.migration-baseline.XXXXXX") || return 1
     for migration in "$migrations"/*.sh; do
         [[ -f "$migration" ]] || continue
-        # Transactional migrations start with v0.30.0. Older installations
-        # follow their release upgrade guides; never run historical scripts
-        # against a daemon that cannot enter transactional migration mode.
-        if [[ -z "$installed_from" ]] || (( $(vercmp "$installed_from" 0.30.0) < 0 )); then
+        # Only a fresh installation starts with every shipped migration in its
+        # baseline. Upgrades from pre-framework versions still need all later
+        # migrations; stopping an incompatible daemon is a separate prerequisite.
+        if [[ -z "$installed_from" ]]; then
             basename "$migration"
             continue
         fi
@@ -38,7 +38,6 @@ print_migration_notice() {
     local introduced
 
     [[ -d /usr/lib/kvn-tui/migrations ]] || return 0
-    (( $(vercmp "$installed_from" 0.30.0) >= 0 )) || return 0
     for migration in /usr/lib/kvn-tui/migrations/*.sh; do
         [[ -f "$migration" ]] || continue
         introduced=$(sed -n 's/^# kvn:introduced=//p' "$migration" | head -n1)
