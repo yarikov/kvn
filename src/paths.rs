@@ -42,6 +42,16 @@ pub fn config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("kvn-tui"))
 }
 
+/// Return the per-user application state directory.
+pub fn state_dir() -> Option<PathBuf> {
+    dirs::state_dir().map(|d| d.join("kvn-tui"))
+}
+
+/// Return the persisted support-prompt schedule.
+pub fn support_prompt_path() -> Option<PathBuf> {
+    state_dir().map(|d| d.join("support-prompt.json"))
+}
+
 /// Return the path to `profiles.json`.
 pub fn profiles_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("profiles.json"))

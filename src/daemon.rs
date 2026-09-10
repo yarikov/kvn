@@ -123,6 +123,7 @@ fn run_loop(
     loop {
         let msg = rx.recv()?;
         let config_before = model.config.clone();
+        let support_prompt_before = model.support_prompt.clone();
         let mut effects = update(model, msg);
         if effects
             .iter()
@@ -136,6 +137,7 @@ fn run_loop(
                 }
                 Err(error) => {
                     model.replace_config_preserving_selection(config_before);
+                    model.support_prompt = support_prompt_before;
                     let message = match crate::config::save_conflict_config(&edited) {
                         Ok(path) => format!(
                             "Failed to save config: {error:#}; unsaved version preserved at {}",
@@ -175,6 +177,7 @@ fn run_loop(
                     | Effect::ResetGeoUpdateSchedules
                     | Effect::WriteState
                     | Effect::SaveConfig
+                    | Effect::PersistSupportPrompt { .. }
                     | Effect::CommitEditedConfig { .. }
                     | Effect::UpdateSubscription { .. }
                     | Effect::BroadcastState
@@ -690,6 +693,20 @@ fn execute_daemon_effect(
             model.set_status(AppStatus::Error(
                 "Internal error: uncommitted SaveConfig effect".into(),
             ));
+        }
+        Effect::PersistSupportPrompt { previous } => {
+            let result = crate::paths::support_prompt_path()
+                .context("Failed to determine support prompt state path")
+                .and_then(|path| crate::support_prompt::save_at(&path, &model.support_prompt));
+            if let Err(error) = result {
+                model.support_prompt = previous;
+                if model.support_prompt.is_due(chrono::Utc::now()) {
+                    model.overlay = Overlay::Support;
+                }
+                let message = format!("Failed to save support prompt state: {error:#}");
+                model.set_status(AppStatus::Error(message.clone()));
+                crate::services::log_tailer::append_app_log("ERROR", &message);
+            }
         }
         Effect::SaveConfigConflict { edited, conflicts } => {
             match crate::config::save_conflict_config(&edited) {

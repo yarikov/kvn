@@ -220,6 +220,9 @@ pub enum GeoResult {
 #[serde(tag = "cmd")]
 pub enum IpcCommand {
     Attach,
+    /// Ask the daemon to show the support prompt when its persisted deadline
+    /// is due. Only a fresh TUI launch sends this command.
+    CheckSupportPrompt,
     Detach,
     Key {
         code: String,
@@ -263,6 +266,9 @@ pub enum IpcCommand {
     SetAutoConnect {
         enabled: bool,
     },
+    ResolveSupportPrompt {
+        resolution: SupportPromptResolution,
+    },
     Paste {
         text: String,
     },
@@ -294,6 +300,13 @@ pub enum IpcCommand {
     ClientError {
         message: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SupportPromptResolution {
+    RemindLater,
+    Dismiss,
 }
 
 #[cfg(test)]
@@ -341,6 +354,7 @@ mod tests {
         };
         let cmds = vec![
             IpcCommand::Attach,
+            IpcCommand::CheckSupportPrompt,
             IpcCommand::Detach,
             IpcCommand::Key {
                 code: "Char".into(),
@@ -365,6 +379,9 @@ mod tests {
             },
             IpcCommand::SetKillSwitch { enabled: true },
             IpcCommand::SetAutoConnect { enabled: false },
+            IpcCommand::ResolveSupportPrompt {
+                resolution: SupportPromptResolution::RemindLater,
+            },
             IpcCommand::Paste {
                 text: "hello".into(),
             },

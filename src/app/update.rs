@@ -92,7 +92,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.singbox_pid = Some(pid);
             model.connection = ConnectionState::Connected;
             model.connecting_profile_id = None;
-            model.overlay = Overlay::None;
             // Fresh sing-box → fresh counters. Drop the previous sample so the
             // first delta is computed against zero rather than a stale value.
             model.traffic = TrafficStats::default();
@@ -803,6 +802,12 @@ pub(super) fn commit_geo_region(model: &mut Model, region: GeoRegion) -> Vec<Eff
     let changed = old_region != Some(region);
     model.config.settings.geo_routing.set_region(region);
     let mut effects = vec![Effect::SaveConfig];
+    let previous_support = model.support_prompt.clone();
+    if model.support_prompt.schedule_initial(chrono::Utc::now()) {
+        effects.push(Effect::PersistSupportPrompt {
+            previous: previous_support,
+        });
+    }
     if changed {
         effects.push(Effect::RefreshGeoLastUpdated);
     }
@@ -2427,6 +2432,9 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
+                Effect::PersistSupportPrompt {
+                    previous: crate::support_prompt::SupportPromptState::default(),
+                },
                 Effect::RefreshGeoLastUpdated,
                 app_log_info("Geo region: cn"),
                 app_log_info("Checking geo databases..."),
@@ -2513,6 +2521,9 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
+                Effect::PersistSupportPrompt {
+                    previous: crate::support_prompt::SupportPromptState::default(),
+                },
                 Effect::RefreshGeoLastUpdated,
                 app_log_info("Geo region: global"),
                 app_log_info("Routing mode: Global")
@@ -2611,6 +2622,9 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
+                Effect::PersistSupportPrompt {
+                    previous: crate::support_prompt::SupportPromptState::default(),
+                },
                 Effect::RefreshGeoLastUpdated,
                 app_log_info("Geo region: ru"),
                 app_log_info("Checking geo databases..."),
@@ -3347,6 +3361,25 @@ mod tests {
                 Effect::SaveConfig
             ]
         );
+    }
+
+    #[test]
+    fn connected_does_not_close_open_overlay() {
+        let mut model = Model::test_new(crate::config::profile::Config::default());
+        model.connection = ConnectionState::Connecting;
+        model.overlay = Overlay::ConfirmDelete;
+
+        update(
+            &mut model,
+            Msg::Connected {
+                pid: 12345,
+                profile_id: uuid::Uuid::new_v4(),
+                attempt_id: 0,
+            },
+        );
+
+        assert_eq!(model.connection, ConnectionState::Connected);
+        assert_eq!(model.overlay, Overlay::ConfirmDelete);
     }
 
     #[test]

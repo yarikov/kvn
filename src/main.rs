@@ -18,6 +18,7 @@ mod paths;
 mod redaction;
 mod services;
 mod singbox;
+mod support_prompt;
 mod tui_client;
 mod ui;
 

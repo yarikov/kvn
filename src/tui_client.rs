@@ -1,3 +1,4 @@
+mod browser;
 mod clipboard;
 mod editor;
 mod input;
@@ -18,7 +19,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::app::model::{AppStatus, ConnectionState, Model, TrafficStats};
-use crate::app::msg::{IpcCommand, Msg};
+use crate::app::msg::{IpcCommand, Msg, SupportPromptResolution};
 use crate::ipc::IpcClient;
 use crate::services::LogTailer;
 use crate::ui::palette::to_rgb;
@@ -559,6 +560,11 @@ pub fn run() -> Result<()> {
     spawn_ticker(tx.clone());
     theme_watch::spawn_theme_watcher(tx.clone());
     client.spawn_reader(tx.clone(), 0)?;
+    // Only a normal, fresh TUI launch checks the prompt. Migration reconnects
+    // bypass this path and therefore defer it until the next invocation.
+    if initial_snapshot.migration.is_none() {
+        client.send(&IpcCommand::CheckSupportPrompt)?;
+    }
 
     let mut log_tailer = LogTailer::new(vec![
         (crate::paths::app_log_path(), "[app]"),
@@ -894,7 +900,9 @@ fn run_loop(
                 match key.code {
                     KeyCode::Char('g') => {
                         if completes_gg {
-                            if model.overlay == crate::app::model::Overlay::None
+                            if model.overlay == crate::app::model::Overlay::Support {
+                                model.support_selected = 0;
+                            } else if model.overlay == crate::app::model::Overlay::None
                                 && pane_focus == MainPaneFocus::Logs
                             {
                                 log_navigation.select_buffer_edge(
@@ -909,7 +917,11 @@ fn run_loop(
                         needs_redraw = true;
                     }
                     KeyCode::Char('q') | KeyCode::Esc => {
-                        if key.code == KeyCode::Esc
+                        if model.overlay == crate::app::model::Overlay::Support {
+                            client.send(&IpcCommand::ResolveSupportPrompt {
+                                resolution: SupportPromptResolution::RemindLater,
+                            })?;
+                        } else if key.code == KeyCode::Esc
                             && model.overlay == crate::app::model::Overlay::None
                             && pane_focus == MainPaneFocus::Logs
                             && log_navigation.is_visual()
@@ -927,6 +939,40 @@ fn run_loop(
                         let _ = client.send(&IpcCommand::Quit);
                         std::thread::sleep(Duration::from_millis(300));
                         break;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down
+                        if model.overlay == crate::app::model::Overlay::Support =>
+                    {
+                        crate::ui::nav::select_next(&mut model.support_selected, 3);
+                        needs_redraw = true;
+                    }
+                    KeyCode::Char('k') | KeyCode::Up
+                        if model.overlay == crate::app::model::Overlay::Support =>
+                    {
+                        crate::ui::nav::select_prev(&mut model.support_selected);
+                        needs_redraw = true;
+                    }
+                    KeyCode::Char('G') if model.overlay == crate::app::model::Overlay::Support => {
+                        crate::ui::nav::select_last(&mut model.support_selected, 3);
+                        needs_redraw = true;
+                    }
+                    KeyCode::Enter if model.overlay == crate::app::model::Overlay::Support => {
+                        match model.support_selected {
+                            0 => match browser::open_support_page() {
+                                Ok(()) => client.send(&IpcCommand::ResolveSupportPrompt {
+                                    resolution: SupportPromptResolution::Dismiss,
+                                })?,
+                                Err(error) => client.send(&IpcCommand::ClientError {
+                                    message: format!("Failed to open support page: {error:#}"),
+                                })?,
+                            },
+                            1 => client.send(&IpcCommand::ResolveSupportPrompt {
+                                resolution: SupportPromptResolution::RemindLater,
+                            })?,
+                            _ => client.send(&IpcCommand::ResolveSupportPrompt {
+                                resolution: SupportPromptResolution::Dismiss,
+                            })?,
+                        }
                     }
                     KeyCode::Char('h') | KeyCode::Left
                         if model.overlay == crate::app::model::Overlay::None =>
