@@ -1980,8 +1980,10 @@ print_migration_notice "$1"
         session.live_identity = Some(file_identity(&live).unwrap());
         session.candidate_identity =
             Some(file_identity(session.candidate_path.as_ref().unwrap()).unwrap());
-        fs::remove_file(&live).unwrap();
-        fs::write(&live, b"unrelated replacement").unwrap();
+        // Create the replacement before unlinking the live file so its inode
+        // cannot be reused, which would leave the recorded identity unchanged.
+        crate::atomic_write::write(&live, b"unrelated replacement").unwrap();
+        assert_ne!(Some(file_identity(&live).unwrap()), session.live_identity);
 
         assert!(
             recover_cutover_phase(&mut session)
@@ -1989,6 +1991,8 @@ print_migration_notice "$1"
                 .to_string()
                 .contains("ambiguous")
         );
+        assert_eq!(session.phase, SessionPhase::Finalizing);
+        assert_eq!(fs::read(&live).unwrap(), b"unrelated replacement");
     }
 
     #[test]
