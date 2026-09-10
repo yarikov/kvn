@@ -12,6 +12,8 @@
 
 ![kvn screenshot](assets/screenshot.webp)
 
+> If you find `kvn` useful, consider [supporting its development](https://web.tribute.tg/d/QbU) 🚀
+
 ---
 
 ## Contents
