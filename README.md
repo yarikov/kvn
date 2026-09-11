@@ -245,8 +245,8 @@ when a required dependency is unusable or a required migration is pending.
 
 | Key | Action |
 |-----|--------|
-| `h` / `←` | Focus the previous pane |
-| `l` / `→` | Focus the next pane |
+| `Ctrl+h` / `←` | Focus the previous pane |
+| `Ctrl+l` / `→` | Focus the next pane |
 | `j` / `↓` | Move or scroll down |
 | `k` / `↑` | Move or scroll up |
 | `gg` / `G` | Go to the first / last item |

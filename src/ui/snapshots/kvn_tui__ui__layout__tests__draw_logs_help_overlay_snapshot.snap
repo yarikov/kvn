@@ -4,22 +4,22 @@ expression: "snapshot_terminal(&model, 100, 24)"
 ---
 ┌ Traffic ─────────────────────────────────────────────────────────────────────────────────────────┐
 │ ↑ 0.0 KB/s  ↓┌────────────────────────────────────────────────────────────────────┐              │
-└──────────────│ gg/G         Go to first / last                                    │──────────────┘
+└──────────────│ gg/G            Go to first / last                                 │──────────────┘
 ┌ Profiles ────│                                                                    │──────────────┐
 │ No sources. P│ Logs                                                               │              │
-│subscription U│ y            Yank selected log(s)                                  │              │
-│              │ Shift+V      Select multiple logs                                  │              │
-│              │ Esc          Cancel log selection                                  │              │
+│subscription U│ y               Yank selected log(s)                               │              │
+│              │ Shift+V         Select multiple logs                               │              │
+│              │ Esc             Cancel log selection                               │              │
 │              │                                                                    │              │
 │              │ Profiles                                                           │              │
-│              │ Enter        Connect selected profile                              │              │
-│              │ e            Open profiles.json in $EDITOR                         │              │
-│              │ y            Yank selected source                                  │              │
-│              │ p            Paste source from clipboard                           │              │
-│              │ d            Delete selected source                                │              │
-│              │ u            Update subscription or geo                            │              │
-│              │ i/I          Cycle subscription / geo auto-update                  │              │
-│              │ t/T          Test selected / all profiles                          │              │
+│              │ Enter           Connect selected profile                           │              │
+│              │ e               Open profiles.json in $EDITOR                      │              │
+│              │ y               Yank selected source                               │              │
+│              │ p               Paste source from clipboard                        │              │
+│              │ d               Delete selected source                             │              │
+│              │ u               Update subscription or geo                         │              │
+│              │ i/I             Cycle subscription / geo auto-update               │              │
+│              │ t/T             Test selected / all profiles                       │              │
 │              │                                                                    │              │
 │              │ Connection                                                         │              │
 │              │                                                                    │              │

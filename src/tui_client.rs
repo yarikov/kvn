@@ -45,6 +45,7 @@ pub(crate) const OSC_POINTER_DEFAULT: &str = "\x1b]22;\x1b\\";
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(300);
 const TOAST_INFO_DURATION: Duration = Duration::from_secs(3);
 const TOAST_ERROR_DURATION: Duration = Duration::from_secs(7);
+const DEPRECATED_PANE_FOCUS_MESSAGE: &str = "h/l pane switching is deprecated; use Ctrl+h/Ctrl+l";
 
 /// Presentation-only lifetime for daemon status events. Keeping the deadline
 /// here avoids leaking wall-clock concerns into the shared TEA model.
@@ -73,6 +74,12 @@ impl ToastState {
             return true;
         }
         false
+    }
+
+    fn show_info(&mut self, message: impl Into<String>, now: Instant) {
+        self.status = Some(AppStatus::Info(message.into()));
+        self.expires_at = Some(now + TOAST_INFO_DURATION);
+        self.show_over_overlay = false;
     }
 
     fn observe(&mut self, revision: u64, status: AppStatus, now: Instant) -> Option<u64> {
@@ -895,6 +902,7 @@ fn run_loop(
                     }
                 }
                 let completes_gg = go_first_sequence.feed(&key.code);
+                let requested_pane_focus = pane_focus_shortcut(&key);
                 let mut forward_key = || {
                     let (code, ch) = match key.code {
                         KeyCode::Char(c) => ("Char".to_string(), Some(c)),
@@ -984,18 +992,26 @@ fn run_loop(
                             })?,
                         }
                     }
-                    KeyCode::Char('h') | KeyCode::Left
-                        if model.overlay == crate::app::model::Overlay::None =>
+                    _ if model.overlay == crate::app::model::Overlay::None
+                        && requested_pane_focus
+                            .is_some_and(|shortcut| shortcut.focus == MainPaneFocus::Sources) =>
                     {
+                        if requested_pane_focus.is_some_and(|shortcut| shortcut.deprecated) {
+                            toast.show_info(DEPRECATED_PANE_FOCUS_MESSAGE, Instant::now());
+                        }
                         pane_focus = MainPaneFocus::Sources;
                         client.send(&IpcCommand::SetMainPaneFocus {
                             focus: MainPaneFocus::Sources,
                         })?;
                         needs_redraw = true;
                     }
-                    KeyCode::Char('l') | KeyCode::Right
-                        if model.overlay == crate::app::model::Overlay::None =>
+                    _ if model.overlay == crate::app::model::Overlay::None
+                        && requested_pane_focus
+                            .is_some_and(|shortcut| shortcut.focus == MainPaneFocus::Logs) =>
                     {
+                        if requested_pane_focus.is_some_and(|shortcut| shortcut.deprecated) {
+                            toast.show_info(DEPRECATED_PANE_FOCUS_MESSAGE, Instant::now());
+                        }
                         let area: ratatui::layout::Rect = terminal.size()?.into();
                         if crate::ui::layout::logs_visible(area) {
                             pane_focus = MainPaneFocus::Logs;
@@ -1397,6 +1413,32 @@ fn spawn_migration_reconnect(
     });
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PaneFocusShortcut {
+    focus: crate::app::model::MainPaneFocus,
+    deprecated: bool,
+}
+
+fn pane_focus_shortcut(key: &crossterm::event::KeyEvent) -> Option<PaneFocusShortcut> {
+    use crate::app::model::MainPaneFocus;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let (focus, deprecated) = match key.code {
+        KeyCode::Left => (MainPaneFocus::Sources, false),
+        KeyCode::Right => (MainPaneFocus::Logs, false),
+        KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            (MainPaneFocus::Sources, false)
+        }
+        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            (MainPaneFocus::Logs, false)
+        }
+        KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => (MainPaneFocus::Sources, true),
+        KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => (MainPaneFocus::Logs, true),
+        _ => return None,
+    };
+    Some(PaneFocusShortcut { focus, deprecated })
+}
+
 fn update_pointer_shape(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     model: &Model,
@@ -1512,6 +1554,65 @@ fn spawn_ticker(tx: Sender<Msg>) {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn pane_focus_shortcuts_mark_only_plain_h_and_l_deprecated() {
+        use crate::app::model::MainPaneFocus;
+
+        assert_eq!(
+            pane_focus_shortcut(&KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL)),
+            Some(PaneFocusShortcut {
+                focus: MainPaneFocus::Sources,
+                deprecated: false,
+            })
+        );
+        assert_eq!(
+            pane_focus_shortcut(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+            Some(PaneFocusShortcut {
+                focus: MainPaneFocus::Logs,
+                deprecated: false,
+            })
+        );
+        assert_eq!(
+            pane_focus_shortcut(&KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE)),
+            Some(PaneFocusShortcut {
+                focus: MainPaneFocus::Sources,
+                deprecated: true,
+            })
+        );
+        assert_eq!(
+            pane_focus_shortcut(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE)),
+            Some(PaneFocusShortcut {
+                focus: MainPaneFocus::Logs,
+                deprecated: true,
+            })
+        );
+        assert_eq!(
+            pane_focus_shortcut(&KeyEvent::new(KeyCode::Char('h'), KeyModifiers::ALT)),
+            None
+        );
+    }
+
+    #[test]
+    fn arrow_keys_still_focus_main_panes() {
+        use crate::app::model::MainPaneFocus;
+
+        assert_eq!(
+            pane_focus_shortcut(&KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+            Some(PaneFocusShortcut {
+                focus: MainPaneFocus::Sources,
+                deprecated: false,
+            })
+        );
+        assert_eq!(
+            pane_focus_shortcut(&KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+            Some(PaneFocusShortcut {
+                focus: MainPaneFocus::Logs,
+                deprecated: false,
+            })
+        );
+    }
 
     #[test]
     fn docs_preview_shows_realistic_logs_and_kill_switch_toast() {
@@ -1736,6 +1837,35 @@ mod tests {
         );
         assert_eq!(toast.current().map(AppStatus::text), Some("Saved"));
         assert!(toast.expires_at.unwrap() > first_deadline);
+    }
+
+    #[test]
+    fn local_info_toast_restarts_its_lifetime_without_changing_daemon_revision() {
+        let start = Instant::now();
+        let mut toast = ToastState::new(4);
+
+        toast.show_info(DEPRECATED_PANE_FOCUS_MESSAGE, start);
+        let first_deadline = toast.expires_at.unwrap();
+        toast.show_info(
+            DEPRECATED_PANE_FOCUS_MESSAGE,
+            start + Duration::from_secs(1),
+        );
+        assert_eq!(
+            toast.observe(
+                4,
+                AppStatus::Info("unchanged daemon status".into()),
+                start + Duration::from_secs(2),
+            ),
+            None
+        );
+
+        assert_eq!(toast.last_revision, 4);
+        assert_eq!(
+            toast.current().map(AppStatus::text),
+            Some(DEPRECATED_PANE_FOCUS_MESSAGE)
+        );
+        assert!(toast.expires_at.unwrap() > first_deadline);
+        assert!(!toast.show_over_overlay());
     }
 
     #[test]
