@@ -36,7 +36,7 @@ pub struct Cli {
 
 /// Warn when the legacy executable name is used for a CLI invocation.
 ///
-/// A plain TUI launch and the systemd-compatible daemon invocation stay quiet.
+/// Plain TUI launches and machine-facing integrations stay quiet.
 pub fn warn_if_legacy_invocation(args: &[OsString]) {
     if !should_warn_for_legacy_invocation(args) {
         return;
@@ -64,8 +64,11 @@ fn should_warn_for_legacy_invocation(args: &[OsString]) -> bool {
     let is_legacy = Path::new(executable)
         .file_name()
         .is_some_and(|name| name == OsStr::new("kvn-tui"));
-    let is_quiet_invocation =
-        args.len() == 1 || (args.len() == 2 && args.get(1).is_some_and(|arg| arg == "--daemon"));
+    let is_quiet_invocation = args.len() == 1
+        || (args.len() == 2
+            && args
+                .get(1)
+                .is_some_and(|arg| arg == "--daemon" || arg == "--waybar-status"));
 
     is_legacy && !is_quiet_invocation
 }
@@ -899,6 +902,7 @@ esac
             &["kvn", "--version"],
             &["kvn-tui"],
             &["kvn-tui", "--daemon"],
+            &["kvn-tui", "--waybar-status"],
         ] {
             assert!(!warns(args), "unexpected warning for {args:?}");
         }
