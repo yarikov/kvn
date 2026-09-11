@@ -960,7 +960,7 @@ fn run_loop(
                         match model.support_selected {
                             0 => match browser::open_support_page() {
                                 Ok(()) => client.send(&IpcCommand::ResolveSupportPrompt {
-                                    resolution: SupportPromptResolution::Dismiss,
+                                    resolution: SupportPromptResolution::Supported,
                                 })?,
                                 Err(error) => client.send(&IpcCommand::ClientError {
                                     message: format!("Failed to open support page: {error:#}"),

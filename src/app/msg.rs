@@ -306,6 +306,7 @@ pub enum IpcCommand {
 #[serde(rename_all = "snake_case")]
 pub enum SupportPromptResolution {
     RemindLater,
+    Supported,
     Dismiss,
 }
 
@@ -381,6 +382,9 @@ mod tests {
             IpcCommand::SetAutoConnect { enabled: false },
             IpcCommand::ResolveSupportPrompt {
                 resolution: SupportPromptResolution::RemindLater,
+            },
+            IpcCommand::ResolveSupportPrompt {
+                resolution: SupportPromptResolution::Supported,
             },
             IpcCommand::Paste {
                 text: "hello".into(),

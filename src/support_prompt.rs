@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub const INITIAL_DELAY_DAYS: i64 = 7;
 pub const REMINDER_DELAY_DAYS: i64 = 30;
+pub const SUPPORTED_DELAY_DAYS: i64 = 180;
 pub const SUPPORT_URL: &str = "https://web.tribute.tg/d/QbU";
 
 /// Small, non-config UX state. Keeping it outside profiles.json avoids making
@@ -36,6 +37,11 @@ impl SupportPromptState {
     pub fn remind_later(&mut self, now: DateTime<Utc>) {
         self.dismissed = false;
         self.next_show_at = Some(now + Duration::days(REMINDER_DELAY_DAYS));
+    }
+
+    pub fn supported(&mut self, now: DateTime<Utc>) {
+        self.dismissed = false;
+        self.next_show_at = Some(now + Duration::days(SUPPORTED_DELAY_DAYS));
     }
 
     pub fn dismiss(&mut self) {
@@ -113,6 +119,15 @@ mod tests {
         state.remind_later(now);
         assert!(!state.is_due(now + Duration::days(30) - Duration::seconds(1)));
         assert!(state.is_due(now + Duration::days(30)));
+    }
+
+    #[test]
+    fn support_moves_deadline_six_months() {
+        let now = now();
+        let mut state = SupportPromptState::default();
+        state.supported(now);
+        assert!(!state.is_due(now + Duration::days(180) - Duration::seconds(1)));
+        assert!(state.is_due(now + Duration::days(180)));
     }
 
     #[test]

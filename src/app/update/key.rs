@@ -698,6 +698,9 @@ pub(super) fn handle_ipc_command(
                     crate::app::msg::SupportPromptResolution::RemindLater => {
                         model.support_prompt.remind_later(chrono::Utc::now());
                     }
+                    crate::app::msg::SupportPromptResolution::Supported => {
+                        model.support_prompt.supported(chrono::Utc::now());
+                    }
                     crate::app::msg::SupportPromptResolution::Dismiss => {
                         model.support_prompt.dismiss();
                     }
@@ -1324,6 +1327,28 @@ mod tests {
         );
         assert!(model.support_prompt.dismissed);
         assert_eq!(model.support_prompt.next_show_at, None);
+        assert!(matches!(effects[0], Effect::PersistSupportPrompt { .. }));
+    }
+
+    #[test]
+    fn supported_prompt_is_scheduled_six_months_out() {
+        use crate::app::msg::SupportPromptResolution;
+
+        let mut model = crate::test_helpers::model_with_profiles(vec![]);
+        model.overlay = Overlay::Support;
+        let effects = handle_ipc_command(
+            &mut model,
+            IpcCommand::ResolveSupportPrompt {
+                resolution: SupportPromptResolution::Supported,
+            },
+        );
+
+        assert_eq!(model.overlay, Overlay::None);
+        assert!(!model.support_prompt.dismissed);
+        assert!(
+            model.support_prompt.next_show_at
+                > Some(chrono::Utc::now() + chrono::Duration::days(179))
+        );
         assert!(matches!(effects[0], Effect::PersistSupportPrompt { .. }));
     }
     fn enter() -> KeyEvent {
