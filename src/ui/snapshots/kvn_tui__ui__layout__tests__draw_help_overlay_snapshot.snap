@@ -6,37 +6,37 @@ expression: "snapshot_terminal(&model, 80, 40)"
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections         │
 └───────────┌──────────────────────────────────────────────────────┐───────────┘
 ┌ Profiles ─│ Navigation                                           │───────────┐
-│ No sources│ h/l, ←/→     Focus panes                             │ipboard.   │
-│           │ j/k, ↑/↓     Move or scroll                          │           │
-│           │ gg/G         Go to first / last                      │           │
+│ No sources│ Ctrl+h/l, ←/→   Focus panes                          │ipboard.   │
+│           │ j/k, ↑/↓        Move or scroll                       │           │
+│           │ gg/G            Go to first / last                   │           │
 │           │                                                      │           │
 │           │ Profiles                                             │           │
-│           │ Enter        Connect selected profile                │           │
-│           │ e            Open profiles.json in $EDITOR           │           │
-│           │ y            Yank selected source                    │           │
-│           │ p            Paste source from clipboard             │           │
-│           │ d            Delete selected source                  │           │
-│           │ u            Update subscription or geo              │           │
-│           │ i/I          Cycle subscription / geo auto-update    │           │
-│           │ t/T          Test selected / all profiles            │           │
+│           │ Enter           Connect selected profile             │           │
+│           │ e               Open profiles.json in $EDITOR        │           │
+│           │ y               Yank selected source                 │           │
+│           │ p               Paste source from clipboard          │           │
+│           │ d               Delete selected source               │           │
+│           │ u               Update subscription or geo           │           │
+│           │ i/I             Cycle subscription / geo auto-update │           │
+│           │ t/T             Test selected / all profiles         │           │
 │           │                                                      │           │
 │           │ Logs                                                 │           │
-│           │ y            Yank selected log(s)                    │           │
-│           │ Shift+V      Select multiple logs                    │           │
-│           │ Esc          Cancel log selection                    │           │
+│           │ y               Yank selected log(s)                 │           │
+│           │ Shift+V         Select multiple logs                 │           │
+│           │ Esc             Cancel log selection                 │           │
 │           │                                                      │           │
 │           │ Connection                                           │           │
-│           │ r            Reconnect                               │           │
-│           │ s            Disconnect                              │           │
-│           │ a            Toggle auto-connect                     │           │
-│           │ K            Toggle kill switch                      │           │
+│           │ r               Reconnect                            │           │
+│           │ s               Disconnect                           │           │
+│           │ a               Toggle auto-connect                  │           │
+│           │ K               Toggle kill switch                   │           │
 │           │                                                      │           │
 │           │ Settings                                             │           │
-│           │ m            Routing mode                            │           │
-│           │ o            Geo region                              │           │
-│           │ D            DNS settings                            │           │
-│           │ S            Service routing                         │           │
-│           │ C            Theme picker                            │           │
+│           │ m               Routing mode                         │           │
+│           │ o               Geo region                           │           │
+│           │ D               DNS settings                         │           │
+│           │ S               Service routing                      │           │
+│           │ C               Theme picker                         │           │
 │           │                                                      │           │
 │           │        j/k scroll · gg/G edges · q/Esc/? back        │           │
 │           └──────────────────────────────────────────────────────┘           │
