@@ -1,8 +1,6 @@
 # Theme gallery
 
-kvn includes 22 palettes derived from Omarchy themes. Press `C` in the TUI to preview and select one. The `omarchy` setting follows the active system theme and is not shown below because its appearance depends on the local installation.
-
-Each screenshot uses the same side-effect-free demonstration state; no VPN connection, user configuration, or network access is involved.
+kvn includes 22 palettes derived from Omarchy themes. Press `C` in the TUI to preview and select one.
 
 ## Catppuccin
 
