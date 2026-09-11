@@ -220,6 +220,11 @@ pub enum GeoResult {
 #[serde(tag = "cmd")]
 pub enum IpcCommand {
     Attach,
+    /// Clear an error after a TUI rendered its toast. The revision prevents a
+    /// delayed client from clearing a newer error.
+    ClearErrorStatus {
+        status_revision: u64,
+    },
     /// Ask the daemon to show the support prompt when its persisted deadline
     /// is due. Only a fresh TUI launch sends this command.
     CheckSupportPrompt,
@@ -355,6 +360,7 @@ mod tests {
         };
         let cmds = vec![
             IpcCommand::Attach,
+            IpcCommand::ClearErrorStatus { status_revision: 7 },
             IpcCommand::CheckSupportPrompt,
             IpcCommand::Detach,
             IpcCommand::Key {

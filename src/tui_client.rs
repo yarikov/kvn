@@ -65,25 +65,28 @@ impl ToastState {
         }
     }
 
-    fn show_initial_error(&mut self, status: AppStatus, now: Instant) {
+    fn show_initial_error(&mut self, status: AppStatus, now: Instant) -> bool {
         if matches!(status, AppStatus::Error(_)) {
             self.status = Some(status);
             self.expires_at = Some(now + TOAST_ERROR_DURATION);
             self.show_over_overlay = true;
+            return true;
         }
+        false
     }
 
-    fn observe(&mut self, revision: u64, status: AppStatus, now: Instant) {
+    fn observe(&mut self, revision: u64, status: AppStatus, now: Instant) -> Option<u64> {
         if revision == self.last_revision {
-            return;
+            return None;
         }
         self.last_revision = revision;
         if status.text().is_empty() || status.text() == "Press ? for help" {
             self.status = None;
             self.expires_at = None;
             self.show_over_overlay = false;
-            return;
+            return None;
         }
+        let error_revision = matches!(status, AppStatus::Error(_)).then_some(revision);
         let duration = if matches!(status, AppStatus::Error(_)) {
             TOAST_ERROR_DURATION
         } else {
@@ -92,6 +95,7 @@ impl ToastState {
         self.status = Some(status);
         self.expires_at = Some(now + duration);
         self.show_over_overlay = false;
+        error_revision
     }
 
     fn expire(&mut self, now: Instant) {
@@ -732,7 +736,7 @@ fn run_loop(
     let mut log_navigation = LogNavigation::default();
     let mut go_first_sequence = GoFirstSequence::default();
     let mut toast = ToastState::new(model.status_revision);
-    toast.show_initial_error(model.status.clone(), Instant::now());
+    let clear_initial_error = toast.show_initial_error(model.status.clone(), Instant::now());
     // Initial draw
     terminal.draw(|f| {
         crate::ui::layout::draw_with_toast(
@@ -745,6 +749,11 @@ fn run_loop(
             toast.show_over_overlay(),
         )
     })?;
+    if clear_initial_error {
+        client.send(&IpcCommand::ClearErrorStatus {
+            status_revision: model.status_revision,
+        })?;
+    }
     let mut pointer_shape = PointerShape::Default;
     let mut mouse_position: Option<(u16, u16)> = None;
     let mut click_tracker = ClickTracker::default();
@@ -753,6 +762,7 @@ fn run_loop(
     let mut ipc_generation = 0_u64;
     let mut migration_reconnecting = false;
     let mut reconnect_attempt_running = false;
+    let mut pending_error_status_clear = None;
     let mut next_reconnect_at = Instant::now();
     let mut migration_disconnected_at = None;
 
@@ -1179,7 +1189,8 @@ fn run_loop(
                 } else {
                     AppStatus::Info(snapshot.status.clone())
                 };
-                toast.observe(snapshot.status_revision, toast_status, Instant::now());
+                pending_error_status_clear =
+                    toast.observe(snapshot.status_revision, toast_status, Instant::now());
                 apply_snapshot(model, snapshot);
                 if model.migration.is_some() {
                     model.overlay = crate::app::model::Overlay::Migration;
@@ -1235,6 +1246,14 @@ fn run_loop(
                 {
                     snapshot.migration = Some(status);
                 }
+                let toast_status = if snapshot.status_is_error {
+                    AppStatus::Error(snapshot.status.clone())
+                } else {
+                    AppStatus::Info(snapshot.status.clone())
+                };
+                pending_error_status_clear = toast
+                    .show_initial_error(toast_status, Instant::now())
+                    .then_some(snapshot.status_revision);
                 apply_snapshot(model, snapshot);
                 if model.migration.is_some() {
                     model.overlay = crate::app::model::Overlay::Migration;
@@ -1334,6 +1353,9 @@ fn run_loop(
                     toast.show_over_overlay(),
                 )
             })?;
+            if let Some(status_revision) = pending_error_status_clear.take() {
+                client.send(&IpcCommand::ClearErrorStatus { status_revision })?;
+            }
         }
     }
     Ok(TuiExit::Normal)
@@ -1702,7 +1724,10 @@ mod tests {
     fn toast_state_treats_repeated_text_as_a_new_revision() {
         let start = Instant::now();
         let mut toast = ToastState::new(4);
-        toast.observe(5, AppStatus::Info("Saved".into()), start);
+        assert_eq!(
+            toast.observe(5, AppStatus::Info("Saved".into()), start),
+            None
+        );
         let first_deadline = toast.expires_at.unwrap();
         toast.observe(
             6,
@@ -1717,12 +1742,18 @@ mod tests {
     fn toast_state_ignores_duplicate_snapshots_and_expires() {
         let start = Instant::now();
         let mut toast = ToastState::new(2);
-        toast.observe(3, AppStatus::Error("Failed".into()), start);
+        assert_eq!(
+            toast.observe(3, AppStatus::Error("Failed".into()), start),
+            Some(3)
+        );
         let deadline = toast.expires_at.unwrap();
-        toast.observe(
-            3,
-            AppStatus::Info("stale".into()),
-            start + Duration::from_secs(1),
+        assert_eq!(
+            toast.observe(
+                3,
+                AppStatus::Info("stale".into()),
+                start + Duration::from_secs(1),
+            ),
+            None
         );
         assert_eq!(toast.current().map(AppStatus::text), Some("Failed"));
         toast.expire(deadline);
@@ -1744,11 +1775,11 @@ mod tests {
         let start = Instant::now();
         let mut toast = ToastState::new(2);
 
-        toast.show_initial_error(AppStatus::Info("Connected".into()), start);
+        assert!(!toast.show_initial_error(AppStatus::Info("Connected".into()), start));
         assert!(toast.current().is_none());
         assert!(!toast.show_over_overlay());
 
-        toast.show_initial_error(AppStatus::Error("Startup failed".into()), start);
+        assert!(toast.show_initial_error(AppStatus::Error("Startup failed".into()), start));
         assert_eq!(toast.current().map(AppStatus::text), Some("Startup failed"));
         assert!(toast.show_over_overlay());
 

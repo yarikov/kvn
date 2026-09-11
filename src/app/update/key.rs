@@ -524,6 +524,10 @@ pub(super) fn handle_ipc_command(
 ) -> Vec<Effect> {
     use crate::app::msg::IpcCommand;
     match cmd {
+        IpcCommand::ClearErrorStatus { status_revision } => {
+            model.clear_error_status(status_revision);
+            return finish_ipc_effects(vec![]);
+        }
         IpcCommand::MigrationBegin { status } => {
             if model
                 .migration
@@ -584,6 +588,7 @@ pub(super) fn handle_ipc_command(
     }
     let effects = match cmd {
         IpcCommand::Attach => vec![],
+        IpcCommand::ClearErrorStatus { .. } => unreachable!("handled above"),
         IpcCommand::CheckSupportPrompt => {
             if model.overlay == Overlay::None
                 && model.config.settings.geo_routing.current_region.is_some()

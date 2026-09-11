@@ -1606,6 +1606,60 @@ mod tests {
     }
 
     #[test]
+    fn ipc_error_status_clear_is_revision_safe() {
+        let mut model = model_with_profiles(vec![]);
+        model.set_status(AppStatus::Error("first".into()));
+        let first_revision = model.status_revision;
+
+        handle_ipc_command(
+            &mut model,
+            crate::app::msg::IpcCommand::ClearErrorStatus {
+                status_revision: first_revision.wrapping_sub(1),
+            },
+        );
+        assert_eq!(model.status, AppStatus::Error("first".into()));
+
+        handle_ipc_command(
+            &mut model,
+            crate::app::msg::IpcCommand::ClearErrorStatus {
+                status_revision: first_revision,
+            },
+        );
+        assert_eq!(model.status, AppStatus::Info(String::new()));
+        assert_eq!(model.status_revision, first_revision);
+
+        model.set_status(AppStatus::Error("first".into()));
+        assert_eq!(model.status_revision, first_revision + 1);
+        assert_eq!(model.status, AppStatus::Error("first".into()));
+    }
+
+    #[test]
+    fn ipc_error_status_can_be_cleared_during_migration() {
+        let mut model = model_with_profiles(vec![]);
+        model.set_status(AppStatus::Error("migration failed".into()));
+        model.migration = Some(crate::app::model::MigrationStatus {
+            session_id: "session".into(),
+            phase: crate::app::model::MigrationPhase::Running,
+            completed: 0,
+            total: 1,
+            summary: "Migrating".into(),
+            error: None,
+        });
+        let revision = model.status_revision;
+
+        let effects = handle_ipc_command(
+            &mut model,
+            crate::app::msg::IpcCommand::ClearErrorStatus {
+                status_revision: revision,
+            },
+        );
+
+        assert_eq!(model.status, AppStatus::Info(String::new()));
+        assert_eq!(model.status_revision, revision);
+        assert_eq!(effects, vec![Effect::BroadcastState]);
+    }
+
+    #[test]
     fn ipc_command_client_error_sets_status_and_logs() {
         let mut model = model_with_profiles(vec![]);
         let effects = handle_ipc_command(

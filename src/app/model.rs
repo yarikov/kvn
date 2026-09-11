@@ -355,6 +355,17 @@ impl Model {
         self.status_revision = self.status_revision.wrapping_add(1);
     }
 
+    /// Clear an error after its toast was rendered without creating another
+    /// status event. A matching revision prevents a delayed client from
+    /// clearing a newer error.
+    pub fn clear_error_status(&mut self, status_revision: u64) -> bool {
+        if self.status_revision != status_revision || !matches!(self.status, AppStatus::Error(_)) {
+            return false;
+        }
+        self.status = AppStatus::Info(String::new());
+        true
+    }
+
     /// Initialize application state and load persisted configuration.
     ///
     /// Load and validation errors fall back to [`Config::default`] — the
@@ -1177,6 +1188,20 @@ mod tests {
         assert_eq!(model.status.text(), "oops");
         assert_eq!(model.logs.back().unwrap(), "oops");
         assert_eq!(model.status_revision, initial_revision + 2);
+    }
+
+    #[test]
+    fn clear_error_status_requires_the_current_revision() {
+        let mut model = Model::test_new(Config::default());
+        model.set_status(AppStatus::Error("first".into()));
+        let revision = model.status_revision;
+
+        assert!(!model.clear_error_status(revision.wrapping_sub(1)));
+        assert_eq!(model.status.text(), "first");
+        assert!(model.clear_error_status(revision));
+        assert_eq!(model.status, AppStatus::Info(String::new()));
+        assert_eq!(model.status_revision, revision);
+        assert!(!model.clear_error_status(revision));
     }
 
     #[test]
