@@ -89,6 +89,12 @@ See the `release` skill in `.agents/skills/release/SKILL.md` for the full versio
 
 ## Code Conventions
 
+### Comments and Self-Documenting Code
+- Do not add line, block, or documentation comments to new or modified code.
+- Make code self-documenting through precise names, small focused functions, explicit types, and clear structure.
+- If intent is unclear without a comment, refactor the code until the intent is evident instead of explaining it with a comment.
+- Do not remove existing comments unless their removal is directly required by the task.
+
 ### Error Handling
 - Use `anyhow::Result<T>` for fallible functions at the application / UI boundary.
 - Use `thiserror` only if you need structured error enums (rare in this codebase).
