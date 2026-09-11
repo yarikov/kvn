@@ -170,15 +170,15 @@ sudo kvn clean --killswitch
 Hyprland. If you do not use it, skip this section.
 
 Set up the standalone [omakvn](https://github.com/yarikov/omakvn) Quickshell bar
-plugin together with the `kvn` **Apps** menu entry, Hyprland shortcuts, and
+plugin together with the `kvn` Apps menu entry, Hyprland shortcuts, and
 floating-window rules:
 
 ```bash
 kvn setup --omarchy
 ```
 
-The plugin (`yarikov.omakvn`) shows live VPN status and provides profile
-selection and common VPN controls directly from the bar.
+The plugin shows live VPN status and provides profile selection and common VPN
+controls directly from the bar.
 
 The idempotent installer creates backups before editing user configuration.
 Remove them after verification with:
