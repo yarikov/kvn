@@ -207,7 +207,7 @@ struct FormattedLog {
 
 /// Convert the tailer's `[source] HH:MM:SS LEVEL ...` representation into the
 /// compact presentation used by the log pane. The connection context emitted
-/// by sing-box (`[id Nms]`) is useful in raw logs but too noisy for the TUI.
+/// by sing-box (`[id duration]`) is useful in raw logs but too noisy for the TUI.
 fn format_log_for_display(line: &str) -> FormattedLog {
     let Some(close_source) = line.strip_prefix('[').and_then(|rest| rest.find(']')) else {
         return FormattedLog {
@@ -245,12 +245,10 @@ fn format_log_for_display(line: &str) -> FormattedLog {
     };
     let level = LogLevel::parse(level_text);
 
-    if let Some(rest) = message.strip_prefix('[')
+    if source == "sb"
+        && let Some(rest) = message.strip_prefix('[')
         && let Some(close) = rest.find(']')
-        && rest[..close]
-            .split_whitespace()
-            .nth(1)
-            .is_some_and(|value| value.ends_with("ms"))
+        && is_singbox_connection_context(&rest[..close])
     {
         message = rest[close + 1..].trim_start();
     }
@@ -261,6 +259,56 @@ fn format_log_for_display(line: &str) -> FormattedLog {
         level,
         structured: true,
     }
+}
+
+fn is_singbox_connection_context(value: &str) -> bool {
+    let mut fields = value.split_whitespace();
+    let Some(id) = fields.next() else {
+        return false;
+    };
+    let Some(duration) = fields.next() else {
+        return false;
+    };
+
+    fields.next().is_none()
+        && id.chars().all(|character| character.is_ascii_digit())
+        && is_go_duration(duration)
+}
+
+/// Recognize the representation produced by Go's `time.Duration.String`.
+fn is_go_duration(value: &str) -> bool {
+    let mut remainder = value
+        .strip_prefix('-')
+        .or_else(|| value.strip_prefix('+'))
+        .unwrap_or(value);
+    let mut components = 0;
+
+    while !remainder.is_empty() {
+        let integer_len = remainder.bytes().take_while(u8::is_ascii_digit).count();
+        if integer_len == 0 {
+            return false;
+        }
+        remainder = &remainder[integer_len..];
+
+        if let Some(fraction) = remainder.strip_prefix('.') {
+            let fraction_len = fraction.bytes().take_while(u8::is_ascii_digit).count();
+            if fraction_len == 0 {
+                return false;
+            }
+            remainder = &fraction[fraction_len..];
+        }
+
+        let Some(unit) = ["ns", "us", "µs", "ms", "h", "m", "s"]
+            .into_iter()
+            .find(|unit| remainder.starts_with(unit))
+        else {
+            return false;
+        };
+        remainder = &remainder[unit.len()..];
+        components += 1;
+    }
+
+    components > 0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1716,6 +1764,48 @@ mod tests {
         );
         assert_eq!(formatted.level, LogLevel::Info);
         assert!(formatted.structured);
+    }
+
+    #[test]
+    fn format_log_for_display_compacts_context_for_every_singbox_level() {
+        for (level, duration, expected_level) in [
+            ("TRACE", "900ns", LogLevel::Trace),
+            ("DEBUG", "12.5µs", LogLevel::Debug),
+            ("INFO", "81ms", LogLevel::Info),
+            ("WARN", "1.25s", LogLevel::Warn),
+            ("WARNING", "1m2.5s", LogLevel::Warn),
+            ("ERROR", "5.0s", LogLevel::Error),
+            ("FATAL", "2m3s", LogLevel::Error),
+            ("PANIC", "1h2m3s", LogLevel::Error),
+        ] {
+            let formatted = format_log_for_display(&format!(
+                "[sb] 07:45:08 {level} [1541259397 {duration}] dns: exchange failed"
+            ));
+
+            assert_eq!(
+                formatted.text,
+                format!("07:45:08 [sbx] {level} dns: exchange failed")
+            );
+            assert_eq!(formatted.level, expected_level);
+            assert!(formatted.structured);
+        }
+    }
+
+    #[test]
+    fn format_log_for_display_preserves_non_context_brackets() {
+        for (line, expected) in [
+            (
+                "[sb] 07:45:08 ERROR [router] failed",
+                "07:45:08 [sbx] ERROR [router] failed",
+            ),
+            (
+                "[sb] 07:45:08 ERROR [1541259397 recently] failed",
+                "07:45:08 [sbx] ERROR [1541259397 recently] failed",
+            ),
+        ] {
+            let formatted = format_log_for_display(line);
+            assert_eq!(formatted.text, expected);
+        }
     }
 
     #[test]
