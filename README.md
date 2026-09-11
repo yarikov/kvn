@@ -6,9 +6,9 @@
 [![Rust Version](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/github/license/yarikov/kvn-tui)](LICENSE)
 
-> Terminal VPN client for Arch Linux with vim navigation.
+> Terminal VPN client for Arch Linux with Vim-style navigation.
 
-`kvn` is a keyboard-driven TUI application for managing VPN connections. It provides a fast, minimal interface for configuring profiles, connecting via the [sing-box](https://sing-box.sagernet.org/) backend, and routing traffic — all without leaving the terminal.
+`kvn` is a keyboard-first TUI application for managing VPN connections. It provides a fast, minimal interface for configuring profiles, connecting via the [sing-box](https://sing-box.sagernet.org/) backend, and routing traffic — all without leaving the terminal.
 
 ![kvn screenshot](assets/screenshot.webp)
 
@@ -44,13 +44,15 @@
 ## Features
 
 - **Vim-style navigation** — `j`/`k` to move, `gg`/`G` to jump, `?` for help
-- **Profiles & subscriptions** — import, export, edit, and automatically update VPN profiles
+- **Profiles & subscriptions** — manage profiles and keep subscriptions automatically up to date
 - **Geo & service routing** — choose country-based routing modes and ready-made overrides for selected services
-- **DNS controls** — built-in DoH, DoT, system resolver, strategy, and fake-IP settings
 - **Kill switch** — block outbound traffic if the VPN connection drops
-- **Automatic recovery** — auto-connect on startup and reconnect after suspend
+- **DNS controls** — built-in DoH, DoT, system resolver, strategy, and fake-IP settings
+- **Auto-connect & resume** — restore the last connection on startup and after system resume
+- **Persistent daemon** — keep the VPN and background services running after detaching the TUI
 - **Live insights** — traffic rates, totals, active connections, and combined logs
-- **Themes** — choose from [22 bundled color palettes](docs/themes.md) directly in the TUI
+- **Diagnostics** — check dependencies, configuration, daemon state, and integrations with `kvn doctor`
+- **Themes** — choose from [22 bundled color palettes](docs/themes.md)
 
 ---
 
@@ -112,48 +114,6 @@ systemctl --user enable --now kvn-tui.service
 available after login. The package also restores the TUN capabilities on
 `/usr/bin/sing-box` automatically after pacman upgrades it.
 
-To update the package and run breaking migrations in the same visible
-terminal, use:
-
-```bash
-kvn update
-```
-
-The command prefers `yay` and falls back to `paru`. A normal `yay -Syu` is
-also supported: pending migrations run automatically the next time `kvn` is
-opened. If migrations declare Git resources, kvn first downloads their pinned
-commits while the existing daemon and VPN remain fully usable. A failed
-download leaves the daemon, config and kill switch unchanged; restore network
-access (connect the VPN if needed) and retry `kvn migrate`.
-Resources declared with
-`"when": {"omarchy": true, "version": ">=4.0.0, <5.0.0"}` are prepared only for Omarchy 4;
-plain Arch and other Omarchy major versions skip them without Git or downloads.
-Before running the ordered migration queue, kvn puts the daemon into a
-non-mutable migration mode, records the active profile, and saves the exact
-`profiles.json` bytes under `~/.config/kvn-tui/recovery/`. A separate candidate
-is created from that backup and every config migration runs against the
-candidate. The daemon, VPN, live config, and kill switch stay active while
-scripts run. Any attached TUI shows a blocking progress overlay; `q`/`Esc` only
-detach the TUI. It keeps the overlay across the expected daemon socket restart
-and reopens itself with the installed client after the transaction finishes.
-After the whole queue succeeds, kvn briefly stops the old daemon,
-atomically promotes the candidate, starts the new daemon, and reconnects the
-profile. The previous live file remains temporarily available for crash
-recovery during this handoff and is removed after success; the durable copy is
-the backup in `recovery/`. Schema changes are never applied implicitly while
-loading the config. The queue can be inspected or retried explicitly:
-
-```bash
-kvn migrate --pending
-kvn migrate
-```
-
-Prepared checkouts live under `$XDG_STATE_HOME/kvn-tui/migration-resources`
-(normally `~/.local/state/kvn-tui/migration-resources`). They are removed only
-after the transaction and VPN handoff succeed; failures retain them for a
-local retry. The installed Omarchy plugin is an independent copy and is not
-removed with this cache. `kvn doctor` also reports resource preparation errors.
-
 ### Polkit setup (optional, recommended for unattended reconnects)
 
 Install the polkit rule to avoid repeated authentication prompts when sing-box
@@ -209,7 +169,7 @@ sudo kvn clean --killswitch
 [Omarchy](https://omarchy.org/) is an Arch-based Linux distribution built around
 Hyprland. If you do not use Omarchy, skip this section.
 
-Omarchy users can enable Shell/Waybar, launcher, Hyprland, and floating-window
+Omarchy users can enable Shell, launcher, Hyprland, and floating-window
 integration with:
 
 ```bash
@@ -220,17 +180,13 @@ Run Omarchy setup and cleanup without `sudo`, because they modify the current
 user's configuration. `--omarchy` cannot be combined with `--polkit` or
 `--killswitch`; run the user and system commands separately.
 
-On **Omarchy 4 (Quattro)** this installs the standalone
-[omakvn](https://github.com/yarikov/omakvn) Quickshell bar plugin (`yarikov.omakvn`):
-it shows live VPN status and provides profile selection and common VPN controls
-directly from the bar. It also adds kvn to the **Apps** menu; search for
-`kvn`, `kvn-tui`, `tui`, or `vpn` to open or focus the terminal client. On Omarchy 3
-(or builds without the shell plugin
-registry), setup falls back to a Waybar status module that opens the TUI on
-click.
+This installs the standalone [omakvn](https://github.com/yarikov/omakvn)
+Quickshell bar plugin (`yarikov.omakvn`). It shows live VPN status and provides
+profile selection and common VPN controls directly from the bar. It also adds
+kvn to the **Apps** menu.
 
-The idempotent installer detects Omarchy 3 or 4 and creates backups before
-editing user configuration. Remove those backups after verification with:
+The idempotent installer creates backups before editing user configuration.
+Remove those backups after verification with:
 
 ```bash
 kvn clean --omarchy
