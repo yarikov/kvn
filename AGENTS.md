@@ -296,6 +296,10 @@ If you need to add a new side effect from `update`, add a new `Effect` variant a
 
 ## Configuration Paths
 
+The existing `kvn-tui` paths below are retained for compatibility. Use `kvn`
+instead of `kvn-tui` in the path of every new file or directory; do not add new
+filesystem resources under the legacy `kvn-tui` namespace.
+
 | Resource | Path |
 |----------|------|
 | Profiles & settings | `~/.config/kvn-tui/profiles.json` |
@@ -315,3 +319,4 @@ If you need to add a new side effect from `update`, add a new `Effect` variant a
 4. Are you respecting the Arch-only constraint (no support for other distros or BSDs added silently)?
 5. Does the sing-box config generation remain valid for sing-box 1.12+?
 6. Have you run `cargo fmt` and `cargo clippy --all-targets --all-features` and fixed any warnings?
+7. Do all new files and directories use `kvn` rather than the legacy `kvn-tui` path namespace?
