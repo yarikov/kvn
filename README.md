@@ -22,8 +22,8 @@
 - [Supported Protocols](#supported-protocols)
 - [First Connection](#first-connection)
 - [Installation (Arch Linux)](#installation-arch-linux)
-  - [AUR](#aur-recommended)
-  - [Polkit setup](#polkit-setup-optional-recommended-for-unattended-reconnects)
+  - [AUR](#aur)
+  - [Polkit setup](#polkit-setup-optional)
   - [Kill switch setup](#kill-switch-setup-optional)
   - [Omarchy integration](#omarchy-integration-optional)
   - [Build from source](#build-from-source)
@@ -103,7 +103,7 @@ Optional setup commands modify system or desktop configuration. See
 [system integration details](docs/system-integration.md) for installed files,
 permissions, and removal instructions.
 
-### AUR (recommended)
+### AUR
 
 ```bash
 yay -S kvn-tui-bin
@@ -114,7 +114,7 @@ systemctl --user enable --now kvn-tui.service
 available after login. The package also restores the TUN capabilities on
 `/usr/bin/sing-box` automatically after pacman upgrades it.
 
-### Polkit setup (optional, recommended for unattended reconnects)
+### Polkit setup (optional)
 
 Install the polkit rule to avoid repeated authentication prompts when sing-box
 configures per-link DNS through systemd-resolved. The rule grants only the
