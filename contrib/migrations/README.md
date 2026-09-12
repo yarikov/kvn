@@ -1,7 +1,7 @@
 # kvn package migrations
 
 Breaking migrations are shipped here and installed into
-`/usr/lib/kvn-tui/migrations`. The runner executes every migration in bytewise
+`/usr/lib/kvn/migrations`. The runner executes every migration in bytewise
 filename order and records successful runs per user.
 
 The framework starts at v0.30.0. Do not add scripts for older releases, and do
@@ -34,7 +34,7 @@ may depend on every earlier migration having completed.
 
 Scripts must be idempotent, exit successfully when they do not apply, and call
 `sudo` only for the exact privileged commands they require. A machine-wide
-operation must use `/var/lib/kvn-tui/migrations/<migration-id>` as its own
+operation must use `/var/lib/kvn/migrations/<migration-id>` as its own
 root-owned completion marker. Ordinary migrations must not stop kvn, sing-box,
 or the active VPN; the runner owns the daemon handoff.
 
@@ -119,7 +119,7 @@ Git checkout is not overwritten. Ordinary manual setup still uses Omarchy's
 network-backed installer.
 
 Prepared resources and `ready.json` metadata are private per-user cache data at
-`$XDG_STATE_HOME/kvn-tui/migration-resources/<migration-id>-<manifest-digest>/`.
+`$XDG_STATE_HOME/kvn/migration-resources/<migration-id>-<manifest-digest>/`.
 Preparation errors are recorded separately in `preparation.json` for `kvn doctor`;
 they do not start a migration session or block the TUI. Re-running preparation
 reuses valid completed downloads and discards incomplete temporary clones.

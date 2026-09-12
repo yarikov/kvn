@@ -92,7 +92,7 @@ pub(super) struct PreparedMigration {
 fn root() -> Result<PathBuf> {
     Ok(dirs::state_dir()
         .context("failed to determine XDG state directory")?
-        .join("kvn-tui/migration-resources"))
+        .join("kvn/migration-resources"))
 }
 
 pub(super) fn manifest_path(migration: &Migration) -> PathBuf {

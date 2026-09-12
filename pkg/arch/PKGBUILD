@@ -30,14 +30,14 @@ package() {
     cd "$startdir/../../"
     install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
     ln -s kvn-tui "$pkgdir/usr/bin/kvn"
-    install -dm755 "$pkgdir/usr/lib/kvn-tui/migrations"
+    install -dm755 "$pkgdir/usr/lib/kvn/migrations"
     for migration in contrib/migrations/*.sh; do
         [[ -f "$migration" ]] || continue
-        install -m755 "$migration" "$pkgdir/usr/lib/kvn-tui/migrations/"
+        install -m755 "$migration" "$pkgdir/usr/lib/kvn/migrations/"
     done
     for resources in contrib/migrations/*.resources.json; do
         [[ -f "$resources" ]] || continue
-        install -m644 "$resources" "$pkgdir/usr/lib/kvn-tui/migrations/"
+        install -m644 "$resources" "$pkgdir/usr/lib/kvn/migrations/"
     done
     install -Dm644 contrib/kvn-tui.service "$pkgdir/usr/lib/systemd/user/kvn-tui.service"
     install -Dm644 contrib/kvn-tui-sing-box-capabilities.hook \

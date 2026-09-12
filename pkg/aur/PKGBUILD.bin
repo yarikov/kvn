@@ -24,14 +24,14 @@ package() {
     cd "kvn-tui-{{VERSION}}-x86_64-linux"
     install -Dm755 kvn-tui "$pkgdir/usr/bin/kvn-tui"
     ln -s kvn-tui "$pkgdir/usr/bin/kvn"
-    install -dm755 "$pkgdir/usr/lib/kvn-tui/migrations"
+    install -dm755 "$pkgdir/usr/lib/kvn/migrations"
     for migration in migrations/*.sh; do
         [[ -f "$migration" ]] || continue
-        install -m755 "$migration" "$pkgdir/usr/lib/kvn-tui/migrations/"
+        install -m755 "$migration" "$pkgdir/usr/lib/kvn/migrations/"
     done
     for resources in migrations/*.resources.json; do
         [[ -f "$resources" ]] || continue
-        install -m644 "$resources" "$pkgdir/usr/lib/kvn-tui/migrations/"
+        install -m644 "$resources" "$pkgdir/usr/lib/kvn/migrations/"
     done
     install -Dm644 kvn-tui.service "$pkgdir/usr/lib/systemd/user/kvn-tui.service"
     install -Dm644 kvn-tui-sing-box-capabilities.hook \

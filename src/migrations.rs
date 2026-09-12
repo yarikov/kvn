@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
 
-const INSTALLED_DIR: &str = "/usr/lib/kvn-tui/migrations";
-const BASELINE_PATH: &str = "/var/lib/kvn-tui/migration-baseline";
+const INSTALLED_DIR: &str = "/usr/lib/kvn/migrations";
+const BASELINE_PATH: &str = "/var/lib/kvn/migration-baseline";
 const SESSION_STATE_NAME: &str = "migration-session.json";
 
 mod resources;
@@ -41,7 +41,7 @@ impl Store {
     fn installed() -> Result<Self> {
         let state = dirs::state_dir()
             .context("failed to determine XDG state directory")?
-            .join("kvn-tui/migrations");
+            .join("kvn/migrations");
         Ok(Self {
             migrations_dir: PathBuf::from(INSTALLED_DIR),
             baseline_path: PathBuf::from(BASELINE_PATH),
@@ -332,7 +332,7 @@ pub(crate) fn load_ui_status() -> Result<Option<crate::app::model::MigrationStat
 fn session_state_path() -> Result<PathBuf> {
     Ok(dirs::state_dir()
         .context("failed to determine XDG state directory")?
-        .join("kvn-tui")
+        .join("kvn")
         .join(SESSION_STATE_NAME))
 }
 
@@ -1389,7 +1389,7 @@ fn notify_message_once(id: &str, message: &str) {
     let Some(state_dir) = dirs::state_dir() else {
         return;
     };
-    let marker = state_dir.join("kvn-tui/migration-notifications").join(id);
+    let marker = state_dir.join("kvn/migration-notifications").join(id);
     if marker.exists() {
         return;
     }
@@ -1592,9 +1592,9 @@ mod tests {
                 }
                 let state = root.path().join("machine-state");
                 let hook = hook
-                    .replace("/var/lib/kvn-tui", state.to_str().unwrap())
+                    .replace("/var/lib/kvn", state.to_str().unwrap())
                     .replace(
-                        "/usr/lib/kvn-tui/migrations",
+                        "/usr/lib/kvn/migrations",
                         store.migrations_dir.to_str().unwrap(),
                     );
                 // CI need not have pacman/vercmp; these fixtures use plain

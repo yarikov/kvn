@@ -5,9 +5,9 @@ configure_sing_box_capabilities() {
 
 seed_migration_baseline() {
     local installed_from="${1:-}"
-    local state_dir=/var/lib/kvn-tui
+    local state_dir=/var/lib/kvn
     local baseline="$state_dir/migration-baseline"
-    local migrations=/usr/lib/kvn-tui/migrations
+    local migrations=/usr/lib/kvn/migrations
     local tmp
     local introduced
 
@@ -37,8 +37,8 @@ print_migration_notice() {
     local migration
     local introduced
 
-    [[ -d /usr/lib/kvn-tui/migrations ]] || return 0
-    for migration in /usr/lib/kvn-tui/migrations/*.sh; do
+    [[ -d /usr/lib/kvn/migrations ]] || return 0
+    for migration in /usr/lib/kvn/migrations/*.sh; do
         [[ -f "$migration" ]] || continue
         introduced=$(sed -n 's/^# kvn:introduced=//p' "$migration" | head -n1)
         if [[ -z "$introduced" ]] || (( $(vercmp "$introduced" "$installed_from") > 0 )); then
@@ -77,5 +77,5 @@ post_upgrade() {
 }
 
 post_remove() {
-    rm -f /var/lib/kvn-tui/migration-baseline
+    rm -f /var/lib/kvn/migration-baseline
 }

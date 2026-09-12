@@ -13,8 +13,8 @@ The Arch package installs:
 | `/usr/bin/kvn-tui` | `0755` | Application binary |
 | `/usr/bin/kvn` | symlink | Canonical command pointing to `kvn-tui` |
 | `/usr/lib/systemd/user/kvn-tui.service` | `0644` | Per-user daemon service |
-| `/usr/lib/kvn-tui/migrations/` | `0755` | Root-owned, ordered breaking-migration scripts |
-| `/var/lib/kvn-tui/migration-baseline` | `0644` | Scripts included by the initial package installation |
+| `/usr/lib/kvn/migrations/` | `0755` | Root-owned, ordered breaking-migration scripts |
+| `/var/lib/kvn/migration-baseline` | `0644` | Scripts included by the initial package installation |
 | `/usr/share/libalpm/hooks/kvn-tui-sing-box-capabilities.hook` | `0644` | Restores sing-box capabilities after package updates |
 | `/usr/share/licenses/kvn-tui/LICENSE` | `0644` | MIT license for the source package |
 | `/usr/share/licenses/kvn-tui-bin/LICENSE` | `0644` | MIT license for the binary package |
@@ -48,15 +48,15 @@ Do not revoke them while another TUN client relies on the same sing-box binary.
 ## Package migrations
 
 Package upgrades may include ordered migration scripts installed under
-`/usr/lib/kvn-tui/migrations/`.
+`/usr/lib/kvn/migrations/`.
 
 Updates installed through `yay` or `paru` are detected automatically on the
 next `kvn` launch. `kvn update` can also update the AUR package and run pending
 migrations.
 
 Successful migrations are recorded under
-`$XDG_STATE_HOME/kvn-tui/migrations/`; machine-wide operations use
-`/var/lib/kvn-tui/migrations/`.
+`$XDG_STATE_HOME/kvn/migrations/`; machine-wide operations use
+`/var/lib/kvn/migrations/`.
 
 Before changing `profiles.json`, kvn creates a private backup under
 `~/.config/kvn-tui/recovery/` and validates the migrated configuration before
