@@ -86,7 +86,7 @@ enum Command {
     /// Check whether kvn and its runtime dependencies are ready.
     Doctor,
 
-    /// Update the AUR package, then run every newly installed migration.
+    /// Update the AUR package and run pending migrations.
     Update,
 
     /// Run migrations installed by newer kvn packages.
