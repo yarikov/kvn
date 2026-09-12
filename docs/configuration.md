@@ -188,40 +188,18 @@ checked when the daemon starts; `sing-box.log` is additionally checked at a
 safe reconnect point no more than once every 24 hours. Active sing-box logging
 is never truncated in place.
 
-## Validation and migrations
+## Validation and schema versions
 
-Configuration is parsed and semantically validated before use. Schema changes
-are applied only by the transactional migration runner; ordinary daemon and TUI
-loads reject an older schema instead of modifying it implicitly.
-Validation checks profile references and required values, DNS tags and server
-references, the TUN interface, theme slug, log level, and minimum log limits.
+Configuration is parsed and validated before use. Validation checks profile
+references and required values, DNS tags and server references, the TUN
+interface, theme slug, log level, and minimum log limits.
 
 The TUN interface must contain only ASCII letters, digits, `-`, or `_`, and be
 at most 15 characters. `default_profile`, when set, must reference an existing
 profile.
 
-The root structure, settings, DNS objects, subscriptions, and protocol structs
-without flattened TLS reject unknown fields. Protocol variants containing a
-flattened TLS block cannot enforce this serde rule, so do not rely on unknown
-fields being rejected everywhere.
-
-When an update includes a schema change, `kvn migrate` puts the daemon into a
-non-mutable migration mode, saves an exact backup, creates a candidate from it,
-and runs every migration in global filename order against that candidate while
-the existing VPN and live `profiles.json` stay untouched. The candidate is
-promoted atomically only after the whole queue succeeds and during a brief
-daemon restart. The previous live file is retained only until the updated
-daemon restores the VPN; the exact backup under `recovery/` remains afterward.
-The kill switch stays enabled throughout. The configuration schema has the
-following historical steps; installations predating the v0.30.0 migration
-framework reach its baseline using the corresponding manual upgrade guides:
-
-- v0 → v1 moves the legacy `dns_strategy` value into `dns.strategy`.
-- v1 → v2 moves the legacy VLESS `fingerprint` into the shared TLS settings.
-- v4 → v5 sets the TUN interface name to `kvn0`, replacing any previous name.
-
-A file with a schema version newer than the running kvn build is rejected;
-upgrade kvn instead of downgrading the version manually.
+Older schema versions must be migrated before use. Newer schema versions are
+not supported by older `kvn` releases.
 
 ## Runtime files
 
