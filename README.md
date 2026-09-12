@@ -342,10 +342,10 @@ advanced DNS and routing, validation, migrations, and runtime file locations.
 
 ### Architecture Highlights
 
-- **Persistent daemon** — the daemon owns canonical state, sing-box, and background services; TUI clients attach over NDJSON on a Unix socket without interrupting the VPN.
+- **Persistent daemon** — owns canonical state, sing-box, and background services; TUI and desktop integrations attach over NDJSON on a Unix socket without interrupting the VPN.
 - **TEA-style core** — `Model`, `Msg`, `update`, and declarative `Effect` values separate state transitions from runtime I/O and keep business logic testable.
-- **Safe sing-box lifecycle** — 1.12+ configuration is generated, validated with `sing-box check`, and only then started with immediate-failure detection.
-- **Headless background work** — reconnect after suspend, subscription and rule-set updates, traffic statistics, logs, and persisted state continue without an attached TUI.
+- **Safe sing-box lifecycle** — generated configuration is validated with `sing-box check` before startup, with immediate-failure detection before a connection is considered active.
+- **Least-privilege integration** — TUN uses Linux capabilities instead of a root daemon, while privileged DNS and kill-switch operations are limited to narrowly scoped helpers and permissions.
 
 ---
 
