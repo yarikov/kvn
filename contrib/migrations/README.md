@@ -123,7 +123,9 @@ Prepared resources and `ready.json` metadata are private per-user cache data at
 Preparation errors are recorded separately in `preparation.json` for `kvn doctor`;
 they do not start a migration session or block the TUI. Re-running preparation
 reuses valid completed downloads and discards incomplete temporary clones.
-An active transaction records its resource references in `migration-session.json`:
+An active transaction records its resource references in
+`$XDG_STATE_HOME/kvn/migration-session.json` and is serialized by
+`$XDG_RUNTIME_DIR/kvn/migrate.lock`:
 retry only verifies local resources, never fetches while migration mode is active.
 If those resources are missing or changed, restore them before retrying. An
 installed package changed mid-transaction requires recovery with the original

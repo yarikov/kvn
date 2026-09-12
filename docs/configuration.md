@@ -212,8 +212,10 @@ not supported by older `kvn` releases.
 | Waybar and recovery state | `~/.config/kvn-tui/state.json` |
 | Migration recovery backups | `~/.config/kvn-tui/recovery/profiles.json.before-migration-*.json` |
 | Active migration journal | `$XDG_STATE_HOME/kvn/migration-session.json` |
+| Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
 | IPC socket | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
 | Generated sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
+| Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |
 
 The application-owned runtime directory is created with mode `0700`; generated
 sing-box configs and the IPC socket use mode `0600`. No secret-bearing config is

@@ -58,6 +58,10 @@ Successful migrations are recorded under
 `$XDG_STATE_HOME/kvn/migrations/`; machine-wide operations use
 `/var/lib/kvn/migrations/`.
 
+The runner serializes migration transactions with
+`$XDG_RUNTIME_DIR/kvn/migrate.lock` and stores the active journal at
+`$XDG_STATE_HOME/kvn/migration-session.json`.
+
 Before changing `profiles.json`, kvn creates a private backup under
 `~/.config/kvn-tui/recovery/` and validates the migrated configuration before
 applying it. Failed migrations keep the existing configuration and VPN

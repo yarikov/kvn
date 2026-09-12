@@ -300,6 +300,10 @@ The existing `kvn-tui` paths below are retained for compatibility. Use `kvn`
 instead of `kvn-tui` in the path of every new file or directory; do not add new
 filesystem resources under the legacy `kvn-tui` namespace.
 
+Keep documentation synchronized with code changes. When a filesystem path,
+persistent file, runtime file, command, configuration field, or user-visible
+behavior changes, update the corresponding documentation in the same change.
+
 | Resource | Path |
 |----------|------|
 | Profiles & settings | `~/.config/kvn-tui/profiles.json` |
@@ -308,6 +312,8 @@ filesystem resources under the legacy `kvn-tui` namespace.
 | Temp sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
 | Runtime state (waybar) | `~/.config/kvn-tui/state.json` |
 | IPC socket (daemon ↔ TUI) | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
+| Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
+| Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |
 
 ---
 
@@ -320,3 +326,4 @@ filesystem resources under the legacy `kvn-tui` namespace.
 5. Does the sing-box config generation remain valid for sing-box 1.12+?
 6. Have you run `cargo fmt` and `cargo clippy --all-targets --all-features` and fixed any warnings?
 7. Do all new files and directories use `kvn` rather than the legacy `kvn-tui` path namespace?
+8. Does the documentation match every changed path, file, command, configuration field, and user-visible behavior?
