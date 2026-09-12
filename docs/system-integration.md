@@ -47,60 +47,35 @@ Do not revoke them while another TUN client relies on the same sing-box binary.
 
 ## Package migrations
 
-`kvn update` updates the AUR package and invokes the migration runner from the
-new binary. Updates performed directly through `yay` or `paru` are detected on
-the next `kvn` launch. Successful scripts are recorded per user under
-`$XDG_STATE_HOME/kvn-tui/migrations/`; machine-wide operations use their own
-root-owned markers under `/var/lib/kvn-tui/migrations/`.
+Package upgrades may include ordered migration scripts installed under
+`/usr/lib/kvn-tui/migrations/`.
 
-Optional root-owned `*.resources.json` files (`0644`) declare Git resources
-pinned to full commits. The runner prepares these in private per-user
-`$XDG_STATE_HOME/kvn-tui/migration-resources/` storage before entering migration
-mode. A manifest with
-`"when": {"omarchy": true, "version": ">=4.0.0, <5.0.0"}` is prepared only when
-`omarchy version` reports major version 4; on ordinary Arch without Omarchy,
-or with another major version, its downloads are skipped before calling Git.
-Preparation errors are recorded separately from the transaction journal
-and shown by `kvn doctor`; they do not block the existing daemon or VPN.
-Scripts use `KVN_MIGRATION_RESOURCES_DIR` and must not download during a
-transaction. `setup --omarchy --plugin-source PATH` installs an independent
-local plugin copy without remote add/update. Resources survive failed
-transactions and are deleted only after successful daemon/VPN handoff.
+Updates installed through `yay` or `paru` are detected automatically on the
+next `kvn` launch. `kvn update` can also update the AUR package and run pending
+migrations.
 
-The runner keeps the daemon IPC client through all progress acknowledgements
-and requires a confirmed daemon exit before exchanging `profiles.json`. The
-journal, rather than a freshly discovered package queue, controls recovery and
-completion markers. Its file identities make a crash between atomic exchange
-and phase persistence recoverable. During this brief daemon replacement, an
-attached TUI retains the blocking overlay, reconnects without starting a daemon
-itself, and re-executes the installed client after the journal is cleared.
+Successful migrations are recorded under
+`$XDG_STATE_HOME/kvn-tui/migrations/`; machine-wide operations use
+`/var/lib/kvn-tui/migrations/`.
 
-The runner first sends the daemon a versioned migration command. The daemon
-rejects config mutations and the TUI displays a non-dismissible overlay, while
-the existing sing-box process and kill switch keep running. Only after the
-daemon acknowledges this state does the runner copy the exact `profiles.json`
-bytes to `~/.config/kvn-tui/recovery/profiles.json.before-migration-*.json`
-(mode `0600`) and create a private `.profiles.json.migrating-*` candidate from
-that backup. Scripts receive the candidate path through a runner-owned
-environment variable; they never edit the live file.
+Before changing `profiles.json`, kvn creates a private backup under
+`~/.config/kvn-tui/recovery/` and validates the migrated configuration before
+applying it. Failed migrations keep the existing configuration and VPN
+connection intact whenever possible.
 
-A new daemon does not start while migrations are pending, except for the
-explicit post-cutover start recorded in the private
-`$XDG_STATE_HOME/kvn-tui/migration-session.json` journal. After the ordered
-queue, the runner validates the candidate and verifies that the live source
-still matches the backup. It then briefly stops the old daemon, atomically
-exchanges the live and candidate files, starts the new daemon, releases migration
-mode, and reconnects the prior profile. The former live file stays at the
-private candidate path until the handoff succeeds, then is removed; the exact
-backup under `recovery/` remains available. On failure before the exchange, the
-existing daemon and tunnel keep running and the candidate/journal are retained
-for `kvn migrate`. The journal also makes crashes on either side of the atomic
-exchange resumable without guessing or overwriting a backup.
-The schema version in `profiles.json` is checked separately from package
-markers, so restoring an old config after reinstalling the package cannot skip
-its schema migration.
-Run `kvn migrate --pending` to inspect the queue or `kvn doctor` for a read-only
-health check.
+Use:
+
+```bash
+kvn migrate --pending
+```
+
+to inspect pending migrations, or:
+
+```bash
+kvn doctor
+```
+
+to check migration state and related issues.
 
 ## Polkit setup
 
