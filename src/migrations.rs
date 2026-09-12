@@ -1297,7 +1297,7 @@ struct MigrationLock {
 
 impl MigrationLock {
     fn acquire() -> Result<Self> {
-        let path = crate::paths::ensure_runtime_dir()?.join("migrate.lock");
+        let path = crate::paths::ensure_kvn_runtime_dir()?.join("migrate.lock");
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -2331,6 +2331,7 @@ print_migration_notice "$1"
         let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", root.path());
 
         let first = MigrationLock::acquire().unwrap();
+        assert!(root.path().join("kvn/migrate.lock").is_file());
         assert!(MigrationLock::acquire().is_err());
         // A duplicate refers to the same open file description, just like a
         // descriptor temporarily inherited by a child before exec.

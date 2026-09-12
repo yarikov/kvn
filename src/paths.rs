@@ -2,18 +2,29 @@ use std::path::PathBuf;
 
 /// Return the private directory used for secret runtime files.
 pub fn runtime_dir() -> anyhow::Result<PathBuf> {
+    namespaced_runtime_dir("kvn-tui")
+}
+
+fn namespaced_runtime_dir(namespace: &str) -> anyhow::Result<PathBuf> {
     let base = dirs::runtime_dir().ok_or_else(|| {
         anyhow::anyhow!("XDG_RUNTIME_DIR is not set; kvn requires a desktop user session")
     })?;
-    Ok(base.join("kvn-tui"))
+    Ok(base.join(namespace))
 }
 
 /// Create and validate the private runtime directory with owner-only access.
 pub fn ensure_runtime_dir() -> anyhow::Result<PathBuf> {
+    ensure_private_runtime_dir(runtime_dir()?)
+}
+
+pub(crate) fn ensure_kvn_runtime_dir() -> anyhow::Result<PathBuf> {
+    ensure_private_runtime_dir(namespaced_runtime_dir("kvn")?)
+}
+
+fn ensure_private_runtime_dir(dir: PathBuf) -> anyhow::Result<PathBuf> {
     use anyhow::{Context, ensure};
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-    let dir = runtime_dir()?;
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("Failed to create runtime directory {:?}", dir))?;
     let metadata = std::fs::symlink_metadata(&dir)
@@ -44,7 +55,7 @@ pub fn config_dir() -> Option<PathBuf> {
 
 /// Return the per-user application state directory.
 pub fn state_dir() -> Option<PathBuf> {
-    dirs::state_dir().map(|d| d.join("kvn-tui"))
+    dirs::state_dir().map(|d| d.join("kvn"))
 }
 
 /// Return the persisted support-prompt schedule.
@@ -169,6 +180,21 @@ mod tests {
     }
 
     #[test]
+    fn kvn_runtime_directory_is_private() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", root.path());
+        let expected = root.path().join("kvn");
+        let dir = ensure_kvn_runtime_dir().unwrap();
+
+        assert_eq!(dir, expected);
+        assert_eq!(
+            std::fs::metadata(dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+
+    #[test]
     fn runtime_directory_rejects_symlink() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -199,5 +225,17 @@ mod tests {
     fn state_json_path_is_not_empty() {
         let path = state_json_path();
         assert!(!path.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn support_prompt_path_uses_kvn_state_directory() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", root.path());
+
+        assert_eq!(
+            support_prompt_path().unwrap(),
+            root.path().join("kvn/support-prompt.json")
+        );
     }
 }
