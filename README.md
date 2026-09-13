@@ -58,9 +58,8 @@
 
 ## Supported Protocols
 
-`kvn` supports 11 sing-box outbound protocols. Profiles can be imported
-from the listed share-link schemes via the clipboard or a subscription and
-exported with `y`.
+`kvn` supports 11 sing-box outbound protocols. Profiles and subscriptions can be added from
+the clipboard using supported share links.
 
 | Protocol | Share-link scheme(s) | Key support |
 |----------|----------------------|-------------|
@@ -153,16 +152,9 @@ the kill switch can also be installed together:
 sudo kvn setup --polkit --killswitch
 ```
 
-System setup and cleanup must be run through `sudo` from a non-root user.
+These system setup commands must be run through `sudo` from a non-root user.
 Unprivileged invocations and commands run directly from a root shell are
 rejected.
-
-Remove either system integration with:
-
-```bash
-sudo kvn clean --polkit
-sudo kvn clean --killswitch
-```
 
 ### Omarchy integration (optional)
 
@@ -214,17 +206,13 @@ Alternatively, install only the binary from the repository root:
 
 ```bash
 cargo build --release --locked
-sudo install -Dm755 target/release/kvn-tui /usr/local/bin/kvn-tui
-sudo ln -s kvn-tui /usr/local/bin/kvn
+sudo install -Dm755 target/release/kvn-tui /usr/local/bin/kvn
 sudo setcap cap_net_admin,cap_net_raw+ep "$(command -v sing-box)"
 ```
 
 The capabilities allow sing-box to use TUN without running kvn as root. The
-bundled service expects `/usr/bin/kvn-tui`; with a manual installation, use the
-automatic detached daemon or change its `ExecStart` to
-`/usr/local/bin/kvn-tui --daemon`. The legacy executable remains the real file
-so the existing service and integrations continue to work; `kvn` is its
-canonical command alias.
+manual installation uses the automatic detached daemon. If you create a custom
+systemd user service, set its `ExecStart` to `/usr/local/bin/kvn --daemon`.
 
 ## Diagnostics
 
@@ -234,8 +222,7 @@ kvn doctor
 
 Runs a read-only check of sing-box, configuration, pending package migrations,
 the daemon, clipboard, and optional integrations, with remediation hints for
-detected problems. Run it as your regular user; it exits with an error only
-when a required dependency is unusable or a required migration is pending.
+detected problems.
 
 ---
 
