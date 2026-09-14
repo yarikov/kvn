@@ -888,6 +888,14 @@ esac
     }
 
     #[test]
+    fn clap_help_uses_package_description() {
+        use clap::CommandFactory;
+
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("kvn — keyboard-first TUI for managing VPN connections"));
+    }
+
+    #[test]
     fn legacy_warning_invocation_matrix() {
         fn warns(args: &[&str]) -> bool {
             let args = args.iter().map(OsString::from).collect::<Vec<_>>();
