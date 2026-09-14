@@ -6,7 +6,7 @@
 [![Rust Version](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/github/license/yarikov/kvn-tui)](LICENSE)
 
-`kvn` is a keyboard-first TUI application for managing VPN connections. It provides a fast, minimal interface for configuring profiles, connecting via the [sing-box](https://sing-box.sagernet.org/) backend, and routing traffic — all without leaving the terminal.
+Keyboard-first TUI for managing VPN connections. It provides a fast, minimal interface for configuring profiles, connecting via [sing-box](https://sing-box.sagernet.org/) and routing traffic.
 
 ![kvn screenshot](assets/screenshot.webp)
 
