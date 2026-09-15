@@ -236,15 +236,15 @@ detected problems.
 | `k` / `↑` | Move or scroll up |
 | `gg` / `G` | Go to the first / last item |
 
-**Sources**
+**Profiles**
 
 | Key | Action |
 |-----|--------|
 | `Enter` | Connect to selected profile |
 | `e` | Open `profiles.json` in `$EDITOR` |
-| `y` | Yank selected source |
-| `p` | Paste source from clipboard |
-| `d` | Delete selected source |
+| `y` | Yank selected profile or subscription |
+| `p` | Paste profile or subscription from clipboard |
+| `d` | Delete selected profile or subscription |
 | `u` | Update selected subscription or geo |
 | `i` / `I` | Cycle subscription / geo auto-update |
 | `t` / `T` | Test selected / all profiles |
@@ -280,16 +280,6 @@ under `r`:
 | `Space r s` | Service routing |
 | `Space d` | DNS settings |
 | `Space t` | Theme picker |
-
-The original direct shortcuts remain available:
-
-| Key | Action |
-|-----|--------|
-| `m` | Routing mode |
-| `o` | Geo region |
-| `D` | DNS settings |
-| `S` | Service routing |
-| `C` | Theme picker |
 
 **Dialogs**
 

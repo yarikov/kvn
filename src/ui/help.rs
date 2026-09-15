@@ -45,9 +45,9 @@ const NAVIGATION: &[(&str, &str)] = &[
 const SOURCES: &[(&str, &str)] = &[
     ("Enter", "Connect selected profile"),
     ("e", "Open profiles.json in $EDITOR"),
-    ("y", "Yank selected source"),
-    ("p", "Paste source from clipboard"),
-    ("d", "Delete selected source"),
+    ("y", "Yank profile or subscription"),
+    ("p", "Paste profile or subscription"),
+    ("d", "Delete profile or subscription"),
     ("u", "Update subscription or geo"),
     ("i/I", "Cycle subscription / geo auto-update"),
     ("t/T", "Test selected / all profiles"),
@@ -67,11 +67,11 @@ const CONNECTION: &[(&str, &str)] = &[
 ];
 
 const SETTINGS: &[(&str, &str)] = &[
-    ("Space r m / m", "Routing mode"),
-    ("Space r r / o", "Region"),
-    ("Space d / D", "DNS settings"),
-    ("Space r s / S", "Service routing"),
-    ("Space t / C", "Theme picker"),
+    ("Space r m", "Routing mode"),
+    ("Space r r", "Region"),
+    ("Space d", "DNS settings"),
+    ("Space r s", "Service routing"),
+    ("Space t", "Theme picker"),
 ];
 
 const DIALOGS: &[(&str, &str)] = &[

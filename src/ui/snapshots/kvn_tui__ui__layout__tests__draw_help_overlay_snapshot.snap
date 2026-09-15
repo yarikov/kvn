@@ -13,9 +13,9 @@ expression: "snapshot_terminal(&model, 80, 40)"
 │           │ Profiles                                             │           │
 │           │ Enter           Connect selected profile             │           │
 │           │ e               Open profiles.json in $EDITOR        │           │
-│           │ y               Yank selected source                 │           │
-│           │ p               Paste source from clipboard          │           │
-│           │ d               Delete selected source               │           │
+│           │ y               Yank profile or subscription         │           │
+│           │ p               Paste profile or subscription        │           │
+│           │ d               Delete profile or subscription       │           │
 │           │ u               Update subscription or geo           │           │
 │           │ i/I             Cycle subscription / geo auto-update │           │
 │           │ t/T             Test selected / all profiles         │           │
@@ -32,11 +32,11 @@ expression: "snapshot_terminal(&model, 80, 40)"
 │           │ K               Toggle kill switch                   │           │
 │           │                                                      │           │
 │           │ Settings                                             │           │
-│           │ Space r m / m   Routing mode                         │           │
-│           │ Space r r / o   Region                               │           │
-│           │ Space d / D     DNS settings                         │           │
-│           │ Space r s / S   Service routing                      │           │
-│           │ Space t / C     Theme picker                         │           │
+│           │ Space r m       Routing mode                         │           │
+│           │ Space r r       Region                               │           │
+│           │ Space d         DNS settings                         │           │
+│           │ Space r s       Service routing                      │           │
+│           │ Space t         Theme picker                         │           │
 │           │                                                      │           │
 │           │        j/k scroll · gg/G edges · q/Esc/? back        │           │
 │           └──────────────────────────────────────────────────────┘           │

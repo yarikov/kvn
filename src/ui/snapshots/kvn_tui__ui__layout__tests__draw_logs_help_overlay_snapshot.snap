@@ -14,9 +14,9 @@ expression: "snapshot_terminal(&model, 100, 24)"
 │              │ Profiles                                                           │              │
 │              │ Enter           Connect selected profile                           │              │
 │              │ e               Open profiles.json in $EDITOR                      │              │
-│              │ y               Yank selected source                               │              │
-│              │ p               Paste source from clipboard                        │              │
-│              │ d               Delete selected source                             │              │
+│              │ y               Yank profile or subscription                       │              │
+│              │ p               Paste profile or subscription                      │              │
+│              │ d               Delete profile or subscription                     │              │
 │              │ u               Update subscription or geo                         │              │
 │              │ i/I             Cycle subscription / geo auto-update               │              │
 │              │ t/T             Test selected / all profiles                       │              │
