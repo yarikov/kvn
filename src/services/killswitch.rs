@@ -93,6 +93,36 @@ pub fn is_active() -> Result<bool> {
         .arg(UNIT)
         .output()
         .context("failed to spawn systemctl")?;
-    // `systemctl is-active` exits 0 when active, non-zero otherwise.
-    Ok(output.status.success())
+    classify_active_exit_code(output.status.code()).with_context(|| {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        format!(
+            "failed to query {} state ({}): {}",
+            UNIT,
+            output.status,
+            stderr.trim()
+        )
+    })
+}
+
+fn classify_active_exit_code(code: Option<i32>) -> Result<bool> {
+    match code {
+        Some(0) => Ok(true),
+        Some(3) => Ok(false),
+        Some(code) => bail!("systemctl is-active exited with code {code}"),
+        None => bail!("systemctl is-active terminated by signal"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_active_exit_code;
+
+    #[test]
+    fn active_exit_code_distinguishes_inactive_from_errors() {
+        assert!(classify_active_exit_code(Some(0)).unwrap());
+        assert!(!classify_active_exit_code(Some(3)).unwrap());
+        assert!(classify_active_exit_code(Some(1)).is_err());
+        assert!(classify_active_exit_code(Some(4)).is_err());
+        assert!(classify_active_exit_code(None).is_err());
+    }
 }
