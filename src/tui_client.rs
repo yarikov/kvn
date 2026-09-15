@@ -890,6 +890,10 @@ fn run_loop(
                 }
                 let completes_gg = go_first_sequence.feed(&key.code);
                 let requested_pane_focus = pane_focus_shortcut(&key);
+                if let Some(message) = deprecated_settings_shortcut_message(&key, model.overlay) {
+                    toast.show_info(message, Instant::now());
+                    needs_redraw = true;
+                }
                 let mut forward_key = || {
                     let (code, ch) = match key.code {
                         KeyCode::Char(c) => ("Char".to_string(), Some(c)),
@@ -1425,6 +1429,25 @@ fn pane_focus_shortcut(key: &crossterm::event::KeyEvent) -> Option<PaneFocusShor
     Some(PaneFocusShortcut { focus, deprecated })
 }
 
+fn deprecated_settings_shortcut_message(
+    key: &crossterm::event::KeyEvent,
+    overlay: crate::app::model::Overlay,
+) -> Option<&'static str> {
+    use crossterm::event::KeyCode;
+
+    if overlay != crate::app::model::Overlay::None {
+        return None;
+    }
+    match key.code {
+        KeyCode::Char('m') => Some("m is deprecated; use Space r m"),
+        KeyCode::Char('o') => Some("o is deprecated; use Space r r"),
+        KeyCode::Char('D') => Some("D is deprecated; use Space d"),
+        KeyCode::Char('S') => Some("S is deprecated; use Space r s"),
+        KeyCode::Char('C') => Some("C is deprecated; use Space t"),
+        _ => None,
+    }
+}
+
 fn update_pointer_shape(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     model: &Model,
@@ -1598,6 +1621,38 @@ mod tests {
                 focus: MainPaneFocus::Logs,
                 deprecated: false,
             })
+        );
+    }
+
+    #[test]
+    fn legacy_settings_shortcuts_point_to_space_menu_only_on_main_screen() {
+        use crate::app::model::{Overlay, SettingsMenuPage};
+
+        for (key, expected) in [
+            ('m', "m is deprecated; use Space r m"),
+            ('o', "o is deprecated; use Space r r"),
+            ('D', "D is deprecated; use Space d"),
+            ('S', "S is deprecated; use Space r s"),
+            ('C', "C is deprecated; use Space t"),
+        ] {
+            let event = KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE);
+            assert_eq!(
+                deprecated_settings_shortcut_message(&event, Overlay::None),
+                Some(expected)
+            );
+            assert_eq!(
+                deprecated_settings_shortcut_message(
+                    &event,
+                    Overlay::SettingsMenu(SettingsMenuPage::Root)
+                ),
+                None
+            );
+        }
+
+        let event = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
+        assert_eq!(
+            deprecated_settings_shortcut_message(&event, Overlay::None),
+            None
         );
     }
 
