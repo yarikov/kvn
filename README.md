@@ -152,16 +152,6 @@ Toggle it with `K`; when enabled, the status bar shows `KS`.
 > kvn disable --killswitch
 > ```
 
-Polkit and the kill switch can also be installed together:
-
-```bash
-sudo kvn setup --polkit --killswitch
-```
-
-These system setup commands must be run through `sudo` from a non-root user.
-Unprivileged invocations and commands run directly from a root shell are
-rejected.
-
 ### Omarchy integration (optional)
 
 [Omarchy](https://omarchy.org/) is an Arch-based Linux distribution built around
