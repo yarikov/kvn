@@ -486,6 +486,8 @@ pub struct StateSnapshot {
             crate::config::profile::ServiceRoute,
         >,
     >,
+    #[serde(default)]
+    pub settings_menu_return: Option<crate::app::model::SettingsMenuPage>,
     pub geo_updating: bool,
     pub geo_last_updated: Option<String>,
     /// Last successful check of the active regional rule sets.

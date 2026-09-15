@@ -1299,6 +1299,7 @@ fn build_snapshot(model: &Model, log_session_offsets: LogSessionOffsets) -> Stat
         theme_draft: model.theme_draft.clone(),
         service_routing_selected: model.service_routing_selected,
         service_routing_draft: model.service_routing_draft.clone(),
+        settings_menu_return: model.settings_menu_return,
         geo_updating: model.geo_updating,
         geo_last_updated: model.geo_last_updated.clone(),
         geo_last_checked_at: model.geo_last_checked_at,

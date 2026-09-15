@@ -9,7 +9,9 @@
 use crossterm::event::KeyEvent;
 
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, HelpContext, HelpState, MainPaneFocus, Model, Overlay};
+use crate::app::model::{
+    AppStatus, HelpContext, HelpState, MainPaneFocus, Model, Overlay, SettingsMenuPage,
+};
 
 use super::*;
 
@@ -21,12 +23,18 @@ pub(super) fn handle_key(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
         open_help(model);
         return vec![];
     }
+    if key.code == KeyCode::Char(' ') && model.overlay == Overlay::None {
+        model.settings_menu_return = None;
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        return vec![];
+    }
     match model.overlay {
         Overlay::None if model.main_pane_focus == MainPaneFocus::Sources => {
             handle_sources(model, key)
         }
         Overlay::None => handle_logs(model, key),
         Overlay::Help(state) => handle_help(model, state, key),
+        Overlay::SettingsMenu(page) => handle_settings_menu(model, page, key),
         Overlay::ConfirmDelete => handle_confirm_delete(model, key),
         Overlay::RoutingMode => handle_routing_mode(model, key),
         Overlay::GeoRegions => handle_geo_region(model, key),
@@ -62,6 +70,7 @@ fn open_help(model: &mut Model) {
             MainPaneFocus::Sources => HelpContext::Sources,
             MainPaneFocus::Logs => HelpContext::Logs,
         },
+        Overlay::SettingsMenu(page) => HelpContext::SettingsMenu(page),
         Overlay::ConfirmDelete => HelpContext::ConfirmDelete,
         Overlay::RoutingMode => HelpContext::RoutingMode,
         Overlay::GeoRegions => HelpContext::GeoRegions,
@@ -76,6 +85,103 @@ fn open_help(model: &mut Model) {
         context,
         selected: crate::ui::help::first_command(&crate::ui::help::rows(context)),
     });
+}
+
+fn handle_settings_menu(model: &mut Model, page: SettingsMenuPage, key: KeyEvent) -> Vec<Effect> {
+    match (page, key.code) {
+        (SettingsMenuPage::Root, KeyCode::Char('r')) => {
+            model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        }
+        (SettingsMenuPage::Root, KeyCode::Char('d')) => {
+            open_dns_settings(model, Some(SettingsMenuPage::Root));
+        }
+        (SettingsMenuPage::Root, KeyCode::Char('t')) => {
+            open_theme_settings(model, Some(SettingsMenuPage::Root));
+        }
+        (SettingsMenuPage::Routing, KeyCode::Char('m')) => {
+            open_routing_mode(model, Some(SettingsMenuPage::Routing));
+        }
+        (SettingsMenuPage::Routing, KeyCode::Char('r')) => {
+            open_geo_region(model, Some(SettingsMenuPage::Routing));
+        }
+        (SettingsMenuPage::Routing, KeyCode::Char('s')) => {
+            open_service_routing(model, Some(SettingsMenuPage::Routing));
+        }
+        (SettingsMenuPage::Routing, KeyCode::Backspace) => {
+            model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        }
+        (_, KeyCode::Char('q') | KeyCode::Esc) => {
+            model.settings_menu_return = None;
+            model.overlay = Overlay::None;
+        }
+        _ => {}
+    }
+    vec![]
+}
+
+fn open_routing_mode(model: &mut Model, settings_menu_return: Option<SettingsMenuPage>) {
+    model.settings_menu_return = settings_menu_return;
+    model.overlay = Overlay::RoutingMode;
+    let available = model.config.settings.geo_routing.available_modes();
+    model.routing_selected = available
+        .iter()
+        .position(|m| *m == model.config.settings.geo_routing.mode())
+        .unwrap_or(0);
+}
+
+fn open_geo_region(model: &mut Model, settings_menu_return: Option<SettingsMenuPage>) {
+    model.settings_menu_return = settings_menu_return;
+    model.overlay = Overlay::GeoRegions;
+    model.geo_region_selected = model
+        .config
+        .settings
+        .geo_routing
+        .current_region
+        .and_then(|r| GeoRegion::ALL.iter().position(|x| *x == r))
+        .unwrap_or(0);
+}
+
+fn open_dns_settings(model: &mut Model, settings_menu_return: Option<SettingsMenuPage>) {
+    model.settings_menu_return = settings_menu_return;
+    model.overlay = Overlay::DnsSettings;
+    model.dns_selected = 0;
+    model.dns_preset_draft = None;
+    model.dns_strategy_draft = None;
+    model.dns_fakeip_draft = None;
+}
+
+fn open_service_routing(model: &mut Model, settings_menu_return: Option<SettingsMenuPage>) {
+    model.settings_menu_return = settings_menu_return;
+    model.overlay = Overlay::ServiceRouting;
+    model.service_routing_selected = 0;
+    model.service_routing_draft = Some(model.config.settings.geo_routing.service_routes.clone());
+}
+
+fn open_theme_settings(model: &mut Model, settings_menu_return: Option<SettingsMenuPage>) {
+    model.settings_menu_return = settings_menu_return;
+    let slugs = theme_picker_slugs();
+    model.theme_selected = slugs
+        .iter()
+        .position(|s| s == &model.config.settings.theme)
+        .unwrap_or(0);
+    model.theme_draft = None;
+    model.overlay = Overlay::ThemeSettings;
+}
+
+fn return_to_settings_menu(model: &mut Model) -> bool {
+    if model.settings_menu_return.is_none() {
+        return false;
+    }
+    finish_settings_overlay(model);
+    true
+}
+
+fn finish_settings_overlay(model: &mut Model) {
+    model.overlay = model
+        .settings_menu_return
+        .take()
+        .map(Overlay::SettingsMenu)
+        .unwrap_or(Overlay::None);
 }
 
 fn handle_help(model: &mut Model, mut state: HelpState, key: KeyEvent) -> Vec<Effect> {
@@ -162,12 +268,7 @@ pub(super) fn handle_sources(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
             model.overlay = Overlay::ConfirmDelete;
         }
         KeyCode::Char('m') => {
-            model.overlay = Overlay::RoutingMode;
-            let available = model.config.settings.geo_routing.available_modes();
-            model.routing_selected = available
-                .iter()
-                .position(|m| *m == model.config.settings.geo_routing.mode())
-                .unwrap_or(0);
+            open_routing_mode(model, None);
         }
         KeyCode::Char('u') => return handle_update_key(model),
         KeyCode::Char('I') => {
@@ -211,14 +312,7 @@ pub(super) fn handle_sources(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
             }
         }
         KeyCode::Char('o') => {
-            model.overlay = Overlay::GeoRegions;
-            model.geo_region_selected = model
-                .config
-                .settings
-                .geo_routing
-                .current_region
-                .and_then(|r| GeoRegion::ALL.iter().position(|x| *x == r))
-                .unwrap_or(0);
+            open_geo_region(model, None);
         }
         KeyCode::Char('r') if model.connection == ConnectionState::Connected => {
             if let Some(profile) = model.active_profile_id.and_then(|id| {
@@ -276,17 +370,10 @@ pub(super) fn handle_sources(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
             return effects;
         }
         KeyCode::Char('D') => {
-            model.overlay = Overlay::DnsSettings;
-            model.dns_selected = 0;
-            model.dns_preset_draft = None;
-            model.dns_strategy_draft = None;
-            model.dns_fakeip_draft = None;
+            open_dns_settings(model, None);
         }
         KeyCode::Char('S') => {
-            model.overlay = Overlay::ServiceRouting;
-            model.service_routing_selected = 0;
-            model.service_routing_draft =
-                Some(model.config.settings.geo_routing.service_routes.clone());
+            open_service_routing(model, None);
         }
         KeyCode::Char('t') => {
             if !model.config.settings.connectivity_probe.enabled {
@@ -324,13 +411,7 @@ pub(super) fn handle_sources(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
             }
         }
         KeyCode::Char('C') => {
-            let slugs = theme_picker_slugs();
-            model.theme_selected = slugs
-                .iter()
-                .position(|s| s == &model.config.settings.theme)
-                .unwrap_or(0);
-            model.theme_draft = None;
-            model.overlay = Overlay::ThemeSettings;
+            open_theme_settings(model, None);
         }
 
         _ => {}
@@ -759,6 +840,7 @@ fn finish_ipc_effects(mut effects: Vec<Effect>) -> Vec<Effect> {
 fn handle_go_first(model: &mut Model) -> Vec<Effect> {
     match model.overlay {
         Overlay::None => model.select_first(),
+        Overlay::SettingsMenu(_) => {}
         Overlay::RoutingMode => crate::ui::nav::select_first(&mut model.routing_selected),
         Overlay::GeoRegions => crate::ui::nav::select_first(&mut model.geo_region_selected),
         Overlay::DnsSettings => crate::ui::nav::select_first(&mut model.dns_selected),
@@ -795,6 +877,7 @@ pub(super) fn rebuild_key_event(
         "Right" => KeyCode::Right,
         "Tab" => KeyCode::Tab,
         "BackTab" => KeyCode::BackTab,
+        "Backspace" => KeyCode::Backspace,
         "Char" => KeyCode::Char(ch.unwrap_or(' ')),
         _ => return None,
     };
@@ -819,11 +902,13 @@ pub(super) fn handle_routing_mode(model: &mut Model, key: KeyEvent) -> Vec<Effec
         }
         KeyCode::Enter => {
             if let Some(&mode) = available.get(model.routing_selected) {
-                model.overlay = Overlay::None;
+                finish_settings_overlay(model);
                 return commit_routing_mode(model, mode);
             }
         }
+        KeyCode::Backspace if return_to_settings_menu(model) => {}
         KeyCode::Char('q') | KeyCode::Esc => {
+            model.settings_menu_return = None;
             model.overlay = Overlay::None;
         }
         _ => {}
@@ -837,6 +922,7 @@ pub(super) fn handle_routing_mode(model: &mut Model, key: KeyEvent) -> Vec<Effec
 pub(super) fn handle_theme_picker(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
     let slugs = theme_picker_slugs();
     if slugs.is_empty() {
+        model.settings_menu_return = None;
         model.overlay = Overlay::None;
         return vec![];
     }
@@ -860,7 +946,7 @@ pub(super) fn handle_theme_picker(model: &mut Model, key: KeyEvent) -> Vec<Effec
             let changed = model.config.settings.theme != slug;
             model.config.settings.theme = slug.clone();
             model.theme_draft = None;
-            model.overlay = Overlay::None;
+            finish_settings_overlay(model);
             if changed {
                 let mut effects = vec![Effect::SaveConfig];
                 push_status(
@@ -874,7 +960,12 @@ pub(super) fn handle_theme_picker(model: &mut Model, key: KeyEvent) -> Vec<Effec
         }
         KeyCode::Char('q') | KeyCode::Esc => {
             model.theme_draft = None;
+            model.settings_menu_return = None;
             model.overlay = Overlay::None;
+        }
+        KeyCode::Backspace if model.settings_menu_return.is_some() => {
+            model.theme_draft = None;
+            return_to_settings_menu(model);
         }
         _ => {}
     }
@@ -895,13 +986,15 @@ pub(super) fn handle_geo_region(model: &mut Model, key: KeyEvent) -> Vec<Effect>
         }
         KeyCode::Enter => {
             if let Some(&region) = regions.get(model.geo_region_selected) {
-                model.overlay = Overlay::None;
+                finish_settings_overlay(model);
                 return commit_geo_region(model, region);
             }
         }
+        KeyCode::Backspace if return_to_settings_menu(model) => {}
         KeyCode::Char('q') | KeyCode::Esc
             if model.config.settings.geo_routing.current_region.is_some() =>
         {
+            model.settings_menu_return = None;
             model.overlay = Overlay::None;
         }
         _ => {}
@@ -994,17 +1087,24 @@ pub(super) fn handle_dns_settings(model: &mut Model, key: KeyEvent) -> Vec<Effec
                 return vec![];
             };
             let effects = apply_dns_item(model, item);
-            model.overlay = Overlay::None;
+            finish_settings_overlay(model);
             model.dns_preset_draft = None;
             model.dns_strategy_draft = None;
             model.dns_fakeip_draft = None;
             return effects;
         }
         KeyCode::Char('q') | KeyCode::Esc => {
+            model.settings_menu_return = None;
             model.overlay = Overlay::None;
             model.dns_preset_draft = None;
             model.dns_strategy_draft = None;
             model.dns_fakeip_draft = None;
+        }
+        KeyCode::Backspace if model.settings_menu_return.is_some() => {
+            model.dns_preset_draft = None;
+            model.dns_strategy_draft = None;
+            model.dns_fakeip_draft = None;
+            return_to_settings_menu(model);
         }
         _ => {}
     }
@@ -1158,10 +1258,10 @@ pub(super) fn handle_service_routing(model: &mut Model, key: KeyEvent) -> Vec<Ef
         }
         KeyCode::Enter => {
             let Some(draft) = model.service_routing_draft.take() else {
-                model.overlay = Overlay::None;
+                finish_settings_overlay(model);
                 return vec![];
             };
-            model.overlay = Overlay::None;
+            finish_settings_overlay(model);
             let changed = draft != model.config.settings.geo_routing.service_routes;
             if !changed {
                 return vec![];
@@ -1229,8 +1329,13 @@ pub(super) fn handle_service_routing(model: &mut Model, key: KeyEvent) -> Vec<Ef
             return effects;
         }
         KeyCode::Char('q') | KeyCode::Esc => {
+            model.settings_menu_return = None;
             model.overlay = Overlay::None;
             model.service_routing_draft = None;
+        }
+        KeyCode::Backspace if model.settings_menu_return.is_some() => {
+            model.service_routing_draft = None;
+            return_to_settings_menu(model);
         }
         _ => {}
     }
@@ -1270,11 +1375,327 @@ mod tests {
     use super::*;
     use crate::app::msg::IpcCommand;
     use crate::config::profile::{
-        DnsPreset, DnsServer, DnsStrategy, Profile, Subscription, SubscriptionAutoUpdate,
+        DnsPreset, DnsServer, DnsStrategy, Profile, ServiceRoute, Subscription,
+        SubscriptionAutoUpdate,
     };
     use crate::test_helpers::{key, model_with_profiles};
     use crossterm::event::{KeyCode, KeyEvent};
     use uuid::Uuid;
+
+    #[test]
+    fn space_opens_settings_menu_from_both_main_panes() {
+        for focus in [MainPaneFocus::Sources, MainPaneFocus::Logs] {
+            let mut model = model_with_profiles(vec![]);
+            model.main_pane_focus = focus;
+
+            assert!(handle_key(&mut model, key(' ')).is_empty());
+            assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+        }
+    }
+
+    #[test]
+    fn settings_menu_opens_routing_group_and_returns_to_root() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+
+        handle_key(&mut model, key('r'));
+        assert_eq!(
+            model.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Routing)
+        );
+
+        handle_key(&mut model, KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+    }
+
+    #[test]
+    fn settings_menu_root_opens_dns_with_clean_drafts() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        model.dns_selected = 2;
+        model.dns_preset_draft = Some(DnsPreset::GoogleDot);
+        model.dns_strategy_draft = Some(DnsStrategy::OnlyIpv4);
+        model.dns_fakeip_draft = Some(true);
+
+        handle_key(&mut model, key('d'));
+
+        assert_eq!(model.overlay, Overlay::DnsSettings);
+        assert_eq!(model.dns_selected, 0);
+        assert_eq!(model.dns_preset_draft, None);
+        assert_eq!(model.dns_strategy_draft, None);
+        assert_eq!(model.dns_fakeip_draft, None);
+        assert_eq!(model.settings_menu_return, Some(SettingsMenuPage::Root));
+    }
+
+    #[test]
+    fn settings_menu_root_opens_theme_picker() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        model.config.settings.theme = "gruvbox".into();
+
+        handle_key(&mut model, key('t'));
+
+        assert_eq!(model.overlay, Overlay::ThemeSettings);
+        assert_eq!(
+            theme_picker_slugs()
+                .get(model.theme_selected)
+                .map(String::as_str),
+            Some("gruvbox")
+        );
+        assert_eq!(model.theme_draft, None);
+        assert_eq!(model.settings_menu_return, Some(SettingsMenuPage::Root));
+    }
+
+    #[test]
+    fn settings_routing_menu_opens_each_destination() {
+        let mut mode_model = model_with_profiles(vec![]);
+        mode_model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        handle_key(&mut mode_model, key('m'));
+        assert_eq!(mode_model.overlay, Overlay::RoutingMode);
+        assert_eq!(
+            mode_model.settings_menu_return,
+            Some(SettingsMenuPage::Routing)
+        );
+
+        let mut region_model = model_with_profiles(vec![]);
+        region_model
+            .config
+            .settings
+            .geo_routing
+            .set_region(GeoRegion::Ir);
+        region_model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        handle_key(&mut region_model, key('r'));
+        assert_eq!(region_model.overlay, Overlay::GeoRegions);
+        assert_eq!(region_model.geo_region_selected, 2);
+        assert_eq!(
+            region_model.settings_menu_return,
+            Some(SettingsMenuPage::Routing)
+        );
+
+        let mut services_model = model_with_profiles(vec![]);
+        services_model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        handle_key(&mut services_model, key('s'));
+        assert_eq!(services_model.overlay, Overlay::ServiceRouting);
+        assert_eq!(services_model.service_routing_selected, 0);
+        assert_eq!(
+            services_model.settings_menu_return,
+            Some(SettingsMenuPage::Routing)
+        );
+        assert_eq!(
+            services_model.service_routing_draft.as_ref(),
+            Some(&services_model.config.settings.geo_routing.service_routes)
+        );
+    }
+
+    #[test]
+    fn settings_menu_closes_or_ignores_keys_as_expected() {
+        for code in [KeyCode::Char('q'), KeyCode::Esc] {
+            let mut model = model_with_profiles(vec![]);
+            model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+            handle_key(&mut model, KeyEvent::from(code));
+            assert_eq!(model.overlay, Overlay::None);
+        }
+
+        for code in [KeyCode::Char(' '), KeyCode::Backspace, KeyCode::Char('x')] {
+            let mut model = model_with_profiles(vec![]);
+            model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+            handle_key(&mut model, KeyEvent::from(code));
+            assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+        }
+
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        handle_key(&mut model, key(' '));
+        assert_eq!(
+            model.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Routing)
+        );
+    }
+
+    #[test]
+    fn help_returns_to_the_same_settings_menu_page() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+
+        handle_key(&mut model, key('?'));
+        assert!(matches!(
+            model.overlay,
+            Overlay::Help(HelpState {
+                context: HelpContext::SettingsMenu(SettingsMenuPage::Routing),
+                ..
+            })
+        ));
+
+        handle_key(&mut model, key('?'));
+        assert_eq!(
+            model.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Routing)
+        );
+    }
+
+    #[test]
+    fn backspace_returns_from_settings_overlays_and_discards_drafts() {
+        let mut routing = model_with_profiles(vec![]);
+        routing.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        handle_key(&mut routing, key('m'));
+        handle_key(&mut routing, KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(
+            routing.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Routing)
+        );
+        assert_eq!(routing.settings_menu_return, None);
+
+        let mut region = model_with_profiles(vec![]);
+        region.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        handle_key(&mut region, key('r'));
+        handle_key(&mut region, KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(
+            region.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Routing)
+        );
+        assert_eq!(region.settings_menu_return, None);
+
+        let mut dns = model_with_profiles(vec![]);
+        dns.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        handle_key(&mut dns, key('d'));
+        dns.dns_preset_draft = Some(DnsPreset::GoogleDot);
+        dns.dns_strategy_draft = Some(DnsStrategy::OnlyIpv4);
+        dns.dns_fakeip_draft = Some(true);
+        handle_key(&mut dns, KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(dns.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+        assert_eq!(dns.dns_preset_draft, None);
+        assert_eq!(dns.dns_strategy_draft, None);
+        assert_eq!(dns.dns_fakeip_draft, None);
+        assert_eq!(dns.settings_menu_return, None);
+
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let mut theme = model_with_profiles(vec![]);
+        theme.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        handle_key(&mut theme, key('t'));
+        theme.theme_draft = Some("gruvbox".into());
+        handle_key(&mut theme, KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(theme.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+        assert_eq!(theme.theme_draft, None);
+        assert_eq!(theme.settings_menu_return, None);
+
+        let mut services = model_with_profiles(vec![]);
+        services.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        handle_key(&mut services, key('s'));
+        services
+            .service_routing_draft
+            .as_mut()
+            .unwrap()
+            .insert(RoutedService::Steam, ServiceRoute::Proxy);
+        handle_key(&mut services, KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(
+            services.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Routing)
+        );
+        assert_eq!(services.service_routing_draft, None);
+        assert_eq!(services.settings_menu_return, None);
+    }
+
+    #[test]
+    fn enter_commits_and_returns_to_the_originating_settings_menu() {
+        let mut routing = model_with_profiles(vec![]);
+        routing.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        handle_key(&mut routing, key('m'));
+        handle_key(&mut routing, KeyEvent::from(KeyCode::Enter));
+        assert_eq!(
+            routing.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Routing)
+        );
+        assert_eq!(routing.settings_menu_return, None);
+
+        let mut region = model_with_profiles(vec![]);
+        region.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        handle_key(&mut region, key('r'));
+        handle_key(&mut region, KeyEvent::from(KeyCode::Enter));
+        assert_eq!(
+            region.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Routing)
+        );
+        assert_eq!(region.settings_menu_return, None);
+
+        let mut dns = model_with_profiles(vec![]);
+        dns.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        handle_key(&mut dns, key('d'));
+        dns.dns_preset_draft = Some(DnsPreset::GoogleDot);
+        let effects = handle_key(&mut dns, KeyEvent::from(KeyCode::Enter));
+        assert_eq!(dns.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+        assert_eq!(
+            DnsPreset::detect(&dns.config.settings.dns),
+            Some(DnsPreset::GoogleDot)
+        );
+        assert!(effects.contains(&Effect::SaveConfig));
+        assert_eq!(dns.settings_menu_return, None);
+
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let mut theme = model_with_profiles(vec![]);
+        theme.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        handle_key(&mut theme, key('t'));
+        handle_key(&mut theme, key('j'));
+        let selected_theme = theme.theme_draft.clone().unwrap();
+        handle_key(&mut theme, KeyEvent::from(KeyCode::Enter));
+        assert_eq!(theme.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+        assert_eq!(theme.config.settings.theme, selected_theme);
+        assert_eq!(theme.theme_draft, None);
+        assert_eq!(theme.settings_menu_return, None);
+
+        let mut services = model_with_profiles(vec![]);
+        services.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        handle_key(&mut services, key('s'));
+        services
+            .service_routing_draft
+            .as_mut()
+            .unwrap()
+            .insert(RoutedService::Steam, ServiceRoute::Proxy);
+        let effects = handle_key(&mut services, KeyEvent::from(KeyCode::Enter));
+        assert_eq!(
+            services.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Routing)
+        );
+        assert_eq!(
+            services
+                .config
+                .settings
+                .geo_routing
+                .service_routes
+                .get(&RoutedService::Steam),
+            Some(&ServiceRoute::Proxy)
+        );
+        assert!(effects.contains(&Effect::SaveConfig));
+        assert_eq!(services.settings_menu_return, None);
+    }
+
+    #[test]
+    fn direct_settings_shortcuts_do_not_enable_back_navigation() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        for shortcut in ['m', 'o', 'D', 'S', 'C'] {
+            let mut model = model_with_profiles(vec![]);
+            model.settings_menu_return = Some(SettingsMenuPage::Root);
+            handle_key(&mut model, key(shortcut));
+            assert_eq!(model.settings_menu_return, None);
+        }
+
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::RoutingMode;
+        handle_key(&mut model, KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(model.overlay, Overlay::RoutingMode);
+    }
+
+    #[test]
+    fn enter_after_direct_settings_shortcuts_closes_the_overlay() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        for shortcut in ['m', 'o', 'D', 'S', 'C'] {
+            let mut model = model_with_profiles(vec![]);
+            handle_key(&mut model, key(shortcut));
+            handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
+            assert_eq!(model.overlay, Overlay::None);
+            assert_eq!(model.settings_menu_return, None);
+        }
+    }
 
     #[test]
     fn support_prompt_check_requires_geo_and_due_deadline() {

@@ -15,7 +15,7 @@ expression: "snapshot_terminal(&model, 80, 24)"
 │               │   Strategy ‹       prefer_ipv4        ›      │               │
 │               │   Fake-IP  ‹           off            ›      │               │
 │               │                                              │               │
-│               │      Enter confirm, q/Esc cancel, ? help     │               │
+│               │          󰌑 apply, q/󱊷 close, ⌫ back          │               │
 │               │                                              │               │
 │               │                                              │               │
 │               │                                              │               │

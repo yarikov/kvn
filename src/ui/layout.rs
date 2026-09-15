@@ -834,6 +834,7 @@ fn draw_impl(
 
     match model.overlay {
         Overlay::Help(state) => draw_help(frame, model, state, area),
+        Overlay::SettingsMenu(page) => draw_settings_menu(frame, model, page, area),
         Overlay::ConfirmDelete => draw_confirm_delete(frame, model, area),
         Overlay::RoutingMode => draw_routing_mode(frame, model, area),
         Overlay::GeoRegions => draw_geo_region(frame, model, area),
@@ -1051,6 +1052,77 @@ fn draw_help(
     );
 }
 
+fn draw_settings_menu(
+    frame: &mut Frame,
+    model: &Model,
+    page: crate::app::model::SettingsMenuPage,
+    area: Rect,
+) {
+    use crate::app::model::SettingsMenuPage;
+
+    let (title, entries, footer): (Option<&str>, &[(&str, &str)], &str) = match page {
+        SettingsMenuPage::Root => (
+            None,
+            &[
+                ("r", "+Routing"),
+                ("d", "DNS settings"),
+                ("t", "Theme picker"),
+            ],
+            "q/󱊷 close",
+        ),
+        SettingsMenuPage::Routing => (
+            Some("Routing"),
+            &[("m", "Mode"), ("r", "Region"), ("s", "Services")],
+            "q/󱊷 close   ⌫ back",
+        ),
+    };
+    let entry_width = entries
+        .iter()
+        .map(|(key, action)| visual_width(&format!("{key}  {action}")))
+        .max()
+        .unwrap_or(0);
+    let content_width = entry_width.max(visual_width(footer));
+    let popup_width = u16::try_from(content_width)
+        .unwrap_or(u16::MAX)
+        .saturating_add(6)
+        .min(area.width);
+    let popup_height = area.height.min(7);
+    let popup_area = Rect::new(
+        area.x + area.width.saturating_sub(popup_width) / 2,
+        area.y + area.height.saturating_sub(popup_height) / 2,
+        popup_width,
+        popup_height,
+    );
+
+    frame.render_widget(Clear, popup_area);
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .padding(Padding::horizontal(2))
+        .border_style(model.theme.accent())
+        .style(model.theme.popup_bg());
+    if let Some(title) = title {
+        block = block.title(format!(" {title} "));
+    }
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let mut lines: Vec<Line> = entries
+        .iter()
+        .map(|(key, action)| {
+            Line::from(vec![
+                Span::styled(*key, model.theme.accent().add_modifier(Modifier::BOLD)),
+                Span::raw(" "),
+                Span::styled("", model.theme.accent()),
+                Span::raw(" "),
+                Span::styled(*action, model.theme.normal()),
+            ])
+        })
+        .collect();
+    lines.push(Line::from(""));
+    lines.push(Line::from(footer));
+    frame.render_widget(Paragraph::new(lines).style(model.theme.normal()), inner);
+}
+
 /// Draw the delete confirmation dialog.
 fn draw_confirm_delete(frame: &mut Frame, model: &Model, area: Rect) {
     use crate::app::model::SourceRow;
@@ -1074,6 +1146,9 @@ fn draw_confirm_delete(frame: &mut Frame, model: &Model, area: Rect) {
 
 const POPUP_WIDTH_PERCENT: u16 = 60;
 const POPUP_HEIGHT_PERCENT: u16 = 50;
+const SETTINGS_FOOTER: &[&str] = &["󰌑 apply, q/󱊷 close"];
+const SETTINGS_FOOTER_WITH_BACK: &[&str] = &["󰌑 apply, q/󱊷 close, ⌫ back"];
+const REQUIRED_SETTINGS_FOOTER: &[&str] = &["󰌑 apply"];
 /// Taller variant for overlays whose list grows past ~6 items (e.g. the
 /// theme picker with 19+ entries). Keeps text inside the visible region
 /// on standard 24-row terminals.
@@ -1149,7 +1224,7 @@ fn draw_routing_mode(frame: &mut Frame, model: &Model, area: Rect) {
         model.routing_selected,
         active,
         POPUP_HEIGHT_PERCENT,
-        &["Enter confirm, q/Esc cancel, ? help"],
+        settings_overlay_footer(model),
     );
 }
 
@@ -1175,10 +1250,12 @@ fn draw_geo_region(frame: &mut Frame, model: &Model, area: Rect) {
         model.geo_region_selected,
         active,
         POPUP_HEIGHT_PERCENT,
-        if model.config.settings.geo_routing.current_region.is_some() {
-            &["Enter confirm, q/Esc cancel, ? help"]
+        if model.settings_menu_return.is_some() {
+            settings_overlay_footer(model)
+        } else if model.config.settings.geo_routing.current_region.is_some() {
+            SETTINGS_FOOTER
         } else {
-            &["Enter confirm, ? help"]
+            REQUIRED_SETTINGS_FOOTER
         },
     );
 }
@@ -1224,7 +1301,7 @@ fn draw_dns_settings(frame: &mut Frame, model: &Model, area: Rect) {
         model.dns_selected,
         None,
         POPUP_HEIGHT_PERCENT,
-        &["Enter confirm, q/Esc cancel, ? help"],
+        settings_overlay_footer(model),
     );
 }
 
@@ -1284,7 +1361,8 @@ fn draw_service_routing(frame: &mut Frame, model: &Model, area: Rect) {
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from("Enter confirm, q/Esc cancel, ? help").centered());
+    let footer = settings_overlay_footer(model)[0];
+    lines.push(Line::from(footer).centered());
 
     frame.render_widget(Paragraph::new(lines).style(theme.normal()), inner);
 }
@@ -1307,8 +1385,16 @@ fn draw_theme_settings(frame: &mut Frame, model: &Model, area: Rect) {
         model.theme_selected,
         active,
         POPUP_HEIGHT_PERCENT_TALL,
-        &["Enter confirm, q/Esc cancel, ? help"],
+        settings_overlay_footer(model),
     );
+}
+
+fn settings_overlay_footer(model: &Model) -> &'static [&'static str] {
+    if model.settings_menu_return.is_some() {
+        SETTINGS_FOOTER_WITH_BACK
+    } else {
+        SETTINGS_FOOTER
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2298,8 +2384,8 @@ mod tests {
             ("t/T", "Test selected / all profiles"),
             ("r", "Reconnect"),
             ("s", "Disconnect"),
-            ("m", "Routing mode"),
-            ("C", "Theme picker"),
+            ("Space r m / m", "Routing mode"),
+            ("Space t / C", "Theme picker"),
             ("q/Esc", "Detach TUI from main screen"),
             ("Ctrl+C", "Quit daemon"),
             ("?", "Open or close help"),
@@ -2577,6 +2663,20 @@ mod tests {
     }
 
     #[test]
+    fn draw_settings_menu_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Root);
+        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+    }
+
+    #[test]
+    fn draw_routing_menu_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
+        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+    }
+
+    #[test]
     fn draw_confirm_delete_overlay_snapshot() {
         let mut model = model_with_profiles(vec![Profile::new_vless(
             "Alpha".to_string(),
@@ -2694,8 +2794,8 @@ mod tests {
         model.overlay = Overlay::GeoRegions;
 
         let required = snapshot_terminal(&model, 80, 20);
-        assert!(required.contains("Enter confirm, ? help"));
-        assert!(!required.contains("q/Esc cancel"));
+        assert!(required.contains("󰌑 apply"));
+        assert!(!required.contains("q/󱊷 close"));
         assert!(!required.contains("j/k navigate"));
 
         model
@@ -2704,8 +2804,26 @@ mod tests {
             .geo_routing
             .set_region(crate::config::profile::GeoRegion::Ru);
         let optional = snapshot_terminal(&model, 80, 20);
-        assert!(optional.contains("Enter confirm, q/Esc cancel, ? help"));
+        assert!(optional.contains("󰌑 apply, q/󱊷 close"));
         assert!(!optional.contains("j/k navigate"));
+    }
+
+    #[test]
+    fn settings_overlays_show_back_only_for_menu_navigation() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::DnsSettings;
+
+        let direct = snapshot_terminal(&model, 100, 20);
+        assert!(!direct.contains("⌫ back"));
+
+        model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Root);
+        let from_menu = snapshot_terminal(&model, 100, 20);
+        assert!(from_menu.contains("󰌑 apply, q/󱊷 close, ⌫ back"));
+
+        model.overlay = Overlay::ServiceRouting;
+        model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Routing);
+        let services = snapshot_terminal(&model, 100, 20);
+        assert!(services.contains("󰌑 apply, q/󱊷 close, ⌫ back"));
     }
 
     #[test]
@@ -2713,6 +2831,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::DnsSettings;
+        model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Root);
         // Cursor on the "Strategy" row so it gets highlighted in the snapshot.
         model.dns_selected = 4;
         insta::assert_snapshot!(snapshot_terminal(&model, 80, 24));
@@ -2911,7 +3030,7 @@ mod tests {
 
         let rendered = snapshot_terminal(&model, 80, 24);
         assert!(rendered.contains("white"));
-        assert!(rendered.contains("Enter confirm, q/Esc cancel, ? help"));
+        assert!(rendered.contains("󰌑 apply, q/󱊷 close"));
         assert!(!rendered.contains("j/k navigate"));
         assert!(!rendered.contains("catppuccin-latte"));
     }

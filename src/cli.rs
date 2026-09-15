@@ -1367,6 +1367,7 @@ esac
             theme_draft: None,
             service_routing_selected: 0,
             service_routing_draft: None,
+            settings_menu_return: None,
             geo_updating: false,
             geo_last_updated: None,
             geo_last_checked_at: None,

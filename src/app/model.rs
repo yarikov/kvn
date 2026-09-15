@@ -16,6 +16,7 @@ pub enum Overlay {
     #[default]
     None,
     Help(HelpState),
+    SettingsMenu(SettingsMenuPage),
     ConfirmDelete,
     RoutingMode,
     GeoRegions,
@@ -24,6 +25,14 @@ pub enum Overlay {
     ServiceRouting,
     Support,
     Migration,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingsMenuPage {
+    #[default]
+    Root,
+    Routing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +59,7 @@ pub enum HelpContext {
     #[default]
     Sources,
     Logs,
+    SettingsMenu(SettingsMenuPage),
     ConfirmDelete,
     RoutingMode,
     GeoRegions,
@@ -63,6 +73,7 @@ impl HelpContext {
     pub fn restore_overlay(self) -> Overlay {
         match self {
             Self::Sources | Self::Logs => Overlay::None,
+            Self::SettingsMenu(page) => Overlay::SettingsMenu(page),
             Self::ConfirmDelete => Overlay::ConfirmDelete,
             Self::RoutingMode => Overlay::RoutingMode,
             Self::GeoRegions => Overlay::GeoRegions,
@@ -220,6 +231,7 @@ pub(crate) fn row_for_subscription_header(config: &Config, sub_idx: usize) -> us
 /// Application data model — no side effects.
 pub struct Model {
     pub overlay: Overlay,
+    pub settings_menu_return: Option<SettingsMenuPage>,
     pub main_pane_focus: MainPaneFocus,
     pub connection: ConnectionState,
     pub config: Config,
@@ -482,6 +494,7 @@ impl Model {
 
         let mut model = Self {
             overlay: Overlay::None,
+            settings_menu_return: None,
             main_pane_focus: MainPaneFocus::Sources,
             connection,
             config,
@@ -595,6 +608,7 @@ impl Model {
 
         let mut model = Self {
             overlay: Overlay::None,
+            settings_menu_return: None,
             main_pane_focus: MainPaneFocus::Sources,
             connection: ConnectionState::Idle,
             config,
@@ -825,6 +839,7 @@ impl Model {
         let selected = 0;
         Self {
             overlay: Overlay::None,
+            settings_menu_return: None,
             main_pane_focus: MainPaneFocus::Sources,
             connection: ConnectionState::Idle,
             config,
@@ -893,6 +908,15 @@ impl Model {
 mod tests {
     use super::*;
     use crate::test_helpers::*;
+
+    #[test]
+    fn settings_menu_overlay_serde_roundtrip() {
+        for page in [SettingsMenuPage::Root, SettingsMenuPage::Routing] {
+            let overlay = Overlay::SettingsMenu(page);
+            let json = serde_json::to_string(&overlay).unwrap();
+            assert_eq!(serde_json::from_str::<Overlay>(&json).unwrap(), overlay);
+        }
+    }
 
     #[test]
     fn select_next_basic() {
