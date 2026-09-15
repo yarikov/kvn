@@ -53,7 +53,6 @@ struct ToastState {
     last_revision: u64,
     status: Option<AppStatus>,
     expires_at: Option<Instant>,
-    show_over_overlay: bool,
 }
 
 impl ToastState {
@@ -62,7 +61,6 @@ impl ToastState {
             last_revision,
             status: None,
             expires_at: None,
-            show_over_overlay: false,
         }
     }
 
@@ -70,7 +68,6 @@ impl ToastState {
         if matches!(status, AppStatus::Error(_)) {
             self.status = Some(status);
             self.expires_at = Some(now + TOAST_ERROR_DURATION);
-            self.show_over_overlay = true;
             return true;
         }
         false
@@ -79,7 +76,6 @@ impl ToastState {
     fn show_info(&mut self, message: impl Into<String>, now: Instant) {
         self.status = Some(AppStatus::Info(message.into()));
         self.expires_at = Some(now + TOAST_INFO_DURATION);
-        self.show_over_overlay = false;
     }
 
     fn observe(&mut self, revision: u64, status: AppStatus, now: Instant) -> Option<u64> {
@@ -90,7 +86,6 @@ impl ToastState {
         if status.text().is_empty() || status.text() == "Press ? for help" {
             self.status = None;
             self.expires_at = None;
-            self.show_over_overlay = false;
             return None;
         }
         let error_revision = matches!(status, AppStatus::Error(_)).then_some(revision);
@@ -101,7 +96,6 @@ impl ToastState {
         };
         self.status = Some(status);
         self.expires_at = Some(now + duration);
-        self.show_over_overlay = false;
         error_revision
     }
 
@@ -109,16 +103,11 @@ impl ToastState {
         if self.expires_at.is_some_and(|deadline| now >= deadline) {
             self.status = None;
             self.expires_at = None;
-            self.show_over_overlay = false;
         }
     }
 
     fn current(&self) -> Option<&AppStatus> {
         self.status.as_ref()
-    }
-
-    fn show_over_overlay(&self) -> bool {
-        self.show_over_overlay
     }
 }
 
@@ -254,7 +243,6 @@ pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
                 None,
                 None,
                 Some(&toast),
-                false,
             )
         })?;
         if event::poll(Duration::from_millis(250))?
@@ -753,7 +741,6 @@ fn run_loop(
             Some(&log_navigation),
             None,
             toast.current(),
-            toast.show_over_overlay(),
         )
     })?;
     if clear_initial_error {
@@ -1366,7 +1353,6 @@ fn run_loop(
                     Some(&log_navigation),
                     log_selection.as_ref(),
                     toast.current(),
-                    toast.show_over_overlay(),
                 )
             })?;
             if let Some(status_revision) = pending_error_status_clear.take() {
@@ -1671,7 +1657,6 @@ mod tests {
                     None,
                     None,
                     Some(&state.toast),
-                    false,
                 )
             })
             .unwrap();
@@ -1866,7 +1851,6 @@ mod tests {
             Some(DEPRECATED_PANE_FOCUS_MESSAGE)
         );
         assert!(toast.expires_at.unwrap() > first_deadline);
-        assert!(!toast.show_over_overlay());
     }
 
     #[test]
@@ -1902,20 +1886,17 @@ mod tests {
     }
 
     #[test]
-    fn toast_state_shows_only_initial_errors_over_an_overlay() {
+    fn toast_state_initializes_only_from_errors() {
         let start = Instant::now();
         let mut toast = ToastState::new(2);
 
         assert!(!toast.show_initial_error(AppStatus::Info("Connected".into()), start));
         assert!(toast.current().is_none());
-        assert!(!toast.show_over_overlay());
 
         assert!(toast.show_initial_error(AppStatus::Error("Startup failed".into()), start));
         assert_eq!(toast.current().map(AppStatus::text), Some("Startup failed"));
-        assert!(toast.show_over_overlay());
 
         toast.observe(3, AppStatus::Info("Recovered".into()), start);
         assert_eq!(toast.current().map(AppStatus::text), Some("Recovered"));
-        assert!(!toast.show_over_overlay());
     }
 }

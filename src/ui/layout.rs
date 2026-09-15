@@ -6,6 +6,8 @@ use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Row, Table, Ta
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthChar;
 
+#[cfg(test)]
+use crate::app::model::AppStatus;
 use crate::app::model::{MainPaneFocus, Model, Overlay, SourceRow};
 use crate::ui::styles::Theme;
 use crate::ui::widgets::{
@@ -720,15 +722,7 @@ pub(crate) fn source_hit_test(
 /// Render the full application UI into the terminal frame.
 #[cfg(test)]
 fn draw(frame: &mut Frame, model: &Model) {
-    draw_impl(
-        frame,
-        model,
-        MainPaneFocus::Sources,
-        None,
-        None,
-        None,
-        false,
-    );
+    draw_impl(frame, model, MainPaneFocus::Sources, None, None, None);
 }
 
 #[cfg(test)]
@@ -744,7 +738,6 @@ pub(crate) fn draw_with_log_selection(
         None,
         log_selection,
         None,
-        false,
     );
 }
 
@@ -763,7 +756,6 @@ pub(crate) fn draw_with_interaction(
         log_navigation,
         log_selection,
         None,
-        false,
     );
 }
 
@@ -774,7 +766,6 @@ pub(crate) fn draw_with_toast(
     log_navigation: Option<&LogNavigation>,
     log_selection: Option<&LogSelection>,
     toast: Option<&crate::app::model::AppStatus>,
-    show_toast_over_overlay: bool,
 ) {
     draw_impl(
         frame,
@@ -783,7 +774,6 @@ pub(crate) fn draw_with_toast(
         log_navigation,
         log_selection,
         toast,
-        show_toast_over_overlay,
     );
 }
 
@@ -794,7 +784,6 @@ fn draw_impl(
     log_navigation: Option<&LogNavigation>,
     log_selection: Option<&LogSelection>,
     toast: Option<&crate::app::model::AppStatus>,
-    show_toast_over_overlay: bool,
 ) {
     let area = frame.area();
 
@@ -846,9 +835,7 @@ fn draw_impl(
         Overlay::None => {}
     }
 
-    if (model.overlay == Overlay::None || show_toast_over_overlay)
-        && let Some(status) = toast
-    {
+    if let Some(status) = toast {
         let toast = Toast::new(status, &model.theme);
         if let Some(area) = toast.area(frame.area()) {
             frame.render_widget(toast, area);
@@ -2235,7 +2222,6 @@ mod tests {
                     None,
                     None,
                     Some(&status),
-                    false,
                 )
             })
             .unwrap();
@@ -2257,7 +2243,6 @@ mod tests {
                     None,
                     None,
                     Some(&status),
-                    false,
                 )
             })
             .unwrap();
@@ -2267,7 +2252,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_hides_toast() {
+    fn overlay_shows_toast() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::ConfirmDelete;
         let status = crate::app::model::AppStatus::Error("Must not appear".into());
@@ -2281,19 +2266,19 @@ mod tests {
                     None,
                     None,
                     Some(&status),
-                    false,
                 )
             })
             .unwrap();
-        assert!(!buffer_to_string(terminal.backend().buffer()).contains("Must not appear"));
+        assert!(buffer_to_string(terminal.backend().buffer()).contains("Must not appear"));
     }
 
     #[test]
-    fn explicitly_allowed_toast_renders_over_overlay() {
+    fn settings_menu_shows_error_and_info_toasts() {
         let mut model = model_with_profiles(vec![]);
-        model.overlay = Overlay::ConfirmDelete;
-        let status = crate::app::model::AppStatus::Error("Startup failed".into());
+        model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Root);
         let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+
+        let error = AppStatus::Error("Failed to save config".into());
         terminal
             .draw(|frame| {
                 draw_with_toast(
@@ -2302,12 +2287,26 @@ mod tests {
                     MainPaneFocus::Sources,
                     None,
                     None,
-                    Some(&status),
-                    true,
+                    Some(&error),
                 )
             })
             .unwrap();
-        assert!(buffer_to_string(terminal.backend().buffer()).contains("Startup failed"));
+        assert!(buffer_to_string(terminal.backend().buffer()).contains("Failed to save config"));
+
+        let info = AppStatus::Info("Saved".into());
+        terminal
+            .draw(|frame| {
+                draw_with_toast(
+                    frame,
+                    &model,
+                    MainPaneFocus::Sources,
+                    None,
+                    None,
+                    Some(&info),
+                )
+            })
+            .unwrap();
+        assert!(buffer_to_string(terminal.backend().buffer()).contains("Saved"));
     }
 
     fn find_text(buffer: &ratatui::buffer::Buffer, needle: &str) -> usize {
