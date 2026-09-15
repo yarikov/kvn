@@ -131,13 +131,6 @@ or resume reconnects.
 
 ### Kill switch setup (optional)
 
-> **Note:** If the daemon crashes or cannot start while the kill switch is
-> active, use the emergency command below to restore network access.
->
-> ```bash
-> kvn disable --killswitch
-> ```
-
 The kill switch requires `nftables` and blocks outbound traffic when the VPN is
 not active:
 
@@ -150,8 +143,16 @@ The kill-switch sudoers rule uses the same dedicated `kvn-tui` group and allows
 only the validating helper installed at `/usr/lib/kvn-tui/killswitch-helper.sh`.
 Log out and back in if setup newly adds you to the group.
 
-Toggle it with `K`; the status bar shows `[KS]` while it is enabled. Polkit and
-the kill switch can also be installed together:
+Toggle it with `K`; when enabled, the status bar shows `KS`.
+
+> **Note:** If the daemon crashes or cannot start in this state, use the
+> emergency command below to restore network access.
+>
+> ```bash
+> kvn disable --killswitch
+> ```
+
+Polkit and the kill switch can also be installed together:
 
 ```bash
 sudo kvn setup --polkit --killswitch
