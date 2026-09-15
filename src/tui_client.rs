@@ -1499,6 +1499,7 @@ fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
     model.theme_draft = snapshot.theme_draft.clone();
     model.service_routing_selected = snapshot.service_routing_selected;
     model.service_routing_draft = snapshot.service_routing_draft;
+    model.settings_menu_return = snapshot.settings_menu_return;
     model.geo_updating = snapshot.geo_updating;
     model.geo_last_updated = snapshot.geo_last_updated;
     model.geo_last_checked_at = snapshot.geo_last_checked_at;

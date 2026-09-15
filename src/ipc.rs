@@ -330,6 +330,7 @@ mod tests {
             theme_draft: None,
             service_routing_selected: 0,
             service_routing_draft: None,
+            settings_menu_return: None,
             geo_updating: false,
             geo_last_updated: None,
             geo_last_checked_at: None,
@@ -344,6 +345,25 @@ mod tests {
             profile_latencies: Default::default(),
             testing_profiles: Default::default(),
         }
+    }
+
+    #[test]
+    fn settings_menu_return_is_optional_and_roundtrips() {
+        let mut snapshot = sample_snapshot();
+        snapshot.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Routing);
+        let mut value = serde_json::to_value(&snapshot).unwrap();
+        let restored: StateSnapshot = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(
+            restored.settings_menu_return,
+            Some(crate::app::model::SettingsMenuPage::Routing)
+        );
+
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("settings_menu_return");
+        let legacy: StateSnapshot = serde_json::from_value(value).unwrap();
+        assert_eq!(legacy.settings_menu_return, None);
     }
 
     /// End-to-end: client → server command, server → client broadcast.

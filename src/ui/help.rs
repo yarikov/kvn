@@ -67,11 +67,11 @@ const CONNECTION: &[(&str, &str)] = &[
 ];
 
 const SETTINGS: &[(&str, &str)] = &[
-    ("m", "Routing mode"),
-    ("o", "Geo region"),
-    ("D", "DNS settings"),
-    ("S", "Service routing"),
-    ("C", "Theme picker"),
+    ("Space r m / m", "Routing mode"),
+    ("Space r r / o", "Region"),
+    ("Space d / D", "DNS settings"),
+    ("Space r s / S", "Service routing"),
+    ("Space t / C", "Theme picker"),
 ];
 
 const DIALOGS: &[(&str, &str)] = &[
@@ -84,6 +84,7 @@ const DIALOGS: &[(&str, &str)] = &[
 const GENERAL: &[(&str, &str)] = &[
     ("q/Esc", "Detach TUI from main screen"),
     ("Ctrl+C", "Quit daemon"),
+    ("Space", "Open settings shortcuts"),
     ("?", "Open or close help"),
 ];
 
@@ -117,6 +118,7 @@ fn relevant_group(context: HelpContext) -> HelpGroup {
     match context {
         HelpContext::Sources => HelpGroup::Sources,
         HelpContext::Logs => HelpGroup::Logs,
+        HelpContext::SettingsMenu(_) => HelpGroup::Settings,
         HelpContext::ConfirmDelete
         | HelpContext::RoutingMode
         | HelpContext::GeoRegions
@@ -242,6 +244,8 @@ mod tests {
         for context in [
             HelpContext::Sources,
             HelpContext::Logs,
+            HelpContext::SettingsMenu(crate::app::model::SettingsMenuPage::Root),
+            HelpContext::SettingsMenu(crate::app::model::SettingsMenuPage::Routing),
             HelpContext::ConfirmDelete,
             HelpContext::RoutingMode,
             HelpContext::GeoRegions,
@@ -302,6 +306,7 @@ mod tests {
     #[test]
     fn general_orders_quit_before_help() {
         assert_eq!(GENERAL[1], ("Ctrl+C", "Quit daemon"));
-        assert_eq!(GENERAL[2], ("?", "Open or close help"));
+        assert_eq!(GENERAL[2], ("Space", "Open settings shortcuts"));
+        assert_eq!(GENERAL[3], ("?", "Open or close help"));
     }
 }

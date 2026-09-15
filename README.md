@@ -270,6 +270,19 @@ detected problems.
 
 **Settings**
 
+Press `Space` to open the settings shortcut menu. Routing actions are grouped
+under `r`:
+
+| Key | Action |
+|-----|--------|
+| `Space r m` | Routing mode |
+| `Space r r` | Region |
+| `Space r s` | Service routing |
+| `Space d` | DNS settings |
+| `Space t` | Theme picker |
+
+The original direct shortcuts remain available:
+
 | Key | Action |
 |-----|--------|
 | `m` | Routing mode |
@@ -291,6 +304,7 @@ detected problems.
 
 | Key | Action |
 |-----|--------|
+| `Space` | Open settings shortcuts |
 | `q` / `Esc` | Detach the TUI from the main screen; in a dialog, cancel it (`Esc` cancels an active log selection first) |
 | `Ctrl+C` | Stop the daemon, disconnect the VPN, and exit completely |
 | `?` | Open or close help |

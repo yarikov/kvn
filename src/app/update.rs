@@ -2324,6 +2324,10 @@ mod tests {
         let backtab = rebuild_key_event("BackTab", None, false).unwrap();
         assert_eq!(backtab.code, KeyCode::BackTab);
         assert_eq!(backtab.modifiers, KeyModifiers::empty());
+
+        let backspace = rebuild_key_event("Backspace", None, false).unwrap();
+        assert_eq!(backspace.code, KeyCode::Backspace);
+        assert_eq!(backspace.modifiers, KeyModifiers::empty());
     }
 
     #[test]

@@ -32,11 +32,11 @@ expression: "snapshot_terminal(&model, 80, 40)"
 │           │ K               Toggle kill switch                   │           │
 │           │                                                      │           │
 │           │ Settings                                             │           │
-│           │ m               Routing mode                         │           │
-│           │ o               Geo region                           │           │
-│           │ D               DNS settings                         │           │
-│           │ S               Service routing                      │           │
-│           │ C               Theme picker                         │           │
+│           │ Space r m / m   Routing mode                         │           │
+│           │ Space r r / o   Region                               │           │
+│           │ Space d / D     DNS settings                         │           │
+│           │ Space r s / S   Service routing                      │           │
+│           │ Space t / C     Theme picker                         │           │
 │           │                                                      │           │
 │           │        j/k scroll · gg/G edges · q/Esc/? back        │           │
 │           └──────────────────────────────────────────────────────┘           │
