@@ -132,7 +132,11 @@ or resume reconnects.
 ### Kill switch setup (optional)
 
 > **Note:** If the daemon crashes or cannot start while the kill switch is
-> active, run `kvn disable --killswitch` to restore network access.
+> active, use the emergency command below to restore network access.
+>
+> ```bash
+> kvn disable --killswitch
+> ```
 
 The kill switch requires `nftables` and blocks outbound traffic when the VPN is
 not active:
