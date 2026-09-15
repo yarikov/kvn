@@ -3,7 +3,7 @@ use clap::{ArgGroup, Parser, Subcommand};
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use crate::app::model::ConnectionState;
@@ -117,6 +117,35 @@ enum Command {
 
     /// Connect the last-used profile, or disconnect when connected.
     Toggle,
+
+    #[command(
+        about = "Enable one or more runtime integrations",
+        group(
+            ArgGroup::new("targets")
+                .required(true)
+                .args(["killswitch"])
+        )
+    )]
+    Enable {
+        #[arg(
+            long,
+            help = "Enable the kill switch and immediately block non-VPN traffic"
+        )]
+        killswitch: bool,
+    },
+
+    #[command(
+        about = "Disable one or more runtime integrations",
+        group(
+            ArgGroup::new("targets")
+                .required(true)
+                .args(["killswitch"])
+        )
+    )]
+    Disable {
+        #[arg(long, help = "Disable the nftables-based kill switch")]
+        killswitch: bool,
+    },
 
     /// Recover or reset profiles.json while the daemon is stopped.
     Config {
@@ -497,6 +526,85 @@ fn run_toggle() -> Result<()> {
     Ok(())
 }
 
+fn run_kill_switch(enabled: bool) -> Result<()> {
+    let active_before = crate::services::killswitch::is_active().ok();
+    let already = complete_kill_switch_apply(
+        enabled,
+        active_before,
+        try_apply_kill_switch_via_daemon(enabled, active_before),
+        crate::services::killswitch::apply,
+    )?;
+    println!("{}", kill_switch_status(enabled, already));
+    Ok(())
+}
+
+fn complete_kill_switch_apply(
+    enabled: bool,
+    active_before: Option<bool>,
+    daemon_result: Option<Result<()>>,
+    apply_directly: impl FnOnce(bool) -> Result<()>,
+) -> Result<bool> {
+    match daemon_result {
+        Some(result) => result?,
+        None => apply_directly(enabled)?,
+    }
+    Ok(active_before == Some(enabled))
+}
+
+fn try_apply_kill_switch_via_daemon(
+    enabled: bool,
+    active_before: Option<bool>,
+) -> Option<Result<()>> {
+    let mut client = IpcClient::connect().ok()?;
+    let initial = fetch_snapshot(&mut client).ok()?;
+    if initial.settings.kill_switch == enabled {
+        return (active_before == Some(enabled)).then_some(Ok(()));
+    }
+
+    client.send(&IpcCommand::SetKillSwitch { enabled }).ok()?;
+    let deadline = Instant::now() + SNAPSHOT_TIMEOUT;
+    loop {
+        let remaining = deadline.checked_duration_since(Instant::now())?;
+        let snapshot = client.read_snapshot(remaining).ok()?;
+        if let Some(result) = kill_switch_snapshot_result(&snapshot, enabled) {
+            return Some(result);
+        }
+    }
+}
+
+fn kill_switch_status(enabled: bool, already: bool) -> String {
+    let state = if enabled { "enabled" } else { "disabled" };
+    if already {
+        format!("Kill switch already {state}")
+    } else {
+        format!("Kill switch {state}")
+    }
+}
+
+fn kill_switch_snapshot_result(snapshot: &StateSnapshot, enabled: bool) -> Option<Result<()>> {
+    kill_switch_result(
+        snapshot.settings.kill_switch,
+        snapshot.status_is_error,
+        &snapshot.status,
+        enabled,
+    )
+}
+
+fn kill_switch_result(
+    current: bool,
+    status_is_error: bool,
+    status: &str,
+    enabled: bool,
+) -> Option<Result<()>> {
+    if current == enabled {
+        Some(Ok(()))
+    } else if status_is_error && status.starts_with("Kill switch:") {
+        Some(Err(anyhow::anyhow!(status.to_string())))
+    } else {
+        None
+    }
+}
+
 /// Resolve a profile query: exact UUID, exact (case-insensitive) name, or
 /// unique case-insensitive name prefix. Ambiguous prefixes resolve to none.
 fn resolve_profile(snap: &StateSnapshot, query: &str) -> Option<Uuid> {
@@ -611,6 +719,16 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
         Some(Command::Disconnect) => return Some(run_disconnect()),
         Some(Command::Reconnect) => return Some(run_reconnect()),
         Some(Command::Toggle) => return Some(run_toggle()),
+        Some(Command::Enable { killswitch }) => {
+            if *killswitch {
+                return Some(run_kill_switch(true));
+            }
+        }
+        Some(Command::Disable { killswitch }) => {
+            if *killswitch {
+                return Some(run_kill_switch(false));
+            }
+        }
         Some(Command::Config { command }) => {
             return Some(match command {
                 ConfigCommand::Migrate { to } => crate::migrations::prepare_profile_migration(*to),
@@ -971,6 +1089,96 @@ esac
                 killswitch: false,
             })
         ));
+    }
+
+    #[test]
+    fn enable_killswitch_option_detected() {
+        let cli = Cli::parse_from(["kvn", "enable", "--killswitch"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Enable { killswitch: true })
+        ));
+    }
+
+    #[test]
+    fn disable_killswitch_option_detected() {
+        let cli = Cli::parse_from(["kvn", "disable", "--killswitch"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Disable { killswitch: true })
+        ));
+    }
+
+    #[test]
+    fn kill_switch_commands_require_a_target() {
+        assert!(Cli::try_parse_from(["kvn", "enable"]).is_err());
+        assert!(Cli::try_parse_from(["kvn", "disable"]).is_err());
+    }
+
+    #[test]
+    fn kill_switch_result_waits_for_completion() {
+        assert!(
+            kill_switch_result(false, false, "Kill switch disabling…", false)
+                .unwrap()
+                .is_ok()
+        );
+        assert!(kill_switch_result(true, false, "Kill switch disabling…", false).is_none());
+    }
+
+    #[test]
+    fn kill_switch_result_surfaces_daemon_helper_errors() {
+        let error = kill_switch_result(true, true, "Kill switch: helper failed", false)
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.to_string(), "Kill switch: helper failed");
+        assert!(kill_switch_result(true, true, "another error", false).is_none());
+    }
+
+    #[test]
+    fn kill_switch_status_distinguishes_changes_from_existing_state() {
+        assert_eq!(kill_switch_status(true, false), "Kill switch enabled");
+        assert_eq!(kill_switch_status(false, false), "Kill switch disabled");
+        assert_eq!(
+            kill_switch_status(true, true),
+            "Kill switch already enabled"
+        );
+        assert_eq!(
+            kill_switch_status(false, true),
+            "Kill switch already disabled"
+        );
+    }
+
+    #[test]
+    fn kill_switch_fallback_reapplies_an_already_matching_state() {
+        let direct_calls = std::cell::Cell::new(0);
+        let already = complete_kill_switch_apply(false, Some(false), None, |enabled| {
+            assert!(!enabled);
+            direct_calls.set(direct_calls.get() + 1);
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(already);
+        assert_eq!(direct_calls.get(), 1);
+    }
+
+    #[test]
+    fn kill_switch_daemon_result_does_not_call_direct_helper() {
+        let already = complete_kill_switch_apply(true, Some(false), Some(Ok(())), |_| {
+            panic!("direct helper must not be called")
+        })
+        .unwrap();
+
+        assert!(!already);
+    }
+
+    #[test]
+    fn enable_help_explains_that_non_vpn_traffic_is_blocked() {
+        use clap::CommandFactory;
+
+        let mut enable = Cli::command().find_subcommand("enable").unwrap().clone();
+        let help = enable.render_long_help().to_string();
+        assert!(help.contains("immediately block non-VPN traffic"));
     }
 
     #[test]
