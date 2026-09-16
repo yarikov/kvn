@@ -14,7 +14,7 @@ expression: "snapshot_terminal(&model, 80, 24)"
 │               │           Steam     ‹  Direct  ›             │               │
 │               │           Telegram  ‹  Proxy   › *           │               │
 │               │                                              │               │
-│               │              󰌑 apply, q/󱊷 close              │               │
+│               │              󰌑 apply · q/󱊷 close             │               │
 │               │                                              │               │
 │               │                                              │               │
 │               │                                              │               │

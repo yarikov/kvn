@@ -13,7 +13,7 @@ expression: "snapshot_terminal(&model, 80, 20)"
 │                           │  r  Region          │                           │
 │                           │  s  Services        │                           │
 │                           │                      │                           │
-│                           │  q/󱊷 close   ⌫ back  │                           │
+│                           │  q/󱊷 close · ⌫ back  │                           │
 │                           └──────────────────────┘                           │
 │                                                                              │
 │                                                                              │
