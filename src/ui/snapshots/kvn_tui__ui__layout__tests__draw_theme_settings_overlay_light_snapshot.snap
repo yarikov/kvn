@@ -4,33 +4,33 @@ expression: "snapshot_terminal(&model, 80, 32)"
 ---
 ┌ Traffic ─────────────────────────────────────────────────────────────────────┐
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections         │
-└───────────────┌──────────────────────────────────────────────┐───────────────┘
-┌ Profiles ─────│                 Select theme                 │───────────────┐
-│ No sources. Pr│                                              │m clipboard.   │
-│               │               catppuccin                     │               │
-│               │               catppuccin-latte               │               │
-│               │               ethereal                       │               │
-│               │               everforest                     │               │
-│               │               flexoki-light                  │               │
-│               │               gruvbox                        │               │
-│               │               hackerman                      │               │
-│               │               kanagawa                       │               │
-│               │               last-horizon                   │               │
-│               │               lumon                          │               │
-│               │               lupine                         │               │
-│               │               matte-black                    │               │
-│               │               miasma                         │               │
-│               │               nord                           │               │
-│               │               osaka-jade                     │               │
-│               │               retro-82                       │               │
-│               │               ristretto                      │               │
-│               │               rose-pine                      │               │
-│               │               solitude                       │               │
-│               │               tokyo-night                    │               │
-│               │               vantablack                     │               │
-│               │               white                          │               │
-│               │                                              │               │
-│               │              󰌑 apply · q/󱊷 close             │               │
-│               └──────────────────────────────────────────────┘               │
+└──────────────────────┌───────────────────────────────┐───────────────────────┘
+┌ Profiles ────────────│       Settings › Theme        │───────────────────────┐
+│ No sources. Press p t│                               │ URL from clipboard.   │
+│                      │ Auto (theme-name-that-keep... │                       │
+│                      │ catppuccin                    │                       │
+│                      │ catppuccin-latte              │                       │
+│                      │ ethereal                      │                       │
+│                      │ everforest                    │                       │
+│                      │ flexoki-light                 │                       │
+│                      │ gruvbox                       │                       │
+│                      │ hackerman                     │                       │
+│                      │ kanagawa                      │                       │
+│                      │ last-horizon                  │                       │
+│                      │ lumon                         │                       │
+│                      │ lupine                        │                       │
+│                      │ matte-black                   │                       │
+│                      │ miasma                        │                       │
+│                      │ nord                          │                       │
+│                      │ osaka-jade                    │                       │
+│                      │ retro-82                      │                       │
+│                      │ ristretto                     │                       │
+│                      │ rose-pine                     │                       │
+│                      │ solitude                      │                       │
+│                      │ tokyo-night                   │                       │
+│                      │ vantablack                    │                       │
+│                      │                               │                       │
+│                      │      󰌑 apply · q/󱊷 close      │                       │
+│                      └───────────────────────────────┘                       │
 └──────────────────────────────────────────────────────────────────────────────┘
  DISCONNECTED                                                        DoH  Global

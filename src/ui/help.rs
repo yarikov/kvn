@@ -59,19 +59,13 @@ const LOGS: &[(&str, &str)] = &[
     ("Esc", "Cancel log selection"),
 ];
 
-const CONNECTION: &[(&str, &str)] = &[
-    ("r", "Reconnect"),
-    ("s", "Disconnect"),
-    ("a", "Toggle auto-connect"),
-    ("K", "Toggle kill switch"),
-];
+const CONNECTION: &[(&str, &str)] = &[("r", "Reconnect"), ("s", "Disconnect")];
 
 const SETTINGS: &[(&str, &str)] = &[
-    ("Space r m", "Routing mode"),
-    ("Space r r", "Region"),
-    ("Space d", "DNS settings"),
-    ("Space r s", "Service routing"),
-    ("Space t", "Theme picker"),
+    ("Space c", "Connection"),
+    ("Space d", "DNS"),
+    ("Space r", "Routing"),
+    ("Space t", "Theme"),
 ];
 
 const DIALOGS: &[(&str, &str)] = &[

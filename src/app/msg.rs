@@ -1,4 +1,7 @@
-use crate::app::model::{ConnectionState, MainPaneFocus, MigrationStatus, Overlay, TrafficStats};
+use crate::app::model::{
+    ConnectionSettingsDraft, ConnectionState, MainPaneFocus, MigrationStatus, Overlay,
+    RoutingSettingsDraft, TrafficStats,
+};
 use crate::config::profile::{
     DnsPreset, DnsStrategy, GeoRegion, Profile, RoutedService, RoutingMode, Settings, Subscription,
 };
@@ -488,6 +491,12 @@ pub struct StateSnapshot {
     >,
     #[serde(default)]
     pub settings_menu_return: Option<crate::app::model::SettingsMenuPage>,
+    #[serde(default)]
+    pub settings_menu_selected: usize,
+    #[serde(default)]
+    pub routing_settings_draft: Option<RoutingSettingsDraft>,
+    #[serde(default)]
+    pub connection_settings_draft: Option<ConnectionSettingsDraft>,
     pub geo_updating: bool,
     pub geo_last_updated: Option<String>,
     /// Last successful check of the active regional rule sets.

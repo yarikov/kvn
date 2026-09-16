@@ -6,19 +6,19 @@ expression: "snapshot_terminal(&model, 80, 20)"
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections         │
 └──────────────────────────────────────────────────────────────────────────────┘
 ┌ Profiles ────────────────────────────────────────────────────────────────────┐
-│ No sources. Press p to paste a profile or subscription URL from clipboard.   │
-│                      ┌───────────────────────────────┐                       │
-│                      │   Settings › Routing › Mode   │                       │
+│ No sources. Press p t┌───────────────────────────────┐ URL from clipboard.   │
+│                      │      Settings › Routing       │                       │
 │                      │                               │                       │
-│                      │           Global              │                       │
-│                      │           Bypass RU           │                       │
-│                      │           Only RU             │                       │
+│                      │   Region   ‹ 🇷🇺  Russia ›      │                       │
+│                      │   Mode     ‹ Bypass RU ›      │                       │
 │                      │                               │                       │
-│                      │      󰌑 apply · q/󱊷 close      │                       │
+│                      │           Services            │                       │
+│                      │   Steam    ‹ Disabled ›       │                       │
+│                      │   Telegram ‹ Disabled ›       │                       │
+│                      │                               │                       │
+│                      │ 󰌑 apply · q/󱊷 close · ⌫ back  │                       │
 │                      └───────────────────────────────┘                       │
 │                                                                              │
 │                                                                              │
-│                                                                              │
-│                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
- DISCONNECTED                                       DoH  Global    (off) never
+ DISCONNECTED                                    DoH  Bypass RU    (off) never

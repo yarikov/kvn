@@ -263,20 +263,17 @@ detected problems.
 |-----|--------|
 | `r` | Reconnect |
 | `s` | Disconnect |
-| `a` | Toggle auto-connect |
-| `K` | Toggle kill switch |
 
 **Settings**
 
-Press `Space` to open the settings shortcut menu. Routing actions are grouped
-under `r`:
+Press `Space` to open settings. Use `j` / `k` to select an item, `h` / `l` to
+change its draft value, and `Enter` to apply all changes on the current screen.
 
 | Key | Action |
 |-----|--------|
-| `Space r m` | Routing mode |
-| `Space r r` | Region |
-| `Space r s` | Service routing |
+| `Space c` | Connection settings |
 | `Space d` | DNS settings |
+| `Space r` | Routing settings |
 | `Space t` | Theme picker |
 
 **Dialogs**

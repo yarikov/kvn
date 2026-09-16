@@ -987,7 +987,7 @@ fn draw_help(
         .checked_div(area.height)
         .unwrap_or(90)
         .clamp(50, 90);
-    let popup_area = centered_rect(70, percent, area);
+    let popup_area = centered_fixed_width_rect(HELP_POPUP_WIDTH, centered_rect(100, percent, area));
 
     frame.render_widget(Clear, popup_area);
 
@@ -1046,69 +1046,253 @@ fn draw_settings_menu(
     area: Rect,
 ) {
     use crate::app::model::SettingsMenuPage;
-
-    let (title, entries, back): (Option<&str>, &[(&str, &str)], bool) = match page {
-        SettingsMenuPage::Root => (
-            None,
-            &[
-                ("r", "+Routing"),
-                ("d", "DNS settings"),
-                ("t", "Theme picker"),
-            ],
-            false,
-        ),
-        SettingsMenuPage::Routing => (
-            Some("Routing"),
-            &[("m", "Mode"), ("r", "Region"), ("s", "Services")],
-            true,
-        ),
+    let row_width = settings_row_width(area);
+    let content_width = settings_content_width(area);
+    let heading = match page {
+        SettingsMenuPage::Root => "Settings",
+        SettingsMenuPage::Routing => "Settings › Routing",
+        SettingsMenuPage::Connection => "Settings › Connection",
     };
-    let footer = overlay_footer(None, true, back);
-    let entry_width = entries
-        .iter()
-        .map(|(key, action)| visual_width(&format!("{key}  {action}")))
-        .max()
-        .unwrap_or(0);
-    let content_width = entry_width.max(visual_width(&footer));
-    let popup_width = u16::try_from(content_width)
-        .unwrap_or(u16::MAX)
-        .saturating_add(6)
-        .min(area.width);
-    let popup_height = area.height.min(7);
-    let popup_area = Rect::new(
-        area.x + area.width.saturating_sub(popup_width) / 2,
-        area.y + area.height.saturating_sub(popup_height) / 2,
-        popup_width,
-        popup_height,
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(heading, model.theme.accent())).centered(),
+        Line::from(""),
+    ];
+    match page {
+        SettingsMenuPage::Root => {
+            let entries = [
+                ("c", "Connection"),
+                ("d", "DNS"),
+                ("r", "Routing"),
+                ("t", "Theme"),
+            ];
+            let entry_width = entries
+                .iter()
+                .map(|(key, action)| visual_width(&format!("{key}  {action}")))
+                .max()
+                .unwrap_or(0);
+            let entry_indent = " ".repeat(content_width.saturating_sub(entry_width) / 2);
+            for (index, (key, action)) in entries.into_iter().enumerate() {
+                let command = format!("{key}  {action}");
+                let row = format!("{entry_indent}{command}");
+                let line = if index == model.settings_menu_selected {
+                    settings_full_width_line(&row, row_width, true, &model.theme)
+                } else {
+                    Line::from(vec![
+                        Span::raw(format!(" {}", entry_indent)),
+                        Span::styled(key, model.theme.accent().add_modifier(Modifier::BOLD)),
+                        Span::raw(" "),
+                        Span::styled("", model.theme.accent()),
+                        Span::raw(" "),
+                        Span::styled(action, model.theme.normal()),
+                    ])
+                };
+                lines.push(line);
+            }
+        }
+        SettingsMenuPage::Routing => {
+            use crate::config::profile::{GeoRegion, RoutedService, ServiceRoute};
+
+            let geo_routing = &model.config.settings.geo_routing;
+            let region = geo_routing.current_region.unwrap_or(GeoRegion::Global);
+            let mode = geo_routing.mode();
+            let routes = &geo_routing.service_routes;
+            let has_draft = model.routing_settings_draft.is_some();
+            let (shown_region, shown_mode, shown_routes) = model
+                .routing_settings_draft
+                .as_ref()
+                .map(|draft| (draft.region, draft.mode, &draft.service_routes))
+                .unwrap_or((region, mode, routes));
+            let mut settings = vec![(
+                "Region",
+                geo_region_label(shown_region).to_string(),
+                has_draft && geo_routing.current_region != Some(shown_region),
+            )];
+            if shown_region != GeoRegion::Global {
+                settings.push((
+                    "Mode",
+                    shown_mode.to_string(),
+                    has_draft && mode != shown_mode,
+                ));
+            }
+            let service_offset = if shown_region == GeoRegion::Global {
+                1
+            } else {
+                2
+            };
+            for service in RoutedService::ALL {
+                let saved = routes.get(&service).copied().unwrap_or_default();
+                let shown = shown_routes.get(&service).copied().unwrap_or_default();
+                settings.push((
+                    service.label(),
+                    shown.label().to_string(),
+                    has_draft && saved != shown,
+                ));
+            }
+            let stable_value_width = GeoRegion::ALL
+                .iter()
+                .map(|region| visual_width(geo_region_label(*region)))
+                .chain(GeoRegion::ALL.iter().flat_map(|region| {
+                    crate::config::profile::RoutingMode::available(Some(*region))
+                        .into_iter()
+                        .map(|mode| visual_width(&mode.to_string()))
+                }))
+                .chain(
+                    [
+                        ServiceRoute::Disabled,
+                        ServiceRoute::Proxy,
+                        ServiceRoute::Direct,
+                    ]
+                    .map(|route| visual_width(route.label())),
+                )
+                .max()
+                .unwrap_or(0);
+            let layout = settings_value_layout(&settings, stable_value_width, area);
+            for (index, (name, value, dirty)) in settings.into_iter().enumerate() {
+                if index == service_offset {
+                    lines.push(Line::from(""));
+                    lines.push(
+                        Line::from(Span::styled("Services", model.theme.accent())).centered(),
+                    );
+                }
+                lines.push(settings_value_line(
+                    name,
+                    &value,
+                    dirty,
+                    index == model.settings_menu_selected,
+                    layout,
+                    &model.theme,
+                ));
+            }
+        }
+        SettingsMenuPage::Connection => {
+            let saved_auto_connect = model.config.settings.auto_connect;
+            let saved_kill_switch = model.config.settings.kill_switch;
+            let shown = model.connection_settings_draft.unwrap_or(
+                crate::app::model::ConnectionSettingsDraft {
+                    auto_connect: saved_auto_connect,
+                    kill_switch: model.kill_switch_pending.unwrap_or(saved_kill_switch),
+                },
+            );
+            let settings = [
+                (
+                    "Auto-connect",
+                    if shown.auto_connect { "on" } else { "off" }.to_string(),
+                    shown.auto_connect != saved_auto_connect,
+                ),
+                (
+                    "Kill switch",
+                    if shown.kill_switch { "on" } else { "off" }.to_string(),
+                    shown.kill_switch != saved_kill_switch,
+                ),
+            ];
+            let stable_value_width = ["on", "off"]
+                .into_iter()
+                .map(visual_width)
+                .max()
+                .unwrap_or(0);
+            let layout = settings_value_layout(&settings, stable_value_width, area);
+            for (index, (name, value, dirty)) in settings.into_iter().enumerate() {
+                lines.push(settings_value_line(
+                    name,
+                    &value,
+                    dirty,
+                    index == model.settings_menu_selected,
+                    layout,
+                    &model.theme,
+                ));
+            }
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(
+        Line::from(overlay_footer(
+            (page != SettingsMenuPage::Root).then_some(APPLY_ACTION),
+            true,
+            page != SettingsMenuPage::Root,
+        ))
+        .centered(),
     );
 
+    let popup_area = settings_content_sized_rect(area, &lines);
     frame.render_widget(Clear, popup_area);
-    let mut block = Block::default()
+    let block = Block::default()
         .borders(Borders::ALL)
-        .padding(Padding::horizontal(2))
         .border_style(model.theme.accent())
         .style(model.theme.popup_bg());
-    if let Some(title) = title {
-        block = block.title(format!(" {title} "));
-    }
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
-
-    let mut lines: Vec<Line> = entries
-        .iter()
-        .map(|(key, action)| {
-            Line::from(vec![
-                Span::styled(*key, model.theme.accent().add_modifier(Modifier::BOLD)),
-                Span::raw(" "),
-                Span::styled("", model.theme.accent()),
-                Span::raw(" "),
-                Span::styled(*action, model.theme.normal()),
-            ])
-        })
-        .collect();
-    lines.push(Line::from(""));
-    lines.push(Line::from(footer));
     frame.render_widget(Paragraph::new(lines).style(model.theme.normal()), inner);
+}
+
+fn settings_value_line<'a>(
+    name: &str,
+    value: &str,
+    dirty: bool,
+    selected: bool,
+    layout: SettingsValueLayout,
+    theme: &crate::ui::styles::Theme,
+) -> Line<'a> {
+    let text = settings_value_text(name, value, dirty, layout.label_width);
+    let indent = " ".repeat(layout.content_width.saturating_sub(layout.group_width) / 2);
+    let row = format!("{indent}{text}");
+    settings_full_width_line(&row, layout.row_width, selected, theme)
+}
+
+fn settings_value_text(name: &str, value: &str, dirty: bool, label_width: usize) -> String {
+    let label = pad_to_visual_width(name, label_width);
+    format!("{label} ‹ {value} ›{}", if dirty { " *" } else { "  " })
+}
+
+#[derive(Clone, Copy)]
+struct SettingsValueLayout {
+    label_width: usize,
+    group_width: usize,
+    content_width: usize,
+    row_width: usize,
+}
+
+fn settings_value_layout(
+    settings: &[(&str, String, bool)],
+    stable_value_width: usize,
+    area: Rect,
+) -> SettingsValueLayout {
+    let label_width = settings
+        .iter()
+        .map(|(name, _, _)| visual_width(name))
+        .max()
+        .unwrap_or(0);
+    let value_width = settings
+        .iter()
+        .map(|(_, value, _)| visual_width(value))
+        .max()
+        .unwrap_or(0)
+        .max(stable_value_width);
+    let group_width = label_width + value_width + 7;
+    SettingsValueLayout {
+        label_width,
+        group_width,
+        content_width: settings_content_width(area),
+        row_width: settings_row_width(area),
+    }
+}
+
+fn settings_full_width_line<'a>(
+    text: &str,
+    row_width: usize,
+    selected: bool,
+    theme: &crate::ui::styles::Theme,
+) -> Line<'a> {
+    let content_width = row_width.saturating_sub(SETTINGS_TEXT_MARGIN * 2);
+    let content = fit_to_visual_width(text, content_width);
+    let row = fit_to_visual_width(&format!(" {content}"), row_width);
+    Line::from(Span::styled(
+        row,
+        if selected {
+            theme.selected()
+        } else {
+            theme.normal()
+        },
+    ))
 }
 
 /// Draw the delete confirmation dialog.
@@ -1128,12 +1312,14 @@ fn draw_confirm_delete(frame: &mut Frame, model: &Model, area: Rect) {
             Line::from(""),
             Line::from(overlay_footer(Some(CONFIRM_ACTION), true, false)),
         ],
-        POPUP_HEIGHT_PERCENT,
     );
 }
 
-const POPUP_WIDTH_PERCENT: u16 = 60;
+const DIALOG_POPUP_WIDTH: u16 = 48;
+const HELP_POPUP_WIDTH: u16 = 56;
 const POPUP_HEIGHT_PERCENT: u16 = 50;
+const SETTINGS_POPUP_WIDTH: u16 = 33;
+const SETTINGS_TEXT_MARGIN: usize = 1;
 const APPLY_ACTION: &str = "󰌑 apply";
 const CONFIRM_ACTION: &str = "󰌑 confirm";
 const CLOSE_ACTION: &str = "q/󱊷 close";
@@ -1157,9 +1343,80 @@ fn overlay_footer(primary: Option<&str>, close: bool, back: bool) -> String {
     actions.join(" · ")
 }
 
+fn centered_fixed_width_rect(width: u16, area: Rect) -> Rect {
+    let width = width.min(area.width);
+    Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y,
+        width,
+        area.height,
+    )
+}
+
+fn content_sized_rect(width: u16, area: Rect, lines: &[Line]) -> Rect {
+    let horizontal_area = centered_fixed_width_rect(width, area);
+    content_sized_rect_in(horizontal_area, area, lines, 0)
+}
+
+fn settings_content_sized_rect(area: Rect, lines: &[Line]) -> Rect {
+    let horizontal_area = centered_fixed_width_rect(SETTINGS_POPUP_WIDTH, area);
+    content_sized_rect_in(horizontal_area, area, lines, 0)
+}
+
+fn settings_row_width(area: Rect) -> usize {
+    SETTINGS_POPUP_WIDTH.min(area.width).saturating_sub(2) as usize
+}
+
+fn settings_content_width(area: Rect) -> usize {
+    settings_row_width(area).saturating_sub(SETTINGS_TEXT_MARGIN * 2)
+}
+
+fn content_sized_rect_in(
+    horizontal_area: Rect,
+    area: Rect,
+    lines: &[Line],
+    horizontal_padding: u16,
+) -> Rect {
+    let content_width = horizontal_area
+        .width
+        .saturating_sub(2 + horizontal_padding.saturating_mul(2))
+        .max(1) as usize;
+    let content_height = lines.iter().fold(0u16, |height, line| {
+        let line_height =
+            u16::try_from(line.width().max(1).div_ceil(content_width)).unwrap_or(u16::MAX);
+        height.saturating_add(line_height)
+    });
+    let popup_height = content_height.saturating_add(2).min(area.height);
+    Rect::new(
+        horizontal_area.x,
+        area.y + area.height.saturating_sub(popup_height) / 2,
+        horizontal_area.width,
+        popup_height,
+    )
+}
+
 /// Helper to render a centered popup with a border and text.
-fn draw_modal(frame: &mut Frame, theme: &Theme, area: Rect, lines: Vec<Line>, height_percent: u16) {
-    let popup_area = centered_rect(POPUP_WIDTH_PERCENT, height_percent, area);
+fn draw_modal(frame: &mut Frame, theme: &Theme, area: Rect, lines: Vec<Line>) {
+    let popup_area = content_sized_rect(DIALOG_POPUP_WIDTH, area, &lines);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.accent())
+        .style(theme.popup_bg());
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .style(theme.normal())
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(paragraph, popup_area);
+}
+
+fn draw_settings_modal(frame: &mut Frame, theme: &Theme, area: Rect, lines: Vec<Line>) {
+    let popup_area = settings_content_sized_rect(area, &lines);
 
     frame.render_widget(Clear, popup_area);
 
@@ -1206,7 +1463,7 @@ fn draw_migration(frame: &mut Frame, model: &Model, area: Rect) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(overlay_footer(None, true, false)));
-    draw_modal(frame, &model.theme, area, lines, POPUP_HEIGHT_PERCENT);
+    draw_modal(frame, &model.theme, area, lines);
 }
 
 /// Draw the routing mode selection modal.
@@ -1221,7 +1478,7 @@ fn draw_routing_mode(frame: &mut Frame, model: &Model, area: Rect) {
         frame,
         &model.theme,
         area,
-        "Select routing mode",
+        "Settings › Routing › Mode",
         &labels,
         model.routing_selected,
         active,
@@ -1233,10 +1490,7 @@ fn draw_routing_mode(frame: &mut Frame, model: &Model, area: Rect) {
 /// Draw the geo region selection modal.
 fn draw_geo_region(frame: &mut Frame, model: &Model, area: Rect) {
     use crate::config::profile::GeoRegion;
-    // Labels are aligned 1:1 with `GeoRegion::ALL`. The debug_assert catches
-    // a missed entry when a new region is added.
-    let labels = ["🇷🇺 Russia", "🇨🇳 China", "🇮🇷 Iran", "🌍 Global"];
-    debug_assert_eq!(labels.len(), GeoRegion::ALL.len());
+    let labels = GeoRegion::ALL.map(geo_region_label);
     let active = model
         .config
         .settings
@@ -1247,7 +1501,7 @@ fn draw_geo_region(frame: &mut Frame, model: &Model, area: Rect) {
         frame,
         &model.theme,
         area,
-        "Select geo region",
+        "Settings › Routing › Region",
         &labels,
         model.geo_region_selected,
         active,
@@ -1260,6 +1514,17 @@ fn draw_geo_region(frame: &mut Frame, model: &Model, area: Rect) {
             overlay_footer(Some(APPLY_ACTION), false, false)
         },
     );
+}
+
+fn geo_region_label(region: crate::config::profile::GeoRegion) -> &'static str {
+    use crate::config::profile::GeoRegion;
+
+    match region {
+        GeoRegion::Ru => "🇷🇺 Russia",
+        GeoRegion::Cn => "🇨🇳 China",
+        GeoRegion::Ir => "🇮🇷 Iran",
+        GeoRegion::Global => "🌍 Global",
+    }
 }
 
 /// Draw the DNS settings overlay: preset, strategy, and fake-IP selectors.
@@ -1278,27 +1543,57 @@ fn draw_dns_settings(frame: &mut Frame, model: &Model, area: Rect) {
         .is_some_and(|draft| *draft != dns.strategy);
     let fakeip = model.dns_fakeip_draft.unwrap_or(dns.fakeip_enabled);
     let fakeip_dirty = model.dns_fakeip_draft.is_some() && fakeip != dns.fakeip_enabled;
-    let setting_row = |name: &str, value: &str, dirty: bool| {
-        format!(
-            "{name:<8} ‹ {value:^24} ›{}",
-            if dirty { " *" } else { "  " }
-        )
+    let preset_label = displayed_preset.map_or("Custom", |preset| match preset {
+        DnsPreset::CloudflareDoh => "Cloudflare DoH",
+        DnsPreset::GoogleDot => "Google DoT",
+        DnsPreset::Quad9Doh => "Quad9 DoH",
+        DnsPreset::SystemLocal => "System local",
+    });
+    let strategy_label = match strategy {
+        crate::config::profile::DnsStrategy::PreferIpv4 => "Prefer IPv4",
+        crate::config::profile::DnsStrategy::PreferIpv6 => "Prefer IPv6",
+        crate::config::profile::DnsStrategy::OnlyIpv4 => "IPv4 only",
+        crate::config::profile::DnsStrategy::OnlyIpv6 => "IPv6 only",
     };
-    let labels = [
-        setting_row(
-            "Preset",
-            displayed_preset.map(DnsPreset::label).unwrap_or("Custom"),
-            preset_dirty,
+    let settings = [
+        ("Preset", preset_label.to_string(), preset_dirty),
+        ("Strategy", strategy_label.to_string(), strategy_dirty),
+        (
+            "Fake-IP",
+            if fakeip { "on" } else { "off" }.to_string(),
+            fakeip_dirty,
         ),
-        setting_row("Strategy", strategy.as_str(), strategy_dirty),
-        setting_row("Fake-IP", if fakeip { "on" } else { "off" }, fakeip_dirty),
     ];
+    let stable_value_width = [
+        "Custom",
+        "Cloudflare DoH",
+        "Google DoT",
+        "Quad9 DoH",
+        "System local",
+        "Prefer IPv4",
+        "Prefer IPv6",
+        "IPv4 only",
+        "IPv6 only",
+        "on",
+        "off",
+    ]
+    .into_iter()
+    .map(visual_width)
+    .max()
+    .unwrap_or(0);
+    let layout = settings_value_layout(&settings, stable_value_width, area);
+    let labels = settings.map(|(name, value, dirty)| {
+        fit_to_visual_width(
+            &settings_value_text(name, &value, dirty, layout.label_width),
+            layout.group_width,
+        )
+    });
     let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
     draw_selection_modal(
         frame,
         &model.theme,
         area,
-        "DNS settings",
+        "Settings › DNS",
         &label_refs,
         model.dns_selected,
         None,
@@ -1307,19 +1602,51 @@ fn draw_dns_settings(frame: &mut Frame, model: &Model, area: Rect) {
     );
 }
 
-/// Draw the service routing overlay. Each row shows a service and its
-/// draft route (`‹ value ›`, cycled with h/l); a `*` marks rows whose draft
-/// differs from the committed setting. Enter commits the whole draft.
-///
-/// Rendered without the shared `draw_selection_modal` because this overlay
-/// uses fixed service/route columns instead of a single centered label.
 fn draw_service_routing(frame: &mut Frame, model: &Model, area: Rect) {
     use crate::config::profile::RoutedService;
 
     let theme = &model.theme;
     let committed = &model.config.settings.geo_routing.service_routes;
 
-    let popup_area = centered_rect(POPUP_WIDTH_PERCENT, POPUP_HEIGHT_PERCENT, area);
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(
+            "Settings › Routing › Services",
+            theme.accent(),
+        ))
+        .centered(),
+        Line::from(""),
+    ];
+
+    let settings = RoutedService::ALL.map(|service| {
+        let saved = committed.get(&service).copied().unwrap_or_default();
+        let shown = match model.service_routing_draft.as_ref() {
+            Some(draft) => draft.get(&service).copied().unwrap_or_default(),
+            None => saved,
+        };
+        (service.label(), shown.label().to_string(), shown != saved)
+    });
+    let stable_value_width = ["Disabled", "Proxy", "Direct"]
+        .into_iter()
+        .map(visual_width)
+        .max()
+        .unwrap_or(0);
+    let layout = settings_value_layout(&settings, stable_value_width, area);
+    for (index, (name, value, dirty)) in settings.into_iter().enumerate() {
+        lines.push(settings_value_line(
+            name,
+            &value,
+            dirty,
+            index == model.service_routing_selected,
+            layout,
+            theme,
+        ));
+    }
+
+    lines.push(Line::from(""));
+    let footer = settings_overlay_footer(model);
+    lines.push(Line::from(footer).centered());
+
+    let popup_area = settings_content_sized_rect(area, &lines);
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1327,45 +1654,6 @@ fn draw_service_routing(frame: &mut Frame, model: &Model, area: Rect) {
         .style(theme.popup_bg());
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
-
-    let mut lines: Vec<Line> = vec![
-        Line::from(Span::styled("Service routing", theme.accent())).centered(),
-        Line::from(""),
-    ];
-
-    // name(9) + " ‹ " + route(8) + " ›" + dirty(2)
-    const ROW_WIDTH: usize = 9 + 3 + 8 + 2 + 2;
-    let indent = " ".repeat((inner.width as usize).saturating_sub(ROW_WIDTH) / 2);
-    for (i, service) in RoutedService::ALL.into_iter().enumerate() {
-        let saved = committed.get(&service).copied().unwrap_or_default();
-        // Inside a draft an absent entry IS Disabled (the commit handler
-        // normalizes Disabled to "no entry") — it must not fall back to the
-        // committed value, or cycling back to Disabled would render stale.
-        let shown = match model.service_routing_draft.as_ref() {
-            Some(draft) => draft.get(&service).copied().unwrap_or_default(),
-            None => saved,
-        };
-        let selected = i == model.service_routing_selected;
-        let mut row = format!(
-            "{}{:<9} ‹ {:^8} ›{}",
-            indent,
-            service.label(),
-            shown.label(),
-            if shown != saved { " *" } else { "" },
-        );
-        let style = if selected {
-            row = fit_to_visual_width(&row, inner.width as usize);
-            theme.selected()
-        } else {
-            theme.normal()
-        };
-        lines.push(Line::from(Span::styled(row, style)));
-    }
-
-    lines.push(Line::from(""));
-    let footer = settings_overlay_footer(model);
-    lines.push(Line::from(footer).centered());
-
     frame.render_widget(Paragraph::new(lines).style(theme.normal()), inner);
 }
 
@@ -1382,7 +1670,7 @@ fn draw_theme_settings(frame: &mut Frame, model: &Model, area: Rect) {
         frame,
         &model.theme,
         area,
-        "Select theme",
+        "Settings › Theme",
         &label_refs,
         model.theme_selected,
         active,
@@ -1411,14 +1699,22 @@ fn draw_selection_modal(
     height_percent: u16,
     footer: String,
 ) {
-    let popup_area = centered_rect(POPUP_WIDTH_PERCENT, height_percent, area);
+    let popup_width = SETTINGS_POPUP_WIDTH.min(area.width);
+    let height_area = centered_rect(100, height_percent, area);
+    let popup_area = Rect::new(
+        area.x + area.width.saturating_sub(popup_width) / 2,
+        height_area.y,
+        popup_width,
+        height_area.height,
+    );
     let row_width = popup_area.width.saturating_sub(2) as usize;
+    let content_width = row_width.saturating_sub(SETTINGS_TEXT_MARGIN * 2);
     let column_width = items
         .iter()
         .map(|label| visual_width(label))
         .max()
         .unwrap_or(0)
-        .min(row_width);
+        .min(content_width);
     let footer_height = 1;
     let max_visible_items = popup_area.height.saturating_sub(5 + footer_height) as usize;
     let visible_count = items.len().min(max_visible_items);
@@ -1446,22 +1742,18 @@ fn draw_selection_modal(
         } else {
             theme.normal()
         };
-        let text = align_in_centered_column(label, row_width, column_width);
+        let text = align_in_centered_column(label, content_width, column_width);
+        let text = fit_to_visual_width(&format!(" {text}"), row_width);
         lines.push(Line::from(Span::styled(text, style)));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(footer));
-    draw_modal(frame, theme, area, lines, height_percent);
+    draw_settings_modal(frame, theme, area, lines);
 }
 
 fn draw_support(frame: &mut Frame, model: &Model, area: Rect) {
     const ITEMS: [&str; 3] = ["Support development", "Remind me later", "Don't show again"];
-    let width = if area.width < 80 {
-        100
-    } else {
-        POPUP_WIDTH_PERCENT
-    };
-    let horizontal_area = centered_rect(width, 100, area);
+    let horizontal_area = centered_fixed_width_rect(DIALOG_POPUP_WIDTH, area);
     let row_width = horizontal_area.width.saturating_sub(2) as usize;
     let column_width = ITEMS
         .iter()
@@ -2343,34 +2635,6 @@ mod tests {
     }
 
     #[test]
-    fn centered_rect_60_50_in_100_100() {
-        let area = Rect::new(0, 0, 100, 100);
-        let popup = centered_rect(POPUP_WIDTH_PERCENT, POPUP_HEIGHT_PERCENT, area);
-        assert_eq!(popup.x, 20);
-        assert_eq!(popup.y, 25);
-        assert_eq!(popup.width, 60);
-        assert_eq!(popup.height, 50);
-    }
-
-    #[test]
-    fn centered_rect_100_100_fills_area() {
-        let area = Rect::new(10, 20, 80, 40);
-        let popup = centered_rect(100, 100, area);
-        assert_eq!(popup.x, 10);
-        assert_eq!(popup.y, 20);
-        assert_eq!(popup.width, 80);
-        assert_eq!(popup.height, 40);
-    }
-
-    #[test]
-    fn centered_rect_zero_area() {
-        let area = Rect::new(0, 0, 0, 0);
-        let popup = centered_rect(50, 50, area);
-        assert_eq!(popup.width, 0);
-        assert_eq!(popup.height, 0);
-    }
-
-    #[test]
     fn help_renders_commands() {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
@@ -2402,8 +2666,9 @@ mod tests {
             ("t/T", "Test selected / all profiles"),
             ("r", "Reconnect"),
             ("s", "Disconnect"),
-            ("Space r m", "Routing mode"),
-            ("Space t", "Theme picker"),
+            ("Space r", "Routing"),
+            ("Space t", "Theme"),
+            ("Space c", "Connection"),
             ("q/Esc", "Detach TUI from main screen"),
             ("Ctrl+C", "Quit daemon"),
             ("?", "Open or close help"),
@@ -2580,52 +2845,6 @@ mod tests {
     }
 
     #[test]
-    fn every_overlay_border_renderer_uses_accent() {
-        use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
-        use ratatui::style::Color;
-
-        for (overlay, width_percent, height_percent) in [
-            (
-                Overlay::ConfirmDelete,
-                POPUP_WIDTH_PERCENT,
-                POPUP_HEIGHT_PERCENT,
-            ),
-            (
-                Overlay::Help(crate::app::model::HelpState::default()),
-                70,
-                90,
-            ),
-            (
-                Overlay::ServiceRouting,
-                POPUP_WIDTH_PERCENT,
-                POPUP_HEIGHT_PERCENT,
-            ),
-        ] {
-            let mut model = mouse_model();
-            model.overlay = overlay;
-            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-            terminal
-                .draw(|frame| {
-                    draw_with_interaction(frame, &model, MainPaneFocus::Logs, None, None);
-                })
-                .unwrap();
-
-            let popup = centered_rect(width_percent, height_percent, Rect::new(0, 0, 80, 24));
-            let corner =
-                &terminal.backend().buffer().content[popup.y as usize * 80 + popup.x as usize];
-            assert_eq!(corner.style().fg, Some(Color::Cyan), "overlay: {overlay:?}");
-        }
-
-        let mut model = mouse_model();
-        model.overlay = Overlay::Support;
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|frame| draw(frame, &model)).unwrap();
-        let support_corner = &terminal.backend().buffer().content[3 * 80 + 16];
-        assert_eq!(support_corner.style().fg, Some(Color::Cyan));
-    }
-
-    #[test]
     fn draw_traffic_panel_snapshot() {
         let mut model = model_with_profiles(vec![Profile::new_vless(
             "Alpha".to_string(),
@@ -2691,6 +2910,32 @@ mod tests {
     fn draw_routing_menu_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
+        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+    }
+
+    #[test]
+    fn draw_routing_menu_country_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model
+            .config
+            .settings
+            .geo_routing
+            .set_region(crate::config::profile::GeoRegion::Ru);
+        model
+            .config
+            .settings
+            .geo_routing
+            .set_mode(crate::config::profile::RoutingMode::Bypass(
+                crate::config::profile::GeoRegion::Ru,
+            ));
+        model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
+        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+    }
+
+    #[test]
+    fn draw_connection_menu_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Connection);
         insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
     }
 
@@ -2850,8 +3095,7 @@ mod tests {
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::DnsSettings;
         model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Root);
-        // Cursor on the "Strategy" row so it gets highlighted in the snapshot.
-        model.dns_selected = 4;
+        model.dns_selected = 1;
         insta::assert_snapshot!(snapshot_terminal(&model, 80, 24));
     }
 
@@ -2917,104 +3161,28 @@ mod tests {
     }
 
     #[test]
-    fn support_overlay_preserves_copy_and_actions_at_supported_sizes() {
-        for (width, height, popup_height) in [(80, 24, 17), (70, 24, 17), (70, 15, 12)] {
-            let mut model = model_with_profiles(vec![]);
-            model.overlay = Overlay::Support;
-            model.support_selected = 1;
-            let rendered = snapshot_terminal(&model, width, height);
-            for expected in [
-                "Support kvn 🚀",
-                "kvn is free, open source, and built with care.",
-                "development.",
-                "Your support helps cover AI tools",
-                "and new features.",
-                "Support development",
-                "Remind me later",
-                "Don't show again",
-                "󰌑 confirm · q/󱊷 close",
-            ] {
-                assert!(
-                    rendered.contains(expected),
-                    "missing {expected:?} at {width}x{height}:\n{rendered}"
-                );
-            }
-            assert!(!rendered.contains("> Support development"));
-
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal.draw(|frame| draw(frame, &model)).unwrap();
-            let buffer = terminal.backend().buffer();
-            let footer = find_text(buffer, "confirm");
-            let footer_row = footer / width as usize;
-            let popup_y = (height - popup_height) / 2;
-            assert_eq!(footer_row, (popup_y + popup_height - 2) as usize);
-            let popup_x = if width < 80 || height < 24 {
-                0
-            } else {
-                centered_rect(POPUP_WIDTH_PERCENT, 100, Rect::new(0, 0, width, height)).x
-            };
-            assert_eq!(
-                buffer.content[(popup_y * width + popup_x) as usize].symbol(),
-                "┌"
-            );
-            assert_eq!(
-                buffer.content[((popup_y + popup_height - 1) * width + popup_x) as usize].symbol(),
-                "└"
-            );
-        }
-    }
-
-    #[test]
-    fn support_overlay_uses_standard_full_row_selection() {
+    fn draw_support_overlay_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::Support;
         model.support_selected = 1;
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|frame| draw(frame, &model)).unwrap();
-
-        let buffer = terminal.backend().buffer();
-        let selected = find_text(buffer, "Remind me later");
-        let row_start = selected / 80 * 80;
-        let popup = centered_rect(
-            POPUP_WIDTH_PERCENT,
-            POPUP_HEIGHT_PERCENT_TALL,
-            Rect::new(0, 0, 80, 24),
-        );
-        let expected = model.theme.selected().bg;
-        for x in popup.x + 1..popup.x + popup.width - 1 {
-            assert_eq!(buffer.content[row_start + x as usize].style().bg, expected);
-        }
+        insta::assert_snapshot!(snapshot_terminal(&model, 80, 24));
     }
 
     #[test]
-    fn migration_overlay_shows_progress_description_and_close_action() {
+    fn draw_migration_overlay_snapshot() {
         use crate::app::model::{MigrationPhase, MigrationStatus};
 
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::Migration;
         model.migration = Some(MigrationStatus {
             session_id: "session".into(),
-            phase: MigrationPhase::Running,
+            phase: MigrationPhase::Failed,
             completed: 2,
             total: 4,
             summary: "Updating integration".into(),
-            error: None,
+            error: Some("sudo command failed".into()),
         });
-        let running = snapshot_terminal(&model, 80, 24);
-        assert!(running.contains("Updating kvn"));
-        assert!(running.contains("Updating integration"));
-        assert!(running.contains("Migration continues after closing the TUI."));
-        assert!(running.contains("Step 2 of 4"));
-        assert!(running.contains(CLOSE_ACTION));
-        assert!(!running.contains("the migration stays active"));
-
-        let status = model.migration.as_mut().unwrap();
-        status.phase = MigrationPhase::Failed;
-        status.error = Some("sudo command failed".into());
-        let failed = snapshot_terminal(&model, 80, 24);
-        assert!(failed.contains("Migration failed"));
-        assert!(failed.contains("sudo command failed"));
-        assert!(failed.contains("kvn migrate"));
+        insta::assert_snapshot!(snapshot_terminal(&model, 80, 24));
     }
 
     /// Theme picker rendered with a light palette — sanity check for
@@ -3023,6 +3191,13 @@ mod tests {
     fn draw_theme_settings_overlay_light_snapshot() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join("omarchy/current");
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(
+            current.join("theme.name"),
+            "theme-name-that-keeps-going-past-the-overlay",
+        )
+        .unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         unsafe { std::env::set_var("XDG_STATE_HOME", dir.path()) };
         let mut model = model_with_profiles(vec![]);
@@ -3060,6 +3235,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.config.settings.dns.fakeip_enabled = true;
+        model.dns_preset_draft = Some(crate::config::profile::DnsPreset::SystemLocal);
         model
             .config
             .settings
@@ -3071,7 +3247,7 @@ mod tests {
                 inet6_range: "fc00::/18".to_string(),
             });
         model.overlay = Overlay::DnsSettings;
-        model.dns_selected = 5;
+        model.dns_selected = 2;
         insta::assert_snapshot!(snapshot_terminal(&model, 80, 24));
     }
 
