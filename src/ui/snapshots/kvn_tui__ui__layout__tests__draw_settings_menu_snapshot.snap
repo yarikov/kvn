@@ -7,16 +7,16 @@ expression: "snapshot_terminal(&model, 80, 20)"
 └──────────────────────────────────────────────────────────────────────────────┘
 ┌ Profiles ────────────────────────────────────────────────────────────────────┐
 │ No sources. Press p to paste a profile or subscription URL from clipboard.   │
-│                                                                              │
-│                            ┌────────────────────┐                            │
-│                            │  r  +Routing      │                            │
-│                            │  d  DNS settings  │                            │
-│                            │  t  Theme picker  │                            │
-│                            │                    │                            │
-│                            │  q/󱊷 close         │                            │
-│                            └────────────────────┘                            │
-│                                                                              │
-│                                                                              │
+│                      ┌───────────────────────────────┐                       │
+│                      │           Settings            │                       │
+│                      │                               │                       │
+│                      │        c  Connection         │                       │
+│                      │        d  DNS                │                       │
+│                      │        r  Routing            │                       │
+│                      │        t  Theme              │                       │
+│                      │                               │                       │
+│                      │           q/󱊷 close           │                       │
+│                      └───────────────────────────────┘                       │
 │                                                                              │
 │                                                                              │
 │                                                                              │

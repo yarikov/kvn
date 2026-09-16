@@ -1,5 +1,7 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model, Overlay, TrafficStats};
+use crate::app::model::{
+    AppStatus, ConnectionState, Model, Overlay, RoutingSettingsDraft, TrafficStats,
+};
 use crate::app::msg::{GeoResult, Msg};
 use crate::config::profile::{
     GeoRegion, Profile, RoutedService, RoutingMode, Subscription, SubscriptionAutoUpdate,
@@ -150,7 +152,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             updated_parts,
             errors,
         } => {
-            model.geo_updating = false;
+            model.geo_updating = model.pending_geo_reconnect;
             model.service_retry_states = retry_states;
             model.service_checked_at = checked_at;
             model.service_next_updates = next_updates;
@@ -179,6 +181,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
                 return effects;
             }
             model.pending_service_reconnect = false;
+            if model.pending_geo_reconnect {
+                effects.push(Effect::BroadcastState);
+                return effects;
+            }
             if model.connection != ConnectionState::Connected {
                 // Disconnected while the download ran — the files are on
                 // disk and apply on whatever connect happens next.
@@ -792,6 +798,129 @@ pub(super) fn commit_routing_mode(model: &mut Model, mode: RoutingMode) -> Vec<E
     effects
 }
 
+pub(super) fn commit_routing_settings(
+    model: &mut Model,
+    draft: RoutingSettingsDraft,
+) -> Vec<Effect> {
+    if !RoutingMode::available(Some(draft.region)).contains(&draft.mode) {
+        let mut effects = vec![];
+        push_status(
+            &mut effects,
+            model,
+            AppStatus::Error(format!(
+                "Routing mode {} is unavailable for region {}",
+                draft.mode,
+                draft.region.code_upper()
+            )),
+        );
+        return effects;
+    }
+
+    let old_region = model.config.settings.geo_routing.current_region;
+    let old_mode = model.config.settings.geo_routing.mode();
+    let old_routes = model.config.settings.geo_routing.service_routes.clone();
+    let region_changed = old_region != Some(draft.region);
+    let mode_changed = old_mode != draft.mode;
+    let service_routes_changed = old_routes != draft.service_routes;
+    if !region_changed && !mode_changed && !service_routes_changed {
+        return vec![];
+    }
+
+    if region_changed && let Some(region) = old_region {
+        model
+            .config
+            .settings
+            .geo_routing
+            .selected_region_modes
+            .insert(region, old_mode);
+    }
+    model.config.settings.geo_routing.set_region(draft.region);
+    model.config.settings.geo_routing.set_mode(draft.mode);
+    model.config.settings.geo_routing.service_routes = draft.service_routes;
+
+    let connection = model.connection;
+    let mut effects = vec![Effect::SaveConfig, Effect::BroadcastState];
+    push_status(
+        &mut effects,
+        model,
+        AppStatus::Info("Routing settings updated".into()),
+    );
+
+    if region_changed {
+        let previous_support = model.support_prompt.clone();
+        if model.support_prompt.schedule_initial(chrono::Utc::now()) {
+            effects.push(Effect::PersistSupportPrompt {
+                previous: previous_support,
+            });
+        }
+        effects.push(Effect::RefreshGeoLastUpdated);
+        if draft.region != GeoRegion::Global {
+            if download_allowed(model) {
+                model.geo_updating = true;
+                model.geo_last_attempt_at = Some(chrono::Local::now());
+                if connection == ConnectionState::Connected && service_routes_changed {
+                    model.pending_geo_reconnect = true;
+                }
+                effects.push(Effect::DownloadGeoIfMissing);
+            } else {
+                push_download_blocked(&mut effects, model, DownloadKind::Geo);
+            }
+        }
+    }
+
+    if service_routes_changed {
+        match connection {
+            ConnectionState::Connected => {
+                model.pending_service_reconnect = true;
+                effects.push(Effect::DownloadServiceRuleSetsIfMissing);
+            }
+            ConnectionState::Connecting | ConnectionState::ConnectPending => {
+                push_status(
+                    &mut effects,
+                    model,
+                    AppStatus::Info(
+                        "Routing settings saved — take effect on next reconnect".into(),
+                    ),
+                );
+            }
+            _ if !model
+                .config
+                .settings
+                .geo_routing
+                .enabled_services()
+                .is_empty() =>
+            {
+                if download_allowed(model) {
+                    effects.push(Effect::DownloadServiceRuleSetsIfMissing);
+                } else {
+                    push_download_blocked(&mut effects, model, DownloadKind::Geo);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if connection == ConnectionState::Connected && !service_routes_changed {
+        if let Some(active_id) = model.active_profile_id {
+            queue_connect(model, active_id);
+        }
+    } else if connection == ConnectionState::Idle
+        && region_changed
+        && model.config.settings.auto_connect
+        && let Some(profile_id) = model.config.settings.last_connected_profile
+        && let Some(idx) = model
+            .config
+            .profiles
+            .iter()
+            .position(|profile| profile.id == profile_id)
+    {
+        model.selected = crate::app::model::row_for_profile(&model.config, idx);
+        queue_connect(model, profile_id);
+    }
+
+    effects
+}
+
 /// Commit a geo-region switch: shared by the region overlay's Enter key and
 /// the `SetGeoRegion` IPC command. Persists the old region's routing mode,
 /// restores the new region's stored mode, kicks off missing-database
@@ -1284,7 +1413,8 @@ fn handle_subscription_result_at(
 }
 
 fn handle_geo_result(model: &mut Model, result: GeoResult) -> Vec<Effect> {
-    model.geo_updating = false;
+    let pending_geo_reconnect = std::mem::take(&mut model.pending_geo_reconnect);
+    model.geo_updating = pending_geo_reconnect && model.pending_service_reconnect;
     model.geo_automatic_update = false;
     let mut effects = match result {
         GeoResult::Updated {
@@ -1329,7 +1459,8 @@ fn handle_geo_result(model: &mut Model, result: GeoResult) -> Vec<Effect> {
                 AppStatus::Error(format!("Geo updated partially: {}", warnings.join("; ")))
             };
             push_status(&mut log_effects, model, status);
-            if model.connection == ConnectionState::Connected
+            if !pending_geo_reconnect
+                && model.connection == ConnectionState::Connected
                 && let Some(active_id) = model.active_profile_id
                 && queue_connect(model, active_id)
             {
@@ -1400,7 +1531,8 @@ fn handle_geo_result(model: &mut Model, result: GeoResult) -> Vec<Effect> {
                     message: format!("Updated: {part}"),
                 });
             }
-            if has_updates
+            if !pending_geo_reconnect
+                && has_updates
                 && model.connection == ConnectionState::Connected
                 && let Some(active_id) = model.active_profile_id
             {
@@ -1409,6 +1541,13 @@ fn handle_geo_result(model: &mut Model, result: GeoResult) -> Vec<Effect> {
             effects
         }
     };
+    if pending_geo_reconnect
+        && !model.pending_service_reconnect
+        && model.connection == ConnectionState::Connected
+        && let Some(active_id) = model.active_profile_id
+    {
+        queue_connect(model, active_id);
+    }
     effects.push(Effect::BroadcastState);
     effects
 }
@@ -1966,8 +2105,8 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                Effect::SaveConfig,
                 app_log_info("Auto-connect enabled"),
+                Effect::SaveConfig,
                 Effect::BroadcastState,
             ]
         );
@@ -3611,6 +3750,75 @@ mod tests {
             Some(active_id),
             "must reconnect the active profile, not the cursor's"
         );
+    }
+
+    #[test]
+    fn routing_reconnect_waits_for_geo_and_service_downloads_in_any_order() {
+        fn geo_ready() -> Msg {
+            Msg::GeoUpdated(GeoResult::UpToDate {
+                checked_at: Some(Local::now()),
+                retry_state: None,
+                service_retry_states: Default::default(),
+                service_checked_at: Default::default(),
+                next_update: None,
+                service_next_updates: Default::default(),
+                warnings: Vec::new(),
+            })
+        }
+
+        fn services_ready() -> Msg {
+            Msg::ServiceRuleSetsReady {
+                retry_states: Default::default(),
+                checked_at: Default::default(),
+                next_updates: Default::default(),
+                updated_parts: Vec::new(),
+                errors: Vec::new(),
+            }
+        }
+
+        for geo_first in [true, false] {
+            let profile = Profile::new_vless("A".into(), "e".into(), 1, "u".into());
+            let active_id = profile.id;
+            let mut model = model_with_profiles(vec![profile]);
+            model.connection = ConnectionState::Connected;
+            model.active_profile_id = Some(active_id);
+            let mut service_routes = std::collections::HashMap::new();
+            service_routes.insert(
+                RoutedService::Steam,
+                crate::config::profile::ServiceRoute::Proxy,
+            );
+            let effects = commit_routing_settings(
+                &mut model,
+                RoutingSettingsDraft {
+                    region: GeoRegion::Ru,
+                    mode: RoutingMode::Global,
+                    service_routes,
+                },
+            );
+
+            assert!(effects.contains(&Effect::DownloadGeoIfMissing));
+            assert!(effects.contains(&Effect::DownloadServiceRuleSetsIfMissing));
+            assert!(model.pending_geo_reconnect);
+            assert!(model.pending_service_reconnect);
+
+            if geo_first {
+                update(&mut model, geo_ready());
+                assert_eq!(model.connection, ConnectionState::Connected);
+                assert!(model.geo_updating);
+                update(&mut model, services_ready());
+            } else {
+                update(&mut model, services_ready());
+                assert_eq!(model.connection, ConnectionState::Connected);
+                assert!(model.geo_updating);
+                update(&mut model, geo_ready());
+            }
+
+            assert_eq!(model.connection, ConnectionState::Connecting);
+            assert_eq!(model.connecting_profile_id, Some(active_id));
+            assert!(!model.pending_geo_reconnect);
+            assert!(!model.pending_service_reconnect);
+            assert!(!model.geo_updating);
+        }
     }
 
     #[test]

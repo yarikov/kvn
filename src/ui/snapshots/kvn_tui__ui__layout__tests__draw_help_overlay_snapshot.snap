@@ -28,15 +28,15 @@ expression: "snapshot_terminal(&model, 80, 40)"
 │           │ Connection                                           │           │
 │           │ r               Reconnect                            │           │
 │           │ s               Disconnect                           │           │
-│           │ a               Toggle auto-connect                  │           │
-│           │ K               Toggle kill switch                   │           │
 │           │                                                      │           │
 │           │ Settings                                             │           │
-│           │ Space r m       Routing mode                         │           │
-│           │ Space r r       Region                               │           │
-│           │ Space d         DNS settings                         │           │
-│           │ Space r s       Service routing                      │           │
-│           │ Space t         Theme picker                         │           │
+│           │ Space c         Connection                           │           │
+│           │ Space d         DNS                                  │           │
+│           │ Space r         Routing                              │           │
+│           │ Space t         Theme                                │           │
+│           │                                                      │           │
+│           │ Dialogs                                              │           │
+│           │ h/l, ←/→        Change selected value                │           │
 │           │                                                      │           │
 │           │                       q/󱊷 close                      │           │
 │           └──────────────────────────────────────────────────────┘           │

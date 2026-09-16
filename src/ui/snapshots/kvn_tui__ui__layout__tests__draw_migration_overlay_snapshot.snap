@@ -1,21 +1,25 @@
 ---
 source: src/ui/layout.rs
-expression: "snapshot_terminal(&model, 80, 20)"
+expression: "snapshot_terminal(&model, 80, 24)"
 ---
 ┌ Traffic ─────────────────────────────────────────────────────────────────────┐
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections         │
 └──────────────────────────────────────────────────────────────────────────────┘
 ┌ Profiles ────────────────────────────────────────────────────────────────────┐
-│ └ Alpha                                                   vless  1.1.1.1:443 │
-│                                                                              │
+│ No sources. Press p to paste a profile or subscription URL from clipboard.   │
 │                                                                              │
 │               ┌──────────────────────────────────────────────┐               │
-│               │           Delete selected profile?           │               │
+│               │               Migration failed               │               │
 │               │                                              │               │
-│               │             󰌑 confirm · q/󱊷 close            │               │
+│               │             Updating integration             │               │
+│               │  Migration continues after closing the TUI.  │               │
+│               │                  Step 2 of 4                 │               │
+│               │                                              │               │
+│               │              sudo command failed             │               │
+│               │   Run `kvn migrate` in a terminal to retry.  │               │
+│               │                                              │               │
+│               │                   q/󱊷 close                  │               │
 │               └──────────────────────────────────────────────┘               │
-│                                                                              │
-│                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │

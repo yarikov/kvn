@@ -33,6 +33,38 @@ pub enum SettingsMenuPage {
     #[default]
     Root,
     Routing,
+    Connection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutingSettingsDraft {
+    pub region: GeoRegion,
+    pub mode: crate::config::profile::RoutingMode,
+    pub service_routes: HashMap<RoutedService, ServiceRoute>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectionSettingsDraft {
+    pub auto_connect: bool,
+    pub kill_switch: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutingSettingsItem {
+    Region,
+    Mode,
+    Service(RoutedService),
+}
+
+impl RoutingSettingsItem {
+    pub fn available(region: GeoRegion) -> Vec<Self> {
+        let mut items = vec![Self::Region];
+        if region != GeoRegion::Global {
+            items.push(Self::Mode);
+        }
+        items.extend(RoutedService::ALL.map(Self::Service));
+        items
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -232,6 +264,9 @@ pub(crate) fn row_for_subscription_header(config: &Config, sub_idx: usize) -> us
 pub struct Model {
     pub overlay: Overlay,
     pub settings_menu_return: Option<SettingsMenuPage>,
+    pub settings_menu_selected: usize,
+    pub routing_settings_draft: Option<RoutingSettingsDraft>,
+    pub connection_settings_draft: Option<ConnectionSettingsDraft>,
     pub main_pane_focus: MainPaneFocus,
     pub connection: ConnectionState,
     pub config: Config,
@@ -292,6 +327,7 @@ pub struct Model {
     /// config while the files are still missing, leaving the freshly enabled
     /// service inert until a second manual reconnect.
     pub pending_service_reconnect: bool,
+    pub pending_geo_reconnect: bool,
     pub logs: VecDeque<String>,
     pub log_scroll: usize,
     pub geo_updating: bool,
@@ -495,6 +531,9 @@ impl Model {
         let mut model = Self {
             overlay: Overlay::None,
             settings_menu_return: None,
+            settings_menu_selected: 0,
+            routing_settings_draft: None,
+            connection_settings_draft: None,
             main_pane_focus: MainPaneFocus::Sources,
             connection,
             config,
@@ -519,6 +558,7 @@ impl Model {
             service_routing_selected: 0,
             service_routing_draft: None,
             pending_service_reconnect: false,
+            pending_geo_reconnect: false,
             logs: VecDeque::new(),
             log_scroll: 0,
             geo_updating: false,
@@ -609,6 +649,9 @@ impl Model {
         let mut model = Self {
             overlay: Overlay::None,
             settings_menu_return: None,
+            settings_menu_selected: 0,
+            routing_settings_draft: None,
+            connection_settings_draft: None,
             main_pane_focus: MainPaneFocus::Sources,
             connection: ConnectionState::Idle,
             config,
@@ -633,6 +676,7 @@ impl Model {
             service_routing_selected: 0,
             service_routing_draft: None,
             pending_service_reconnect: false,
+            pending_geo_reconnect: false,
             logs: VecDeque::new(),
             log_scroll: 0,
             geo_updating: false,
@@ -840,6 +884,9 @@ impl Model {
         Self {
             overlay: Overlay::None,
             settings_menu_return: None,
+            settings_menu_selected: 0,
+            routing_settings_draft: None,
+            connection_settings_draft: None,
             main_pane_focus: MainPaneFocus::Sources,
             connection: ConnectionState::Idle,
             config,
@@ -864,6 +911,7 @@ impl Model {
             service_routing_selected: 0,
             service_routing_draft: None,
             pending_service_reconnect: false,
+            pending_geo_reconnect: false,
             logs: VecDeque::new(),
             log_scroll: 0,
             geo_updating: false,
@@ -911,7 +959,11 @@ mod tests {
 
     #[test]
     fn settings_menu_overlay_serde_roundtrip() {
-        for page in [SettingsMenuPage::Root, SettingsMenuPage::Routing] {
+        for page in [
+            SettingsMenuPage::Root,
+            SettingsMenuPage::Routing,
+            SettingsMenuPage::Connection,
+        ] {
             let overlay = Overlay::SettingsMenu(page);
             let json = serde_json::to_string(&overlay).unwrap();
             assert_eq!(serde_json::from_str::<Overlay>(&json).unwrap(), overlay);

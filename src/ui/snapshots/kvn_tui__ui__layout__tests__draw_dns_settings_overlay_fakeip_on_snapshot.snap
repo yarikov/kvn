@@ -8,18 +8,18 @@ expression: "snapshot_terminal(&model, 80, 24)"
 ┌ Profiles ────────────────────────────────────────────────────────────────────┐
 │ No sources. Press p to paste a profile or subscription URL from clipboard.   │
 │                                                                              │
-│               ┌──────────────────────────────────────────────┐               │
-│               │                 DNS settings                 │               │
-│               │                                              │               │
-│               │   Preset   ‹ Cloudflare DoH (1.1.1.1) ›      │               │
-│               │   Strategy ‹       prefer_ipv4        ›      │               │
-│               │   Fake-IP  ‹            on            ›      │               │
-│               │                                              │               │
-│               │              󰌑 apply · q/󱊷 close             │               │
-│               │                                              │               │
-│               │                                              │               │
-│               │                                              │               │
-│               └──────────────────────────────────────────────┘               │
+│                                                                              │
+│                      ┌───────────────────────────────┐                       │
+│                      │        Settings › DNS         │                       │
+│                      │                               │                       │
+│                      │ Preset   ‹ System local › *   │                       │
+│                      │ Strategy ‹ Prefer IPv4 ›      │                       │
+│                      │ Fake-IP  ‹ on ›               │                       │
+│                      │                               │                       │
+│                      │      󰌑 apply · q/󱊷 close      │                       │
+│                      └───────────────────────────────┘                       │
+│                                                                              │
+│                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │

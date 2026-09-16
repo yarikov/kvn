@@ -62,15 +62,6 @@ pub enum DnsPreset {
 }
 
 impl DnsPreset {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::CloudflareDoh => "Cloudflare DoH (1.1.1.1)",
-            Self::GoogleDot => "Google DoT (8.8.8.8)",
-            Self::Quad9Doh => "Quad9 DoH (9.9.9.9)",
-            Self::SystemLocal => "System resolver (local)",
-        }
-    }
-
     pub fn next(self) -> Self {
         match self {
             Self::CloudflareDoh => Self::GoogleDot,

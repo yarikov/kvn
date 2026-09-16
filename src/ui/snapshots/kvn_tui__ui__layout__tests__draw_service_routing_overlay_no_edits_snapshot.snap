@@ -8,18 +8,18 @@ expression: "snapshot_terminal(&model, 80, 24)"
 ┌ Profiles ────────────────────────────────────────────────────────────────────┐
 │ No sources. Press p to paste a profile or subscription URL from clipboard.   │
 │                                                                              │
-│               ┌──────────────────────────────────────────────┐               │
-│               │                Service routing               │               │
-│               │                                              │               │
-│               │           Steam     ‹ Disabled ›             │               │
-│               │           Telegram  ‹ Disabled ›             │               │
-│               │                                              │               │
-│               │              󰌑 apply · q/󱊷 close             │               │
-│               │                                              │               │
-│               │                                              │               │
-│               │                                              │               │
-│               │                                              │               │
-│               └──────────────────────────────────────────────┘               │
+│                                                                              │
+│                                                                              │
+│                      ┌───────────────────────────────┐                       │
+│                      │ Settings › Routing › Services │                       │
+│                      │                               │                       │
+│                      │    Steam    ‹ Disabled ›      │                       │
+│                      │    Telegram ‹ Disabled ›      │                       │
+│                      │                               │                       │
+│                      │      󰌑 apply · q/󱊷 close      │                       │
+│                      └───────────────────────────────┘                       │
+│                                                                              │
+│                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │

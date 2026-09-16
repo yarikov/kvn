@@ -1439,11 +1439,13 @@ fn deprecated_settings_shortcut_message(
         return None;
     }
     match key.code {
-        KeyCode::Char('m') => Some("m is deprecated; use Space r m"),
-        KeyCode::Char('o') => Some("o is deprecated; use Space r r"),
+        KeyCode::Char('m') => Some("m is deprecated; use Space r"),
+        KeyCode::Char('o') => Some("o is deprecated; use Space r"),
         KeyCode::Char('D') => Some("D is deprecated; use Space d"),
-        KeyCode::Char('S') => Some("S is deprecated; use Space r s"),
+        KeyCode::Char('S') => Some("S is deprecated; use Space r"),
         KeyCode::Char('C') => Some("C is deprecated; use Space t"),
+        KeyCode::Char('a') => Some("a is deprecated; use Space c"),
+        KeyCode::Char('K') => Some("K is deprecated; use Space c"),
         _ => None,
     }
 }
@@ -1509,6 +1511,9 @@ fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
     model.service_routing_selected = snapshot.service_routing_selected;
     model.service_routing_draft = snapshot.service_routing_draft;
     model.settings_menu_return = snapshot.settings_menu_return;
+    model.settings_menu_selected = snapshot.settings_menu_selected;
+    model.routing_settings_draft = snapshot.routing_settings_draft;
+    model.connection_settings_draft = snapshot.connection_settings_draft;
     model.geo_updating = snapshot.geo_updating;
     model.geo_last_updated = snapshot.geo_last_updated;
     model.geo_last_checked_at = snapshot.geo_last_checked_at;
@@ -1629,11 +1634,13 @@ mod tests {
         use crate::app::model::{Overlay, SettingsMenuPage};
 
         for (key, expected) in [
-            ('m', "m is deprecated; use Space r m"),
-            ('o', "o is deprecated; use Space r r"),
+            ('m', "m is deprecated; use Space r"),
+            ('o', "o is deprecated; use Space r"),
             ('D', "D is deprecated; use Space d"),
-            ('S', "S is deprecated; use Space r s"),
+            ('S', "S is deprecated; use Space r"),
             ('C', "C is deprecated; use Space t"),
+            ('a', "a is deprecated; use Space c"),
+            ('K', "K is deprecated; use Space c"),
         ] {
             let event = KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE);
             assert_eq!(

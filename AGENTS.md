@@ -138,6 +138,9 @@ See the `release` skill in `.agents/skills/release/SKILL.md` for the full versio
 - Use `tempfile` for file-system tests; use `NamedTempFile` / `tempdir()` for isolation.
 - Tests that mutate process environment (`std::env::set_var`) **must** lock `crate::test_helpers::ENV_LOCK` to serialize against other env-touching tests. The same lock is required for tests that *read* the environment non-atomically — spawning a child process (execve/PATH lookup reads the env) or resolving an env-dependent path more than once — otherwise they race the mutating tests and fail intermittently.
 - Snapshot tests use [insta](https://insta.rs/). Regenerate with `INSTA_UPDATE=always cargo test`, then review the diffs before committing.
+- Test visual TUI rendering — dimensions, alignment, spacing, styles, and rendered text or row order — only with `insta` snapshots. Do not add granular unit tests that inspect coordinates, widths, styles, helper output, or individual cells in a `ratatui::Buffer`.
+- Use regular unit tests for functional behavior only: input handling, model transitions, persistence, emitted effects, validation, and business logic.
+- When changing existing UI rendering, update the relevant snapshot. Add a new snapshot only when no existing snapshot covers the state being changed.
 - Example pattern: create a default `Profile`, generate a config, assert on JSON structure.
 
 ### Coverage Policy
