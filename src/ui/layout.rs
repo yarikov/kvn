@@ -1032,7 +1032,7 @@ fn draw_help(
     frame.render_widget(
         Paragraph::new(vec![
             Line::from(""),
-            Line::from("j/k scroll · gg/G edges · q/Esc/? back").centered(),
+            Line::from(overlay_footer(None, true, false)).centered(),
         ])
         .style(theme.normal()),
         chunks[1],
@@ -1047,7 +1047,7 @@ fn draw_settings_menu(
 ) {
     use crate::app::model::SettingsMenuPage;
 
-    let (title, entries, footer): (Option<&str>, &[(&str, &str)], &str) = match page {
+    let (title, entries, back): (Option<&str>, &[(&str, &str)], bool) = match page {
         SettingsMenuPage::Root => (
             None,
             &[
@@ -1055,20 +1055,21 @@ fn draw_settings_menu(
                 ("d", "DNS settings"),
                 ("t", "Theme picker"),
             ],
-            "q/󱊷 close",
+            false,
         ),
         SettingsMenuPage::Routing => (
             Some("Routing"),
             &[("m", "Mode"), ("r", "Region"), ("s", "Services")],
-            "q/󱊷 close   ⌫ back",
+            true,
         ),
     };
+    let footer = overlay_footer(None, true, back);
     let entry_width = entries
         .iter()
         .map(|(key, action)| visual_width(&format!("{key}  {action}")))
         .max()
         .unwrap_or(0);
-    let content_width = entry_width.max(visual_width(footer));
+    let content_width = entry_width.max(visual_width(&footer));
     let popup_width = u16::try_from(content_width)
         .unwrap_or(u16::MAX)
         .saturating_add(6)
@@ -1125,7 +1126,7 @@ fn draw_confirm_delete(frame: &mut Frame, model: &Model, area: Rect) {
         vec![
             Line::from(Span::styled(message, theme.error())),
             Line::from(""),
-            Line::from("y/Enter confirm, q/Esc cancel, ? help"),
+            Line::from(overlay_footer(Some(CONFIRM_ACTION), true, false)),
         ],
         POPUP_HEIGHT_PERCENT,
     );
@@ -1133,13 +1134,28 @@ fn draw_confirm_delete(frame: &mut Frame, model: &Model, area: Rect) {
 
 const POPUP_WIDTH_PERCENT: u16 = 60;
 const POPUP_HEIGHT_PERCENT: u16 = 50;
-const SETTINGS_FOOTER: &[&str] = &["󰌑 apply, q/󱊷 close"];
-const SETTINGS_FOOTER_WITH_BACK: &[&str] = &["󰌑 apply, q/󱊷 close, ⌫ back"];
-const REQUIRED_SETTINGS_FOOTER: &[&str] = &["󰌑 apply"];
+const APPLY_ACTION: &str = "󰌑 apply";
+const CONFIRM_ACTION: &str = "󰌑 confirm";
+const CLOSE_ACTION: &str = "q/󱊷 close";
+const BACK_ACTION: &str = "⌫ back";
 /// Taller variant for overlays whose list grows past ~6 items (e.g. the
 /// theme picker with 19+ entries). Keeps text inside the visible region
 /// on standard 24-row terminals.
 const POPUP_HEIGHT_PERCENT_TALL: u16 = 90;
+
+fn overlay_footer(primary: Option<&str>, close: bool, back: bool) -> String {
+    let mut actions = Vec::with_capacity(3);
+    if let Some(primary) = primary {
+        actions.push(primary);
+    }
+    if close {
+        actions.push(CLOSE_ACTION);
+    }
+    if back {
+        actions.push(BACK_ACTION);
+    }
+    actions.join(" · ")
+}
 
 /// Helper to render a centered popup with a border and text.
 fn draw_modal(frame: &mut Frame, theme: &Theme, area: Rect, lines: Vec<Line>, height_percent: u16) {
@@ -1176,6 +1192,7 @@ fn draw_migration(frame: &mut Frame, model: &Model, area: Rect) {
         Line::from(Span::styled(heading, model.theme.accent())),
         Line::from(""),
         Line::from(detail.to_string()),
+        Line::from("Migration continues after closing the TUI."),
         Line::from(format!(
             "Step {} of {}",
             status.completed.min(status.total),
@@ -1188,9 +1205,7 @@ fn draw_migration(frame: &mut Frame, model: &Model, area: Rect) {
         lines.push(Line::from("Run `kvn migrate` in a terminal to retry."));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(
-        "q/Esc leaves the TUI; the migration stays active",
-    ));
+    lines.push(Line::from(overlay_footer(None, true, false)));
     draw_modal(frame, &model.theme, area, lines, POPUP_HEIGHT_PERCENT);
 }
 
@@ -1240,9 +1255,9 @@ fn draw_geo_region(frame: &mut Frame, model: &Model, area: Rect) {
         if model.settings_menu_return.is_some() {
             settings_overlay_footer(model)
         } else if model.config.settings.geo_routing.current_region.is_some() {
-            SETTINGS_FOOTER
+            overlay_footer(Some(APPLY_ACTION), true, false)
         } else {
-            REQUIRED_SETTINGS_FOOTER
+            overlay_footer(Some(APPLY_ACTION), false, false)
         },
     );
 }
@@ -1348,7 +1363,7 @@ fn draw_service_routing(frame: &mut Frame, model: &Model, area: Rect) {
     }
 
     lines.push(Line::from(""));
-    let footer = settings_overlay_footer(model)[0];
+    let footer = settings_overlay_footer(model);
     lines.push(Line::from(footer).centered());
 
     frame.render_widget(Paragraph::new(lines).style(theme.normal()), inner);
@@ -1376,12 +1391,12 @@ fn draw_theme_settings(frame: &mut Frame, model: &Model, area: Rect) {
     );
 }
 
-fn settings_overlay_footer(model: &Model) -> &'static [&'static str] {
-    if model.settings_menu_return.is_some() {
-        SETTINGS_FOOTER_WITH_BACK
-    } else {
-        SETTINGS_FOOTER
-    }
+fn settings_overlay_footer(model: &Model) -> String {
+    overlay_footer(
+        Some(APPLY_ACTION),
+        true,
+        model.settings_menu_return.is_some(),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1394,7 +1409,7 @@ fn draw_selection_modal(
     selected: usize,
     active: Option<usize>,
     height_percent: u16,
-    footer: &[&str],
+    footer: String,
 ) {
     let popup_area = centered_rect(POPUP_WIDTH_PERCENT, height_percent, area);
     let row_width = popup_area.width.saturating_sub(2) as usize;
@@ -1404,7 +1419,7 @@ fn draw_selection_modal(
         .max()
         .unwrap_or(0)
         .min(row_width);
-    let footer_height = footer.len() as u16;
+    let footer_height = 1;
     let max_visible_items = popup_area.height.saturating_sub(5 + footer_height) as usize;
     let visible_count = items.len().min(max_visible_items);
     let window_start = if items.len() > visible_count {
@@ -1435,7 +1450,7 @@ fn draw_selection_modal(
         lines.push(Line::from(Span::styled(text, style)));
     }
     lines.push(Line::from(""));
-    lines.extend(footer.iter().map(|text| Line::from(*text)));
+    lines.push(Line::from(footer));
     draw_modal(frame, theme, area, lines, height_percent);
 }
 
@@ -1490,7 +1505,11 @@ fn draw_support(frame: &mut Frame, model: &Model, area: Rect) {
         if !compact {
             lines.push(Line::from(""));
         }
-        lines.push(Line::from("Enter confirm, q/Esc cancel, ? help"));
+        lines.push(Line::from(overlay_footer(
+            Some(CONFIRM_ACTION),
+            true,
+            false,
+        )));
         lines
     };
     let content_width = row_width.max(1);
@@ -2702,7 +2721,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
         terminal.draw(|frame| draw(frame, &model)).unwrap();
         let buffer = terminal.backend().buffer();
-        let footer_start = find_text(buffer, "y/Enter");
+        let footer_start = find_text(buffer, "confirm");
 
         assert_eq!(
             buffer.content[footer_start].style().fg,
@@ -2788,7 +2807,7 @@ mod tests {
     }
 
     #[test]
-    fn geo_region_footer_only_offers_cancel_after_initial_selection() {
+    fn geo_region_footer_only_offers_close_after_initial_selection() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::GeoRegions;
 
@@ -2803,7 +2822,7 @@ mod tests {
             .geo_routing
             .set_region(crate::config::profile::GeoRegion::Ru);
         let optional = snapshot_terminal(&model, 80, 20);
-        assert!(optional.contains("󰌑 apply, q/󱊷 close"));
+        assert!(optional.contains("󰌑 apply · q/󱊷 close"));
         assert!(!optional.contains("j/k navigate"));
     }
 
@@ -2817,12 +2836,12 @@ mod tests {
 
         model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Root);
         let from_menu = snapshot_terminal(&model, 100, 20);
-        assert!(from_menu.contains("󰌑 apply, q/󱊷 close, ⌫ back"));
+        assert!(from_menu.contains("󰌑 apply · q/󱊷 close · ⌫ back"));
 
         model.overlay = Overlay::ServiceRouting;
         model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Routing);
         let services = snapshot_terminal(&model, 100, 20);
-        assert!(services.contains("󰌑 apply, q/󱊷 close, ⌫ back"));
+        assert!(services.contains("󰌑 apply · q/󱊷 close · ⌫ back"));
     }
 
     #[test]
@@ -2913,7 +2932,7 @@ mod tests {
                 "Support development",
                 "Remind me later",
                 "Don't show again",
-                "Enter confirm, q/Esc cancel, ? help",
+                "󰌑 confirm · q/󱊷 close",
             ] {
                 assert!(
                     rendered.contains(expected),
@@ -2925,7 +2944,7 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| draw(frame, &model)).unwrap();
             let buffer = terminal.backend().buffer();
-            let footer = find_text(buffer, "Enter confirm");
+            let footer = find_text(buffer, "confirm");
             let footer_row = footer / width as usize;
             let popup_y = (height - popup_height) / 2;
             assert_eq!(footer_row, (popup_y + popup_height - 2) as usize);
@@ -2968,7 +2987,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_overlay_shows_progress_and_failure_without_cancel_action() {
+    fn migration_overlay_shows_progress_description_and_close_action() {
         use crate::app::model::{MigrationPhase, MigrationStatus};
 
         let mut model = model_with_profiles(vec![]);
@@ -2984,8 +3003,10 @@ mod tests {
         let running = snapshot_terminal(&model, 80, 24);
         assert!(running.contains("Updating kvn"));
         assert!(running.contains("Updating integration"));
+        assert!(running.contains("Migration continues after closing the TUI."));
         assert!(running.contains("Step 2 of 4"));
-        assert!(running.contains("q/Esc leaves the TUI"));
+        assert!(running.contains(CLOSE_ACTION));
+        assert!(!running.contains("the migration stays active"));
 
         let status = model.migration.as_mut().unwrap();
         status.phase = MigrationPhase::Failed;
@@ -3029,7 +3050,7 @@ mod tests {
 
         let rendered = snapshot_terminal(&model, 80, 24);
         assert!(rendered.contains("white"));
-        assert!(rendered.contains("󰌑 apply, q/󱊷 close"));
+        assert!(rendered.contains("󰌑 apply · q/󱊷 close"));
         assert!(!rendered.contains("j/k navigate"));
         assert!(!rendered.contains("catppuccin-latte"));
     }

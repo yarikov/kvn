@@ -23,6 +23,6 @@ expression: "snapshot_terminal(&model, 100, 24)"
 │              │                                                                    │              │
 │              │ Connection                                                         │              │
 │              │                                                                    │              │
-│              │               j/k scroll · gg/G edges · q/Esc/? back               │              │
+│              │                              q/󱊷 close                             │              │
 └──────────────└────────────────────────────────────────────────────────────────────┘──────────────┘
  DISCONNECTED                                                                            DoH  Global

@@ -30,7 +30,7 @@ expression: "snapshot_terminal(&model, 80, 32)"
 │               │               vantablack                     │               │
 │               │               white                          │               │
 │               │                                              │               │
-│               │              󰌑 apply, q/󱊷 close              │               │
+│               │              󰌑 apply · q/󱊷 close             │               │
 │               └──────────────────────────────────────────────┘               │
 └──────────────────────────────────────────────────────────────────────────────┘
  DISCONNECTED                                                        DoH  Global
