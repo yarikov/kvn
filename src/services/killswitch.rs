@@ -69,11 +69,22 @@ fn ensure_integration_group_active(active: Option<bool>) -> Result<()> {
 }
 
 pub(crate) fn integration_group_active() -> Option<bool> {
-    let output = Command::new("id").arg("-Gn").output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| group_list_includes_integration_group(&output.stdout))
+    id_output(&["-Gn"]).map(|output| group_list_includes_integration_group(&output))
+}
+
+pub(crate) fn integration_group_pending_activation() -> Option<bool> {
+    if integration_group_active()? {
+        return Some(false);
+    }
+    let username = id_output(&["-un"])?;
+    let username = std::str::from_utf8(&username).ok()?.trim();
+    let configured_groups = id_output(&["-Gn", username])?;
+    Some(group_list_includes_integration_group(&configured_groups))
+}
+
+fn id_output(args: &[&str]) -> Option<Vec<u8>> {
+    let output = Command::new("id").args(args).output().ok()?;
+    output.status.success().then_some(output.stdout)
 }
 
 fn group_list_includes_integration_group(output: &[u8]) -> bool {
