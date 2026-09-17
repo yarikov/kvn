@@ -15,6 +15,7 @@ use std::process::Command;
 
 const HELPER: &str = "/usr/lib/kvn-tui/killswitch-helper.sh";
 const UNIT: &str = "kvn-tui-killswitch.service";
+const INTEGRATION_GROUP: &str = "kvn-tui";
 
 fn helper_present() -> bool {
     std::path::Path::new(HELPER).is_file()
@@ -54,7 +55,31 @@ fn run_helper(args: &[&str]) -> Result<()> {
 
 /// Enable or disable the kill switch systemd unit (also starts/stops it).
 pub fn apply(enabled: bool) -> Result<()> {
+    if enabled && helper_present() {
+        ensure_integration_group_active(integration_group_active())?;
+    }
     run_helper(&[if enabled { "enable" } else { "disable" }])
+}
+
+fn ensure_integration_group_active(active: Option<bool>) -> Result<()> {
+    if active == Some(false) {
+        bail!("access group is not active; log out and back in, then restart kvn-tui.service");
+    }
+    Ok(())
+}
+
+pub(crate) fn integration_group_active() -> Option<bool> {
+    let output = Command::new("id").arg("-Gn").output().ok()?;
+    output
+        .status
+        .success()
+        .then(|| group_list_includes_integration_group(&output.stdout))
+}
+
+fn group_list_includes_integration_group(output: &[u8]) -> bool {
+    String::from_utf8_lossy(output)
+        .split_whitespace()
+        .any(|group| group == INTEGRATION_GROUP)
 }
 
 /// Add a temporary exception so sing-box can reach the given endpoint during
@@ -115,7 +140,10 @@ fn classify_active_exit_code(code: Option<i32>) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::classify_active_exit_code;
+    use super::{
+        classify_active_exit_code, ensure_integration_group_active,
+        group_list_includes_integration_group,
+    };
 
     #[test]
     fn active_exit_code_distinguishes_inactive_from_errors() {
@@ -124,5 +152,25 @@ mod tests {
         assert!(classify_active_exit_code(Some(1)).is_err());
         assert!(classify_active_exit_code(Some(4)).is_err());
         assert!(classify_active_exit_code(None).is_err());
+    }
+
+    #[test]
+    fn integration_group_requires_an_exact_group_name() {
+        assert!(group_list_includes_integration_group(
+            b"users wheel kvn-tui\n"
+        ));
+        assert!(!group_list_includes_integration_group(
+            b"users wheel kvn-tui-old\n"
+        ));
+    }
+
+    #[test]
+    fn inactive_integration_group_has_actionable_error() {
+        assert!(ensure_integration_group_active(Some(true)).is_ok());
+        assert!(ensure_integration_group_active(None).is_ok());
+
+        let error = ensure_integration_group_active(Some(false)).unwrap_err();
+        assert!(error.to_string().contains("log out and back in"));
+        assert!(error.to_string().contains("restart kvn-tui.service"));
     }
 }
