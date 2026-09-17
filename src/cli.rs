@@ -109,13 +109,13 @@ enum Command {
         profile: String,
     },
 
-    /// Disconnect the active VPN tunnel.
+    /// Disconnect the active VPN tunnel or cancel an in-progress connection.
     Disconnect,
 
-    /// Reconnect the active profile.
+    /// Restart the active or in-progress profile connection.
     Reconnect,
 
-    /// Connect the last-used profile, or disconnect when connected.
+    /// Connect the last successfully connected profile, or disconnect/cancel.
     Toggle,
 
     #[command(
@@ -457,13 +457,55 @@ fn attach_or_start_client() -> Result<IpcClient> {
 
 fn fetch_snapshot(client: &mut IpcClient) -> Result<StateSnapshot> {
     client.send(&IpcCommand::Attach)?;
-    client.read_snapshot(SNAPSHOT_TIMEOUT)
+    let value = client.read_snapshot_value(SNAPSHOT_TIMEOUT)?;
+    ensure_snapshot_compatible(&value)?;
+    serde_json::from_value(value).context("Malformed state snapshot from the daemon")
+}
+
+fn ensure_snapshot_compatible(value: &serde_json::Value) -> Result<()> {
+    let daemon_version = value
+        .get("daemon_version")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let ipc_version = value
+        .get("ipc_version")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or_default();
+    anyhow::ensure!(
+        daemon_version == env!("CARGO_PKG_VERSION")
+            && ipc_version == u64::from(crate::ipc::IPC_VERSION),
+        "running daemon {} (IPC {}) is incompatible with kvn {} (IPC {}); restart kvn-tui.service or open the TUI",
+        daemon_version,
+        ipc_version,
+        env!("CARGO_PKG_VERSION"),
+        crate::ipc::IPC_VERSION
+    );
+    Ok(())
 }
 
 /// Send a command and return the snapshot the daemon broadcasts in response.
 fn send_command(client: &mut IpcClient, cmd: IpcCommand) -> Result<StateSnapshot> {
-    client.send(&cmd)?;
-    client.read_snapshot(SNAPSHOT_TIMEOUT)
+    let request_id = client.send_request(&cmd)?;
+    client.read_response(request_id, SNAPSHOT_TIMEOUT)
+}
+
+fn ensure_commands_available(snapshot: &StateSnapshot) -> Result<()> {
+    anyhow::ensure!(
+        snapshot.migration.is_none(),
+        "cannot change the VPN connection while a migration is in progress"
+    );
+    Ok(())
+}
+
+fn print_command_result(snapshot: &StateSnapshot) -> Result<()> {
+    if let Some(error) = &snapshot.response_error {
+        anyhow::bail!(error.clone());
+    }
+    if snapshot.status_is_error {
+        anyhow::bail!(snapshot.status.clone());
+    }
+    println!("{}", format_status_line(snapshot));
+    Ok(())
 }
 
 fn run_status(json: bool) -> Result<()> {
@@ -483,47 +525,51 @@ fn run_status(json: bool) -> Result<()> {
 fn run_connect(query: &str) -> Result<()> {
     let mut client = attach_or_start_client()?;
     let snap = fetch_snapshot(&mut client)?;
-    let id = resolve_profile(&snap, query).with_context(|| {
-        format!(
-            "no profile matches '{query}' ({} profiles configured)",
-            snap.profiles.len()
-        )
-    })?;
+    ensure_commands_available(&snap)?;
+    let id = resolve_profile(&snap, query)?;
     let snap = send_command(&mut client, IpcCommand::ConnectProfile { profile_id: id })?;
-    println!("{}", format_status_line(&snap));
-    Ok(())
+    print_command_result(&snap)
 }
 
 fn run_disconnect() -> Result<()> {
-    let mut client = attach_or_start_client()?;
-    fetch_snapshot(&mut client)?;
+    if !crate::ipc::is_daemon_running() {
+        println!("Disconnected");
+        return Ok(());
+    }
+    let mut client = attach_client()?;
+    let snap = fetch_snapshot(&mut client)?;
+    ensure_commands_available(&snap)?;
     let snap = send_command(&mut client, IpcCommand::Disconnect)?;
-    println!("{}", format_status_line(&snap));
-    Ok(())
+    print_command_result(&snap)
 }
 
 fn run_reconnect() -> Result<()> {
-    let mut client = attach_or_start_client()?;
-    fetch_snapshot(&mut client)?;
+    anyhow::ensure!(
+        crate::ipc::is_daemon_running(),
+        "cannot reconnect while VPN is disconnected"
+    );
+    let mut client = attach_client()?;
+    let snap = fetch_snapshot(&mut client)?;
+    ensure_commands_available(&snap)?;
+    ensure_can_reconnect(snap.connection)?;
     let snap = send_command(&mut client, IpcCommand::Reconnect)?;
-    println!("{}", format_status_line(&snap));
+    print_command_result(&snap)
+}
+
+fn ensure_can_reconnect(connection: ConnectionState) -> Result<()> {
+    anyhow::ensure!(
+        connection != ConnectionState::Idle,
+        "cannot reconnect while VPN is disconnected"
+    );
     Ok(())
 }
 
 fn run_toggle() -> Result<()> {
     let mut client = attach_or_start_client()?;
     let snap = fetch_snapshot(&mut client)?;
-    if snap.connection == ConnectionState::Connected {
-        let snap = send_command(&mut client, IpcCommand::Disconnect)?;
-        println!("{}", format_status_line(&snap));
-        return Ok(());
-    }
-    let Some(id) = snap.settings.last_connected_profile else {
-        anyhow::bail!("no previous profile to connect — run `kvn connect <name>` first");
-    };
-    let snap = send_command(&mut client, IpcCommand::ConnectProfile { profile_id: id })?;
-    println!("{}", format_status_line(&snap));
-    Ok(())
+    ensure_commands_available(&snap)?;
+    let snap = send_command(&mut client, IpcCommand::Toggle)?;
+    print_command_result(&snap)
 }
 
 fn run_kill_switch(enabled: bool) -> Result<()> {
@@ -607,11 +653,13 @@ fn kill_switch_result(
 
 /// Resolve a profile query: exact UUID, exact (case-insensitive) name, or
 /// unique case-insensitive name prefix. Ambiguous prefixes resolve to none.
-fn resolve_profile(snap: &StateSnapshot, query: &str) -> Option<Uuid> {
-    if let Ok(id) = Uuid::parse_str(query)
-        && snap.profiles.iter().any(|p| p.id == id)
-    {
-        return Some(id);
+fn resolve_profile(snap: &StateSnapshot, query: &str) -> Result<Uuid> {
+    if let Ok(id) = Uuid::parse_str(query) {
+        anyhow::ensure!(
+            snap.profiles.iter().any(|profile| profile.id == id),
+            "profile UUID {id} does not exist"
+        );
+        return Ok(id);
     }
     let lower = query.to_lowercase();
     let exact: Vec<_> = snap
@@ -620,7 +668,10 @@ fn resolve_profile(snap: &StateSnapshot, query: &str) -> Option<Uuid> {
         .filter(|p| p.name.to_lowercase() == lower)
         .collect();
     if exact.len() == 1 {
-        return Some(exact[0].id);
+        return Ok(exact[0].id);
+    }
+    if exact.len() > 1 {
+        anyhow::bail!("multiple profiles are named '{query}'; use a profile UUID");
     }
     let prefix: Vec<_> = snap
         .profiles
@@ -628,8 +679,14 @@ fn resolve_profile(snap: &StateSnapshot, query: &str) -> Option<Uuid> {
         .filter(|p| p.name.to_lowercase().starts_with(&lower))
         .collect();
     match prefix.len() {
-        1 => Some(prefix[0].id),
-        _ => None,
+        1 => Ok(prefix[0].id),
+        0 => anyhow::bail!(
+            "no profile matches '{query}' ({} profiles configured)",
+            snap.profiles.len()
+        ),
+        count => anyhow::bail!(
+            "profile prefix '{query}' is ambiguous ({count} matches); use a UUID or a longer name"
+        ),
     }
 }
 
@@ -642,12 +699,12 @@ fn active_profile_name(snap: &StateSnapshot) -> Option<&str> {
 }
 
 /// One-line human summary of a snapshot, e.g.
-/// `connected to Work VPN (↑ 1.2 MiB/s · ↓ 3.4 MiB/s) [kill switch]`.
+/// `Connected to Work VPN (↑ 1.2 MiB/s · ↓ 3.4 MiB/s) [kill switch]`.
 fn format_status_line(snap: &StateSnapshot) -> String {
     match snap.connection {
         ConnectionState::Connected => {
             let name = active_profile_name(snap).unwrap_or("unknown profile");
-            let mut line = format!("connected to {name}");
+            let mut line = format!("Connected to {name}");
             if snap.traffic.up_rate_bps > 0 || snap.traffic.down_rate_bps > 0 {
                 line.push_str(&format!(
                     " (↑ {}/s · ↓ {}/s)",
@@ -661,13 +718,17 @@ fn format_status_line(snap: &StateSnapshot) -> String {
             line
         }
         ConnectionState::Connecting | ConnectionState::ConnectPending => {
-            format!("connecting — {}", snap.status)
+            if snap.status.is_empty() {
+                "Connecting".to_string()
+            } else {
+                snap.status.clone()
+            }
         }
         ConnectionState::Idle => {
             if snap.status_is_error {
-                format!("disconnected — {}", snap.status)
+                format!("Disconnected — {}", snap.status)
             } else {
-                "disconnected".to_string()
+                "Disconnected".to_string()
             }
         }
     }
@@ -1558,6 +1619,8 @@ esac
             ipc_version: crate::ipc::IPC_VERSION,
             migration_protocol_version: crate::ipc::MIGRATION_PROTOCOL_VERSION,
             migration: None,
+            response_to: None,
+            response_error: None,
             connection: ConnectionState::Idle,
             status: "ok".into(),
             status_is_error: false,
@@ -1615,48 +1678,134 @@ esac
         let snap = snapshot_with_profiles();
         let work_id = snap.profiles[0].id;
 
-        assert_eq!(resolve_profile(&snap, &work_id.to_string()), Some(work_id));
-        assert_eq!(resolve_profile(&snap, "work"), Some(work_id));
-        assert_eq!(resolve_profile(&snap, "WORK VPN"), Some(work_id));
-        assert_eq!(resolve_profile(&snap, "home"), Some(snap.profiles[1].id));
-        // Ambiguous / unknown.
-        assert_eq!(resolve_profile(&snap, "nope"), None);
-        assert_eq!(resolve_profile(&snap, &Uuid::new_v4().to_string()), None);
+        assert_eq!(
+            resolve_profile(&snap, &work_id.to_string()).unwrap(),
+            work_id
+        );
+        assert_eq!(resolve_profile(&snap, "work").unwrap(), work_id);
+        assert_eq!(resolve_profile(&snap, "WORK VPN").unwrap(), work_id);
+        assert_eq!(resolve_profile(&snap, "home").unwrap(), snap.profiles[1].id);
+        assert!(
+            resolve_profile(&snap, "nope")
+                .unwrap_err()
+                .to_string()
+                .contains("no profile matches")
+        );
+        assert!(
+            resolve_profile(&snap, &Uuid::new_v4().to_string())
+                .unwrap_err()
+                .to_string()
+                .contains("does not exist")
+        );
+
+        let mut ambiguous = snap.clone();
+        ambiguous.profiles[1].name = "Work VPN".into();
+        assert!(
+            resolve_profile(&ambiguous, "work vpn")
+                .unwrap_err()
+                .to_string()
+                .contains("multiple profiles")
+        );
     }
 
     #[test]
     fn format_status_line_variants() {
         let mut snap = snapshot_with_profiles();
-        assert_eq!(format_status_line(&snap), "disconnected");
+        assert_eq!(format_status_line(&snap), "Disconnected");
 
         snap.status = "Connect failed: timeout".into();
         snap.status_is_error = true;
         assert_eq!(
             format_status_line(&snap),
-            "disconnected — Connect failed: timeout"
+            "Disconnected — Connect failed: timeout"
         );
 
         snap.status_is_error = false;
         snap.status = "Connecting to Work VPN…".into();
         snap.connection = ConnectionState::Connecting;
-        assert_eq!(
-            format_status_line(&snap),
-            "connecting — Connecting to Work VPN…"
-        );
+        assert_eq!(format_status_line(&snap), "Connecting to Work VPN…");
+
+        snap.status = "Reconnecting to Work VPN…".into();
+        assert_eq!(format_status_line(&snap), "Reconnecting to Work VPN…");
+
+        snap.status.clear();
+        assert_eq!(format_status_line(&snap), "Connecting");
 
         snap.connection = ConnectionState::Connected;
         snap.active_profile_id = Some(snap.profiles[0].id.to_string());
-        assert_eq!(format_status_line(&snap), "connected to Work VPN");
+        assert_eq!(format_status_line(&snap), "Connected to Work VPN");
 
         snap.traffic.up_rate_bps = 1536;
         snap.traffic.down_rate_bps = 5 * 1024 * 1024;
         assert_eq!(
             format_status_line(&snap),
-            "connected to Work VPN (↑ 1.5 KiB/s · ↓ 5.0 MiB/s)"
+            "Connected to Work VPN (↑ 1.5 KiB/s · ↓ 5.0 MiB/s)"
         );
 
         snap.settings.kill_switch = true;
         assert!(format_status_line(&snap).ends_with(" [kill switch]"));
+    }
+
+    #[test]
+    fn reconnect_requires_an_active_or_in_progress_connection() {
+        assert_eq!(
+            ensure_can_reconnect(ConnectionState::Idle)
+                .unwrap_err()
+                .to_string(),
+            "cannot reconnect while VPN is disconnected"
+        );
+        assert!(ensure_can_reconnect(ConnectionState::Connected).is_ok());
+        assert!(ensure_can_reconnect(ConnectionState::Connecting).is_ok());
+        assert!(ensure_can_reconnect(ConnectionState::ConnectPending).is_ok());
+    }
+
+    #[test]
+    fn one_shot_commands_reject_incompatible_daemons_and_migrations() {
+        let mut snap = snapshot_with_profiles();
+        assert!(ensure_snapshot_compatible(&serde_json::to_value(&snap).unwrap()).is_ok());
+        assert!(ensure_commands_available(&snap).is_ok());
+
+        snap.daemon_version = "0.0.0".into();
+        assert!(
+            ensure_snapshot_compatible(&serde_json::to_value(&snap).unwrap())
+                .unwrap_err()
+                .to_string()
+                .contains("incompatible")
+        );
+
+        snap.daemon_version = env!("CARGO_PKG_VERSION").into();
+        snap.migration = Some(crate::app::model::MigrationStatus {
+            session_id: "migration".into(),
+            phase: crate::app::model::MigrationPhase::Running,
+            completed: 0,
+            total: 1,
+            summary: "Migrating".into(),
+            error: None,
+        });
+        assert!(
+            ensure_commands_available(&snap)
+                .unwrap_err()
+                .to_string()
+                .contains("migration is in progress")
+        );
+    }
+
+    #[test]
+    fn command_result_surfaces_correlated_and_status_errors() {
+        let mut snap = snapshot_with_profiles();
+        snap.response_error = Some("command rejected".into());
+        assert_eq!(
+            print_command_result(&snap).unwrap_err().to_string(),
+            "command rejected"
+        );
+
+        snap.response_error = None;
+        snap.status_is_error = true;
+        snap.status = "connection failed".into();
+        assert_eq!(
+            print_command_result(&snap).unwrap_err().to_string(),
+            "connection failed"
+        );
     }
 
     #[test]

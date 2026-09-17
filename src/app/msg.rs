@@ -116,6 +116,10 @@ pub enum Msg {
     },
 
     IpcCommand(IpcCommand),
+    IpcRequest {
+        command: IpcCommand,
+        request_id: Uuid,
+    },
     StateUpdate {
         generation: u64,
         snapshot: Box<StateSnapshot>,
@@ -249,10 +253,11 @@ pub enum IpcCommand {
     ConnectProfile {
         profile_id: Uuid,
     },
-    /// Disconnect the active tunnel. No-op unless currently connected.
+    /// Disconnect the active tunnel or cancel an in-progress connection.
     Disconnect,
-    /// Reconnect the active profile. No-op unless currently connected.
+    /// Reconnect the active or currently connecting profile.
     Reconnect,
+    Toggle,
     /// Set the routing mode outright, bypassing the TUI overlay. Rejected
     /// (status error, no state change) when the mode is unavailable for the
     /// current geo region — mirrors the overlay's available-modes list.
@@ -381,6 +386,7 @@ mod tests {
             },
             IpcCommand::Disconnect,
             IpcCommand::Reconnect,
+            IpcCommand::Toggle,
             IpcCommand::SetRoutingMode {
                 mode: RoutingMode::Bypass(GeoRegion::Ru),
             },
@@ -457,6 +463,10 @@ pub struct StateSnapshot {
     pub migration_protocol_version: u32,
     #[serde(default)]
     pub migration: Option<MigrationStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_to: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_error: Option<String>,
     pub connection: ConnectionState,
     pub status: String,
     pub status_is_error: bool,

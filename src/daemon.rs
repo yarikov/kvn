@@ -122,6 +122,25 @@ fn run_loop(
 ) -> Result<()> {
     loop {
         let msg = rx.recv()?;
+        let response_to = match &msg {
+            Msg::IpcRequest { request_id, .. } => Some(*request_id),
+            _ => None,
+        };
+        let response_error = match &msg {
+            Msg::IpcRequest { command, .. }
+                if model.migration.is_some()
+                    && matches!(
+                        command,
+                        IpcCommand::ConnectProfile { .. }
+                            | IpcCommand::Disconnect
+                            | IpcCommand::Reconnect
+                            | IpcCommand::Toggle
+                    ) =>
+            {
+                Some("Cannot change the VPN connection while a migration is in progress".into())
+            }
+            _ => None,
+        };
         let config_before = model.config.clone();
         let support_prompt_before = model.support_prompt.clone();
         let mut effects = update(model, msg);
@@ -196,7 +215,12 @@ fn run_loop(
         }
 
         if should_broadcast {
-            ipc_server.broadcast(&build_snapshot(model, log_session_offsets));
+            ipc_server.broadcast(&build_snapshot(
+                model,
+                log_session_offsets,
+                response_to,
+                response_error,
+            ));
         }
     }
     Ok(())
@@ -1276,12 +1300,19 @@ fn dns_bootstrap_endpoints(
         .collect()
 }
 
-fn build_snapshot(model: &Model, log_session_offsets: LogSessionOffsets) -> StateSnapshot {
+fn build_snapshot(
+    model: &Model,
+    log_session_offsets: LogSessionOffsets,
+    response_to: Option<uuid::Uuid>,
+    response_error: Option<String>,
+) -> StateSnapshot {
     StateSnapshot {
         daemon_version: env!("CARGO_PKG_VERSION").to_string(),
         ipc_version: crate::ipc::IPC_VERSION,
         migration_protocol_version: crate::ipc::MIGRATION_PROTOCOL_VERSION,
         migration: model.migration.clone(),
+        response_to,
+        response_error,
         connection: model.connection,
         status: model.status.text().to_string(),
         status_is_error: matches!(model.status, AppStatus::Error(_)),

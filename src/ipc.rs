@@ -7,6 +7,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use uuid::Uuid;
 
 use anyhow::Context;
 
@@ -117,8 +118,26 @@ impl IpcServer {
                             for line in reader.lines() {
                                 match line {
                                     Ok(line) => {
-                                        if let Ok(cmd) = serde_json::from_str::<IpcCommand>(&line) {
-                                            let _ = tx.send(Msg::IpcCommand(cmd));
+                                        if let Ok(mut value) =
+                                            serde_json::from_str::<serde_json::Value>(&line)
+                                        {
+                                            let request_id = value
+                                                .as_object_mut()
+                                                .and_then(|object| object.remove("request_id"))
+                                                .and_then(|value| value.as_str().map(str::to_owned))
+                                                .and_then(|value| Uuid::parse_str(&value).ok());
+                                            if let Ok(command) =
+                                                serde_json::from_value::<IpcCommand>(value)
+                                            {
+                                                let message = match request_id {
+                                                    Some(request_id) => Msg::IpcRequest {
+                                                        command,
+                                                        request_id,
+                                                    },
+                                                    None => Msg::IpcCommand(command),
+                                                };
+                                                let _ = tx.send(message);
+                                            }
                                         }
                                     }
                                     Err(_) => break,
@@ -191,6 +210,36 @@ impl IpcClient {
         self.stream.write_all(json.as_bytes())?;
         self.stream.flush()?;
         Ok(())
+    }
+
+    pub fn send_request(&mut self, cmd: &IpcCommand) -> anyhow::Result<Uuid> {
+        let request_id = Uuid::new_v4();
+        let mut value = serde_json::to_value(cmd)?;
+        value
+            .as_object_mut()
+            .context("IPC command did not serialize as an object")?
+            .insert("request_id".into(), request_id.to_string().into());
+        let json = serde_json::to_string(&value)? + "\n";
+        self.stream.write_all(json.as_bytes())?;
+        self.stream.flush()?;
+        Ok(request_id)
+    }
+
+    pub fn read_response(
+        &mut self,
+        request_id: Uuid,
+        timeout: Duration,
+    ) -> anyhow::Result<StateSnapshot> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .context("Timed out waiting for the daemon to acknowledge the command")?;
+            let snapshot = self.read_snapshot(remaining)?;
+            if snapshot.response_to == Some(request_id) {
+                return Ok(snapshot);
+            }
+        }
     }
 
     /// Read a single state snapshot line, for one-shot CLI clients
@@ -313,6 +362,8 @@ mod tests {
             ipc_version: IPC_VERSION,
             migration_protocol_version: MIGRATION_PROTOCOL_VERSION,
             migration: None,
+            response_to: None,
+            response_error: None,
             connection: ConnectionState::Idle,
             status: "ok".into(),
             status_is_error: false,
@@ -409,6 +460,43 @@ mod tests {
             Some(_) => panic!("expected Msg::StateUpdate, got a different Msg variant"),
             None => panic!("timed out waiting for Msg::StateUpdate"),
         }
+
+        cleanup_socket();
+        unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+    }
+
+    #[test]
+    fn request_response_skips_unrelated_broadcasts() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_RUNTIME_DIR", tmp.path()) };
+        cleanup_socket();
+
+        let (server_tx, server_rx) = channel::<Msg>();
+        let server = IpcServer::bind(server_tx).expect("server bind");
+        let mut client = IpcClient::connect().expect("client connect");
+        let request_id = client
+            .send_request(&IpcCommand::Toggle)
+            .expect("send request");
+
+        match drain_one(&server_rx, Duration::from_secs(2)) {
+            Some(Msg::IpcRequest {
+                command: IpcCommand::Toggle,
+                request_id: received,
+            }) => assert_eq!(received, request_id),
+            Some(_) => panic!("expected correlated toggle request"),
+            None => panic!("timed out waiting for correlated toggle request"),
+        }
+
+        server.broadcast(&sample_snapshot());
+        let mut response = sample_snapshot();
+        response.response_to = Some(request_id);
+        server.broadcast(&response);
+
+        let received = client
+            .read_response(request_id, Duration::from_secs(2))
+            .expect("read correlated response");
+        assert_eq!(received.response_to, Some(request_id));
 
         cleanup_socket();
         unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
