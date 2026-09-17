@@ -422,6 +422,11 @@ fn check_killswitch() -> Check {
             "Reinstall it with `sudo kvn setup --killswitch`.",
         );
     }
+    if let Some(check) =
+        check_killswitch_session(crate::services::killswitch::integration_group_active())
+    {
+        return check;
+    }
 
     match Command::new("sudo")
         .args(["-n", KILLSWITCH_HELPER, "check"])
@@ -439,6 +444,15 @@ fn check_killswitch() -> Check {
             "Install sudo and run `sudo kvn setup --killswitch`.",
         ),
     }
+}
+
+fn check_killswitch_session(group_active: Option<bool>) -> Option<Check> {
+    group_active.is_some_and(|active| !active).then(|| {
+        Check::warning(
+            "kill switch is installed but the current session does not include the `kvn-tui` group",
+            "Log out and back in, then restart `kvn-tui.service`.",
+        )
+    })
 }
 
 fn check_polkit() -> Check {
@@ -773,6 +787,21 @@ mod tests {
         executable(dir.path(), "wl-paste", "exit 0");
         executable(dir.path(), "wl-copy", "exit 0");
         assert_eq!(check_clipboard().level, Level::Pass);
+    }
+
+    #[test]
+    fn kill_switch_session_check_requires_active_integration_group() {
+        assert!(check_killswitch_session(Some(true)).is_none());
+
+        let check = check_killswitch_session(Some(false)).unwrap();
+        assert_eq!(check.level, Level::Warning);
+        assert!(check.message.contains("current session"));
+        assert_eq!(
+            check.remedy.as_deref(),
+            Some("Log out and back in, then restart `kvn-tui.service`.")
+        );
+
+        assert!(check_killswitch_session(None).is_none());
     }
 
     #[test]
