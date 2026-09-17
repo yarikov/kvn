@@ -34,6 +34,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         && !matches!(
             &msg,
             Msg::IpcCommand(_)
+                | Msg::IpcRequest { .. }
                 | Msg::Resize
                 | Msg::StateUpdate { .. }
                 | Msg::IpcReadFailed { .. }
@@ -279,7 +280,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.needs_redraw = true;
             vec![]
         }
-        Msg::IpcCommand(cmd) => handle_ipc_command(model, cmd),
+        Msg::IpcCommand(cmd) | Msg::IpcRequest { command: cmd, .. } => {
+            handle_ipc_command(model, cmd)
+        }
         Msg::StateUpdate { .. }
         | Msg::IpcReadFailed { .. }
         | Msg::MigrationReconnectReady { .. }
@@ -1899,11 +1902,22 @@ mod tests {
     }
 
     #[test]
+    fn ipc_command_disconnect_cancels_in_progress_connection() {
+        for connection in [ConnectionState::Connecting, ConnectionState::ConnectPending] {
+            let mut model = model_with_profiles(vec![]);
+            model.connection = connection;
+            let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Disconnect);
+            assert_eq!(effects, vec![Effect::Disconnect, Effect::BroadcastState]);
+        }
+    }
+
+    #[test]
     fn ipc_command_reconnect_when_connected() {
         let (mut model, a_id) = connected_model();
         let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Reconnect);
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, Some(a_id));
+        assert_eq!(model.connect_attempt_id, 1);
         assert_eq!(
             effects,
             vec![app_log_info("Reconnecting to A…"), Effect::BroadcastState]
@@ -1911,11 +1925,92 @@ mod tests {
     }
 
     #[test]
-    fn ipc_command_reconnect_when_idle_is_noop() {
+    fn ipc_command_reconnect_restarts_in_progress_connection() {
+        for connection in [ConnectionState::Connecting, ConnectionState::ConnectPending] {
+            let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+            let profile_id = profile.id;
+            let mut model = model_with_profiles(vec![profile]);
+            model.connection = connection;
+            model.connecting_profile_id = Some(profile_id);
+            model.connect_attempt_id = 7;
+
+            let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Reconnect);
+
+            assert_eq!(model.connection, ConnectionState::Connecting);
+            assert_eq!(model.connecting_profile_id, Some(profile_id));
+            assert_eq!(model.connect_attempt_id, 8);
+            assert_eq!(model.status.text(), "Reconnecting to A…");
+            assert_eq!(
+                effects,
+                vec![app_log_info("Reconnecting to A…"), Effect::BroadcastState]
+            );
+        }
+    }
+
+    #[test]
+    fn ipc_command_reconnect_when_idle_reports_error() {
         let mut model = model_with_profiles(vec![]);
         let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Reconnect);
-        assert_eq!(effects, vec![Effect::BroadcastState]);
+        assert_eq!(
+            effects,
+            vec![
+                app_log_error("Cannot reconnect while VPN is disconnected"),
+                Effect::BroadcastState,
+            ]
+        );
         assert_eq!(model.connection, ConnectionState::Idle);
+        assert_eq!(
+            model.status.text(),
+            "Cannot reconnect while VPN is disconnected"
+        );
+    }
+
+    #[test]
+    fn ipc_command_toggle_disconnects_or_cancels_non_idle_connection() {
+        for connection in [
+            ConnectionState::Connected,
+            ConnectionState::Connecting,
+            ConnectionState::ConnectPending,
+        ] {
+            let mut model = model_with_profiles(vec![]);
+            model.connection = connection;
+            let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Toggle);
+            assert_eq!(effects, vec![Effect::Disconnect, Effect::BroadcastState]);
+        }
+    }
+
+    #[test]
+    fn ipc_command_toggle_connects_last_successful_profile() {
+        let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        let profile_id = profile.id;
+        let mut model = model_with_profiles(vec![profile]);
+        model.config.settings.last_connected_profile = Some(profile_id);
+
+        let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Toggle);
+
+        assert_eq!(model.connection, ConnectionState::Connecting);
+        assert_eq!(model.connecting_profile_id, Some(profile_id));
+        assert_eq!(model.status.text(), "Connecting to A…");
+        assert_eq!(
+            effects,
+            vec![app_log_info("Connecting to A…"), Effect::BroadcastState]
+        );
+    }
+
+    #[test]
+    fn ipc_command_toggle_without_last_profile_reports_error() {
+        let mut model = model_with_profiles(vec![]);
+
+        let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Toggle);
+
+        assert_eq!(model.connection, ConnectionState::Idle);
+        assert_eq!(
+            effects,
+            vec![
+                app_log_error("No previous profile to connect; run `kvn connect <name>` first"),
+                Effect::BroadcastState,
+            ]
+        );
     }
 
     #[test]

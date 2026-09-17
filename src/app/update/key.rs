@@ -885,26 +885,66 @@ pub(super) fn handle_ipc_command(
         }
         IpcCommand::GoFirst => handle_go_first(model),
         IpcCommand::ConnectProfile { profile_id } => {
-            queue_connect(model, profile_id);
-            vec![]
-        }
-        IpcCommand::Disconnect => {
-            if model.connection == ConnectionState::Connected {
-                vec![Effect::Disconnect]
+            let profile_name = model
+                .config
+                .profiles
+                .iter()
+                .find(|profile| profile.id == profile_id)
+                .map(|profile| profile.name.clone());
+            if let Some(profile_name) = profile_name {
+                let mut effects = vec![];
+                push_status(
+                    &mut effects,
+                    model,
+                    AppStatus::Info(format!("Connecting to {profile_name}…")),
+                );
+                queue_connect(model, profile_id);
+                effects
             } else {
-                vec![]
+                let mut effects = vec![];
+                push_status(
+                    &mut effects,
+                    model,
+                    AppStatus::Error("Cannot connect: profile no longer exists".into()),
+                );
+                effects
             }
         }
+        IpcCommand::Disconnect => match model.connection {
+            ConnectionState::Connected
+            | ConnectionState::Connecting
+            | ConnectionState::ConnectPending => vec![Effect::Disconnect],
+            ConnectionState::Idle if matches!(model.status, AppStatus::Error(_)) => {
+                let mut effects = vec![];
+                push_status(&mut effects, model, AppStatus::Info("Disconnected".into()));
+                effects
+            }
+            ConnectionState::Idle => vec![],
+        },
         IpcCommand::Reconnect => {
-            if model.connection == ConnectionState::Connected
-                && let Some(profile) = model.active_profile_id.and_then(|id| {
-                    model
-                        .config
-                        .profiles
-                        .iter()
-                        .find(|profile| profile.id == id)
-                })
-            {
+            if model.connection == ConnectionState::Idle {
+                let mut effects = vec![];
+                push_status(
+                    &mut effects,
+                    model,
+                    AppStatus::Error("Cannot reconnect while VPN is disconnected".into()),
+                );
+                return finish_ipc_effects(effects);
+            }
+            let profile_id = match model.connection {
+                ConnectionState::Connected => model.active_profile_id,
+                ConnectionState::Connecting | ConnectionState::ConnectPending => {
+                    model.connecting_profile_id
+                }
+                ConnectionState::Idle => unreachable!("handled above"),
+            };
+            if let Some(profile) = profile_id.and_then(|id| {
+                model
+                    .config
+                    .profiles
+                    .iter()
+                    .find(|profile| profile.id == id)
+            }) {
                 let profile_id = profile.id;
                 let profile_name = profile.name.clone();
                 let mut effects = vec![];
@@ -916,9 +956,51 @@ pub(super) fn handle_ipc_command(
                 queue_connect(model, profile_id);
                 effects
             } else {
-                vec![]
+                let mut effects = vec![];
+                push_status(
+                    &mut effects,
+                    model,
+                    AppStatus::Error("Cannot reconnect: profile no longer exists".into()),
+                );
+                effects
             }
         }
+        IpcCommand::Toggle => match model.connection {
+            ConnectionState::Connected
+            | ConnectionState::Connecting
+            | ConnectionState::ConnectPending => vec![Effect::Disconnect],
+            ConnectionState::Idle => {
+                let profile = model.config.settings.last_connected_profile.and_then(|id| {
+                    model
+                        .config
+                        .profiles
+                        .iter()
+                        .find(|profile| profile.id == id)
+                });
+                if let Some(profile) = profile {
+                    let profile_id = profile.id;
+                    let profile_name = profile.name.clone();
+                    let mut effects = vec![];
+                    push_status(
+                        &mut effects,
+                        model,
+                        AppStatus::Info(format!("Connecting to {profile_name}…")),
+                    );
+                    queue_connect(model, profile_id);
+                    effects
+                } else {
+                    let mut effects = vec![];
+                    push_status(
+                        &mut effects,
+                        model,
+                        AppStatus::Error(
+                            "No previous profile to connect; run `kvn connect <name>` first".into(),
+                        ),
+                    );
+                    effects
+                }
+            }
+        },
         IpcCommand::SetRoutingMode { mode } => commit_routing_mode(model, mode),
         IpcCommand::SetGeoRegion { region } => commit_geo_region(model, region),
         IpcCommand::SetKillSwitch { enabled } => set_kill_switch(model, enabled),
@@ -3043,6 +3125,17 @@ mod tests {
         );
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, Some(second.id));
+        assert_eq!(model.status.text(), "Connecting to B…");
+        assert_eq!(
+            effects,
+            vec![
+                Effect::AppendAppLog {
+                    level: "INFO".into(),
+                    message: "Connecting to B…".into(),
+                },
+                Effect::BroadcastState,
+            ]
+        );
         assert!(!effects.contains(&Effect::Disconnect));
 
         model.connection = ConnectionState::Connected;
@@ -3055,6 +3148,17 @@ mod tests {
         );
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, Some(first.id));
+        assert_eq!(model.status.text(), "Connecting to A…");
+        assert_eq!(
+            effects,
+            vec![
+                Effect::AppendAppLog {
+                    level: "INFO".into(),
+                    message: "Connecting to A…".into(),
+                },
+                Effect::BroadcastState,
+            ]
+        );
         assert!(!effects.contains(&Effect::Disconnect));
     }
 
