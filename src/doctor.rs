@@ -10,6 +10,7 @@ use anyhow::Result;
 const MIN_SINGBOX_VERSION: (u64, u64, u64) = (1, 12, 0);
 const USER_UNIT: &str = "kvn-tui.service";
 const KILLSWITCH_HELPER: &str = "/usr/lib/kvn-tui/killswitch-helper.sh";
+const POLKIT_RULE: &str = "/etc/polkit-1/rules.d/49-kvn-tui.rules";
 const POLKIT_DNS_ACTIONS: [&str; 3] = [
     "org.freedesktop.resolve1.set-dns-servers",
     "org.freedesktop.resolve1.set-domains",
@@ -437,7 +438,7 @@ fn check_killswitch() -> Check {
         }
         Ok(_) => Check::warning(
             "kill switch helper is installed but passwordless authorization is unavailable",
-            "Run `sudo kvn setup --killswitch`, then log out and back in.",
+            "Run `sudo kvn setup --killswitch`, then log out and back in to activate the `kvn-tui` group.",
         ),
         Err(_) => Check::warning(
             "kill switch helper is installed but `sudo` could not be executed",
@@ -450,12 +451,18 @@ fn check_killswitch_session(group_active: Option<bool>) -> Option<Check> {
     group_active.is_some_and(|active| !active).then(|| {
         Check::warning(
             "kill switch is installed but the current session does not include the `kvn-tui` group",
-            "Log out and back in, then restart `kvn-tui.service`.",
+            "Log out and back in to activate the `kvn-tui` group.",
         )
     })
 }
 
 fn check_polkit() -> Check {
+    if let Some(check) = check_polkit_session(
+        Path::new(POLKIT_RULE).is_file(),
+        crate::services::killswitch::integration_group_active(),
+    ) {
+        return check;
+    }
     let Some(identity) = polkit_process_identity() else {
         return Check::warning(
             "polkit authorization could not be checked",
@@ -480,7 +487,7 @@ fn check_polkit() -> Check {
             Some(1 | 2) => {
                 return Check::warning(
                     format!("passwordless polkit authorization is missing for {action}"),
-                    "Run `sudo kvn setup --polkit`, then log out and back in.",
+                    "Run `sudo kvn setup --polkit`, then log out and back in to activate the `kvn-tui` group.",
                 );
             }
             _ => {
@@ -496,6 +503,15 @@ fn check_polkit() -> Check {
         }
     }
     Check::pass("all required polkit DNS authorizations are active")
+}
+
+fn check_polkit_session(rule_installed: bool, group_active: Option<bool>) -> Option<Check> {
+    (rule_installed && group_active == Some(false)).then(|| {
+        Check::warning(
+            "polkit rule is installed but the current session does not include the `kvn-tui` group",
+            "Log out and back in to activate the `kvn-tui` group.",
+        )
+    })
 }
 
 /// Build the non-racy `PID,START_TIME,UID` identity recommended by pkcheck.
@@ -798,7 +814,7 @@ mod tests {
         assert!(check.message.contains("current session"));
         assert_eq!(
             check.remedy.as_deref(),
-            Some("Log out and back in, then restart `kvn-tui.service`.")
+            Some("Log out and back in to activate the `kvn-tui` group.")
         );
 
         assert!(check_killswitch_session(None).is_none());
@@ -849,10 +865,27 @@ mod tests {
         assert_eq!(check.level, Level::Warning);
         assert_eq!(
             check.remedy.as_deref(),
-            Some("Run `sudo kvn setup --polkit`, then log out and back in.")
+            Some(
+                "Run `sudo kvn setup --polkit`, then log out and back in to activate the `kvn-tui` group."
+            )
         );
         executable(dir.path(), "pkcheck", "echo unavailable >&2; exit 127");
         assert_eq!(check_polkit().level, Level::Warning);
+    }
+
+    #[test]
+    fn polkit_session_check_warns_only_for_an_installed_rule() {
+        assert!(check_polkit_session(true, Some(true)).is_none());
+        assert!(check_polkit_session(false, Some(false)).is_none());
+        assert!(check_polkit_session(true, None).is_none());
+
+        let check = check_polkit_session(true, Some(false)).unwrap();
+        assert_eq!(check.level, Level::Warning);
+        assert!(check.message.contains("current session"));
+        assert_eq!(
+            check.remedy.as_deref(),
+            Some("Log out and back in to activate the `kvn-tui` group.")
+        );
     }
 
     #[test]
