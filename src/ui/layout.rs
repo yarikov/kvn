@@ -1317,17 +1317,13 @@ fn draw_confirm_delete(frame: &mut Frame, model: &Model, area: Rect) {
 
 const DIALOG_POPUP_WIDTH: u16 = 48;
 const HELP_POPUP_WIDTH: u16 = 56;
-const POPUP_HEIGHT_PERCENT: u16 = 50;
 const SETTINGS_POPUP_WIDTH: u16 = 33;
 const SETTINGS_TEXT_MARGIN: usize = 1;
+const SELECTION_POPUP_MAX_HEIGHT_PERCENT: u16 = 90;
 const APPLY_ACTION: &str = "󰌑 apply";
 const CONFIRM_ACTION: &str = "󰌑 confirm";
 const CLOSE_ACTION: &str = "q/󱊷 close";
 const BACK_ACTION: &str = "⌫ back";
-/// Taller variant for overlays whose list grows past ~6 items (e.g. the
-/// theme picker with 19+ entries). Keeps text inside the visible region
-/// on standard 24-row terminals.
-const POPUP_HEIGHT_PERCENT_TALL: u16 = 90;
 
 fn overlay_footer(primary: Option<&str>, close: bool, back: bool) -> String {
     let mut actions = Vec::with_capacity(3);
@@ -1482,7 +1478,6 @@ fn draw_routing_mode(frame: &mut Frame, model: &Model, area: Rect) {
         &labels,
         model.routing_selected,
         active,
-        POPUP_HEIGHT_PERCENT,
         settings_overlay_footer(model),
     );
 }
@@ -1505,7 +1500,6 @@ fn draw_geo_region(frame: &mut Frame, model: &Model, area: Rect) {
         &labels,
         model.geo_region_selected,
         active,
-        POPUP_HEIGHT_PERCENT,
         if model.settings_menu_return.is_some() {
             settings_overlay_footer(model)
         } else if model.config.settings.geo_routing.current_region.is_some() {
@@ -1597,7 +1591,6 @@ fn draw_dns_settings(frame: &mut Frame, model: &Model, area: Rect) {
         &label_refs,
         model.dns_selected,
         None,
-        POPUP_HEIGHT_PERCENT,
         settings_overlay_footer(model),
     );
 }
@@ -1674,7 +1667,6 @@ fn draw_theme_settings(frame: &mut Frame, model: &Model, area: Rect) {
         &label_refs,
         model.theme_selected,
         active,
-        POPUP_HEIGHT_PERCENT_TALL,
         settings_overlay_footer(model),
     );
 }
@@ -1696,11 +1688,10 @@ fn draw_selection_modal(
     items: &[&str],
     selected: usize,
     active: Option<usize>,
-    height_percent: u16,
     footer: String,
 ) {
     let popup_width = SETTINGS_POPUP_WIDTH.min(area.width);
-    let height_area = centered_rect(100, height_percent, area);
+    let height_area = centered_rect(100, SELECTION_POPUP_MAX_HEIGHT_PERCENT, area);
     let popup_area = Rect::new(
         area.x + area.width.saturating_sub(popup_width) / 2,
         height_area.y,
@@ -3049,6 +3040,18 @@ mod tests {
         model.overlay = Overlay::GeoRegions;
         model.geo_region_selected = 1;
         insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+    }
+
+    #[test]
+    fn draw_geo_region_overlay_at_minimum_terminal_size_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::GeoRegions;
+        model.geo_region_selected = 1;
+        insta::assert_snapshot!(snapshot_terminal(
+            &model,
+            MIN_TERMINAL_WIDTH,
+            MIN_TERMINAL_HEIGHT
+        ));
     }
 
     #[test]
