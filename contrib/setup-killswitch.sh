@@ -176,11 +176,6 @@ echo "  /etc/sudoers.d/kvn-tui-killswitch"
 echo
 echo "Toggle the kill switch from the TUI with Shift+K."
 if [[ "$NEW_GROUP" == "1" ]]; then
-    echo "User '$USER_NAME' was added to '$GROUP_NAME' — log out and back in,"
-    echo "then restart kvn-tui.service before toggling from the TUI."
-fi
-if id -nG "$USER_NAME" | tr ' ' '\n' | grep -Fxq network; then
-    echo
-    echo "Note: kvn no longer uses the 'network' group. Existing membership"
-    echo "was preserved because another application may rely on it."
+    echo "User '$USER_NAME' was added to '$GROUP_NAME'."
+    echo "Log out and back in to activate the kvn-tui group."
 fi

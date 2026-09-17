@@ -107,7 +107,7 @@ authentication prompt:
 - `org.freedesktop.resolve1.set-default-route`
 No NetworkManager actions are granted. This authorization is group-wide and is
 not restricted to the kvn process. After being added to `kvn-tui`, log out
-and back in and restart `kvn-tui.service`.
+and back in to activate the `kvn-tui` group.
 
 To remove the rule:
 
@@ -117,9 +117,7 @@ sudo kvn clean --polkit
 
 Cleanup preserves the group while the kill switch still uses it. If neither
 integration remains, cleanup removes the now-unused group and its membership
-records automatically. Existing membership in the legacy `network` group is
-never removed automatically; verify that no other software needs it before
-changing it manually.
+records automatically.
 
 ## Kill switch setup
 

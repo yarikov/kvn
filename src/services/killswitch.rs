@@ -63,7 +63,7 @@ pub fn apply(enabled: bool) -> Result<()> {
 
 fn ensure_integration_group_active(active: Option<bool>) -> Result<()> {
     if active == Some(false) {
-        bail!("access group is not active; log out and back in, then restart kvn-tui.service");
+        bail!("log out and back in to activate the kvn-tui group");
     }
     Ok(())
 }
@@ -171,6 +171,6 @@ mod tests {
 
         let error = ensure_integration_group_active(Some(false)).unwrap_err();
         assert!(error.to_string().contains("log out and back in"));
-        assert!(error.to_string().contains("restart kvn-tui.service"));
+        assert!(error.to_string().contains("activate the kvn-tui group"));
     }
 }
