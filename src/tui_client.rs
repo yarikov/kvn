@@ -183,6 +183,14 @@ impl TerminalSession {
             let _ = disable_raw_mode();
             return Err(error.into());
         }
+        if let Err(error) = input::enable_bracketed_paste(&mut stdout) {
+            let _ = input::disable_bracketed_paste(&mut stdout);
+            let _ = input::disable_mouse_capture(&mut stdout);
+            let _ = input::disable_keyboard_protocol(&mut stdout);
+            let _ = stdout.execute(LeaveAlternateScreen);
+            let _ = disable_raw_mode();
+            return Err(error.into());
+        }
         Ok(Self)
     }
 }
@@ -191,6 +199,7 @@ impl Drop for TerminalSession {
     fn drop(&mut self) {
         let mut stdout = io::stdout();
         let _ = stdout.write_all(OSC_POINTER_DEFAULT.as_bytes());
+        let _ = input::disable_bracketed_paste(&mut stdout);
         let _ = input::disable_mouse_capture(&mut stdout);
         let _ = input::disable_keyboard_protocol(&mut stdout);
         let _ = disable_raw_mode();
@@ -861,6 +870,13 @@ fn run_loop(
                     _ => {}
                 }
             }
+            Msg::Paste(text) => {
+                if model.overlay == crate::app::model::Overlay::None
+                    && pane_focus == MainPaneFocus::Sources
+                {
+                    client.send(&IpcCommand::Paste { text })?;
+                }
+            }
             Msg::Key(key) => {
                 use crossterm::event::{KeyCode, KeyModifiers};
                 if model.overlay == crate::app::model::Overlay::Migration {
@@ -1101,9 +1117,16 @@ fn run_loop(
                         if model.overlay == crate::app::model::Overlay::None
                             && pane_focus == MainPaneFocus::Sources =>
                     {
-                        if let Ok(text) = self::clipboard::read_clipboard_text() {
-                            client.send(&IpcCommand::Paste { text })?;
-                        }
+                        paste_clipboard(client)?;
+                    }
+                    KeyCode::Char('v')
+                        if key
+                            .modifiers
+                            .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER)
+                            && model.overlay == crate::app::model::Overlay::None
+                            && pane_focus == MainPaneFocus::Sources =>
+                    {
+                        paste_clipboard(client)?;
                     }
                     KeyCode::Char('y')
                         if model.overlay == crate::app::model::Overlay::None
@@ -1140,6 +1163,7 @@ fn run_loop(
                         terminal
                             .backend_mut()
                             .write_all(OSC_POINTER_DEFAULT.as_bytes())?;
+                        input::disable_bracketed_paste(terminal.backend_mut())?;
                         input::disable_mouse_capture(terminal.backend_mut())?;
                         input::disable_keyboard_protocol(terminal.backend_mut())?;
                         disable_raw_mode()?;
@@ -1151,6 +1175,7 @@ fn run_loop(
                         terminal.backend_mut().execute(EnterAlternateScreen)?;
                         input::enable_keyboard_protocol(terminal.backend_mut())?;
                         input::enable_mouse_capture(terminal.backend_mut())?;
+                        input::enable_bracketed_paste(terminal.backend_mut())?;
                         pointer_shape = PointerShape::Default;
                         terminal.clear()?;
                         input::discard_pending_input();
@@ -1407,6 +1432,16 @@ fn spawn_migration_reconnect(
 struct PaneFocusShortcut {
     focus: crate::app::model::MainPaneFocus,
     deprecated: bool,
+}
+
+fn paste_clipboard(client: &mut IpcClient) -> Result<()> {
+    match self::clipboard::read_clipboard_text() {
+        Ok(text) => client.send(&IpcCommand::Paste { text })?,
+        Err(error) => client.send(&IpcCommand::ClientError {
+            message: format!("Failed to read clipboard: {error:#}"),
+        })?,
+    }
+    Ok(())
 }
 
 fn pane_focus_shortcut(key: &crossterm::event::KeyEvent) -> Option<PaneFocusShortcut> {
