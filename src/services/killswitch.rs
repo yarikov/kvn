@@ -56,7 +56,7 @@ fn run_helper(args: &[&str]) -> Result<()> {
 /// Enable or disable the kill switch systemd unit (also starts/stops it).
 pub fn apply(enabled: bool) -> Result<()> {
     if enabled && helper_present() {
-        ensure_integration_group_active(integration_group_active())?;
+        ensure_integration_group_ready(integration_group_status())?;
     }
     if !enabled && !helper_present() && !helper_needed_to_disable(is_active().ok()) {
         return Ok(());
@@ -68,25 +68,44 @@ fn helper_needed_to_disable(active: Option<bool>) -> bool {
     active != Some(false)
 }
 
-fn ensure_integration_group_active(active: Option<bool>) -> Result<()> {
-    if active == Some(false) {
-        bail!("log out and back in to activate the kvn-tui group");
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IntegrationGroup {
+    Active,
+    PendingActivation,
+    NotMember,
+}
+
+fn ensure_integration_group_ready(status: Option<IntegrationGroup>) -> Result<()> {
+    match status {
+        Some(IntegrationGroup::PendingActivation) => {
+            bail!("reboot to activate the `kvn-tui` group")
+        }
+        Some(IntegrationGroup::NotMember) => bail!(
+            "the current user is not in the `kvn-tui` group; run `sudo kvn setup --killswitch`, then reboot"
+        ),
+        Some(IntegrationGroup::Active) | None => Ok(()),
     }
-    Ok(())
 }
 
-pub(crate) fn integration_group_active() -> Option<bool> {
-    id_output(&["-Gn"]).map(|output| group_list_includes_integration_group(&output))
-}
-
-pub(crate) fn integration_group_pending_activation() -> Option<bool> {
-    if integration_group_active()? {
-        return Some(false);
+pub(crate) fn integration_group_status() -> Option<IntegrationGroup> {
+    let active = id_output(&["-Gn"])?;
+    if group_list_includes_integration_group(&active) {
+        return Some(IntegrationGroup::Active);
     }
     let username = id_output(&["-un"])?;
     let username = std::str::from_utf8(&username).ok()?.trim();
     let configured_groups = id_output(&["-Gn", username])?;
-    Some(group_list_includes_integration_group(&configured_groups))
+    Some(
+        if group_list_includes_integration_group(&configured_groups) {
+            IntegrationGroup::PendingActivation
+        } else {
+            IntegrationGroup::NotMember
+        },
+    )
+}
+
+pub(crate) fn integration_group_pending_activation() -> Option<bool> {
+    integration_group_status().map(|status| status == IntegrationGroup::PendingActivation)
 }
 
 fn id_output(args: &[&str]) -> Option<Vec<u8>> {
@@ -159,7 +178,7 @@ fn classify_active_exit_code(code: Option<i32>) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_active_exit_code, ensure_integration_group_active,
+        IntegrationGroup, classify_active_exit_code, ensure_integration_group_ready,
         group_list_includes_integration_group, helper_needed_to_disable,
     };
 
@@ -191,11 +210,18 @@ mod tests {
 
     #[test]
     fn inactive_integration_group_has_actionable_error() {
-        assert!(ensure_integration_group_active(Some(true)).is_ok());
-        assert!(ensure_integration_group_active(None).is_ok());
+        assert!(ensure_integration_group_ready(Some(IntegrationGroup::Active)).is_ok());
+        assert!(ensure_integration_group_ready(None).is_ok());
 
-        let error = ensure_integration_group_active(Some(false)).unwrap_err();
-        assert!(error.to_string().contains("log out and back in"));
-        assert!(error.to_string().contains("activate the kvn-tui group"));
+        let pending = ensure_integration_group_ready(Some(IntegrationGroup::PendingActivation))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(pending, "reboot to activate the `kvn-tui` group");
+
+        let missing = ensure_integration_group_ready(Some(IntegrationGroup::NotMember))
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("not in the `kvn-tui` group"));
+        assert!(missing.contains("sudo kvn setup --killswitch"));
     }
 }

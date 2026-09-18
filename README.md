@@ -123,8 +123,8 @@ sudo pacman -S --needed polkit
 sudo kvn setup --polkit
 ```
 
-If setup adds you to the `kvn-tui` group, log out and back in to activate the
-`kvn-tui` group. Because authorization is group-wide, every process running as
+If setup adds you to the `kvn-tui` group, reboot to activate the `kvn-tui`
+group. Because authorization is group-wide, every process running as
 an enrolled user can request those three DNS operations. Skip this setup if you
 prefer interactive polkit authorization and do not need unattended auto-connect
 or resume reconnects. Enabling auto-connect requires this setup: kvn refuses to
@@ -143,8 +143,8 @@ sudo kvn setup --killswitch
 
 The kill-switch sudoers rule uses the same dedicated `kvn-tui` group and allows
 only the validating helper installed at `/usr/lib/kvn-tui/killswitch-helper.sh`.
-If setup adds you to the `kvn-tui` group, log out and back in to activate the
-`kvn-tui` group.
+If setup adds you to the `kvn-tui` group, reboot to activate the `kvn-tui`
+group.
 
 Toggle it with `K`; when enabled, the status bar shows `KS`.
 

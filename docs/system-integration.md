@@ -106,8 +106,8 @@ authentication prompt:
 - `org.freedesktop.resolve1.set-domains`
 - `org.freedesktop.resolve1.set-default-route`
 No NetworkManager actions are granted. This authorization is group-wide and is
-not restricted to the kvn process. After being added to `kvn-tui`, log out
-and back in to activate the `kvn-tui` group.
+not restricted to the kvn process. After being added to `kvn-tui`, reboot
+to activate the `kvn-tui` group.
 
 To remove the rule:
 

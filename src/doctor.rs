@@ -423,7 +423,7 @@ fn check_killswitch() -> Check {
         );
     }
     if let Some(check) =
-        check_killswitch_session(crate::services::killswitch::integration_group_active())
+        check_killswitch_session(crate::services::killswitch::integration_group_status())
     {
         return check;
     }
@@ -437,7 +437,7 @@ fn check_killswitch() -> Check {
         }
         Ok(_) => Check::warning(
             "kill switch helper is installed but passwordless authorization is unavailable",
-            "Run `sudo kvn setup --killswitch`, then log out and back in to activate the `kvn-tui` group.",
+            "Run `sudo kvn setup --killswitch`, then reboot to activate the `kvn-tui` group.",
         ),
         Err(_) => Check::warning(
             "kill switch helper is installed but `sudo` could not be executed",
@@ -446,13 +446,22 @@ fn check_killswitch() -> Check {
     }
 }
 
-fn check_killswitch_session(group_active: Option<bool>) -> Option<Check> {
-    group_active.is_some_and(|active| !active).then(|| {
-        Check::warning(
+fn check_killswitch_session(
+    status: Option<crate::services::killswitch::IntegrationGroup>,
+) -> Option<Check> {
+    use crate::services::killswitch::IntegrationGroup;
+
+    match status? {
+        IntegrationGroup::Active => None,
+        IntegrationGroup::PendingActivation => Some(Check::warning(
             "kill switch is installed but the current session does not include the `kvn-tui` group",
-            "Log out and back in to activate the `kvn-tui` group.",
-        )
-    })
+            "Reboot to activate the `kvn-tui` group.",
+        )),
+        IntegrationGroup::NotMember => Some(Check::warning(
+            "kill switch is installed but the current user is not in the `kvn-tui` group",
+            "Run `sudo kvn setup --killswitch`, then reboot to activate the `kvn-tui` group.",
+        )),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -510,13 +519,13 @@ fn polkit_readiness_from(status: PolkitStatus) -> Result<()> {
             anyhow::bail!("polkit authorization could not be verified: `pkcheck` is unavailable")
         }
         PolkitStatus::Denied { .. } => anyhow::bail!(
-            "passwordless polkit is not set up; run `sudo kvn setup --polkit`, then log out and back in"
+            "passwordless polkit is not set up; run `sudo kvn setup --polkit`, then reboot"
         ),
         PolkitStatus::CheckFailed { error, .. } => {
             anyhow::bail!("polkit authorization could not be verified: {error}")
         }
         PolkitStatus::GroupPendingActivation => {
-            anyhow::bail!("log out and back in to activate the `kvn-tui` group")
+            anyhow::bail!("reboot to activate the `kvn-tui` group")
         }
     }
 }
@@ -534,7 +543,7 @@ fn check_polkit() -> Check {
         ),
         PolkitStatus::Denied { action } => Check::warning(
             format!("passwordless polkit authorization is missing for {action}"),
-            "Run `sudo kvn setup --polkit`, then log out and back in to activate the `kvn-tui` group.",
+            "Run `sudo kvn setup --polkit`, then reboot to activate the `kvn-tui` group.",
         ),
         PolkitStatus::CheckFailed { action, error } => Check::warning(
             format!("polkit authorization for {action} could not be checked: {error}"),
@@ -547,7 +556,7 @@ fn check_polkit() -> Check {
 fn polkit_group_pending_check() -> Check {
     Check::warning(
         "polkit rule is installed but the current session does not include the `kvn-tui` group",
-        "Log out and back in to activate the `kvn-tui` group.",
+        "Reboot to activate the `kvn-tui` group.",
     )
 }
 
@@ -844,14 +853,27 @@ mod tests {
 
     #[test]
     fn kill_switch_session_check_requires_active_integration_group() {
-        assert!(check_killswitch_session(Some(true)).is_none());
+        use crate::services::killswitch::IntegrationGroup;
 
-        let check = check_killswitch_session(Some(false)).unwrap();
+        assert!(check_killswitch_session(Some(IntegrationGroup::Active)).is_none());
+
+        let check = check_killswitch_session(Some(IntegrationGroup::PendingActivation)).unwrap();
         assert_eq!(check.level, Level::Warning);
         assert!(check.message.contains("current session"));
         assert_eq!(
             check.remedy.as_deref(),
-            Some("Log out and back in to activate the `kvn-tui` group.")
+            Some("Reboot to activate the `kvn-tui` group.")
+        );
+
+        let check = check_killswitch_session(Some(IntegrationGroup::NotMember)).unwrap();
+        assert_eq!(check.level, Level::Warning);
+        assert!(check.message.contains("not in the `kvn-tui` group"));
+        assert!(
+            check
+                .remedy
+                .as_deref()
+                .unwrap()
+                .starts_with("Run `sudo kvn setup --killswitch`")
         );
 
         assert!(check_killswitch_session(None).is_none());
@@ -902,9 +924,7 @@ mod tests {
         assert_eq!(check.level, Level::Warning);
         assert_eq!(
             check.remedy.as_deref(),
-            Some(
-                "Run `sudo kvn setup --polkit`, then log out and back in to activate the `kvn-tui` group."
-            )
+            Some("Run `sudo kvn setup --polkit`, then reboot to activate the `kvn-tui` group.")
         );
         executable(dir.path(), "pkcheck", "echo unavailable >&2; exit 127");
         assert_eq!(check_polkit().level, Level::Warning);
@@ -917,7 +937,7 @@ mod tests {
         assert!(check.message.contains("current session"));
         assert_eq!(
             check.remedy.as_deref(),
-            Some("Log out and back in to activate the `kvn-tui` group.")
+            Some("Reboot to activate the `kvn-tui` group.")
         );
     }
 
@@ -950,7 +970,7 @@ mod tests {
             polkit_readiness_from(PolkitStatus::GroupPendingActivation)
                 .unwrap_err()
                 .to_string()
-                .contains("log out and back in")
+                .contains("reboot to activate")
         );
     }
 
