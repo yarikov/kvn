@@ -1,0 +1,60 @@
+#!/usr/sbin/nft -f
+# kvn-tui kill switch: drop all non-VPN egress.
+# Loaded by kvn-tui-killswitch.service at boot when enabled.
+
+# Idempotent atomic replace — add-then-delete-then-add lets `nft -f` succeed
+# both on first load (no prior table) and on reload (prior table exists).
+add table inet kvn_tui_killswitch
+delete table inet kvn_tui_killswitch
+table inet kvn_tui_killswitch {
+    # Dynamic sets populated by the daemon during the connect handshake.
+    # IPv6 uses `meta l4proto` so extension headers are followed to the actual
+    # transport protocol; IPv4's protocol field already identifies it directly.
+    set handshake_v4 {
+        type ipv4_addr . inet_proto . inet_service
+        flags interval
+    }
+    set handshake_v6 {
+        type ipv6_addr . inet_proto . inet_service
+        flags interval
+    }
+
+    chain input {
+        type filter hook input priority -10; policy drop;
+        iifname "lo" accept
+        iifname "tun*" accept
+        iifname "kvn*" accept
+        ct state established,related accept
+        meta l4proto { icmp, icmpv6 } accept
+        ip saddr { 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12 } accept
+        ip6 saddr { fc00::/7, fe80::/10 } accept
+        udp sport 67 udp dport 68 accept
+        udp sport 547 udp dport 546 accept
+    }
+
+    chain output {
+        type filter hook output priority -10; policy drop;
+        oifname "lo" accept
+        oifname "tun*" accept
+        oifname "kvn*" accept
+        # Packets marked by sing-box (route.default_mark = 666 / 0x29a). This
+        # allows the `direct` outbound used by Bypass/Only routing modes to
+        # reach the physical interface; everything else still drops.
+        meta mark 0x29a accept
+        ct state established,related accept
+        ip daddr { 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12 } accept
+        ip6 daddr { fc00::/7, fe80::/10 } accept
+        meta l4proto { icmp, icmpv6 } accept
+        ip daddr . ip protocol . th dport @handshake_v4 accept
+        ip6 daddr . meta l4proto . th dport @handshake_v6 accept
+        udp sport 68 udp dport 67 accept
+        udp sport 546 udp dport 547 accept
+    }
+
+    chain forward {
+        type filter hook forward priority -10; policy drop;
+        oifname "tun*" accept
+        oifname "kvn*" accept
+        ct state established,related accept
+    }
+}

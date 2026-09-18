@@ -1,0 +1,13 @@
+// kvn-tui: allow unattended sing-box DNS setup for explicitly enrolled users.
+polkit.addRule(function(action, subject) {
+    if (
+        (
+            action.id == "org.freedesktop.resolve1.set-dns-servers" ||
+            action.id == "org.freedesktop.resolve1.set-domains" ||
+            action.id == "org.freedesktop.resolve1.set-default-route"
+        ) &&
+        subject.isInGroup("kvn-tui")
+    ) {
+        return polkit.Result.YES;
+    }
+});

@@ -4,6 +4,7 @@ set -euo pipefail
 RULE_FILE="/etc/polkit-1/rules.d/49-kvn-tui.rules"
 KILLSWITCH_SUDOERS="/etc/sudoers.d/kvn-tui-killswitch"
 GROUP_NAME="kvn-tui"
+STAMP_FILE="/var/lib/kvn/integrations/polkit.sha256"
 
 cleanup_group_if_unused() {
     if [[ -e "$KILLSWITCH_SUDOERS" ]]; then
@@ -32,6 +33,8 @@ if [[ -z "$USER_NAME" || "$USER_NAME" == "root" ]] || ! id "$USER_NAME" >/dev/nu
     exit 1
 fi
 
+rm -f -- "$STAMP_FILE"
+rmdir /var/lib/kvn/integrations 2>/dev/null || true
 if [[ -e "$RULE_FILE" ]]; then
     rm -- "$RULE_FILE"
     echo "Removed $RULE_FILE"

@@ -25,6 +25,7 @@ uuid = { version = "1.9", features = ["v4", "serde"] }
 # HTTP client for geo database downloads
 ureq = { version = "3", features = ["rustls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+ring = "0.17"
 webpki-roots = "1"
 
 # Logging

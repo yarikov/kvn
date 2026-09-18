@@ -8,6 +8,7 @@ UNIT_FILE="/etc/systemd/system/$UNIT"
 SUDOERS="/etc/sudoers.d/kvn-tui-killswitch"
 POLKIT_RULE="/etc/polkit-1/rules.d/49-kvn-tui.rules"
 GROUP_NAME="kvn-tui"
+STAMP_FILE="/var/lib/kvn/integrations/killswitch-sudoers.sha256"
 
 cleanup_group_if_unused() {
     if [[ -e "$POLKIT_RULE" ]]; then
@@ -49,9 +50,10 @@ fi
 # Remove a table left behind after a prior interrupted service stop.
 nft delete table inet kvn_tui_killswitch >/dev/null 2>&1 || true
 
-rm -f -- "$SUDOERS" "$HELPER" "$UNIT_FILE" "$RULESET"
+rm -f -- "$SUDOERS" "$HELPER" "$UNIT_FILE" "$RULESET" "$STAMP_FILE"
 rmdir /usr/lib/kvn-tui 2>/dev/null || true
 rmdir /etc/kvn-tui 2>/dev/null || true
+rmdir /var/lib/kvn/integrations 2>/dev/null || true
 systemctl daemon-reload
 systemctl reset-failed "$UNIT" >/dev/null 2>&1 || true
 

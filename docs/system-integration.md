@@ -97,6 +97,9 @@ The command:
 - creates the dedicated system group `kvn-tui` and adds the invoking user if
   necessary;
 - writes `/etc/polkit-1/rules.d/49-kvn-tui.rules` with mode `0644`;
+- records the rule's SHA-256 in `/var/lib/kvn/integrations/polkit.sha256`
+  (mode `0644`), because the polkit rules directory is not readable by
+  regular users;
 - leaves polkit to reload the changed rule automatically.
 
 The rule allows every member of `kvn-tui` to perform these actions without an
@@ -135,6 +138,7 @@ The command requires `nftables`, adds the invoking user to the dedicated
 | `/usr/lib/kvn-tui/killswitch-helper.sh` | `root:root`, `0755` | Validating privileged helper |
 | `/etc/systemd/system/kvn-tui-killswitch.service` | `root`, `0644` | System kill-switch unit |
 | `/etc/sudoers.d/kvn-tui-killswitch` | `root:root`, `0440` | Restricted NOPASSWD rule |
+| `/var/lib/kvn/integrations/killswitch-sudoers.sha256` | `root`, `0644` | SHA-256 of the installed sudoers rule |
 
 The sudoers rule permits members of `kvn-tui` to invoke only the fixed helper
 path without a password. The root-owned helper rejects unknown operations and
@@ -171,6 +175,17 @@ The command preserves the `kvn-tui` group while the polkit integration still
 uses it. If neither integration remains, cleanup removes the group and its
 membership records automatically. The kill switch is turned off in kvn
 settings: immediately if the daemon is running, otherwise on its next start.
+
+## Outdated integrations
+
+`kvn doctor` compares the installed kill-switch helper, ruleset, and unit with
+the versions embedded in the current kvn binary, and compares the recorded
+SHA-256 stamps with the embedded sudoers and polkit rules. Any difference is
+reported as an error; rerun `sudo kvn setup --killswitch` or
+`sudo kvn setup --polkit` to update the files. Installations made before
+stamps were introduced have no stamps and are reported as outdated once.
+A polkit rule that grants the DNS actions without a stamp is treated the same
+way. Cleanup removes the corresponding stamp.
 
 ## Omarchy setup
 

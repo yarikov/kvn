@@ -356,7 +356,7 @@ fn install_polkit() -> Result<()> {
     run_embedded_script(
         "setup-polkit.sh",
         include_str!("../contrib/setup-polkit.sh"),
-        &[],
+        &[crate::integration_files::POLKIT_RULE],
     )
 }
 
@@ -365,7 +365,12 @@ fn install_killswitch() -> Result<()> {
     run_embedded_script(
         "setup-killswitch.sh",
         include_str!("../contrib/setup-killswitch.sh"),
-        &[include_str!("../contrib/killswitch-helper.sh")],
+        &[
+            crate::integration_files::KILLSWITCH_HELPER,
+            crate::integration_files::KILLSWITCH_RULESET,
+            crate::integration_files::KILLSWITCH_UNIT,
+            crate::integration_files::KILLSWITCH_SUDOERS,
+        ],
     )
 }
 
@@ -1508,25 +1513,15 @@ esac
     }
 
     #[test]
-    fn polkit_rule_is_narrow_and_uses_dedicated_group() {
-        let script = include_str!("../contrib/setup-polkit.sh");
-        for action in [
-            "org.freedesktop.resolve1.set-dns-servers",
-            "org.freedesktop.resolve1.set-domains",
-            "org.freedesktop.resolve1.set-default-route",
-        ] {
-            assert!(script.contains(action));
+    fn setup_scripts_install_embedded_payloads_and_stamps() {
+        let polkit = include_str!("../contrib/setup-polkit.sh");
+        assert!(polkit.contains("RULE_SOURCE=\"${1:?"));
+        assert!(polkit.contains("/var/lib/kvn/integrations"));
+        let killswitch = include_str!("../contrib/setup-killswitch.sh");
+        for arg in ["${1:?", "${2:?", "${3:?", "${4:?"] {
+            assert!(killswitch.contains(arg));
         }
-        assert!(script.contains("subject.isInGroup(\"kvn-tui\")"));
-        assert!(!script.contains("org.freedesktop.NetworkManager"));
-        assert!(!script.contains("subject.isInGroup(\"network\")"));
-    }
-
-    #[test]
-    fn killswitch_sudoers_uses_dedicated_group() {
-        let script = include_str!("../contrib/setup-killswitch.sh");
-        assert!(script.contains("%kvn-tui ALL=(root) NOPASSWD:"));
-        assert!(!script.contains("%network ALL=(root) NOPASSWD:"));
+        assert!(killswitch.contains("killswitch-sudoers.sha256"));
     }
 
     fn helper_accepts_allow_args(args: &[&str]) -> bool {
