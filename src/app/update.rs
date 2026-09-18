@@ -291,6 +291,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::KillSwitchApplied { enabled, error } => {
             handle_kill_switch_applied(model, enabled, error)
         }
+        Msg::AutoConnectPolkitChecked { error } => handle_auto_connect_polkit_checked(model, error),
         Msg::TrafficStatsUpdated {
             attempt_id,
             request_id,
@@ -410,6 +411,37 @@ fn handle_kill_switch_applied(
             effects.push(Effect::BroadcastState);
         }
     }
+    effects
+}
+
+fn handle_auto_connect_polkit_checked(
+    model: &mut Model,
+    error: Option<crate::app::msg::IpcError>,
+) -> Vec<Effect> {
+    if !model.auto_connect_pending {
+        return Vec::new();
+    }
+    model.auto_connect_pending = false;
+    let mut effects = Vec::new();
+    match error {
+        None => {
+            model.config.settings.auto_connect = true;
+            push_status(
+                &mut effects,
+                model,
+                AppStatus::Info("Auto-connect enabled".into()),
+            );
+            effects.push(Effect::SaveConfig);
+        }
+        Some(err) => {
+            push_status(
+                &mut effects,
+                model,
+                AppStatus::Error(format!("Auto-connect not enabled: {err}")),
+            );
+        }
+    }
+    effects.push(Effect::BroadcastState);
     effects
 }
 
@@ -2196,6 +2228,12 @@ mod tests {
             &mut model,
             crate::app::msg::IpcCommand::SetAutoConnect { enabled: true },
         );
+        assert!(!model.config.settings.auto_connect);
+        assert_eq!(
+            effects,
+            vec![Effect::CheckAutoConnectPolkit, Effect::BroadcastState]
+        );
+        let effects = update(&mut model, Msg::AutoConnectPolkitChecked { error: None });
         assert!(model.config.settings.auto_connect);
         assert_eq!(
             effects,
@@ -4019,16 +4057,67 @@ mod tests {
     }
 
     #[test]
+    fn auto_connect_polkit_failure_keeps_it_disabled_and_logs_error() {
+        let mut model = model_with_profiles(vec![]);
+        handle_sources(&mut model, key('a'));
+
+        let effects = update(
+            &mut model,
+            Msg::AutoConnectPolkitChecked {
+                error: Some(crate::app::msg::IpcError::new(
+                    "log out and back in to activate the `kvn-tui` group",
+                )),
+            },
+        );
+
+        let message =
+            "Auto-connect not enabled: log out and back in to activate the `kvn-tui` group";
+        assert!(!model.config.settings.auto_connect);
+        assert!(!model.auto_connect_pending);
+        assert_eq!(model.status, AppStatus::Error(message.into()));
+        assert_eq!(
+            effects,
+            vec![
+                Effect::AppendAppLog {
+                    level: "ERROR".into(),
+                    message: message.into(),
+                },
+                Effect::BroadcastState,
+            ]
+        );
+    }
+
+    #[test]
+    fn stale_auto_connect_polkit_result_is_ignored() {
+        let mut model = model_with_profiles(vec![]);
+        assert!(update(&mut model, Msg::AutoConnectPolkitChecked { error: None }).is_empty());
+
+        handle_sources(&mut model, key('a'));
+        let mut effects = handle_ipc_command(
+            &mut model,
+            crate::app::msg::IpcCommand::SetAutoConnect { enabled: false },
+        );
+        effects.retain(|effect| *effect != Effect::BroadcastState);
+        assert!(effects.is_empty());
+        assert!(!model.auto_connect_pending);
+        assert!(update(&mut model, Msg::AutoConnectPolkitChecked { error: None }).is_empty());
+        assert!(!model.config.settings.auto_connect);
+    }
+
+    #[test]
     fn toggle_auto_connect() {
         let mut model = model_with_profiles(vec![]);
         assert!(!model.config.settings.auto_connect);
         let effects = handle_sources(&mut model, key('a'));
+        assert!(!model.config.settings.auto_connect);
+        assert!(model.auto_connect_pending);
+        assert_eq!(effects, vec![Effect::CheckAutoConnectPolkit]);
+
+        assert!(handle_sources(&mut model, key('a')).is_empty());
+
+        update(&mut model, Msg::AutoConnectPolkitChecked { error: None });
         assert!(model.config.settings.auto_connect);
         assert!(model.status.text().contains("enabled"));
-        assert_eq!(
-            effects,
-            vec![app_log_info("Auto-connect enabled"), Effect::SaveConfig]
-        );
 
         let effects = handle_sources(&mut model, key('a'));
         assert!(!model.config.settings.auto_connect);

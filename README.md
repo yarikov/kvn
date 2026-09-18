@@ -127,7 +127,9 @@ If setup adds you to the `kvn-tui` group, log out and back in to activate the
 `kvn-tui` group. Because authorization is group-wide, every process running as
 an enrolled user can request those three DNS operations. Skip this setup if you
 prefer interactive polkit authorization and do not need unattended auto-connect
-or resume reconnects.
+or resume reconnects. Enabling auto-connect requires this setup: kvn refuses to
+turn it on until the polkit rule is installed and the `kvn-tui` group is active
+in the current session.
 
 ### Kill switch setup (optional)
 

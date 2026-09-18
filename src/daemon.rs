@@ -201,6 +201,7 @@ fn run_loop(
                     | Effect::UpdateSubscription { .. }
                     | Effect::BroadcastState
                     | Effect::ApplyKillSwitch { .. }
+                    | Effect::CheckAutoConnectPolkit
             ) {
                 should_broadcast = true;
             }
@@ -812,6 +813,15 @@ fn execute_daemon_effect(
                     .err()
                     .map(crate::app::msg::IpcError::from);
                 let _ = tx.send(Msg::KillSwitchApplied { enabled, error });
+            });
+        }
+        Effect::CheckAutoConnectPolkit => {
+            let tx = tx.clone();
+            thread::spawn(move || {
+                let error = crate::doctor::polkit_readiness()
+                    .err()
+                    .map(crate::app::msg::IpcError::from);
+                let _ = tx.send(Msg::AutoConnectPolkitChecked { error });
             });
         }
         Effect::FetchTrafficStats {

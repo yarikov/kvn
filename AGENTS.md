@@ -277,7 +277,7 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 - `settings.auto_connect` (persisted in `profiles.json`) controls whether the app reconnects to the last used profile on startup.
 - `settings.last_connected_profile` stores the UUID of the most recently connected profile. It is updated in `update.rs` on `Msg::Connected` and saved via `Effect::SaveConfig`.
 - `Model::new()` calls `resolve_startup_state()` to check `auto_connect` + `last_connected_profile`. If both are set and the profile exists, the model starts in `ConnectionState::Connecting` with that profile pre-selected, and the status bar shows `Auto-connecting to {name}…`.
-- The user can toggle `auto_connect` at runtime with the `a` keybinding, which triggers `Effect::SaveConfig` immediately.
+- The user can toggle `auto_connect` at runtime with the `a` keybinding, the Connection settings overlay, or IPC `SetAutoConnect`. Disabling saves immediately. Enabling first emits `Effect::CheckAutoConnectPolkit` (with `Model::auto_connect_pending` set): the daemon runs `doctor::polkit_readiness()` and replies with `Msg::AutoConnectPolkitChecked`. The flag is flipped and saved only when passwordless polkit is set up and the `kvn-tui` group is active in the daemon's session; otherwise auto-connect stays off and the reason is shown as an error toast and written to the app log.
 
 ---
 

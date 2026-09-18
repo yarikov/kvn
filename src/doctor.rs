@@ -455,61 +455,100 @@ fn check_killswitch_session(group_active: Option<bool>) -> Option<Check> {
     })
 }
 
-fn check_polkit() -> Check {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PolkitStatus {
+    Ready,
+    IdentityUnknown,
+    PkcheckUnavailable,
+    Denied { action: &'static str },
+    CheckFailed { action: &'static str, error: String },
+    GroupPendingActivation,
+}
+
+fn polkit_status() -> PolkitStatus {
     let Some(identity) = polkit_process_identity() else {
-        return Check::warning(
-            "polkit authorization could not be checked",
-            "Run `kvn doctor` again or inspect polkit with `sudo kvn setup --polkit`.",
-        );
+        return PolkitStatus::IdentityUnknown;
     };
     for action in POLKIT_DNS_ACTIONS {
         let output = Command::new("pkcheck")
             .args(["--action-id", action, "--process", &identity])
             .output();
         let Ok(output) = output else {
-            return Check::warning(
-                "`pkcheck` is unavailable, so polkit authorization could not be checked",
-                "Install the `polkit` package and run `kvn doctor` again.",
-            );
+            return PolkitStatus::PkcheckUnavailable;
         };
 
         match output.status.code() {
             Some(0) => {}
             // 1 means denied. 2 means authorization would require interaction;
             // doctor deliberately never opens an authentication prompt.
-            Some(1 | 2) => {
-                return Check::warning(
-                    format!("passwordless polkit authorization is missing for {action}"),
-                    "Run `sudo kvn setup --polkit`, then log out and back in to activate the `kvn-tui` group.",
-                );
-            }
+            Some(1 | 2) => return PolkitStatus::Denied { action },
             _ => {
-                let error = String::from_utf8_lossy(&output.stderr);
-                return Check::warning(
-                    format!(
-                        "polkit authorization for {action} could not be checked: {}",
-                        error.trim()
-                    ),
-                    "Verify that polkit is running, then run `kvn doctor` again.",
-                );
+                return PolkitStatus::CheckFailed {
+                    action,
+                    error: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                };
             }
         }
     }
-    if let Some(check) =
-        check_polkit_session(crate::services::killswitch::integration_group_pending_activation())
-    {
-        return check;
+    if crate::services::killswitch::integration_group_pending_activation() == Some(true) {
+        return PolkitStatus::GroupPendingActivation;
     }
-    Check::pass("all required polkit DNS authorizations are active")
+    PolkitStatus::Ready
 }
 
-fn check_polkit_session(group_pending_activation: Option<bool>) -> Option<Check> {
-    (group_pending_activation == Some(true)).then(|| {
-        Check::warning(
-            "polkit rule is installed but the current session does not include the `kvn-tui` group",
-            "Log out and back in to activate the `kvn-tui` group.",
-        )
-    })
+pub(crate) fn polkit_readiness() -> Result<()> {
+    polkit_readiness_from(polkit_status())
+}
+
+fn polkit_readiness_from(status: PolkitStatus) -> Result<()> {
+    match status {
+        PolkitStatus::Ready => Ok(()),
+        PolkitStatus::IdentityUnknown => {
+            anyhow::bail!("polkit authorization could not be verified")
+        }
+        PolkitStatus::PkcheckUnavailable => {
+            anyhow::bail!("polkit authorization could not be verified: `pkcheck` is unavailable")
+        }
+        PolkitStatus::Denied { .. } => anyhow::bail!(
+            "passwordless polkit is not set up; run `sudo kvn setup --polkit`, then log out and back in"
+        ),
+        PolkitStatus::CheckFailed { error, .. } => {
+            anyhow::bail!("polkit authorization could not be verified: {error}")
+        }
+        PolkitStatus::GroupPendingActivation => {
+            anyhow::bail!("log out and back in to activate the `kvn-tui` group")
+        }
+    }
+}
+
+fn check_polkit() -> Check {
+    match polkit_status() {
+        PolkitStatus::Ready => Check::pass("all required polkit DNS authorizations are active"),
+        PolkitStatus::IdentityUnknown => Check::warning(
+            "polkit authorization could not be checked",
+            "Run `kvn doctor` again or inspect polkit with `sudo kvn setup --polkit`.",
+        ),
+        PolkitStatus::PkcheckUnavailable => Check::warning(
+            "`pkcheck` is unavailable, so polkit authorization could not be checked",
+            "Install the `polkit` package and run `kvn doctor` again.",
+        ),
+        PolkitStatus::Denied { action } => Check::warning(
+            format!("passwordless polkit authorization is missing for {action}"),
+            "Run `sudo kvn setup --polkit`, then log out and back in to activate the `kvn-tui` group.",
+        ),
+        PolkitStatus::CheckFailed { action, error } => Check::warning(
+            format!("polkit authorization for {action} could not be checked: {error}"),
+            "Verify that polkit is running, then run `kvn doctor` again.",
+        ),
+        PolkitStatus::GroupPendingActivation => polkit_group_pending_check(),
+    }
+}
+
+fn polkit_group_pending_check() -> Check {
+    Check::warning(
+        "polkit rule is installed but the current session does not include the `kvn-tui` group",
+        "Log out and back in to activate the `kvn-tui` group.",
+    )
 }
 
 /// Build the non-racy `PID,START_TIME,UID` identity recommended by pkcheck.
@@ -872,16 +911,46 @@ mod tests {
     }
 
     #[test]
-    fn polkit_session_check_warns_for_pending_group_activation() {
-        assert!(check_polkit_session(Some(false)).is_none());
-        assert!(check_polkit_session(None).is_none());
-
-        let check = check_polkit_session(Some(true)).unwrap();
+    fn polkit_group_pending_check_asks_to_relogin() {
+        let check = polkit_group_pending_check();
         assert_eq!(check.level, Level::Warning);
         assert!(check.message.contains("current session"));
         assert_eq!(
             check.remedy.as_deref(),
             Some("Log out and back in to activate the `kvn-tui` group.")
+        );
+    }
+
+    #[test]
+    fn polkit_readiness_reports_setup_problems() {
+        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _path = EnvGuard::set("PATH", dir.path());
+
+        let missing = polkit_readiness().unwrap_err().to_string();
+        assert!(missing.contains("`pkcheck` is unavailable"));
+        executable(dir.path(), "pkcheck", "exit 1");
+        let denied = polkit_readiness().unwrap_err().to_string();
+        assert!(denied.contains("sudo kvn setup --polkit"));
+        executable(dir.path(), "pkcheck", "echo broken >&2; exit 127");
+        let failed = polkit_readiness().unwrap_err().to_string();
+        assert!(failed.contains("could not be verified: broken"));
+    }
+
+    #[test]
+    fn polkit_readiness_maps_every_status() {
+        assert!(polkit_readiness_from(PolkitStatus::Ready).is_ok());
+        assert!(
+            polkit_readiness_from(PolkitStatus::IdentityUnknown)
+                .unwrap_err()
+                .to_string()
+                .contains("could not be verified")
+        );
+        assert!(
+            polkit_readiness_from(PolkitStatus::GroupPendingActivation)
+                .unwrap_err()
+                .to_string()
+                .contains("log out and back in")
         );
     }
 
