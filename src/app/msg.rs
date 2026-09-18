@@ -511,6 +511,8 @@ pub struct StateSnapshot {
     pub routing_settings_draft: Option<RoutingSettingsDraft>,
     #[serde(default)]
     pub connection_settings_draft: Option<ConnectionSettingsDraft>,
+    #[serde(default)]
+    pub interface_settings_draft: Option<crate::config::profile::IconSet>,
     pub geo_updating: bool,
     pub geo_last_updated: Option<String>,
     /// Last successful check of the active regional rule sets.

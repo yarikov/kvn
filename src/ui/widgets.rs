@@ -84,8 +84,9 @@ fn rule_set_badge(
             model.theme.ruleset_manual_badge(),
         ),
     };
+    let refresh = crate::ui::icons::icons(model.icon_set()).refresh;
     let schedule = model.config.settings.geo_routing.auto_update.label();
-    Some((format!(" {schedule} {text} "), style))
+    Some((format!(" {refresh} {schedule} {text} "), style))
 }
 
 /// Widget that renders the bottom status bar.

@@ -98,6 +98,7 @@ fn handle_settings_menu(model: &mut Model, page: SettingsMenuPage, key: KeyEvent
             .map(|draft| RoutingSettingsItem::available(draft.region).len())
             .unwrap_or(0),
         SettingsMenuPage::Connection => 2,
+        SettingsMenuPage::Interface => 2,
     };
     match (page, key.code) {
         (_, KeyCode::Char('j') | KeyCode::Down) => {
@@ -110,26 +111,25 @@ fn handle_settings_menu(model: &mut Model, page: SettingsMenuPage, key: KeyEvent
             crate::ui::nav::select_last(&mut model.settings_menu_selected, len);
         }
         (SettingsMenuPage::Root, KeyCode::Char('r')) => {
-            model.settings_menu_selected = 2;
+            model.settings_menu_selected = 3;
             open_routing_settings(model);
         }
         (SettingsMenuPage::Root, KeyCode::Char('d')) => {
             model.settings_menu_selected = 1;
             open_dns_settings(model, Some(SettingsMenuPage::Root));
         }
-        (SettingsMenuPage::Root, KeyCode::Char('t')) => {
-            model.settings_menu_selected = 3;
-            open_theme_settings(model, Some(SettingsMenuPage::Root));
-        }
         (SettingsMenuPage::Root, KeyCode::Char('c')) => {
             model.settings_menu_selected = 0;
             open_connection_settings(model);
         }
+        (SettingsMenuPage::Root, KeyCode::Char('i')) => {
+            open_interface_settings(model);
+        }
         (SettingsMenuPage::Root, KeyCode::Enter) => match model.settings_menu_selected {
             0 => open_connection_settings(model),
             1 => open_dns_settings(model, Some(SettingsMenuPage::Root)),
-            2 => open_routing_settings(model),
-            3 => open_theme_settings(model, Some(SettingsMenuPage::Root)),
+            2 => open_interface_settings(model),
+            3 => open_routing_settings(model),
             _ => {}
         },
         (SettingsMenuPage::Routing, KeyCode::Char('l') | KeyCode::Right) => {
@@ -143,7 +143,7 @@ fn handle_settings_menu(model: &mut Model, page: SettingsMenuPage, key: KeyEvent
                 return vec![];
             };
             model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
-            model.settings_menu_selected = 2;
+            model.settings_menu_selected = 3;
             return commit_routing_settings(model, draft);
         }
         (SettingsMenuPage::Connection, KeyCode::Char('l') | KeyCode::Right) => {
@@ -162,11 +162,25 @@ fn handle_settings_menu(model: &mut Model, page: SettingsMenuPage, key: KeyEvent
             effects.extend(set_kill_switch(model, draft.kill_switch));
             return effects;
         }
-        (SettingsMenuPage::Routing | SettingsMenuPage::Connection, KeyCode::Backspace) => {
-            model.settings_menu_selected = if page == SettingsMenuPage::Routing {
-                2
-            } else {
-                0
+        (SettingsMenuPage::Interface, KeyCode::Char('l') | KeyCode::Right) => {
+            cycle_interface_draft(model, true);
+        }
+        (SettingsMenuPage::Interface, KeyCode::Char('h') | KeyCode::Left) => {
+            cycle_interface_draft(model, false);
+        }
+        (SettingsMenuPage::Interface, KeyCode::Enter) => {
+            model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+            model.settings_menu_selected = 2;
+            return commit_interface_settings(model);
+        }
+        (
+            SettingsMenuPage::Routing | SettingsMenuPage::Connection | SettingsMenuPage::Interface,
+            KeyCode::Backspace,
+        ) => {
+            model.settings_menu_selected = match page {
+                SettingsMenuPage::Interface => 2,
+                SettingsMenuPage::Routing => 3,
+                _ => 0,
             };
             clear_settings_drafts(model);
             model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
@@ -193,6 +207,60 @@ fn open_routing_settings(model: &mut Model) {
     model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
 }
 
+fn open_interface_settings(model: &mut Model) {
+    model.theme_draft = None;
+    model.interface_settings_draft = None;
+    model.settings_menu_selected = 0;
+    model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Interface);
+}
+
+fn cycle_interface_draft(model: &mut Model, forward: bool) {
+    match model.settings_menu_selected {
+        0 => {
+            let slugs = theme_picker_slugs();
+            if slugs.is_empty() {
+                return;
+            }
+            let shown = model
+                .theme_draft
+                .as_deref()
+                .unwrap_or(&model.config.settings.theme);
+            let next = match slugs.iter().position(|slug| slug == shown) {
+                Some(current) if forward => (current + 1) % slugs.len(),
+                Some(current) => (current + slugs.len() - 1) % slugs.len(),
+                None => 0,
+            };
+            model.theme_draft = Some(slugs[next].clone());
+        }
+        1 => model.interface_settings_draft = Some(model.icon_set().next()),
+        _ => {}
+    }
+}
+
+fn commit_interface_settings(model: &mut Model) -> Vec<Effect> {
+    let mut effects = vec![];
+    if let Some(icons) = model.interface_settings_draft.take()
+        && icons != model.config.settings.icons
+    {
+        model.config.settings.icons = icons;
+        effects.push(Effect::SaveConfig);
+    }
+    if let Some(slug) = model.theme_draft.take()
+        && slug != model.config.settings.theme
+    {
+        model.config.settings.theme = slug.clone();
+        if effects.is_empty() {
+            effects.push(Effect::SaveConfig);
+        }
+        push_status(
+            &mut effects,
+            model,
+            AppStatus::Info(format!("Theme: {slug}")),
+        );
+    }
+    effects
+}
+
 fn open_connection_settings(model: &mut Model) {
     model.connection_settings_draft = Some(ConnectionSettingsDraft {
         auto_connect: model.config.settings.auto_connect,
@@ -207,6 +275,8 @@ fn open_connection_settings(model: &mut Model) {
 fn clear_settings_drafts(model: &mut Model) {
     model.routing_settings_draft = None;
     model.connection_settings_draft = None;
+    model.interface_settings_draft = None;
+    model.theme_draft = None;
 }
 
 fn cycle_routing_draft(model: &mut Model, forward: bool) {
@@ -440,12 +510,22 @@ pub fn theme_picker_slugs() -> Vec<String> {
 fn theme_picker_label(slug: &str) -> String {
     if slug == crate::tui_client::theme_watch::OMARCHY_SENTINEL {
         match crate::omarchy::detect_omarchy_theme() {
-            Some(name) => format!("Auto ({name})"),
+            Some(name) => format!("Auto ({})", shorten_theme_name(&name)),
             None => "Auto (Omarchy)".to_string(),
         }
     } else {
         slug.to_string()
     }
+}
+
+const MAX_THEME_NAME_CHARS: usize = 12;
+
+pub fn shorten_theme_name(name: &str) -> String {
+    if name.chars().count() <= MAX_THEME_NAME_CHARS {
+        return name.to_string();
+    }
+    let kept: String = name.chars().take(MAX_THEME_NAME_CHARS - 1).collect();
+    format!("{kept}…")
 }
 
 pub fn theme_picker_labels() -> Vec<String> {
@@ -496,7 +576,11 @@ pub(super) fn handle_sources(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
             push_status(
                 &mut effects,
                 model,
-                AppStatus::Info(format!("Rule sets {}", schedule.label())),
+                AppStatus::Info(format!(
+                    "Rule sets {} {}",
+                    crate::ui::icons::icons(model.config.settings.icons).refresh,
+                    schedule.label()
+                )),
             );
             return effects;
         }
@@ -518,8 +602,10 @@ pub(super) fn handle_sources(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
                     &mut effects,
                     model,
                     crate::app::model::AppStatus::Info(format!(
-                        "Subscription '{}' {}",
-                        name, label
+                        "Subscription '{}' {} {}",
+                        name,
+                        crate::ui::icons::icons(model.config.settings.icons).refresh,
+                        label
                     )),
                 );
                 return effects;
@@ -1566,7 +1652,7 @@ mod tests {
     use super::*;
     use crate::app::msg::IpcCommand;
     use crate::config::profile::{
-        DnsPreset, DnsServer, DnsStrategy, Profile, ServiceRoute, Subscription,
+        DnsPreset, DnsServer, DnsStrategy, IconSet, Profile, ServiceRoute, Subscription,
         SubscriptionAutoUpdate,
     };
     use crate::test_helpers::{key, model_with_profiles};
@@ -1597,7 +1683,7 @@ mod tests {
 
         handle_key(&mut model, KeyEvent::from(KeyCode::Backspace));
         assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
-        assert_eq!(model.settings_menu_selected, 2);
+        assert_eq!(model.settings_menu_selected, 3);
     }
 
     #[test]
@@ -1634,9 +1720,99 @@ mod tests {
     }
 
     #[test]
+    fn settings_menu_interface_previews_and_saves_theme_and_icons() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let slugs = theme_picker_slugs();
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.theme = slugs[0].clone();
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+
+        assert!(handle_key(&mut model, key('i')).is_empty());
+        assert_eq!(
+            model.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Interface)
+        );
+        assert_eq!(model.theme_draft, None);
+        assert_eq!(model.interface_settings_draft, None);
+
+        assert!(handle_key(&mut model, key('h')).is_empty());
+        assert_eq!(model.theme_draft.as_ref(), slugs.last());
+        assert!(handle_key(&mut model, key('l')).is_empty());
+        assert!(handle_key(&mut model, key('l')).is_empty());
+        assert_eq!(model.theme_draft.as_ref(), slugs.get(1));
+
+        assert!(handle_key(&mut model, key('j')).is_empty());
+        assert!(handle_key(&mut model, key('l')).is_empty());
+        assert_eq!(model.icon_set(), IconSet::Unicode);
+        assert_eq!(model.config.settings.icons, IconSet::Nerd);
+        assert_eq!(model.config.settings.theme, slugs[0]);
+
+        let effects = handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
+        assert_eq!(
+            effects
+                .iter()
+                .filter(|effect| matches!(effect, Effect::SaveConfig))
+                .count(),
+            1
+        );
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            Effect::AppendAppLog { message, .. } if *message == format!("Theme: {}", slugs[1])
+        )));
+        assert_eq!(model.config.settings.theme, slugs[1]);
+        assert_eq!(model.config.settings.icons, IconSet::Unicode);
+        assert_eq!(model.theme_draft, None);
+        assert_eq!(model.interface_settings_draft, None);
+        assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+        assert_eq!(model.settings_menu_selected, 2);
+
+        handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
+        assert_eq!(
+            model.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Interface)
+        );
+        assert!(handle_key(&mut model, KeyEvent::from(KeyCode::Enter)).is_empty());
+    }
+
+    #[test]
+    fn settings_menu_interface_saves_icons_without_theme_status() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+
+        handle_key(&mut model, key('i'));
+        handle_key(&mut model, key('j'));
+        handle_key(&mut model, key('h'));
+        let effects = handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
+
+        assert_eq!(effects, vec![Effect::SaveConfig]);
+        assert_eq!(model.config.settings.icons, IconSet::Unicode);
+    }
+
+    #[test]
+    fn settings_menu_interface_discards_drafts_on_close() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let mut model = model_with_profiles(vec![]);
+        let saved_theme = model.config.settings.theme.clone();
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+
+        handle_key(&mut model, key('i'));
+        handle_key(&mut model, key('l'));
+        handle_key(&mut model, key('j'));
+        handle_key(&mut model, key('l'));
+        assert!(handle_key(&mut model, KeyEvent::from(KeyCode::Esc)).is_empty());
+
+        assert_eq!(model.overlay, Overlay::None);
+        assert_eq!(model.theme_draft, None);
+        assert_eq!(model.interface_settings_draft, None);
+        assert_eq!(model.config.settings.theme, saved_theme);
+        assert_eq!(model.icon_set(), IconSet::Nerd);
+    }
+
+    #[test]
     fn settings_menu_root_navigates_and_opens_selected_page() {
         let mut model = model_with_profiles(vec![]);
         handle_key(&mut model, key(' '));
+        handle_key(&mut model, key('j'));
         handle_key(&mut model, key('j'));
         handle_key(&mut model, key('j'));
         handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
@@ -1716,13 +1892,28 @@ mod tests {
     }
 
     #[test]
-    fn settings_menu_root_opens_theme_picker() {
+    fn long_theme_names_are_shortened_to_twelve_chars() {
+        assert_eq!(shorten_theme_name("catppuccin-latte"), "catppuccin-…");
+        assert_eq!(shorten_theme_name("last-horizon"), "last-horizon");
+        assert_eq!(shorten_theme_name("nord"), "nord");
+        assert_eq!(
+            shorten_theme_name("theme-name-that-keeps-going-past-the-overlay"),
+            "theme-name-…"
+        );
+    }
+
+    #[test]
+    fn theme_list_opens_only_from_main_screen_shortcut() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         model.config.settings.theme = "gruvbox".into();
 
-        handle_key(&mut model, key('t'));
+        assert!(handle_key(&mut model, key('t')).is_empty());
+        assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+
+        model.overlay = Overlay::None;
+        handle_key(&mut model, key('C'));
 
         assert_eq!(model.overlay, Overlay::ThemeSettings);
         assert_eq!(
@@ -1732,7 +1923,7 @@ mod tests {
             Some("gruvbox")
         );
         assert_eq!(model.theme_draft, None);
-        assert_eq!(model.settings_menu_return, Some(SettingsMenuPage::Root));
+        assert_eq!(model.settings_menu_return, None);
     }
 
     #[test]
@@ -1861,7 +2052,7 @@ mod tests {
             Overlay::SettingsMenu(SettingsMenuPage::Root)
         );
         assert_eq!(routing.routing_settings_draft, None);
-        assert_eq!(routing.settings_menu_selected, 2);
+        assert_eq!(routing.settings_menu_selected, 3);
 
         let mut dns = model_with_profiles(vec![]);
         dns.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
@@ -1878,15 +2069,21 @@ mod tests {
         assert_eq!(dns.settings_menu_selected, 1);
 
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let mut theme = model_with_profiles(vec![]);
-        theme.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
-        handle_key(&mut theme, key('t'));
-        theme.theme_draft = Some("gruvbox".into());
-        handle_key(&mut theme, KeyEvent::from(KeyCode::Backspace));
-        assert_eq!(theme.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
-        assert_eq!(theme.theme_draft, None);
-        assert_eq!(theme.settings_menu_return, None);
-        assert_eq!(theme.settings_menu_selected, 3);
+        let mut interface = model_with_profiles(vec![]);
+        interface.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        handle_key(&mut interface, key('i'));
+        handle_key(&mut interface, key('l'));
+        handle_key(&mut interface, key('j'));
+        handle_key(&mut interface, key('l'));
+        handle_key(&mut interface, KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(
+            interface.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Root)
+        );
+        assert_eq!(interface.theme_draft, None);
+        assert_eq!(interface.interface_settings_draft, None);
+        assert_eq!(interface.settings_menu_return, None);
+        assert_eq!(interface.settings_menu_selected, 2);
     }
 
     #[test]
@@ -1954,8 +2151,8 @@ mod tests {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let mut theme = model_with_profiles(vec![]);
         theme.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
-        handle_key(&mut theme, key('t'));
-        handle_key(&mut theme, key('j'));
+        handle_key(&mut theme, key('i'));
+        handle_key(&mut theme, key('l'));
         let selected_theme = theme.theme_draft.clone().unwrap();
         handle_key(&mut theme, KeyEvent::from(KeyCode::Enter));
         assert_eq!(theme.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));

@@ -34,6 +34,7 @@ pub enum SettingsMenuPage {
     Root,
     Routing,
     Connection,
+    Interface,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -267,6 +268,7 @@ pub struct Model {
     pub settings_menu_selected: usize,
     pub routing_settings_draft: Option<RoutingSettingsDraft>,
     pub connection_settings_draft: Option<ConnectionSettingsDraft>,
+    pub interface_settings_draft: Option<crate::config::profile::IconSet>,
     pub main_pane_focus: MainPaneFocus,
     pub connection: ConnectionState,
     pub config: Config,
@@ -535,6 +537,7 @@ impl Model {
             settings_menu_selected: 0,
             routing_settings_draft: None,
             connection_settings_draft: None,
+            interface_settings_draft: None,
             main_pane_focus: MainPaneFocus::Sources,
             connection,
             config,
@@ -654,6 +657,7 @@ impl Model {
             settings_menu_selected: 0,
             routing_settings_draft: None,
             connection_settings_draft: None,
+            interface_settings_draft: None,
             main_pane_focus: MainPaneFocus::Sources,
             connection: ConnectionState::Idle,
             config,
@@ -805,6 +809,11 @@ impl Model {
         }
     }
 
+    pub fn icon_set(&self) -> crate::config::profile::IconSet {
+        self.interface_settings_draft
+            .unwrap_or(self.config.settings.icons)
+    }
+
     /// Replace the config while keeping the cursor on the same source item.
     /// If the selected item was removed, clamp the previous row to the new list.
     pub fn replace_config_preserving_selection(&mut self, config: Config) {
@@ -890,6 +899,7 @@ impl Model {
             settings_menu_selected: 0,
             routing_settings_draft: None,
             connection_settings_draft: None,
+            interface_settings_draft: None,
             main_pane_focus: MainPaneFocus::Sources,
             connection: ConnectionState::Idle,
             config,

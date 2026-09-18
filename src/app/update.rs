@@ -21,7 +21,7 @@ use key::{
     handle_confirm_delete, handle_geo_region, handle_routing_mode, handle_sources,
     rebuild_key_event,
 };
-pub use key::{theme_picker_labels, theme_picker_slugs};
+pub use key::{shorten_theme_name, theme_picker_labels, theme_picker_slugs};
 
 /// Minimum interval between Clash-API scrapes. The daemon ticker fires every
 /// 250 ms; we only emit `Effect::FetchTrafficStats` once per second.
@@ -4928,6 +4928,30 @@ mod tests {
         assert!(effects.contains(&Effect::SaveConfig));
         assert!(effects.contains(&app_log_info("Subscription 'Sub'  (3d)")));
         assert!(model.config.subscriptions[0].retry_state.is_none());
+    }
+
+    #[test]
+    fn subscription_interval_status_uses_configured_icon_set() {
+        use crate::config::profile::{IconSet, Subscription};
+
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.icons = IconSet::Unicode;
+        model.config.subscriptions.push(Subscription {
+            id: uuid::Uuid::new_v4(),
+            name: "Sub".to_string(),
+            url: "https://example.com".to_string(),
+            auto_update: SubscriptionAutoUpdate::Every1d,
+            last_updated: None,
+            next_auto_update: None,
+            retry_state: None,
+            send_hwid: false,
+            hwid: None,
+        });
+        model.selected = 0;
+
+        let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Char('i')));
+
+        assert!(effects.contains(&app_log_info("Subscription 'Sub' ↻ (3d)")));
     }
 
     #[test]

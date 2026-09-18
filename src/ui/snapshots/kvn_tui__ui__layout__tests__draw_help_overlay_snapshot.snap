@@ -32,8 +32,8 @@ expression: "snapshot_terminal(&model, 80, 40)"
 │           │ Settings                                             │           │
 │           │ Space c         Connection                           │           │
 │           │ Space d         DNS                                  │           │
+│           │ Space i         Interface                            │           │
 │           │ Space r         Routing                              │           │
-│           │ Space t         Theme                                │           │
 │           │                                                      │           │
 │           │ Dialogs                                              │           │
 │           │ h/l, ←/→        Change selected value                │           │

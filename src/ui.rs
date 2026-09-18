@@ -1,4 +1,5 @@
 pub(crate) mod help;
+pub mod icons;
 pub mod layout;
 pub mod nav;
 pub mod palette;

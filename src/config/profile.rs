@@ -920,7 +920,7 @@ impl SubscriptionAutoUpdate {
 }
 
 fn auto_update_label(interval: &str) -> String {
-    format!(" ({interval})")
+    format!("({interval})")
 }
 
 /// A subscription URL that can be refreshed to import a set of profiles.
@@ -1061,8 +1061,8 @@ fn subscription_auto_update_cycles_and_labels() {
         SubscriptionAutoUpdate::Off
     );
 
-    assert_eq!(SubscriptionAutoUpdate::Off.label(), " (off)");
-    assert_eq!(SubscriptionAutoUpdate::Every1d.label(), " (1d)");
+    assert_eq!(SubscriptionAutoUpdate::Off.label(), "(off)");
+    assert_eq!(SubscriptionAutoUpdate::Every1d.label(), "(1d)");
 }
 
 #[test]
@@ -1137,7 +1137,7 @@ fn geo_auto_update_cycles_intervals_and_labels() {
     for (schedule, minutes, interval) in schedules {
         assert_eq!(schedule.interval_minutes(), minutes);
         assert_eq!(schedule.interval_label(), interval);
-        assert_eq!(schedule.label(), format!(" ({interval})"));
+        assert_eq!(schedule.label(), format!("({interval})"));
     }
     assert_eq!(GeoAutoUpdate::Off.next(), GeoAutoUpdate::Every1d);
     assert_eq!(GeoAutoUpdate::Every12h.next(), GeoAutoUpdate::Every1d);
@@ -1425,6 +1425,32 @@ pub struct Settings {
     pub allow_insecure_http_subscriptions: bool,
     #[serde(default)]
     pub connectivity_probe: ConnectivityProbeConfig,
+    #[serde(default)]
+    pub icons: IconSet,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IconSet {
+    #[default]
+    Nerd,
+    Unicode,
+}
+
+impl IconSet {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Nerd => Self::Unicode,
+            Self::Unicode => Self::Nerd,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Nerd => "nerd",
+            Self::Unicode => "unicode",
+        }
+    }
 }
 
 /// Accept `address` if it parses as a bare IPv4/IPv6 literal or as a hostname.
@@ -1621,6 +1647,7 @@ impl Default for Settings {
             hwid: String::new(),
             allow_insecure_http_subscriptions: false,
             connectivity_probe: ConnectivityProbeConfig::default(),
+            icons: IconSet::default(),
         }
     }
 }
@@ -2235,6 +2262,23 @@ mod tests {
         assert_eq!(s.logs.line_retention.app, 1_000);
         assert_eq!(s.logs.line_retention.singbox, 100_000);
         assert_eq!(s.geo_routing.auto_update, GeoAutoUpdate::Off);
+        assert_eq!(s.icons, IconSet::Nerd);
+    }
+
+    #[test]
+    fn icon_set_serde_values_round_trip() {
+        for (icons, wire) in [
+            (IconSet::Nerd, "\"nerd\""),
+            (IconSet::Unicode, "\"unicode\""),
+        ] {
+            assert_eq!(serde_json::to_string(&icons).unwrap(), wire);
+            assert_eq!(serde_json::from_str::<IconSet>(wire).unwrap(), icons);
+        }
+        assert!(serde_json::from_str::<IconSet>("\"emoji\"").is_err());
+        assert_eq!(IconSet::Nerd.next(), IconSet::Unicode);
+        assert_eq!(IconSet::Unicode.next(), IconSet::Nerd);
+        assert_eq!(IconSet::Nerd.label(), "nerd");
+        assert_eq!(IconSet::Unicode.label(), "unicode");
     }
 
     #[test]
