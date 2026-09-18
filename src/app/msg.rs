@@ -144,6 +144,9 @@ pub enum Msg {
         enabled: bool,
         error: Option<IpcError>,
     },
+    AutoConnectPolkitChecked {
+        error: Option<IpcError>,
+    },
     /// Raw sample of cumulative byte counters from sing-box's Clash API,
     /// timestamped so the pure-layer can compute a per-second rate against
     /// the previous sample stored in `Model::traffic`.

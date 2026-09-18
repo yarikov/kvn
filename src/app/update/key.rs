@@ -285,18 +285,23 @@ fn cycle_connection_draft(model: &mut Model) {
 }
 
 fn set_auto_connect(model: &mut Model, enabled: bool) -> Vec<Effect> {
-    if model.config.settings.auto_connect == enabled {
+    if enabled {
+        if model.config.settings.auto_connect || model.auto_connect_pending {
+            return vec![];
+        }
+        model.auto_connect_pending = true;
+        return vec![Effect::CheckAutoConnectPolkit];
+    }
+    model.auto_connect_pending = false;
+    if !model.config.settings.auto_connect {
         return vec![];
     }
-    model.config.settings.auto_connect = enabled;
+    model.config.settings.auto_connect = false;
     let mut effects = vec![];
     push_status(
         &mut effects,
         model,
-        AppStatus::Info(format!(
-            "Auto-connect {}",
-            if enabled { "enabled" } else { "disabled" }
-        )),
+        AppStatus::Info("Auto-connect disabled".into()),
     );
     effects.push(Effect::SaveConfig);
     effects
@@ -1613,9 +1618,10 @@ mod tests {
         assert_eq!(model.kill_switch_pending, None);
 
         let effects = handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert!(effects.contains(&Effect::CheckAutoConnectPolkit));
         assert!(effects.contains(&Effect::ApplyKillSwitch { enabled: true }));
-        assert!(model.config.settings.auto_connect);
+        assert!(!model.config.settings.auto_connect);
+        assert!(model.auto_connect_pending);
         assert_eq!(model.kill_switch_pending, Some(true));
         assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
         assert_eq!(model.settings_menu_selected, 0);
@@ -3193,8 +3199,8 @@ mod tests {
         model.overlay = Overlay::None;
 
         let effects = handle_key(&mut model, key('a'));
-        assert!(model.config.settings.auto_connect);
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert!(model.auto_connect_pending);
+        assert_eq!(effects, vec![Effect::CheckAutoConnectPolkit]);
 
         let effects = handle_key(&mut model, key('K'));
         assert_eq!(model.kill_switch_pending, Some(true));

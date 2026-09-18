@@ -300,6 +300,7 @@ pub struct Model {
     /// Prevents repeated `K` presses from launching concurrent systemd/nft
     /// operations whose replies could arrive out of order.
     pub kill_switch_pending: Option<bool>,
+    pub auto_connect_pending: bool,
     pub routing_selected: usize,
     pub geo_region_selected: usize,
     pub dns_selected: usize,
@@ -549,6 +550,7 @@ impl Model {
             connecting_profile_id,
             connect_attempt_id: u64::from(connecting_profile_id.is_some()),
             kill_switch_pending: None,
+            auto_connect_pending: false,
             routing_selected: 0,
             geo_region_selected: 0,
             dns_selected: 0,
@@ -667,6 +669,7 @@ impl Model {
             connecting_profile_id: None,
             connect_attempt_id: 0,
             kill_switch_pending: None,
+            auto_connect_pending: false,
             routing_selected: 0,
             geo_region_selected: 0,
             dns_selected: 0,
@@ -902,6 +905,7 @@ impl Model {
             connecting_profile_id: None,
             connect_attempt_id: 0,
             kill_switch_pending: None,
+            auto_connect_pending: false,
             routing_selected: 0,
             geo_region_selected: 0,
             dns_selected: 0,

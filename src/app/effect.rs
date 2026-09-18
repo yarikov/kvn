@@ -53,6 +53,7 @@ pub enum Effect {
     ApplyKillSwitch {
         enabled: bool,
     },
+    CheckAutoConnectPolkit,
     /// Ask the daemon to scrape the Clash API once. IDs bind the asynchronous
     /// reply to the current connection and order overlapping requests.
     FetchTrafficStats {
