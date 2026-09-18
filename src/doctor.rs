@@ -505,6 +505,10 @@ fn polkit_status() -> PolkitStatus {
     PolkitStatus::Ready
 }
 
+pub(crate) fn polkit_authorization_denied() -> bool {
+    matches!(polkit_status(), PolkitStatus::Denied { .. })
+}
+
 pub(crate) fn polkit_readiness() -> Result<()> {
     polkit_readiness_from(polkit_status())
 }
@@ -955,6 +959,19 @@ mod tests {
         executable(dir.path(), "pkcheck", "echo broken >&2; exit 127");
         let failed = polkit_readiness().unwrap_err().to_string();
         assert!(failed.contains("could not be verified: broken"));
+    }
+
+    #[test]
+    fn polkit_denial_is_detected_only_for_refused_authorization() {
+        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _path = EnvGuard::set("PATH", dir.path());
+
+        assert!(!polkit_authorization_denied());
+        executable(dir.path(), "pkcheck", "exit 2");
+        assert!(polkit_authorization_denied());
+        executable(dir.path(), "pkcheck", "exit 127");
+        assert!(!polkit_authorization_denied());
     }
 
     #[test]
