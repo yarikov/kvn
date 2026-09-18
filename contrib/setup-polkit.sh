@@ -51,5 +51,5 @@ echo "Installed $RULE_FILE with three systemd-resolved permissions."
 echo "NetworkManager permissions are not granted."
 if [[ "$ADDED_TO_GROUP" == "1" ]]; then
     echo "User '$USER_NAME' was added to '$GROUP_NAME'."
-    echo "Log out and back in to activate the kvn-tui group."
+    echo "Reboot to activate the kvn-tui group."
 fi

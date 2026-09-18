@@ -4065,13 +4065,12 @@ mod tests {
             &mut model,
             Msg::AutoConnectPolkitChecked {
                 error: Some(crate::app::msg::IpcError::new(
-                    "log out and back in to activate the `kvn-tui` group",
+                    "reboot to activate the `kvn-tui` group",
                 )),
             },
         );
 
-        let message =
-            "Auto-connect not enabled: log out and back in to activate the `kvn-tui` group";
+        let message = "Auto-connect not enabled: reboot to activate the `kvn-tui` group";
         assert!(!model.config.settings.auto_connect);
         assert!(!model.auto_connect_pending);
         assert_eq!(model.status, AppStatus::Error(message.into()));
