@@ -58,7 +58,14 @@ pub fn apply(enabled: bool) -> Result<()> {
     if enabled && helper_present() {
         ensure_integration_group_active(integration_group_active())?;
     }
+    if !enabled && !helper_present() && !helper_needed_to_disable(is_active().ok()) {
+        return Ok(());
+    }
     run_helper(&[if enabled { "enable" } else { "disable" }])
+}
+
+fn helper_needed_to_disable(active: Option<bool>) -> bool {
+    active != Some(false)
 }
 
 fn ensure_integration_group_active(active: Option<bool>) -> Result<()> {
@@ -143,7 +150,7 @@ pub fn is_active() -> Result<bool> {
 fn classify_active_exit_code(code: Option<i32>) -> Result<bool> {
     match code {
         Some(0) => Ok(true),
-        Some(3) => Ok(false),
+        Some(3 | 4) => Ok(false),
         Some(code) => bail!("systemctl is-active exited with code {code}"),
         None => bail!("systemctl is-active terminated by signal"),
     }
@@ -153,15 +160,22 @@ fn classify_active_exit_code(code: Option<i32>) -> Result<bool> {
 mod tests {
     use super::{
         classify_active_exit_code, ensure_integration_group_active,
-        group_list_includes_integration_group,
+        group_list_includes_integration_group, helper_needed_to_disable,
     };
+
+    #[test]
+    fn disabling_an_inactive_unit_does_not_need_the_helper() {
+        assert!(!helper_needed_to_disable(Some(false)));
+        assert!(helper_needed_to_disable(Some(true)));
+        assert!(helper_needed_to_disable(None));
+    }
 
     #[test]
     fn active_exit_code_distinguishes_inactive_from_errors() {
         assert!(classify_active_exit_code(Some(0)).unwrap());
         assert!(!classify_active_exit_code(Some(3)).unwrap());
         assert!(classify_active_exit_code(Some(1)).is_err());
-        assert!(classify_active_exit_code(Some(4)).is_err());
+        assert!(!classify_active_exit_code(Some(4)).unwrap());
         assert!(classify_active_exit_code(None).is_err());
     }
 
