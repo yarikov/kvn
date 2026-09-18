@@ -49,6 +49,7 @@ A subscription contains `id`, `name`, `url`, `auto_update`, and an optional
 | `kill_switch` | `false` | Persisted kill-switch state |
 | `last_connected_profile` | `null` | Last connected profile; maintained by the application |
 | `theme` | `tokyo-night` | Bundled palette slug or `omarchy` |
+| `icons` | `nerd` | `nerd` for Nerd Font glyphs, or `unicode` for terminals without a Nerd Font |
 | `allow_insecure_http_subscriptions` | `false` (`true` after migration from v4) | Temporarily allow deprecated HTTP subscription URLs for backward compatibility |
 | `connectivity_probe.enabled` | `true` | Enable the HTTP(S) endpoint used only by manual `t` / `T` latency tests |
 | `connectivity_probe.url` | `https://connectivitycheck.gstatic.com/generate_204` | Probe endpoint; required and validated only when the probe is enabled |

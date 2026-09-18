@@ -7,16 +7,16 @@ expression: "snapshot_terminal(&model, 80, 20)"
 └──────────────────────────────────────────────────────────────────────────────┘
 ┌ Profiles ────────────────────────────────────────────────────────────────────┐
 │ No sources. Press p to paste a profile or subscription URL from clipboard.   │
+│                                                                              │
 │                      ┌───────────────────────────────┐                       │
-│                      │           Settings            │                       │
+│                      │     Settings › Interface      │                       │
 │                      │                               │                       │
-│                      │        c  Connection         │                       │
-│                      │        d  DNS                │                       │
-│                      │        i  Interface          │                       │
-│                      │        r  Routing            │                       │
+│                      │   Theme ‹ tokyo-night ›       │                       │
+│                      │   Icons ‹ nerd ›              │                       │
 │                      │                               │                       │
-│                      │           q/󱊷 close           │                       │
+│                      │ 󰌑 apply · q/󱊷 close · ⌫ back  │                       │
 │                      └───────────────────────────────┘                       │
+│                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │

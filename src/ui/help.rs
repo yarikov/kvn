@@ -64,8 +64,8 @@ const CONNECTION: &[(&str, &str)] = &[("r", "Reconnect"), ("s", "Disconnect")];
 const SETTINGS: &[(&str, &str)] = &[
     ("Space c", "Connection"),
     ("Space d", "DNS"),
+    ("Space i", "Interface"),
     ("Space r", "Routing"),
-    ("Space t", "Theme"),
 ];
 
 const DIALOGS: &[(&str, &str)] = &[

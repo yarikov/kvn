@@ -1702,6 +1702,7 @@ esac
             settings_menu_selected: 0,
             routing_settings_draft: None,
             connection_settings_draft: None,
+            interface_settings_draft: None,
             geo_updating: false,
             geo_last_updated: None,
             geo_last_checked_at: None,

@@ -1478,7 +1478,7 @@ fn deprecated_settings_shortcut_message(
         KeyCode::Char('o') => Some("o is deprecated; use Space r"),
         KeyCode::Char('D') => Some("D is deprecated; use Space d"),
         KeyCode::Char('S') => Some("S is deprecated; use Space r"),
-        KeyCode::Char('C') => Some("C is deprecated; use Space t"),
+        KeyCode::Char('C') => Some("C is deprecated; use Space i"),
         KeyCode::Char('a') => Some("a is deprecated; use Space c"),
         KeyCode::Char('K') => Some("K is deprecated; use Space c"),
         _ => None,
@@ -1549,6 +1549,7 @@ fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
     model.settings_menu_selected = snapshot.settings_menu_selected;
     model.routing_settings_draft = snapshot.routing_settings_draft;
     model.connection_settings_draft = snapshot.connection_settings_draft;
+    model.interface_settings_draft = snapshot.interface_settings_draft;
     model.geo_updating = snapshot.geo_updating;
     model.geo_last_updated = snapshot.geo_last_updated;
     model.geo_last_checked_at = snapshot.geo_last_checked_at;
@@ -1605,6 +1606,55 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn interface_drafts_preview_theme_and_icons_until_closed() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let mut daemon_model = crate::test_helpers::model_with_profiles(vec![]);
+        daemon_model.config.settings.theme = "tokyo-night".into();
+        let mut client_model = crate::test_helpers::model_with_profiles(vec![]);
+        let sync = |daemon_model: &Model, client_model: &mut Model| {
+            let snapshot = crate::daemon::build_snapshot(
+                daemon_model,
+                crate::app::msg::LogSessionOffsets::default(),
+                None,
+                None,
+            );
+            apply_snapshot(client_model, snapshot);
+        };
+        let saved_background = theme_watch::resolve_active("tokyo-night").palette_background();
+
+        for key in [' ', 'i', 'l', 'j', 'l'] {
+            crate::app::update::update(
+                &mut daemon_model,
+                Msg::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE)),
+            );
+        }
+        sync(&daemon_model, &mut client_model);
+
+        let draft = daemon_model.theme_draft.clone().unwrap();
+        assert_ne!(draft, "tokyo-night");
+        assert_eq!(
+            client_model.theme.palette_background(),
+            theme_watch::resolve_active(&draft).palette_background()
+        );
+        assert_eq!(
+            client_model.icon_set(),
+            crate::config::profile::IconSet::Unicode
+        );
+
+        crate::app::update::update(
+            &mut daemon_model,
+            Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        sync(&daemon_model, &mut client_model);
+
+        assert_eq!(client_model.theme.palette_background(), saved_background);
+        assert_eq!(
+            client_model.icon_set(),
+            crate::config::profile::IconSet::Nerd
+        );
+    }
 
     #[test]
     fn pane_focus_shortcuts_mark_only_plain_h_and_l_deprecated() {
@@ -1673,7 +1723,7 @@ mod tests {
             ('o', "o is deprecated; use Space r"),
             ('D', "D is deprecated; use Space d"),
             ('S', "S is deprecated; use Space r"),
-            ('C', "C is deprecated; use Space t"),
+            ('C', "C is deprecated; use Space i"),
             ('a', "a is deprecated; use Space c"),
             ('K', "K is deprecated; use Space c"),
         ] {
