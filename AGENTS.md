@@ -225,7 +225,7 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 - `services/suspend.rs` runs a blocking zbus listener in a dedicated thread. On resume (`PrepareForSleep` with `false`), it sends `Msg::SystemResumed` through the `mpsc` channel so `update.rs` can schedule a reconnect effect.
 
 ### Kill Switch
-- Uses **nftables** + a systemd unit (`kvn-tui-killswitch.service`) that loads `/etc/kvn-tui/killswitch.nft`. The ruleset drops all outbound traffic except localhost, `tun*`/`kvn*` interfaces, and packets marked `0x29a` by sing-box.
+- Uses **nftables** + a systemd unit (`kvn-tui-killswitch.service`) that loads `/etc/kvn-tui/killswitch.nft`. The ruleset drops all outbound traffic except localhost, `kvn*` interfaces, and packets marked `0x29a` by sing-box.
 - Privilege escalation via **sudoers NOPASSWD** (not polkit) — grants the `network` group passwordless access to `/usr/lib/kvn-tui/killswitch-helper.sh`. Installed with `sudo kvn setup --killswitch`.
 - **Toggle flow**: `K` keybinding → `Effect::ApplyKillSwitch { enabled }` → daemon spawns thread calling `services::killswitch::apply(enabled)` → sends `Msg::KillSwitchApplied { enabled, error }` back. On success the boolean is flipped and config is saved; on error the boolean is unchanged and the error is shown.
 - **Group check on enable**: `apply(true)` reads `integration_group_status()` (`Active` / `PendingActivation` / `NotMember`). A pending group asks the user to reboot (logging out is not enough: `kvn-tui.service` inherits groups from the long-lived `systemd --user` manager); a missing membership points to `sudo kvn setup --killswitch`. `kvn doctor` reports the same two cases.

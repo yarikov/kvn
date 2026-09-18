@@ -2225,7 +2225,7 @@ mod tests {
     #[test]
     fn settings_log_level_defaults_when_absent() {
         let json = r#"{
-            "tun_interface": "tun0",
+            "tun_interface": "kvn0",
             "dns_strategy": "prefer_ipv4",
             "geo_routing": {},
             "auto_connect": false
@@ -2319,7 +2319,7 @@ mod tests {
     fn settings_serde_kill_switch_defaults_when_absent() {
         // Older configs without the field should deserialize with kill_switch=false.
         let json = r#"{
-            "tun_interface": "tun0",
+            "tun_interface": "kvn0",
             "dns_strategy": "prefer_ipv4",
             "geo_routing": {},
             "auto_connect": false
@@ -2343,7 +2343,7 @@ mod tests {
     #[test]
     fn service_routes_absent_in_json_deserialize_as_empty() {
         let json = r#"{
-            "tun_interface": "tun0",
+            "tun_interface": "kvn0",
             "dns_strategy": "prefer_ipv4",
             "geo_routing": {},
             "auto_connect": false
