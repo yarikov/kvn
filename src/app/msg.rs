@@ -52,6 +52,7 @@ impl From<anyhow::Error> for IpcError {
 pub enum Msg {
     Key(KeyEvent),
     Mouse(MouseEvent),
+    Paste(String),
     Tick,
     Resize,
     GeoUpdated(GeoResult),

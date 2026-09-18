@@ -29,6 +29,10 @@ pub(super) const PUSH_KEYBOARD_PROTOCOL: &str = "\x1b[>13u";
 pub(super) const POP_KEYBOARD_PROTOCOL: &str = "\x1b[<1u";
 pub(super) const ENABLE_MOUSE_CAPTURE: &str = "\x1b[?1003h\x1b[?1006h";
 pub(super) const DISABLE_MOUSE_CAPTURE: &str = "\x1b[?1006l\x1b[?1003l";
+pub(super) const ENABLE_BRACKETED_PASTE: &str = "\x1b[?2004h";
+pub(super) const DISABLE_BRACKETED_PASTE: &str = "\x1b[?2004l";
+const PASTE_START: &[u8] = b"\x1b[200~";
+const PASTE_END: &[u8] = b"\x1b[201~";
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const ESCAPE_TIMEOUT: Duration = Duration::from_millis(30);
@@ -84,6 +88,16 @@ pub(super) fn disable_mouse_capture(out: &mut impl Write) -> io::Result<()> {
     out.flush()
 }
 
+pub(super) fn enable_bracketed_paste(out: &mut impl Write) -> io::Result<()> {
+    out.write_all(ENABLE_BRACKETED_PASTE.as_bytes())?;
+    out.flush()
+}
+
+pub(super) fn disable_bracketed_paste(out: &mut impl Write) -> io::Result<()> {
+    out.write_all(DISABLE_BRACKETED_PASTE.as_bytes())?;
+    out.flush()
+}
+
 pub(super) fn spawn_event_reader(tx: Sender<Msg>, control: Arc<EventReaderControl>) {
     spawn_resize_reader(tx.clone());
     thread::spawn(move || {
@@ -115,6 +129,7 @@ pub(super) fn spawn_event_reader(tx: Sender<Msg>, control: Arc<EventReaderContro
                 let msg = match event {
                     InputEvent::Key(key) => Msg::Key(key),
                     InputEvent::Mouse(mouse) => Msg::Mouse(mouse),
+                    InputEvent::Paste(text) => Msg::Paste(text),
                 };
                 if tx.send(msg).is_err() {
                     return;
@@ -219,10 +234,11 @@ enum ParseResult {
     Incomplete,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum InputEvent {
     Key(KeyEvent),
     Mouse(MouseEvent),
+    Paste(String),
 }
 
 fn parse_one(bytes: &[u8], escape_expired: bool) -> ParseResult {
@@ -251,11 +267,32 @@ fn parse_escape(bytes: &[u8], expired: bool) -> ParseResult {
             ParseResult::Incomplete
         };
     }
+    if PASTE_START.starts_with(bytes) {
+        return ParseResult::Incomplete;
+    }
+    if bytes.starts_with(PASTE_START) {
+        return parse_paste(bytes);
+    }
     match bytes[1] {
         b'[' => parse_csi(bytes),
         b'O' => parse_ss3(bytes),
         _ => parse_utf8(&bytes[1..], KeyModifiers::ALT, 1),
     }
+}
+
+fn parse_paste(bytes: &[u8]) -> ParseResult {
+    let body = &bytes[PASTE_START.len()..];
+    let Some(end) = body
+        .windows(PASTE_END.len())
+        .position(|window| window == PASTE_END)
+    else {
+        return ParseResult::Incomplete;
+    };
+    let text = String::from_utf8_lossy(&body[..end]).into_owned();
+    ParseResult::Event(
+        InputEvent::Paste(text),
+        PASTE_START.len() + end + PASTE_END.len(),
+    )
 }
 
 fn parse_ss3(bytes: &[u8]) -> ParseResult {
@@ -601,7 +638,7 @@ mod tests {
             .into_iter()
             .map(|event| match event {
                 InputEvent::Key(key) => key.code,
-                InputEvent::Mouse(_) => panic!("expected key"),
+                InputEvent::Mouse(_) | InputEvent::Paste(_) => panic!("expected key"),
             })
             .collect();
         assert_eq!(
@@ -666,5 +703,35 @@ mod tests {
         assert_eq!(POP_KEYBOARD_PROTOCOL, "\x1b[<1u");
         assert_eq!(ENABLE_MOUSE_CAPTURE, "\x1b[?1003h\x1b[?1006h");
         assert_eq!(DISABLE_MOUSE_CAPTURE, "\x1b[?1006l\x1b[?1003l");
+        assert_eq!(ENABLE_BRACKETED_PASTE, "\x1b[?2004h");
+        assert_eq!(DISABLE_BRACKETED_PASTE, "\x1b[?2004l");
+    }
+
+    #[test]
+    fn bracketed_paste_is_one_event_instead_of_keys() {
+        let mut decoder = Decoder::default();
+        decoder.push(b"\x1b[200~m\x1b[201~j");
+        let events = decoder.drain(Instant::now());
+        assert_eq!(
+            events,
+            [
+                InputEvent::Paste("m".into()),
+                InputEvent::Key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
+            ]
+        );
+    }
+
+    #[test]
+    fn bracketed_paste_waits_for_fragmented_markers() {
+        let mut decoder = Decoder::default();
+        decoder.push(b"\x1b[20");
+        assert!(decoder.drain(Instant::now()).is_empty());
+        decoder.push(b"0~vless://a\x1b[2");
+        assert!(decoder.drain(Instant::now()).is_empty());
+        decoder.push(b"01~");
+        assert_eq!(
+            decoder.drain(Instant::now()),
+            [InputEvent::Paste("vless://a".into())]
+        );
     }
 }

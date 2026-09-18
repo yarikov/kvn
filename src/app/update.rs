@@ -323,7 +323,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.profile_latencies.insert(id, latency_ms);
             vec![Effect::BroadcastState]
         }
-        Msg::Mouse(_) => vec![],
+        Msg::Mouse(_) | Msg::Paste(_) => vec![],
     }
 }
 
@@ -1157,6 +1157,20 @@ fn handle_copied_status(model: &mut Model, name: String, count: usize) -> Vec<Ef
 
 fn handle_clipboard_text(model: &mut Model, text: &str) -> Vec<Effect> {
     let trimmed = text.trim();
+    if trimmed.is_empty() || !trimmed.contains("://") {
+        let message = if trimmed.is_empty() {
+            "Clipboard is empty"
+        } else {
+            "Not a supported VPN link or subscription URL"
+        };
+        let mut effects = Vec::new();
+        push_status(
+            &mut effects,
+            model,
+            crate::app::model::AppStatus::Error(message.into()),
+        );
+        return effects;
+    }
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
         return add_and_fetch_subscription(model, trimmed);
     }
@@ -4316,6 +4330,30 @@ mod tests {
                 "Insecure HTTP subscriptions are blocked; use HTTPS"
             )]
         );
+    }
+
+    #[test]
+    fn paste_plain_text_shows_error_without_side_effects() {
+        let mut model = model_with_profiles(vec![]);
+        let effects = handle_clipboard_text(&mut model, "m");
+        assert!(!effects.contains(&Effect::SaveConfig));
+        assert_eq!(model.overlay, crate::app::model::Overlay::None);
+        assert!(model.config.profiles.is_empty());
+        assert!(model.status.is_error());
+        assert_eq!(
+            model.status.text(),
+            "Not a supported VPN link or subscription URL"
+        );
+
+        handle_clipboard_text(&mut model, "  \n");
+        assert_eq!(model.status.text(), "Clipboard is empty");
+    }
+
+    #[test]
+    fn terminal_paste_message_is_ignored_by_update() {
+        let mut model = model_with_profiles(vec![]);
+        assert!(update(&mut model, Msg::Paste("vless://x".into())).is_empty());
+        assert!(model.config.profiles.is_empty());
     }
 
     #[test]
