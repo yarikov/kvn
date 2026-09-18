@@ -385,6 +385,47 @@ fn clean_killswitch() -> Result<()> {
     )
 }
 
+fn sudo_user_socket_path(sudo_uid: Option<&str>) -> Option<PathBuf> {
+    let uid = sudo_uid?.parse::<u32>().ok()?;
+    Some(PathBuf::from(format!("/run/user/{uid}/kvn-tui.sock")))
+}
+
+fn turn_off_daemon_setting(
+    command: IpcCommand,
+    settled: impl Fn(&StateSnapshot) -> Option<Result<()>>,
+) -> Option<Result<()>> {
+    let path = sudo_user_socket_path(std::env::var("SUDO_UID").ok().as_deref())?;
+    let mut client = IpcClient::connect_at(&path).ok()?;
+    Some((|| {
+        if matches!(settled(&fetch_snapshot(&mut client)?), Some(Ok(()))) {
+            return Ok(());
+        }
+        client.send(&command)?;
+        let deadline = Instant::now() + SNAPSHOT_TIMEOUT;
+        loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .context("timed out waiting for the kvn daemon")?;
+            if let Some(result) = settled(&client.read_snapshot(remaining)?) {
+                return result;
+            }
+        }
+    })())
+}
+
+fn report_daemon_setting_off(setting: &str, result: Option<Result<()>>) {
+    match result {
+        Some(Ok(())) => println!("{setting} turned off in kvn settings."),
+        Some(Err(error)) => {
+            eprintln!("Warning: could not turn off {setting} in kvn settings: {error:#}")
+        }
+        None => println!(
+            "kvn daemon is not running; {} will be turned off on its next start.",
+            setting.to_lowercase()
+        ),
+    }
+}
+
 fn validate_integration_privileges(
     omarchy: bool,
     system: bool,
@@ -832,9 +873,23 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
                 // group's remaining polkit authorization.
                 if *killswitch {
                     clean_killswitch()?;
+                    report_daemon_setting_off(
+                        "Kill switch",
+                        turn_off_daemon_setting(
+                            IpcCommand::SetKillSwitch { enabled: false },
+                            |snapshot| kill_switch_snapshot_result(snapshot, false),
+                        ),
+                    );
                 }
                 if *polkit {
                     clean_polkit()?;
+                    report_daemon_setting_off(
+                        "Auto-connect",
+                        turn_off_daemon_setting(
+                            IpcCommand::SetAutoConnect { enabled: false },
+                            |snapshot| (!snapshot.settings.auto_connect).then_some(Ok(())),
+                        ),
+                    );
                 }
                 Ok(())
             })();
@@ -1168,6 +1223,16 @@ esac
             cli.command,
             Some(Command::Disable { killswitch: true })
         ));
+    }
+
+    #[test]
+    fn clean_targets_the_invoking_users_daemon_socket() {
+        assert_eq!(
+            sudo_user_socket_path(Some("1000")),
+            Some(PathBuf::from("/run/user/1000/kvn-tui.sock"))
+        );
+        assert_eq!(sudo_user_socket_path(Some("root")), None);
+        assert_eq!(sudo_user_socket_path(None), None);
     }
 
     #[test]

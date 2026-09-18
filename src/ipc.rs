@@ -200,7 +200,11 @@ pub struct IpcClient {
 
 impl IpcClient {
     pub fn connect() -> anyhow::Result<Self> {
-        let stream = UnixStream::connect(socket_path()?)?;
+        Self::connect_at(&socket_path()?)
+    }
+
+    pub fn connect_at(path: &std::path::Path) -> anyhow::Result<Self> {
+        let stream = UnixStream::connect(path)?;
         stream.set_nonblocking(false)?;
         Ok(Self { stream })
     }

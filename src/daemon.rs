@@ -72,6 +72,7 @@ pub fn run(mut model: Model) -> Result<()> {
     }
 
     reconcile_kill_switch_state(&mut model);
+    reconcile_auto_connect_state(&mut model);
 
     let shared = DaemonShared {
         process_slot: Arc::new(Mutex::new(ProcessSlot {
@@ -1219,6 +1220,35 @@ fn reconcile_kill_switch_state(model: &mut Model) {
     }
 }
 
+fn reconcile_auto_connect_state(model: &mut Model) {
+    if !model.config.settings.auto_connect || !crate::doctor::polkit_authorization_denied() {
+        return;
+    }
+    tracing::info!("Disabling auto-connect: passwordless polkit is not set up");
+    let base = model.config.clone();
+    let mut edited = base.clone();
+    edited.settings.auto_connect = false;
+    match commit_config_change(model, &base, &edited) {
+        Ok(config) => model.replace_config_preserving_selection(config),
+        Err(e) => {
+            tracing::warn!("Failed to persist disabled auto-connect: {}", e);
+            model.config.settings.auto_connect = false;
+        }
+    }
+    cancel_startup_auto_connect(model);
+}
+
+fn cancel_startup_auto_connect(model: &mut Model) {
+    if model.connection == ConnectionState::Connecting {
+        model.connection = ConnectionState::Idle;
+        model.connecting_profile_id = None;
+    }
+    model.status = AppStatus::Info(
+        "Auto-connect disabled: passwordless polkit is not set up; run `sudo kvn setup --polkit`"
+            .into(),
+    );
+}
+
 /// Pre-resolve the VPN endpoint and open a temporary nft exception so the
 /// initial handshake can pass through the kill switch. Also allowlists every
 /// non-`local`, non-`fakeip` DNS upstream the user has configured so sing-box
@@ -1460,9 +1490,9 @@ fn spawn_signal_handler(tx: Sender<Msg>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ProcessSlot, ServiceRefreshResult, commit_config_change, finalize_geo_result,
-        handshake_protocols, lock_process_slot, log_prune_due, poll_process_exit,
-        write_test_config,
+        ProcessSlot, ServiceRefreshResult, cancel_startup_auto_connect, commit_config_change,
+        finalize_geo_result, handshake_protocols, lock_process_slot, log_prune_due,
+        poll_process_exit, write_test_config,
     };
     use crate::app::msg::{GeoResult, Msg};
     use crate::config::profile::Protocol;
@@ -1470,6 +1500,24 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn startup_auto_connect_is_cancelled_when_polkit_is_missing() {
+        use crate::app::model::{AppStatus, ConnectionState};
+
+        let mut model = crate::app::model::Model::test_new(Default::default());
+        model.connection = ConnectionState::Connecting;
+        model.connecting_profile_id = Some(uuid::Uuid::new_v4());
+
+        cancel_startup_auto_connect(&mut model);
+
+        assert_eq!(model.connection, ConnectionState::Idle);
+        assert!(model.connecting_profile_id.is_none());
+        assert!(matches!(
+            &model.status,
+            AppStatus::Info(text) if text.contains("sudo kvn setup --polkit")
+        ));
+    }
 
     #[test]
     fn config_commit_merges_external_and_model_changes() {

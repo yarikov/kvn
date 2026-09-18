@@ -57,4 +57,3 @@ systemctl reset-failed "$UNIT" >/dev/null 2>&1 || true
 
 echo "Removed kvn kill-switch system integration."
 cleanup_group_if_unused
-echo "Restart the user kvn daemon so its persisted state is reconciled."

@@ -117,7 +117,8 @@ sudo kvn clean --polkit
 
 Cleanup preserves the group while the kill switch still uses it. If neither
 integration remains, cleanup removes the now-unused group and its membership
-records automatically.
+records automatically. Auto-connect is turned off in kvn settings: immediately
+if the daemon is running, otherwise on its next start.
 
 ## Kill switch setup
 
@@ -168,8 +169,8 @@ sudo kvn clean --killswitch
 If the active unit cannot be stopped, cleanup aborts before removing its files.
 The command preserves the `kvn-tui` group while the polkit integration still
 uses it. If neither integration remains, cleanup removes the group and its
-membership records automatically. Restart the user daemon afterward so its
-persisted state is reconciled.
+membership records automatically. The kill switch is turned off in kvn
+settings: immediately if the daemon is running, otherwise on its next start.
 
 ## Omarchy setup
 
