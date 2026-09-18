@@ -20,7 +20,11 @@ if [[ -z "$USER_NAME" || "$USER_NAME" == "root" ]] || ! id "$USER_NAME" >/dev/nu
     exit 1
 fi
 HELPER_SOURCE="${1:?missing embedded kill-switch helper source}"
+RULESET_SOURCE="${2:?missing embedded kill-switch ruleset source}"
+UNIT_SOURCE="${3:?missing embedded kill-switch unit source}"
+SUDOERS_SOURCE="${4:?missing embedded kill-switch sudoers source}"
 GROUP_NAME="kvn-tui"
+STAMP_DIR="/var/lib/kvn/integrations"
 
 echo "Installing kvn kill switch for user '$USER_NAME'…"
 
@@ -31,68 +35,7 @@ fi
 
 # ── 1. nftables ruleset ────────────────────────────────────────────────
 install -dm755 /etc/kvn-tui
-cat > /etc/kvn-tui/killswitch.nft <<'NFT_EOF'
-#!/usr/sbin/nft -f
-# kvn-tui kill switch: drop all non-VPN egress.
-# Loaded by kvn-tui-killswitch.service at boot when enabled.
-
-# Idempotent atomic replace — add-then-delete-then-add lets `nft -f` succeed
-# both on first load (no prior table) and on reload (prior table exists).
-add table inet kvn_tui_killswitch
-delete table inet kvn_tui_killswitch
-table inet kvn_tui_killswitch {
-    # Dynamic sets populated by the daemon during the connect handshake.
-    # IPv6 uses `meta l4proto` so extension headers are followed to the actual
-    # transport protocol; IPv4's protocol field already identifies it directly.
-    set handshake_v4 {
-        type ipv4_addr . inet_proto . inet_service
-        flags interval
-    }
-    set handshake_v6 {
-        type ipv6_addr . inet_proto . inet_service
-        flags interval
-    }
-
-    chain input {
-        type filter hook input priority -10; policy drop;
-        iifname "lo" accept
-        iifname "tun*" accept
-        iifname "kvn*" accept
-        ct state established,related accept
-        meta l4proto { icmp, icmpv6 } accept
-        ip saddr { 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12 } accept
-        ip6 saddr { fc00::/7, fe80::/10 } accept
-        udp sport 67 udp dport 68 accept
-        udp sport 547 udp dport 546 accept
-    }
-
-    chain output {
-        type filter hook output priority -10; policy drop;
-        oifname "lo" accept
-        oifname "tun*" accept
-        oifname "kvn*" accept
-        # Packets marked by sing-box (route.default_mark = 666 / 0x29a). This
-        # allows the `direct` outbound used by Bypass/Only routing modes to
-        # reach the physical interface; everything else still drops.
-        meta mark 0x29a accept
-        ct state established,related accept
-        ip daddr { 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12 } accept
-        ip6 daddr { fc00::/7, fe80::/10 } accept
-        meta l4proto { icmp, icmpv6 } accept
-        ip daddr . ip protocol . th dport @handshake_v4 accept
-        ip6 daddr . meta l4proto . th dport @handshake_v6 accept
-        udp sport 68 udp dport 67 accept
-        udp sport 546 udp dport 547 accept
-    }
-
-    chain forward {
-        type filter hook forward priority -10; policy drop;
-        oifname "tun*" accept
-        oifname "kvn*" accept
-        ct state established,related accept
-    }
-}
-NFT_EOF
+printf '%s' "$RULESET_SOURCE" > /etc/kvn-tui/killswitch.nft
 chmod 644 /etc/kvn-tui/killswitch.nft
 
 # Syntax-check before installing the unit so we don't ship a broken ruleset.
@@ -106,47 +49,25 @@ install -dm755 /usr/lib/kvn-tui
 HELPER_TMP="$(mktemp)"
 SUDOERS_TMP=""
 trap 'rm -f "$HELPER_TMP" "$SUDOERS_TMP"' EXIT
-printf '%s\n' "$HELPER_SOURCE" >"$HELPER_TMP"
+printf '%s' "$HELPER_SOURCE" >"$HELPER_TMP"
 bash -n "$HELPER_TMP"
 install -m 0755 -o root -g root "$HELPER_TMP" /usr/lib/kvn-tui/killswitch-helper.sh
 
 # ── 3. systemd unit ────────────────────────────────────────────────────
-cat > /etc/systemd/system/kvn-tui-killswitch.service <<'UNIT_EOF'
-[Unit]
-Description=kvn-tui kill switch (drop non-VPN egress)
-DefaultDependencies=no
-Conflicts=shutdown.target
-Before=network-pre.target shutdown.target
-Wants=network-pre.target
-ConditionPathExists=/etc/kvn-tui/killswitch.nft
-
-[Service]
-Type=oneshot
-ExecStart=/usr/sbin/nft -f /etc/kvn-tui/killswitch.nft
-ExecStop=/usr/sbin/nft delete table inet kvn_tui_killswitch
-ExecStopPost=-/usr/sbin/nft delete table inet kvn_tui_killswitch
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-WantedBy=network-pre.target
-UNIT_EOF
+printf '%s' "$UNIT_SOURCE" > /etc/systemd/system/kvn-tui-killswitch.service
 chmod 644 /etc/systemd/system/kvn-tui-killswitch.service
 
 # ── 4. sudoers fragment (validated before installing) ──────────────────
 SUDOERS_TMP="$(mktemp)"
-cat > "$SUDOERS_TMP" <<'SUDOERS_EOF'
-# Allow group `kvn-tui` to invoke the kvn-tui kill-switch helper without a
-# password. The helper itself validates its arguments; nothing else is
-# whitelisted, and the helper path is fixed.
-Defaults!/usr/lib/kvn-tui/killswitch-helper.sh env_reset, secure_path="/usr/sbin:/usr/bin"
-%kvn-tui ALL=(root) NOPASSWD: /usr/lib/kvn-tui/killswitch-helper.sh
-SUDOERS_EOF
+printf '%s' "$SUDOERS_SOURCE" > "$SUDOERS_TMP"
 if ! visudo -cf "$SUDOERS_TMP" >/dev/null; then
     echo "FATAL: sudoers fragment failed validation" >&2
     exit 1
 fi
 install -m 0440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/kvn-tui-killswitch
+install -dm755 "$STAMP_DIR"
+sha256sum /etc/sudoers.d/kvn-tui-killswitch | cut -d' ' -f1 > "$STAMP_DIR/killswitch-sudoers.sha256"
+chmod 644 "$STAMP_DIR/killswitch-sudoers.sha256"
 
 # ── 5. Ensure user is in the dedicated group ──────────────────────────
 if ! id -nG "$USER_NAME" | tr ' ' '\n' | grep -Fxq "$GROUP_NAME"; then

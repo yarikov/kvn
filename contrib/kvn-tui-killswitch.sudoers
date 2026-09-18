@@ -1,0 +1,5 @@
+# Allow group `kvn-tui` to invoke the kvn-tui kill-switch helper without a
+# password. The helper itself validates its arguments; nothing else is
+# whitelisted, and the helper path is fixed.
+Defaults!/usr/lib/kvn-tui/killswitch-helper.sh env_reset, secure_path="/usr/sbin:/usr/bin"
+%kvn-tui ALL=(root) NOPASSWD: /usr/lib/kvn-tui/killswitch-helper.sh

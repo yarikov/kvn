@@ -9,7 +9,6 @@ use anyhow::Result;
 
 const MIN_SINGBOX_VERSION: (u64, u64, u64) = (1, 12, 0);
 const USER_UNIT: &str = "kvn-tui.service";
-const KILLSWITCH_HELPER: &str = "/usr/lib/kvn-tui/killswitch-helper.sh";
 const POLKIT_DNS_ACTIONS: [&str; 3] = [
     "org.freedesktop.resolve1.set-dns-servers",
     "org.freedesktop.resolve1.set-domains",
@@ -61,7 +60,11 @@ impl Check {
 /// Run all diagnostics, print the report, and fail when a required component
 /// is not usable.
 pub fn run() -> Result<()> {
-    let checks = collect();
+    run_at(Path::new("/"))
+}
+
+fn run_at(root: &Path) -> Result<()> {
+    let checks = collect(root);
     print_report(&checks)?;
     let failures = checks
         .iter()
@@ -73,7 +76,7 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn collect() -> Vec<Check> {
+fn collect(root: &Path) -> Vec<Check> {
     let mut checks = vec![Check::pass(format!("kvn {}", env!("CARGO_PKG_VERSION")))];
 
     checks.push(check_migrations());
@@ -92,8 +95,8 @@ fn collect() -> Vec<Check> {
     checks.push(check_config());
     checks.extend(check_daemon());
     checks.push(check_clipboard());
-    checks.push(check_killswitch());
-    checks.push(check_polkit());
+    checks.push(check_killswitch(root));
+    checks.push(check_polkit(root));
     checks.push(check_omarchy());
     checks
 }
@@ -398,10 +401,14 @@ fn check_clipboard() -> Check {
     }
 }
 
-fn check_killswitch() -> Check {
+fn check_killswitch(root: &Path) -> Check {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-    let path = Path::new(KILLSWITCH_HELPER);
+    let helper = crate::integration_files::under_root(
+        root,
+        crate::integration_files::KILLSWITCH_HELPER_PATH,
+    );
+    let path = helper.as_path();
     if !path.is_file() {
         return Check::optional("kill switch is not installed (optional)");
     }
@@ -423,13 +430,20 @@ fn check_killswitch() -> Check {
         );
     }
     if let Some(check) =
+        outdated_killswitch_check(crate::integration_files::outdated_killswitch_files(root))
+    {
+        return check;
+    }
+    if let Some(check) =
         check_killswitch_session(crate::services::killswitch::integration_group_status())
     {
         return check;
     }
 
     match Command::new("sudo")
-        .args(["-n", KILLSWITCH_HELPER, "check"])
+        .arg("-n")
+        .arg(path)
+        .arg("check")
         .output()
     {
         Ok(output) if output.status.success() => {
@@ -444,6 +458,18 @@ fn check_killswitch() -> Check {
             "Install sudo and run `sudo kvn setup --killswitch`.",
         ),
     }
+}
+
+fn outdated_killswitch_check(outdated: Vec<&str>) -> Option<Check> {
+    (!outdated.is_empty()).then(|| {
+        Check::failure(
+            format!(
+                "kill switch system files are outdated: {}",
+                outdated.join(", ")
+            ),
+            "Run `sudo kvn setup --killswitch`.",
+        )
+    })
 }
 
 fn check_killswitch_session(
@@ -534,8 +560,26 @@ fn polkit_readiness_from(status: PolkitStatus) -> Result<()> {
     }
 }
 
-fn check_polkit() -> Check {
-    match polkit_status() {
+fn check_polkit(root: &Path) -> Check {
+    polkit_check(
+        polkit_status(),
+        crate::integration_files::polkit_rule_state(root),
+    )
+}
+
+fn polkit_check(status: PolkitStatus, rule: crate::integration_files::StampState) -> Check {
+    use crate::integration_files::StampState;
+
+    let rule_grants_access = matches!(
+        status,
+        PolkitStatus::Ready | PolkitStatus::GroupPendingActivation
+    );
+    match rule {
+        StampState::Outdated => return polkit_outdated_check(),
+        StampState::Missing if rule_grants_access => return polkit_outdated_check(),
+        _ => {}
+    }
+    match status {
         PolkitStatus::Ready => Check::pass("all required polkit DNS authorizations are active"),
         PolkitStatus::IdentityUnknown => Check::warning(
             "polkit authorization could not be checked",
@@ -555,6 +599,10 @@ fn check_polkit() -> Check {
         ),
         PolkitStatus::GroupPendingActivation => polkit_group_pending_check(),
     }
+}
+
+fn polkit_outdated_check() -> Check {
+    Check::failure("polkit rule is outdated", "Run `sudo kvn setup --polkit`.")
 }
 
 fn polkit_group_pending_check() -> Check {
@@ -915,11 +963,24 @@ mod tests {
         assert!(installed.message.contains("active theme: tokyo-night"));
     }
 
+    fn current_polkit_root() -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+        crate::integration_files::install_current(root.path());
+        std::fs::remove_file(crate::integration_files::under_root(
+            root.path(),
+            crate::integration_files::KILLSWITCH_HELPER_PATH,
+        ))
+        .unwrap();
+        root
+    }
+
     #[test]
     fn polkit_check_classifies_authorized_denied_and_errors() {
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let _path = EnvGuard::set("PATH", dir.path());
+        let root = current_polkit_root();
+        let check_polkit = || check_polkit(root.path());
 
         executable(dir.path(), "pkcheck", "exit 0");
         assert_eq!(check_polkit().level, Level::Pass);
@@ -996,7 +1057,64 @@ mod tests {
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let _path = EnvGuard::set("PATH", dir.path());
-        assert_eq!(check_polkit().level, Level::Warning);
+        assert_eq!(check_polkit(dir.path()).level, Level::Warning);
+    }
+
+    #[test]
+    fn polkit_check_fails_for_outdated_or_unrecorded_rule() {
+        use crate::integration_files::StampState;
+
+        for (status, rule) in [
+            (PolkitStatus::Ready, StampState::Outdated),
+            (PolkitStatus::Denied { action: "a" }, StampState::Outdated),
+            (PolkitStatus::Ready, StampState::Missing),
+            (PolkitStatus::GroupPendingActivation, StampState::Missing),
+        ] {
+            let check = polkit_check(status, rule);
+            assert_eq!(check.level, Level::Failure);
+            assert!(check.message.contains("outdated"));
+            assert_eq!(
+                check.remedy.as_deref(),
+                Some("Run `sudo kvn setup --polkit`.")
+            );
+        }
+        assert_eq!(
+            polkit_check(PolkitStatus::Denied { action: "a" }, StampState::Missing).level,
+            Level::Warning
+        );
+        assert_eq!(
+            polkit_check(PolkitStatus::Ready, StampState::Current).level,
+            Level::Pass
+        );
+    }
+
+    #[test]
+    fn outdated_killswitch_check_lists_files() {
+        assert!(outdated_killswitch_check(Vec::new()).is_none());
+        let check = outdated_killswitch_check(vec!["killswitch.nft", "sudoers rule"]).unwrap();
+        assert_eq!(check.level, Level::Failure);
+        assert!(check.message.ends_with("killswitch.nft, sudoers rule"));
+        assert_eq!(
+            check.remedy.as_deref(),
+            Some("Run `sudo kvn setup --killswitch`.")
+        );
+    }
+
+    #[test]
+    fn killswitch_check_fails_for_outdated_installation() {
+        let root = tempfile::tempdir().unwrap();
+        crate::integration_files::install_current(root.path());
+        let helper = crate::integration_files::under_root(
+            root.path(),
+            crate::integration_files::KILLSWITCH_HELPER_PATH,
+        );
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let check = check_killswitch(root.path());
+        assert_eq!(check.level, Level::Warning);
+        assert!(check.message.contains("unsafe ownership"));
+
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(check_killswitch(empty.path()).level, Level::Optional);
     }
 
     #[test]
@@ -1077,7 +1195,8 @@ mod tests {
         let _override = EnvGuard::remove("SING_BOX_PATH");
         let _xdg = EnvGuard::set("XDG_CONFIG_HOME", config.path());
         let _wayland = EnvGuard::set("WAYLAND_DISPLAY", "wayland-test");
-        assert!(run().is_ok());
+        let root = current_polkit_root();
+        assert!(run_at(root.path()).is_ok());
     }
 
     #[test]
@@ -1093,6 +1212,6 @@ mod tests {
         let _xdg = EnvGuard::set("XDG_CONFIG_HOME", config.path());
         let _wayland = EnvGuard::remove("WAYLAND_DISPLAY");
         let _session = EnvGuard::remove("XDG_SESSION_TYPE");
-        assert!(run().is_err());
+        assert!(run_at(config.path()).is_err());
     }
 }

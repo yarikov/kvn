@@ -1256,6 +1256,7 @@ dependencies = [
  "libc",
  "notify",
  "ratatui",
+ "ring",
  "rustls",
  "semver",
  "serde",

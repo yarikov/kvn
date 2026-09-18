@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::process::Command;
 
-const HELPER: &str = "/usr/lib/kvn-tui/killswitch-helper.sh";
+const HELPER: &str = crate::integration_files::KILLSWITCH_HELPER_PATH;
 const UNIT: &str = "kvn-tui-killswitch.service";
 const INTEGRATION_GROUP: &str = "kvn-tui";
 

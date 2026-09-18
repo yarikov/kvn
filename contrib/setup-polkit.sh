@@ -3,6 +3,8 @@ set -euo pipefail
 
 RULE_FILE="/etc/polkit-1/rules.d/49-kvn-tui.rules"
 GROUP_NAME="kvn-tui"
+STAMP_DIR="/var/lib/kvn/integrations"
+RULE_SOURCE="${1:?missing embedded polkit rule source}"
 
 if [[ $EUID -ne 0 ]]; then
     echo "This installer must be run as root (e.g. sudo kvn setup --polkit)" >&2
@@ -29,23 +31,12 @@ fi
 
 RULE_TMP="$(mktemp)"
 trap 'rm -f "$RULE_TMP"' EXIT
-cat >"$RULE_TMP" <<'EOF'
-// kvn-tui: allow unattended sing-box DNS setup for explicitly enrolled users.
-polkit.addRule(function(action, subject) {
-    if (
-        (
-            action.id == "org.freedesktop.resolve1.set-dns-servers" ||
-            action.id == "org.freedesktop.resolve1.set-domains" ||
-            action.id == "org.freedesktop.resolve1.set-default-route"
-        ) &&
-        subject.isInGroup("kvn-tui")
-    ) {
-        return polkit.Result.YES;
-    }
-});
-EOF
+printf '%s' "$RULE_SOURCE" >"$RULE_TMP"
 
 install -m 0644 -o root -g root "$RULE_TMP" "$RULE_FILE"
+install -dm755 "$STAMP_DIR"
+sha256sum "$RULE_FILE" | cut -d' ' -f1 > "$STAMP_DIR/polkit.sha256"
+chmod 644 "$STAMP_DIR/polkit.sha256"
 
 echo "Installed $RULE_FILE with three systemd-resolved permissions."
 echo "NetworkManager permissions are not granted."

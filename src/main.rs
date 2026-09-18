@@ -11,6 +11,7 @@ mod config;
 mod daemon;
 mod doctor;
 mod geo;
+mod integration_files;
 mod ipc;
 mod migrations;
 mod omarchy;
