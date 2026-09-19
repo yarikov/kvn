@@ -108,18 +108,18 @@ impl HelpGroup {
     }
 }
 
-fn relevant_group(context: HelpContext) -> HelpGroup {
+fn relevant_groups(context: HelpContext) -> &'static [HelpGroup] {
     match context {
-        HelpContext::Sources => HelpGroup::Sources,
-        HelpContext::Logs => HelpGroup::Logs,
-        HelpContext::SettingsMenu(_) => HelpGroup::Settings,
+        HelpContext::Sources => &[HelpGroup::Sources],
+        HelpContext::Logs => &[HelpGroup::Logs],
+        HelpContext::SettingsMenu(_) => &[HelpGroup::Dialogs, HelpGroup::Settings],
         HelpContext::ConfirmDelete
         | HelpContext::RoutingMode
         | HelpContext::GeoRegions
         | HelpContext::DnsSettings
         | HelpContext::ThemeSettings
         | HelpContext::ServiceRouting
-        | HelpContext::Support => HelpGroup::Dialogs,
+        | HelpContext::Support => &[HelpGroup::Dialogs],
     }
 }
 
@@ -137,12 +137,14 @@ fn append_group(lines: &mut Vec<HelpLine>, group: HelpGroup) {
 }
 
 pub(crate) fn rows(context: HelpContext) -> Vec<HelpLine> {
-    let relevant = relevant_group(context);
+    let relevant = relevant_groups(context);
     let mut lines = Vec::new();
     append_group(&mut lines, HelpGroup::Navigation);
-    append_group(&mut lines, relevant);
+    for &group in relevant {
+        append_group(&mut lines, group);
+    }
     for &group in BASE_ORDER {
-        if group != relevant {
+        if !relevant.contains(&group) {
             append_group(&mut lines, group);
         }
     }
@@ -228,6 +230,20 @@ mod tests {
                 "Logs",
                 "Connection",
                 "Settings",
+                "General",
+            ]
+        );
+        assert_eq!(
+            headings(HelpContext::SettingsMenu(
+                crate::app::model::SettingsMenuPage::Root
+            )),
+            [
+                "Navigation",
+                "Dialogs",
+                "Settings",
+                "Profiles",
+                "Logs",
+                "Connection",
                 "General",
             ]
         );
