@@ -111,8 +111,9 @@ systemctl --user enable --now kvn-tui.service
 available after login. The package also restores the TUN capabilities on
 `/usr/bin/sing-box` automatically after pacman upgrades it.
 
-Both optional setups below (`kvn setup --polkit` and `kvn setup --killswitch`)
-add you to the dedicated `kvn-tui` group; reboot once afterwards to activate it.
+> **Note:** Both optional setups below (`kvn setup --polkit` and
+> `kvn setup --killswitch`) add you to the dedicated `kvn-tui` group; reboot
+> once afterwards to activate it.
 
 ### Polkit setup (optional)
 
