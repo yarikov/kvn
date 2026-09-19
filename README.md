@@ -279,7 +279,7 @@ change its draft value, and `Enter` to apply all changes on the current screen.
 | `Space` | Open settings menu |
 | `Space c` | Connection settings |
 | `Space d` | DNS settings |
-| `Space i` | Interface settings: theme and Nerd Font or Unicode icons, previewed live |
+| `Space i` | Interface settings |
 | `Space r` | Routing settings |
 
 **Dialogs**
