@@ -276,6 +276,7 @@ change its draft value, and `Enter` to apply all changes on the current screen.
 
 | Key | Action |
 |-----|--------|
+| `Space` | Open settings menu |
 | `Space c` | Connection settings |
 | `Space d` | DNS settings |
 | `Space i` | Interface settings: theme and Nerd Font or Unicode icons, previewed live |
@@ -294,7 +295,6 @@ change its draft value, and `Enter` to apply all changes on the current screen.
 
 | Key | Action |
 |-----|--------|
-| `Space` | Open settings menu |
 | `q` / `Esc` | Detach the TUI from the main screen; in a dialog, cancel it (`Esc` cancels an active log selection first) |
 | `Ctrl+C` | Stop the daemon, disconnect the VPN, and exit completely |
 | `?` | Open or close help |

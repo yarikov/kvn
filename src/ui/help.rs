@@ -62,6 +62,7 @@ const LOGS: &[(&str, &str)] = &[
 const CONNECTION: &[(&str, &str)] = &[("r", "Reconnect"), ("s", "Disconnect")];
 
 const SETTINGS: &[(&str, &str)] = &[
+    ("Space", "Open settings menu"),
     ("Space c", "Connection"),
     ("Space d", "DNS"),
     ("Space i", "Interface"),
@@ -78,7 +79,6 @@ const DIALOGS: &[(&str, &str)] = &[
 const GENERAL: &[(&str, &str)] = &[
     ("q/Esc", "Detach TUI from main screen"),
     ("Ctrl+C", "Quit daemon"),
-    ("Space", "Open settings menu"),
     ("?", "Open or close help"),
 ];
 
@@ -300,7 +300,11 @@ mod tests {
     #[test]
     fn general_orders_quit_before_help() {
         assert_eq!(GENERAL[1], ("Ctrl+C", "Quit daemon"));
-        assert_eq!(GENERAL[2], ("Space", "Open settings menu"));
-        assert_eq!(GENERAL[3], ("?", "Open or close help"));
+        assert_eq!(GENERAL[2], ("?", "Open or close help"));
+    }
+
+    #[test]
+    fn settings_starts_with_menu_entry() {
+        assert_eq!(SETTINGS[0], ("Space", "Open settings menu"));
     }
 }

@@ -30,13 +30,13 @@ expression: "snapshot_terminal(&model, 80, 40)"
 │             │ s          Disconnect                           │              │
 │             │                                                 │              │
 │             │ Settings                                        │              │
+│             │ Space      Open settings menu                   │              │
 │             │ Space c    Connection                           │              │
 │             │ Space d    DNS                                  │              │
 │             │ Space i    Interface                            │              │
 │             │ Space r    Routing                              │              │
 │             │                                                 │              │
 │             │ Dialogs                                         │              │
-│             │ h/l, ←/→   Change selected value                │              │
 │             │                                                 │              │
 │             │                    q/󱊷 close                    │              │
 │             └─────────────────────────────────────────────────┘              │
