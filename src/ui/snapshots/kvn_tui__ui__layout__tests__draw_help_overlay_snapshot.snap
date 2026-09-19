@@ -4,41 +4,41 @@ expression: "snapshot_terminal(&model, 80, 40)"
 ---
 ┌ Traffic ─────────────────────────────────────────────────────────────────────┐
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections         │
-└───────────┌──────────────────────────────────────────────────────┐───────────┘
-┌ Profiles ─│ Navigation                                           │───────────┐
-│ No sources│ Ctrl+h/l, ←/→   Focus panes                          │ipboard.   │
-│           │ j/k, ↑/↓        Move or scroll                       │           │
-│           │ gg/G            Go to first / last                   │           │
-│           │                                                      │           │
-│           │ Profiles                                             │           │
-│           │ Enter           Connect selected profile             │           │
-│           │ e               Open profiles.json in $EDITOR        │           │
-│           │ y               Yank profile or subscription         │           │
-│           │ p               Paste profile or subscription        │           │
-│           │ d               Delete profile or subscription       │           │
-│           │ u               Update subscription or geo           │           │
-│           │ i/I             Cycle subscription / geo auto-update │           │
-│           │ t/T             Test selected / all profiles         │           │
-│           │                                                      │           │
-│           │ Logs                                                 │           │
-│           │ y               Yank selected log(s)                 │           │
-│           │ Shift+V         Select multiple logs                 │           │
-│           │ Esc             Cancel log selection                 │           │
-│           │                                                      │           │
-│           │ Connection                                           │           │
-│           │ r               Reconnect                            │           │
-│           │ s               Disconnect                           │           │
-│           │                                                      │           │
-│           │ Settings                                             │           │
-│           │ Space c         Connection                           │           │
-│           │ Space d         DNS                                  │           │
-│           │ Space i         Interface                            │           │
-│           │ Space r         Routing                              │           │
-│           │                                                      │           │
-│           │ Dialogs                                              │           │
-│           │ h/l, ←/→        Change selected value                │           │
-│           │                                                      │           │
-│           │                       q/󱊷 close                      │           │
-│           └──────────────────────────────────────────────────────┘           │
+└─────────────┌─────────────────────────────────────────────────┐──────────────┘
+┌ Profiles ───│ Navigation                                      │──────────────┐
+│ No sources. │ Ctrl+h/l   Focus panes                          │ clipboard.   │
+│             │ j/k, ↑/↓   Move or scroll                       │              │
+│             │ gg/G       Go to first / last                   │              │
+│             │                                                 │              │
+│             │ Profiles                                        │              │
+│             │ Enter      Connect selected profile             │              │
+│             │ e          Open profiles.json in $EDITOR        │              │
+│             │ y          Yank profile or subscription         │              │
+│             │ p          Paste profile or subscription        │              │
+│             │ d          Delete profile or subscription       │              │
+│             │ u          Update subscription or geo           │              │
+│             │ i/I        Cycle subscription / geo auto-update │              │
+│             │ t/T        Test selected / all profiles         │              │
+│             │                                                 │              │
+│             │ Logs                                            │              │
+│             │ y          Yank selected log(s)                 │              │
+│             │ Shift+V    Select multiple logs                 │              │
+│             │ Esc        Cancel log selection                 │              │
+│             │                                                 │              │
+│             │ Connection                                      │              │
+│             │ r          Reconnect                            │              │
+│             │ s          Disconnect                           │              │
+│             │                                                 │              │
+│             │ Settings                                        │              │
+│             │ Space c    Connection                           │              │
+│             │ Space d    DNS                                  │              │
+│             │ Space i    Interface                            │              │
+│             │ Space r    Routing                              │              │
+│             │                                                 │              │
+│             │ Dialogs                                         │              │
+│             │ h/l, ←/→   Change selected value                │              │
+│             │                                                 │              │
+│             │                    q/󱊷 close                    │              │
+│             └─────────────────────────────────────────────────┘              │
 └──────────────────────────────────────────────────────────────────────────────┘
  DISCONNECTED                                                        DoH  Global

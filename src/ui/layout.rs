@@ -1024,7 +1024,7 @@ fn draw_help(
             crate::ui::help::HelpLine::Separator => Row::new(vec!["", ""]),
             crate::ui::help::HelpLine::Command { key, action } => Row::new(vec![*key, *action]),
         });
-    let table = Table::new(rows, [Constraint::Length(15), Constraint::Min(1)])
+    let table = Table::new(rows, [Constraint::Length(10), Constraint::Min(1)])
         .style(theme.normal())
         .row_highlight_style(theme.selected())
         .highlight_symbol(" ");
@@ -1383,7 +1383,7 @@ fn draw_confirm_delete(frame: &mut Frame, model: &Model, area: Rect) {
 }
 
 const DIALOG_POPUP_WIDTH: u16 = 48;
-const HELP_POPUP_WIDTH: u16 = 56;
+const HELP_POPUP_WIDTH: u16 = 51;
 const SETTINGS_POPUP_MIN_WIDTH: u16 = 33;
 const SETTINGS_TEXT_MARGIN: usize = 1;
 const SELECTION_POPUP_MAX_HEIGHT_PERCENT: u16 = 90;
@@ -2740,7 +2740,7 @@ mod tests {
         let content = buffer_to_string(frame.buffer);
         let lines = crate::ui::help::rows(state.context);
         let expected = [
-            ("Ctrl+h/l, ←/→", "Focus panes"),
+            ("Ctrl+h/l", "Focus panes"),
             ("j/k, ↑/↓", "Move or scroll"),
             ("gg/G", "Go to first / last"),
             ("Enter", "Connect selected profile"),
