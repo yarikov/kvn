@@ -78,7 +78,7 @@ const DIALOGS: &[(&str, &str)] = &[
 const GENERAL: &[(&str, &str)] = &[
     ("q/Esc", "Detach TUI from main screen"),
     ("Ctrl+C", "Quit daemon"),
-    ("Space", "Open settings shortcuts"),
+    ("Space", "Open settings menu"),
     ("?", "Open or close help"),
 ];
 
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn general_orders_quit_before_help() {
         assert_eq!(GENERAL[1], ("Ctrl+C", "Quit daemon"));
-        assert_eq!(GENERAL[2], ("Space", "Open settings shortcuts"));
+        assert_eq!(GENERAL[2], ("Space", "Open settings menu"));
         assert_eq!(GENERAL[3], ("?", "Open or close help"));
     }
 }

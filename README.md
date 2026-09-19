@@ -111,6 +111,9 @@ systemctl --user enable --now kvn-tui.service
 available after login. The package also restores the TUN capabilities on
 `/usr/bin/sing-box` automatically after pacman upgrades it.
 
+Both optional setups below (`kvn setup --polkit` and `kvn setup --killswitch`)
+add you to the dedicated `kvn-tui` group; reboot once afterwards to activate it.
+
 ### Polkit setup (optional)
 
 Install the polkit rule to avoid repeated authentication prompts when sing-box
@@ -123,8 +126,7 @@ sudo pacman -S --needed polkit
 sudo kvn setup --polkit
 ```
 
-If setup adds you to the `kvn-tui` group, reboot to activate the `kvn-tui`
-group. Because authorization is group-wide, every process running as
+Because authorization is group-wide, every process running as
 an enrolled user can request those three DNS operations. Skip this setup if you
 prefer interactive polkit authorization and do not need unattended auto-connect
 or resume reconnects. Enabling auto-connect requires this setup: kvn refuses to
@@ -143,10 +145,9 @@ sudo kvn setup --killswitch
 
 The kill-switch sudoers rule uses the same dedicated `kvn-tui` group and allows
 only the validating helper installed at `/usr/lib/kvn-tui/killswitch-helper.sh`.
-If setup adds you to the `kvn-tui` group, reboot to activate the `kvn-tui`
-group.
 
-Toggle it with `K`; when enabled, the status bar shows `KS`.
+Open the settings menu with `Space c` and enable the kill switch; the status bar
+then shows `KS`.
 
 > **Note:** If the daemon crashes or cannot start in this state, use the
 > emergency command below to restore network access.
@@ -292,7 +293,7 @@ change its draft value, and `Enter` to apply all changes on the current screen.
 
 | Key | Action |
 |-----|--------|
-| `Space` | Open settings shortcuts |
+| `Space` | Open settings menu |
 | `q` / `Esc` | Detach the TUI from the main screen; in a dialog, cancel it (`Esc` cancels an active log selection first) |
 | `Ctrl+C` | Stop the daemon, disconnect the VPN, and exit completely |
 | `?` | Open or close help |

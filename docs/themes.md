@@ -1,6 +1,6 @@
 # Theme gallery
 
-kvn includes 22 palettes derived from Omarchy themes. Press `C` in the TUI to preview and select one.
+kvn includes 22 palettes derived from Omarchy themes. Press `Space i` in the TUI to preview and select one.
 
 ## Catppuccin
 
