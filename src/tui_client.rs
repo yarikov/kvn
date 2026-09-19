@@ -1495,8 +1495,6 @@ fn deprecated_settings_shortcut_message(
         KeyCode::Char('D') => Some("D is deprecated; use Space d"),
         KeyCode::Char('S') => Some("S is deprecated; use Space r"),
         KeyCode::Char('C') => Some("C is deprecated; use Space i"),
-        KeyCode::Char('a') => Some("a is deprecated; use Space c"),
-        KeyCode::Char('K') => Some("K is deprecated; use Space c"),
         _ => None,
     }
 }
@@ -1740,8 +1738,6 @@ mod tests {
             ('D', "D is deprecated; use Space d"),
             ('S', "S is deprecated; use Space r"),
             ('C', "C is deprecated; use Space i"),
-            ('a', "a is deprecated; use Space c"),
-            ('K', "K is deprecated; use Space c"),
         ] {
             let event = KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE);
             assert_eq!(
@@ -1757,11 +1753,13 @@ mod tests {
             );
         }
 
-        let event = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
-        assert_eq!(
-            deprecated_settings_shortcut_message(&event, Overlay::None),
-            None
-        );
+        for key in ['x', 'a', 'K'] {
+            let event = KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE);
+            assert_eq!(
+                deprecated_settings_shortcut_message(&event, Overlay::None),
+                None
+            );
+        }
     }
 
     #[test]

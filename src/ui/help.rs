@@ -59,7 +59,12 @@ const LOGS: &[(&str, &str)] = &[
     ("Esc", "Cancel log selection"),
 ];
 
-const CONNECTION: &[(&str, &str)] = &[("r", "Reconnect"), ("s", "Disconnect")];
+const CONNECTION: &[(&str, &str)] = &[
+    ("r", "Reconnect"),
+    ("s", "Disconnect"),
+    ("a", "Toggle auto-connect"),
+    ("Shift+K", "Toggle kill switch"),
+];
 
 const SETTINGS: &[(&str, &str)] = &[
     ("Space", "Open settings menu"),

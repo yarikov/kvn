@@ -28,6 +28,8 @@ expression: "snapshot_terminal(&model, 80, 40)"
 │             │ Connection                                      │              │
 │             │ r          Reconnect                            │              │
 │             │ s          Disconnect                           │              │
+│             │ a          Toggle auto-connect                  │              │
+│             │ Shift+K    Toggle kill switch                   │              │
 │             │                                                 │              │
 │             │ Settings                                        │              │
 │             │ Space      Open settings menu                   │              │
@@ -35,8 +37,6 @@ expression: "snapshot_terminal(&model, 80, 40)"
 │             │ Space d    DNS                                  │              │
 │             │ Space i    Interface                            │              │
 │             │ Space r    Routing                              │              │
-│             │                                                 │              │
-│             │ Dialogs                                         │              │
 │             │                                                 │              │
 │             │                    q/󱊷 close                    │              │
 │             └─────────────────────────────────────────────────┘              │

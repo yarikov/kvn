@@ -2753,6 +2753,8 @@ mod tests {
             ("t/T", "Test selected / all profiles"),
             ("r", "Reconnect"),
             ("s", "Disconnect"),
+            ("a", "Toggle auto-connect"),
+            ("Shift+K", "Toggle kill switch"),
             ("Space r", "Routing"),
             ("Space i", "Interface"),
             ("Space c", "Connection"),

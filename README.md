@@ -147,8 +147,8 @@ sudo kvn setup --killswitch
 The kill-switch sudoers rule uses the same dedicated `kvn-tui` group and allows
 only the validating helper installed at `/usr/lib/kvn-tui/killswitch-helper.sh`.
 
-Open the settings menu with `Space c` and enable the kill switch; the status bar
-then shows `KS`.
+Toggle it with `Shift+K` or from the `Space c` settings menu; when enabled, the
+status bar shows `KS`.
 
 > **Note:** If the daemon crashes or cannot start in this state, use the
 > emergency command below to restore network access.
@@ -268,6 +268,8 @@ detected problems.
 |-----|--------|
 | `r` | Reconnect |
 | `s` | Disconnect |
+| `a` | Toggle auto-connect |
+| `Shift+K` | Toggle kill switch |
 
 **Settings**
 
