@@ -2984,6 +2984,18 @@ mod tests {
     }
 
     #[test]
+    fn draw_help_overlay_at_minimum_terminal_size_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
+        model.overlay = Overlay::Help(crate::app::model::HelpState::default());
+        insta::assert_snapshot!(snapshot_terminal(
+            &model,
+            MIN_TERMINAL_WIDTH,
+            MIN_TERMINAL_HEIGHT
+        ));
+    }
+
+    #[test]
     fn draw_logs_help_overlay_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::Help(crate::app::model::HelpState {
@@ -3284,11 +3296,45 @@ mod tests {
     }
 
     #[test]
+    fn draw_theme_settings_overlay_at_minimum_terminal_size_snapshot() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
+        unsafe { std::env::set_var("XDG_STATE_HOME", dir.path()) };
+        let mut model = model_with_profiles(vec![]);
+        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
+        model.overlay = Overlay::ThemeSettings;
+        model.config.settings.theme = "gruvbox".into();
+        let slugs = crate::app::update::theme_picker_slugs();
+        model.theme_selected = slugs
+            .iter()
+            .position(|s| s == &model.config.settings.theme)
+            .unwrap_or(0);
+        insta::assert_snapshot!(snapshot_terminal(
+            &model,
+            MIN_TERMINAL_WIDTH,
+            MIN_TERMINAL_HEIGHT
+        ));
+    }
+
+    #[test]
     fn draw_support_overlay_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::Support;
         model.support_selected = 1;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
+    }
+
+    #[test]
+    fn draw_support_overlay_at_minimum_terminal_size_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::Support;
+        model.support_selected = 1;
+        insta::assert_snapshot!(snapshot_terminal(
+            &model,
+            MIN_TERMINAL_WIDTH,
+            MIN_TERMINAL_HEIGHT
+        ));
     }
 
     #[test]
