@@ -85,6 +85,7 @@ pub fn generate_config(
     profile: &Profile,
     settings: &Settings,
     geo: &GeoAvailability,
+    clash_api_port: u16,
 ) -> anyhow::Result<Value> {
     let mut proxy_outbounds = build_outbound(profile)?;
     proxy_outbounds.push(json!({ "type": "direct", "tag": "direct" }));
@@ -126,7 +127,7 @@ pub fn generate_config(
         "experimental": {
             "cache_file": cache_file,
             "clash_api": {
-                "external_controller": "127.0.0.1:9090"
+                "external_controller": format!("127.0.0.1:{clash_api_port}")
             }
         }
     });
@@ -414,6 +415,8 @@ mod tests {
         ShadowtlsVersion, TransportType, VlessConfig,
     };
 
+    const TEST_CLASH_PORT: u16 = 41390;
+
     fn test_profile() -> Profile {
         let mut p = Profile::new_vless(
             "Example".to_string(),
@@ -453,7 +456,13 @@ mod tests {
     fn generated_config_has_required_keys() {
         let profile = test_profile();
         let settings = Settings::default();
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
 
         assert!(config.get("log").is_some());
         assert!(config.get("dns").is_some());
@@ -467,7 +476,13 @@ mod tests {
     fn generated_config_log_level_defaults_to_info() {
         let profile = test_profile();
         let settings = Settings::default();
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         assert_eq!(config["log"]["level"].as_str(), Some("info"));
     }
 
@@ -476,7 +491,13 @@ mod tests {
         let profile = test_profile();
         let mut settings = Settings::default();
         settings.logs.level = "debug".to_string();
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         assert_eq!(config["log"]["level"].as_str(), Some("debug"));
     }
 
@@ -485,7 +506,13 @@ mod tests {
         let profile = test_profile();
         let mut settings = Settings::default();
         settings.logs.level = "verbose".to_string();
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         assert_eq!(config["log"]["level"].as_str(), Some("info"));
     }
 
@@ -493,10 +520,51 @@ mod tests {
     fn generated_config_enables_clash_api() {
         let profile = test_profile();
         let settings = Settings::default();
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         assert_eq!(
-            config["experimental"]["clash_api"]["external_controller"], "127.0.0.1:9090",
+            config["experimental"]["clash_api"]["external_controller"],
+            format!("127.0.0.1:{TEST_CLASH_PORT}"),
             "clash_api must be enabled so the TUI can poll traffic stats"
+        );
+    }
+
+    #[test]
+    fn generated_config_clash_api_port_follows_argument() {
+        let profile = test_profile();
+        let settings = Settings::default();
+        for port in [31234u16, 45678u16] {
+            let config =
+                generate_config(&profile, &settings, &GeoAvailability::all(), port).unwrap();
+            assert_eq!(
+                config["experimental"]["clash_api"]["external_controller"],
+                format!("127.0.0.1:{port}")
+            );
+        }
+    }
+
+    #[test]
+    fn clash_api_client_targets_the_generated_external_controller() {
+        let profile = test_profile();
+        let settings = Settings::default();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
+        let controller = config["experimental"]["clash_api"]["external_controller"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            crate::singbox::clash_api::connections_url(TEST_CLASH_PORT),
+            format!("http://{controller}/connections")
         );
     }
 
@@ -504,7 +572,13 @@ mod tests {
     fn generated_config_global_final_is_proxy() {
         let profile = test_profile();
         let settings = Settings::default();
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         let route = config.get("route").unwrap();
         assert_eq!(route["final"].as_str().unwrap(), "proxy");
     }
@@ -519,7 +593,13 @@ mod tests {
             geo_routing,
             ..Default::default()
         };
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         let route = config.get("route").unwrap();
         assert_eq!(route["final"].as_str().unwrap(), "direct");
     }
@@ -949,7 +1029,13 @@ mod tests {
     fn generated_config_includes_direct_outbound() {
         let profile = test_profile();
         let settings = Settings::default();
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         let outbounds = config["outbounds"].as_array().unwrap();
         assert!(outbounds.iter().any(|o| o["type"] == "direct"));
         assert!(outbounds.iter().any(|o| o["tag"] == "proxy"));
@@ -1015,7 +1101,13 @@ mod tests {
             geo_routing,
             ..Default::default()
         };
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         let route = config.get("route").unwrap();
         assert_eq!(route["final"].as_str().unwrap(), "direct");
     }
@@ -1186,7 +1278,13 @@ mod tests {
             },
             ..Settings::default()
         };
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         assert_eq!(
             config["experimental"]["cache_file"]["store_fakeip"], true,
             "store_fakeip must persist the v4/v6→domain map across restarts"
@@ -1197,7 +1295,13 @@ mod tests {
     fn generated_config_omits_store_fakeip_when_disabled() {
         let profile = test_profile();
         let settings = Settings::default();
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         assert!(
             config["experimental"]["cache_file"]
                 .get("store_fakeip")
@@ -1259,7 +1363,13 @@ mod tests {
             },
             ..Settings::default()
         };
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         assert_eq!(config["dns"]["final"], "quad9");
         assert_eq!(
             config["route"]["default_domain_resolver"]["server"],
@@ -1503,7 +1613,13 @@ mod tests {
             .geo_routing
             .service_routes
             .insert(RoutedService::Steam, ServiceRoute::Direct);
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         let tags: Vec<&str> = config["route"]["rule_set"]
             .as_array()
             .unwrap()
@@ -1518,7 +1634,13 @@ mod tests {
     fn generated_config_omits_service_rule_sets_by_default() {
         let profile = test_profile();
         let settings = Settings::default();
-        let config = generate_config(&profile, &settings, &GeoAvailability::all()).unwrap();
+        let config = generate_config(
+            &profile,
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         assert!(config["route"].get("rule_set").is_none());
     }
 

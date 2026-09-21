@@ -4,12 +4,17 @@ use std::process::ExitStatus;
 pub struct ProcessHandle {
     child: std::process::Child,
     pub pid: u32,
+    pub clash_api_port: u16,
 }
 
 impl ProcessHandle {
-    pub fn new(child: std::process::Child) -> Self {
+    pub fn new(child: std::process::Child, clash_api_port: u16) -> Self {
         let pid = child.id();
-        Self { child, pid }
+        Self {
+            child,
+            pid,
+            clash_api_port,
+        }
     }
 
     /// Check whether the child has exited without blocking. A returned status
@@ -46,8 +51,9 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id();
-        let mut handle = ProcessHandle::new(child);
+        let mut handle = ProcessHandle::new(child, 41390);
         assert_eq!(handle.pid, pid);
+        assert_eq!(handle.clash_api_port, 41390);
         handle.kill_and_wait().unwrap();
     }
 
@@ -58,7 +64,7 @@ mod tests {
             .args(["-c", "exit 7"])
             .spawn()
             .unwrap();
-        let mut handle = ProcessHandle::new(child);
+        let mut handle = ProcessHandle::new(child, 0);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         let status = loop {
             if let Some(status) = handle.try_wait().unwrap() {

@@ -14,6 +14,7 @@ mod geo;
 mod integration_files;
 mod ipc;
 mod migrations;
+mod net;
 mod omarchy;
 mod paths;
 mod redaction;
