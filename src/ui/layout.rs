@@ -3255,8 +3255,8 @@ mod tests {
     fn draw_theme_settings_overlay_snapshot() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        unsafe { std::env::set_var("XDG_STATE_HOME", dir.path()) };
+        let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", dir.path());
         let mut model = model_with_profiles(vec![]);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::ThemeSettings;
@@ -3273,8 +3273,8 @@ mod tests {
     fn draw_theme_settings_overlay_at_minimum_terminal_size_snapshot() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        unsafe { std::env::set_var("XDG_STATE_HOME", dir.path()) };
+        let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", dir.path());
         let mut model = model_with_profiles(vec![]);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::ThemeSettings;
@@ -3341,8 +3341,8 @@ mod tests {
             "theme-name-that-keeps-going-past-the-overlay",
         )
         .unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        unsafe { std::env::set_var("XDG_STATE_HOME", dir.path()) };
+        let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", dir.path());
         let mut model = model_with_profiles(vec![]);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::ThemeSettings;
@@ -3360,8 +3360,8 @@ mod tests {
     fn theme_picker_scrolls_to_keep_selection_and_footer_visible() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        unsafe { std::env::set_var("XDG_STATE_HOME", dir.path()) };
+        let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", dir.path());
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::ThemeSettings;
         model.theme_selected = crate::app::update::theme_picker_slugs().len() - 1;
