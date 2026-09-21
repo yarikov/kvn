@@ -2317,7 +2317,7 @@ mod tests {
     use crate::app::model::{ConnectionState, Overlay};
     use crate::config::profile::Profile;
     use crate::test_helpers::{
-        APP_WINDOW_COLS, APP_WINDOW_ROWS, buffer_to_string, model_with_profiles,
+        APP_WINDOW_COLS, APP_WINDOW_ROWS, buffer_to_string, model_with_profiles, render_to_string,
     };
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -2602,30 +2602,23 @@ mod tests {
     }
 
     fn snapshot_terminal(model: &Model, width: u16, height: u16) -> String {
-        let backend = TestBackend::new(width, height);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let frame = terminal.draw(|f| draw(f, model)).unwrap();
-        buffer_to_string(frame.buffer)
+        render_to_string(width, height, |frame| draw(frame, model))
     }
 
     #[test]
     fn toast_renders_over_the_top_right_corner() {
         let model = model_with_profiles(vec![]);
         let status = crate::app::model::AppStatus::Info("Saved".into());
-        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
-        terminal
-            .draw(|frame| {
-                draw_with_toast(
-                    frame,
-                    &model,
-                    MainPaneFocus::Sources,
-                    None,
-                    None,
-                    Some(&status),
-                )
-            })
-            .unwrap();
-        let output = buffer_to_string(terminal.backend().buffer());
+        let output = render_to_string(80, 20, |frame| {
+            draw_with_toast(
+                frame,
+                &model,
+                MainPaneFocus::Sources,
+                None,
+                None,
+                Some(&status),
+            )
+        });
         assert!(output.lines().nth(2).unwrap().contains("Saved"));
     }
 
@@ -2633,20 +2626,16 @@ mod tests {
     fn toast_remains_visible_when_logs_are_hidden() {
         let model = model_with_profiles(vec![]);
         let status = crate::app::model::AppStatus::Info("Saved".into());
-        let mut terminal = Terminal::new(TestBackend::new(71, 20)).unwrap();
-        terminal
-            .draw(|frame| {
-                draw_with_toast(
-                    frame,
-                    &model,
-                    MainPaneFocus::Sources,
-                    None,
-                    None,
-                    Some(&status),
-                )
-            })
-            .unwrap();
-        let output = buffer_to_string(terminal.backend().buffer());
+        let output = render_to_string(71, 20, |frame| {
+            draw_with_toast(
+                frame,
+                &model,
+                MainPaneFocus::Sources,
+                None,
+                None,
+                Some(&status),
+            )
+        });
         assert!(output.contains("Saved"));
         assert!(!output.contains("Logs"));
     }
@@ -2656,57 +2645,48 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::ConfirmDelete;
         let status = crate::app::model::AppStatus::Error("Must not appear".into());
-        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
-        terminal
-            .draw(|frame| {
-                draw_with_toast(
-                    frame,
-                    &model,
-                    MainPaneFocus::Sources,
-                    None,
-                    None,
-                    Some(&status),
-                )
-            })
-            .unwrap();
-        assert!(buffer_to_string(terminal.backend().buffer()).contains("Must not appear"));
+        let output = render_to_string(80, 20, |frame| {
+            draw_with_toast(
+                frame,
+                &model,
+                MainPaneFocus::Sources,
+                None,
+                None,
+                Some(&status),
+            )
+        });
+        assert!(output.contains("Must not appear"));
     }
 
     #[test]
     fn settings_menu_shows_error_and_info_toasts() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Root);
-        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
-
         let error = AppStatus::Error("Failed to save config".into());
-        terminal
-            .draw(|frame| {
-                draw_with_toast(
-                    frame,
-                    &model,
-                    MainPaneFocus::Sources,
-                    None,
-                    None,
-                    Some(&error),
-                )
-            })
-            .unwrap();
-        assert!(buffer_to_string(terminal.backend().buffer()).contains("Failed to save config"));
+        let rendered = render_to_string(80, 20, |frame| {
+            draw_with_toast(
+                frame,
+                &model,
+                MainPaneFocus::Sources,
+                None,
+                None,
+                Some(&error),
+            )
+        });
+        assert!(rendered.contains("Failed to save config"));
 
         let info = AppStatus::Info("Saved".into());
-        terminal
-            .draw(|frame| {
-                draw_with_toast(
-                    frame,
-                    &model,
-                    MainPaneFocus::Sources,
-                    None,
-                    None,
-                    Some(&info),
-                )
-            })
-            .unwrap();
-        assert!(buffer_to_string(terminal.backend().buffer()).contains("Saved"));
+        let rendered = render_to_string(80, 20, |frame| {
+            draw_with_toast(
+                frame,
+                &model,
+                MainPaneFocus::Sources,
+                None,
+                None,
+                Some(&info),
+            )
+        });
+        assert!(rendered.contains("Saved"));
     }
 
     fn find_text(buffer: &ratatui::buffer::Buffer, needle: &str) -> usize {
@@ -2725,21 +2705,12 @@ mod tests {
 
     #[test]
     fn help_renders_commands() {
-        use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
-
-        let backend = TestBackend::new(80, 60);
-        let mut terminal = Terminal::new(backend).unwrap();
         let model = model_with_profiles(vec![]);
         let state = crate::app::model::HelpState::default();
-        let frame = terminal
-            .draw(|frame| {
-                let area = frame.area();
-                draw_help(frame, &model, state, area);
-            })
-            .unwrap();
-
-        let content = buffer_to_string(frame.buffer);
+        let content = render_to_string(80, 60, |frame| {
+            let area = frame.area();
+            draw_help(frame, &model, state, area);
+        });
         let lines = crate::ui::help::rows(state.context);
         let expected = [
             ("Ctrl+h/l", "Focus panes"),
@@ -2880,8 +2851,6 @@ mod tests {
 
     #[test]
     fn focused_main_pane_uses_accent_border() {
-        use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
         use ratatui::style::Color;
 
         let model = mouse_model();
@@ -2902,8 +2871,6 @@ mod tests {
 
     #[test]
     fn overlay_focus_temporarily_suspends_and_restores_main_pane_focus() {
-        use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
         use ratatui::style::Color;
 
         for pane_focus in [MainPaneFocus::Sources, MainPaneFocus::Logs] {

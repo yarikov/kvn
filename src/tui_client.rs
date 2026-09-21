@@ -1807,10 +1807,10 @@ mod tests {
         assert!(logs.iter().all(|line| !line.contains(" ERROR ")));
         assert_eq!(state.toast.text(), DOCS_PREVIEW_TOAST);
 
-        let mut terminal =
-            ratatui::Terminal::new(ratatui::backend::TestBackend::new(109, 35)).unwrap();
-        terminal
-            .draw(|frame| {
+        let buffer = crate::test_helpers::render_to_buffer(
+            crate::test_helpers::APP_WINDOW_COLS,
+            crate::test_helpers::APP_WINDOW_ROWS,
+            |frame| {
                 crate::ui::layout::draw_with_toast(
                     frame,
                     &state.model,
@@ -1819,9 +1819,9 @@ mod tests {
                     None,
                     Some(&state.toast),
                 )
-            })
-            .unwrap();
-        let output = crate::test_helpers::buffer_to_string(terminal.backend().buffer());
+            },
+        );
+        let output = crate::test_helpers::buffer_to_string(&buffer);
         let lines: Vec<_> = output.lines().collect();
         let connected_row = lines
             .iter()
@@ -1838,10 +1838,9 @@ mod tests {
         assert!(!output.contains("ERROR"));
         assert!(output.matches(DOCS_PREVIEW_TOAST).count() >= 2);
 
-        let buffer = terminal.backend().buffer();
-        for row in 4..33 {
+        for row in 4..(crate::test_helpers::APP_WINDOW_ROWS - 2) {
             assert!(
-                (56..108).any(|column| {
+                (58..112).any(|column| {
                     buffer
                         .cell((column, row))
                         .is_some_and(|cell| !cell.symbol().trim().is_empty())
