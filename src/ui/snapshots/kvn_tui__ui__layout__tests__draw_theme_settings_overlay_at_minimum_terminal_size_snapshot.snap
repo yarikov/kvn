@@ -1,0 +1,19 @@
+---
+source: src/ui/layout.rs
+expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
+---
+┌ Traffic ───────────────────────────────────────────────────────────┐
+│ ↑ 0.0 KB/s  ↓ 0.┌───────────────────────────────┐KB    0 connectio │
+└─────────────────│       Settings › Theme        │──────────────────┘
+┌ Profiles ───────│                               │──────────────────┐
+│ No sources. Pres│       ethereal                │ption URL from    │
+│clipboard.       │       everforest              │                  │
+│                 │       flexoki-light           │                  │
+│                 │       gruvbox                 │                  │
+│                 │       hackerman               │                  │
+│                 │       kanagawa                │                  │
+│                 │       last-horizon            │                  │
+│                 │                               │                  │
+│                 │      󰌑 apply · q/󱊷 close      │                  │
+└─────────────────└───────────────────────────────┘──────────────────┘
+ DISCONNECTED                                              DoH  Global
