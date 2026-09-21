@@ -29,3 +29,7 @@ pkg/arch/src/
 *.pkg.tar.zst.sig
 *.pkg.tar.xz
 *.pkg.tar.xz.sig
+
+# insta pending snapshots
+*.snap.new
+*.pending-snap

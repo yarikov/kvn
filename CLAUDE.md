@@ -9,12 +9,13 @@ cargo build --release          # release build
 cargo test                     # run all tests
 cargo test ui::layout          # run a single module's tests
 INSTA_UPDATE=always cargo test # run tests and auto-accept snapshot changes
+cargo insta test --check --unreferenced=reject  # what CI checks: snapshots match, none orphaned
 cargo fmt                      # format (required before committing)
 cargo clippy --all-targets --all-features  # lint (fix warnings before committing)
 cargo llvm-cov --summary-only  # coverage report; both region & line totals must stay ≥ 85% (CI gate)
 ```
 
-Snapshot tests use [insta](https://insta.rs/). When layout changes affect terminal output, run with `INSTA_UPDATE=always` to regenerate `.snap` files, then review the diffs.
+Snapshot tests use [insta](https://insta.rs/). When layout changes affect terminal output, run with `INSTA_UPDATE=always` to regenerate `.snap` files, then review the diffs. UI snapshots render at `test_helpers::APP_WINDOW_COLS` × `APP_WINDOW_ROWS` unless the test is about a specific terminal size — see `AGENTS.md` § Testing Patterns.
 
 **Coverage policy:** total region and line coverage must remain ≥ 85 %. If a change drops either below 85 %, add tests in the same PR to bring it back up — CI's `coverage` job will fail otherwise. See `AGENTS.md` § Testing Patterns for the full policy and which I/O-wrapper modules are accepted at 0 %.
 

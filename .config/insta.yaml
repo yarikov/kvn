@@ -1,0 +1,5 @@
+behavior:
+  update: auto
+
+test:
+  unreferenced: reject
