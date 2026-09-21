@@ -2317,7 +2317,8 @@ mod tests {
     use crate::app::model::{ConnectionState, Overlay};
     use crate::config::profile::Profile;
     use crate::test_helpers::{
-        APP_WINDOW_COLS, APP_WINDOW_ROWS, buffer_to_string, model_with_profiles, render_to_string,
+        APP_WINDOW_COLS, APP_WINDOW_ROWS, buffer_to_string, buffer_to_styled_string,
+        model_with_profiles, render_to_buffer, render_to_string,
     };
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -2605,6 +2606,10 @@ mod tests {
         render_to_string(width, height, |frame| draw(frame, model))
     }
 
+    fn snapshot_styles(model: &Model, width: u16, height: u16) -> String {
+        buffer_to_styled_string(&render_to_buffer(width, height, |frame| draw(frame, model)))
+    }
+
     #[test]
     fn toast_renders_over_the_top_right_corner() {
         let model = model_with_profiles(vec![]);
@@ -2687,20 +2692,6 @@ mod tests {
             )
         });
         assert!(rendered.contains("Saved"));
-    }
-
-    fn find_text(buffer: &ratatui::buffer::Buffer, needle: &str) -> usize {
-        buffer
-            .content
-            .windows(needle.len())
-            .position(|cells| {
-                cells
-                    .iter()
-                    .map(ratatui::buffer::Cell::symbol)
-                    .collect::<String>()
-                    == needle
-            })
-            .unwrap_or_else(|| panic!("{needle:?} should be rendered"))
     }
 
     #[test]
@@ -2851,57 +2842,36 @@ mod tests {
 
     #[test]
     fn focused_main_pane_uses_accent_border() {
-        use ratatui::style::Color;
-
         let model = mouse_model();
-        let mut terminal = Terminal::new(TestBackend::new(90, 20)).unwrap();
         let navigation = LogNavigation::default();
-        terminal
-            .draw(|frame| {
-                draw_with_interaction(frame, &model, MainPaneFocus::Logs, Some(&navigation), None)
-            })
-            .unwrap();
-
-        let buffer = terminal.backend().buffer();
-        let source_border = &buffer.content[3 * 90];
-        let log_border = &buffer.content[3 * 90 + 45];
-        assert_eq!(source_border.style().fg, Some(Color::DarkGray));
-        assert_eq!(log_border.style().fg, Some(Color::Cyan));
+        let buffer = render_to_buffer(APP_WINDOW_COLS, APP_WINDOW_ROWS, |frame| {
+            draw_with_interaction(frame, &model, MainPaneFocus::Logs, Some(&navigation), None)
+        });
+        insta::assert_snapshot!(buffer_to_styled_string(&buffer));
     }
 
     #[test]
     fn overlay_focus_temporarily_suspends_and_restores_main_pane_focus() {
-        use ratatui::style::Color;
-
-        for pane_focus in [MainPaneFocus::Sources, MainPaneFocus::Logs] {
+        for (label, pane_focus) in [
+            ("sources", MainPaneFocus::Sources),
+            ("logs", MainPaneFocus::Logs),
+        ] {
             let mut model = mouse_model();
             model.overlay = Overlay::ConfirmDelete;
-            let mut terminal = Terminal::new(TestBackend::new(90, 20)).unwrap();
-            terminal
-                .draw(|frame| {
-                    draw_with_interaction(frame, &model, pane_focus, None, None);
-                })
-                .unwrap();
-
-            let buffer = terminal.backend().buffer();
-            assert_eq!(buffer.content[3 * 90].style().fg, Some(Color::DarkGray));
-            assert_eq!(
-                buffer.content[3 * 90 + 89].style().fg,
-                Some(Color::DarkGray)
-            );
+            let suspended = render_to_buffer(APP_WINDOW_COLS, APP_WINDOW_ROWS, |frame| {
+                draw_with_interaction(frame, &model, pane_focus, None, None);
+            });
+            insta::with_settings!({snapshot_suffix => format!("{label}-overlay")}, {
+                insta::assert_snapshot!(buffer_to_styled_string(&suspended));
+            });
 
             model.overlay = Overlay::None;
-            terminal
-                .draw(|frame| {
-                    draw_with_interaction(frame, &model, pane_focus, None, None);
-                })
-                .unwrap();
-            let buffer = terminal.backend().buffer();
-            let focused_border = match pane_focus {
-                MainPaneFocus::Sources => &buffer.content[3 * 90],
-                MainPaneFocus::Logs => &buffer.content[3 * 90 + 45],
-            };
-            assert_eq!(focused_border.style().fg, Some(Color::Cyan));
+            let restored = render_to_buffer(APP_WINDOW_COLS, APP_WINDOW_ROWS, |frame| {
+                draw_with_interaction(frame, &model, pane_focus, None, None);
+            });
+            insta::with_settings!({snapshot_suffix => label}, {
+                insta::assert_snapshot!(buffer_to_styled_string(&restored));
+            });
         }
     }
 
@@ -3053,15 +3023,7 @@ mod tests {
         model.overlay = Overlay::ConfirmDelete;
         model.theme = crate::ui::styles::Theme::resolve("catppuccin-latte");
 
-        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
-        terminal.draw(|frame| draw(frame, &model)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let footer_start = find_text(buffer, "confirm");
-
-        assert_eq!(
-            buffer.content[footer_start].style().fg,
-            model.theme.normal().fg
-        );
+        insta::assert_snapshot!(snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3070,20 +3032,14 @@ mod tests {
         model.theme = crate::ui::styles::Theme::resolve("catppuccin-latte");
         model.overlay = Overlay::Help(crate::app::model::HelpState::default());
 
-        let mut terminal = Terminal::new(TestBackend::new(80, 40)).unwrap();
-        terminal.draw(|frame| draw(frame, &model)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let help_row = find_text(buffer, "Move or scroll");
-        assert_eq!(buffer.content[help_row].style().fg, model.theme.normal().fg);
+        insta::with_settings!({snapshot_suffix => "help"}, {
+            insta::assert_snapshot!(snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
+        });
 
         model.overlay = Overlay::None;
-        terminal.draw(|frame| draw(frame, &model)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let empty_state = find_text(buffer, "No sources");
-        assert_eq!(
-            buffer.content[empty_state].style().fg,
-            model.theme.normal().fg
-        );
+        insta::with_settings!({snapshot_suffix => "empty-sources"}, {
+            insta::assert_snapshot!(snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
+        });
     }
 
     #[test]
@@ -3111,25 +3067,14 @@ mod tests {
         model.overlay = Overlay::RoutingMode;
         model.routing_selected = 2;
 
-        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
-        terminal.draw(|frame| draw(frame, &model)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let active = find_text(buffer, "Global");
-        assert_eq!(buffer.content[active].style().fg, model.theme.success().fg);
-        assert_eq!(buffer.content[active].style().bg, model.theme.popup_bg().bg);
+        insta::with_settings!({snapshot_suffix => "active-row"}, {
+            insta::assert_snapshot!(snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
+        });
 
         model.routing_selected = 0;
-        terminal.draw(|frame| draw(frame, &model)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let selected_active = find_text(buffer, "Global");
-        assert_eq!(
-            buffer.content[selected_active].style().fg,
-            model.theme.selected_connected().fg
-        );
-        assert_eq!(
-            buffer.content[selected_active].style().bg,
-            model.theme.selected_connected().bg
-        );
+        insta::with_settings!({snapshot_suffix => "active-row-selected"}, {
+            insta::assert_snapshot!(snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
+        });
     }
 
     #[test]
@@ -3635,7 +3580,7 @@ mod tests {
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[1].id);
         model.selected = 1;
-        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
+        insta::assert_snapshot!(snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Empty Sources pane: pins the "No sources." placeholder at
@@ -3679,7 +3624,7 @@ mod tests {
         model
             .logs
             .push_back("[error] sing-box exited with code 1".to_string());
-        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
+        insta::assert_snapshot!(snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Subscription rendered with a populated `last_updated` and a non-default
