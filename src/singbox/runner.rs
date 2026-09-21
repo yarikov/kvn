@@ -23,9 +23,14 @@ fn singbox_binary() -> &'static str {
 }
 
 /// Write the generated sing-box configuration to a temporary file.
-fn write_config(profile: &Profile, settings: &Settings, geo: &GeoAvailability) -> Result<PathBuf> {
-    let config =
-        generate_config(profile, settings, geo).context("Failed to generate sing-box config")?;
+fn write_config(
+    profile: &Profile,
+    settings: &Settings,
+    geo: &GeoAvailability,
+    clash_api_port: u16,
+) -> Result<PathBuf> {
+    let config = generate_config(profile, settings, geo, clash_api_port)
+        .context("Failed to generate sing-box config")?;
     crate::paths::ensure_runtime_dir()?;
     let path = crate::paths::temp_singbox_config_path()?;
 
@@ -74,15 +79,65 @@ fn collect_geo_availability() -> GeoAvailability {
     geo
 }
 
+const CLASH_API_START_ATTEMPTS: usize = 3;
+
 /// Start the sing-box process with the given profile.
 /// Validates config first, then spawns the process and verifies it stays alive.
 pub fn start(profile: &Profile, settings: &Settings) -> Result<ProcessHandle> {
     let geo = collect_geo_availability();
-    let config_path = write_config(profile, settings, &geo)?;
+    let mut config_validated = false;
+    start_with(
+        CLASH_API_START_ATTEMPTS,
+        crate::net::allocate_loopback_port,
+        |clash_api_port| {
+            let config_path = write_config(profile, settings, &geo, clash_api_port)?;
+            if !config_validated {
+                check_config(&config_path)?;
+                config_validated = true;
+            }
+            spawn_and_wait(&config_path, clash_api_port)
+        },
+    )
+}
 
-    // Validate configuration before starting.
-    check_config(&config_path)?;
+fn start_with<T>(
+    attempts: usize,
+    mut allocate_port: impl FnMut() -> Result<u16>,
+    mut attempt: impl FnMut(u16) -> Result<T>,
+) -> Result<T> {
+    let mut tried = 1;
+    loop {
+        let port = allocate_port()?;
+        let error = match attempt(port) {
+            Ok(value) => return Ok(value),
+            Err(error) => error,
+        };
+        if !is_clash_port_conflict(&format!("{error:#}"), port) {
+            return Err(error);
+        }
+        if tried >= attempts {
+            return Err(error.context(format!(
+                "sing-box could not bind the Clash API port after {attempts} attempts (last tried 127.0.0.1:{port})"
+            )));
+        }
+        tracing::warn!("Clash API port {port} was taken before sing-box could bind it; retrying");
+        tried += 1;
+    }
+}
 
+fn is_clash_port_conflict(error: &str, port: u16) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("address already in use") && mentions_exact_loopback_port(&error, port)
+}
+
+fn mentions_exact_loopback_port(error: &str, port: u16) -> bool {
+    let address = format!("127.0.0.1:{port}");
+    error
+        .match_indices(&address)
+        .any(|(start, _)| !error[start + address.len()..].starts_with(|c: char| c.is_ascii_digit()))
+}
+
+fn spawn_and_wait(config_path: &PathBuf, clash_api_port: u16) -> Result<ProcessHandle> {
     // We don't consume sing-box stdout; drop it to /dev/null so a verbose
     // logger can't fill the pipe buffer (~64K) and wedge the child on write.
     // stderr stays piped — on immediate exit we read it for diagnostics, and
@@ -90,7 +145,7 @@ pub fn start(profile: &Profile, settings: &Settings) -> Result<ProcessHandle> {
     let mut child = Command::new(singbox_binary())
         .arg("run")
         .arg("-c")
-        .arg(&config_path)
+        .arg(config_path)
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
@@ -125,7 +180,7 @@ pub fn start(profile: &Profile, settings: &Settings) -> Result<ProcessHandle> {
                     if let Some(stderr) = child.stderr.take() {
                         spawn_stderr_drain(stderr);
                     }
-                    return Ok(ProcessHandle::new(child));
+                    return Ok(ProcessHandle::new(child, clash_api_port));
                 }
                 thread::sleep(Duration::from_millis(10));
             }
@@ -155,8 +210,11 @@ fn spawn_stderr_drain(stderr: ChildStderr) {
 mod tests {
     use super::*;
     use crate::config::profile::Profile;
+    use std::cell::RefCell;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+
+    const TEST_CLASH_PORT: u16 = 41390;
 
     #[test]
     fn singbox_binary_resolution() {
@@ -185,13 +243,23 @@ mod tests {
             "uuid".to_string(),
         );
         let settings = Settings::default();
-        let path = write_config(&profile, &settings, &GeoAvailability::default()).unwrap();
+        let path = write_config(
+            &profile,
+            &settings,
+            &GeoAvailability::default(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         assert!(path.exists());
 
         let contents = fs::read_to_string(&path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&contents).unwrap();
         assert!(json.get("log").is_some());
         assert!(json.get("outbounds").is_some());
+        assert_eq!(
+            json["experimental"]["clash_api"]["external_controller"],
+            format!("127.0.0.1:{TEST_CLASH_PORT}")
+        );
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
@@ -305,8 +373,169 @@ mod tests {
         let profile =
             Profile::new_vless("T".to_string(), "1.1.1.1".to_string(), 443, "u".to_string());
         let settings = Settings::default();
-        let path = write_config(&profile, &settings, &GeoAvailability::default()).unwrap();
+        let path = write_config(
+            &profile,
+            &settings,
+            &GeoAvailability::default(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
         check_config(&path).expect("sing-box rejected a minimal vless profile");
         let _ = fs::remove_file(&path);
+    }
+
+    fn conflict_stderr(port: impl std::fmt::Display) -> anyhow::Error {
+        anyhow::anyhow!(
+            "sing-box exited immediately (code: Some(1)). stderr: FATAL[0000] start service: listen tcp 127.0.0.1:{port}: bind: address already in use"
+        )
+    }
+
+    #[test]
+    fn clash_port_conflict_matches_our_port() {
+        assert!(is_clash_port_conflict(
+            &format!("{:#}", conflict_stderr(41390)),
+            41390
+        ));
+    }
+
+    #[test]
+    fn clash_port_conflict_ignores_another_port() {
+        assert!(!is_clash_port_conflict(
+            &format!("{:#}", conflict_stderr(53)),
+            41390
+        ));
+    }
+
+    #[test]
+    fn clash_port_conflict_ignores_a_longer_port_with_the_same_prefix() {
+        assert!(!is_clash_port_conflict(
+            &format!("{:#}", conflict_stderr(413905)),
+            41390
+        ));
+    }
+
+    #[test]
+    fn clash_port_conflict_matches_real_singbox_stderr() {
+        let observed = "sing-box exited immediately (code: Some(1)). stderr: \u{1b}[31mFATAL\u{1b}[0m[0000] start service: finish-start clash server: external controller listen error: listen tcp 127.0.0.1:47551: bind: address already in use";
+        assert!(is_clash_port_conflict(observed, 47551));
+        assert!(!is_clash_port_conflict(observed, 4755));
+    }
+
+    #[test]
+    fn clash_port_conflict_requires_address_in_use() {
+        let error = "sing-box exited immediately (code: Some(1)). stderr: listen tcp 127.0.0.1:41390: bind: permission denied";
+        assert!(!is_clash_port_conflict(error, 41390));
+    }
+
+    #[test]
+    fn start_with_returns_the_first_success() {
+        let allocations = RefCell::new(0);
+        let result = start_with(
+            3,
+            || {
+                *allocations.borrow_mut() += 1;
+                Ok(41390)
+            },
+            Ok,
+        )
+        .unwrap();
+        assert_eq!(result, 41390);
+        assert_eq!(*allocations.borrow(), 1);
+    }
+
+    #[test]
+    fn start_with_retries_a_conflict_on_a_fresh_port() {
+        let ports = RefCell::new(vec![41390u16, 41391]);
+        let tried = RefCell::new(Vec::new());
+        let result = start_with(
+            3,
+            || Ok(ports.borrow_mut().remove(0)),
+            |port| {
+                tried.borrow_mut().push(port);
+                if port == 41390 {
+                    Err(conflict_stderr(port))
+                } else {
+                    Ok(port)
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(result, 41391);
+        assert_eq!(*tried.borrow(), vec![41390, 41391]);
+    }
+
+    #[test]
+    fn start_with_does_not_retry_unrelated_failures() {
+        let tried = RefCell::new(0);
+        let error = start_with(
+            3,
+            || Ok(41390),
+            |_| -> Result<u16> {
+                *tried.borrow_mut() += 1;
+                anyhow::bail!("sing-box config validation failed: bad outbound")
+            },
+        )
+        .unwrap_err();
+        assert_eq!(*tried.borrow(), 1);
+        assert_eq!(
+            format!("{error:#}"),
+            "sing-box config validation failed: bad outbound"
+        );
+    }
+
+    #[test]
+    fn start_with_does_not_retry_a_conflict_on_another_port() {
+        let tried = RefCell::new(0);
+        start_with(
+            3,
+            || Ok(41390),
+            |_| -> Result<u16> {
+                *tried.borrow_mut() += 1;
+                Err(conflict_stderr(53))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(*tried.borrow(), 1);
+    }
+
+    #[test]
+    fn start_with_reports_exhausted_attempts() {
+        let ports = RefCell::new(vec![41390u16, 41391, 41392]);
+        let tried = RefCell::new(0);
+        let error = start_with(
+            CLASH_API_START_ATTEMPTS,
+            || Ok(ports.borrow_mut().remove(0)),
+            |port| -> Result<u16> {
+                *tried.borrow_mut() += 1;
+                Err(conflict_stderr(port))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(*tried.borrow(), CLASH_API_START_ATTEMPTS);
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains(&format!(
+                "could not bind the Clash API port after {CLASH_API_START_ATTEMPTS} attempts"
+            )),
+            "{rendered}"
+        );
+        assert!(rendered.contains("127.0.0.1:41392"), "{rendered}");
+        assert!(rendered.contains("address already in use"), "{rendered}");
+    }
+
+    #[test]
+    fn start_with_propagates_an_allocation_failure() {
+        let tried = RefCell::new(0);
+        let error = start_with(
+            3,
+            || anyhow::bail!("no free port"),
+            |_| -> Result<u16> {
+                *tried.borrow_mut() += 1;
+                Ok(0)
+            },
+        )
+        .unwrap_err();
+        assert_eq!(*tried.borrow(), 0);
+        assert_eq!(format!("{error:#}"), "no free port");
     }
 }

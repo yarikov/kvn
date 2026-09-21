@@ -1,5 +1,5 @@
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex, Weak};
 use std::thread;
@@ -829,9 +829,16 @@ fn execute_daemon_effect(
             attempt_id,
             request_id,
         } => {
+            let clash_api_port = lock_process_slot(&shared.process_slot)
+                .handle
+                .as_ref()
+                .map(|handle| handle.clash_api_port);
+            let Some(clash_api_port) = clash_api_port else {
+                return Ok(());
+            };
             let tx = tx.clone();
-            thread::spawn(
-                move || match crate::singbox::clash_api::fetch_connections() {
+            thread::spawn(move || {
+                match crate::singbox::clash_api::fetch_connections(clash_api_port) {
                     Ok(snap) => {
                         let sampled_at_ms = unix_now_ms();
                         let _ = tx.send(Msg::TrafficStatsUpdated {
@@ -849,8 +856,8 @@ fn execute_daemon_effect(
                         // the user.
                         tracing::debug!("clash_api fetch failed: {e}");
                     }
-                },
-            );
+                }
+            });
         }
         Effect::TestProfile { id } => {
             let profile = model.config.profiles.iter().find(|p| p.id == id).cloned();
@@ -892,12 +899,7 @@ fn run_test(
 
     let probe = crate::config::profile::parse_connectivity_probe_url(probe_url)?;
 
-    // Find a free loopback port by binding to :0, recording the OS-assigned
-    // port, then dropping the listener so sing-box can bind to it.
-    let socks_port = {
-        let listener = TcpListener::bind("127.0.0.1:0")?;
-        listener.local_addr()?.port()
-    };
+    let socks_port = crate::net::allocate_loopback_port()?;
 
     let config_path = write_test_config(profile, id, socks_port)?;
 
@@ -1609,7 +1611,7 @@ mod tests {
             .unwrap();
         let slot = Arc::new(Mutex::new(ProcessSlot {
             attempt_id: 42,
-            handle: Some(ProcessHandle::new(child)),
+            handle: Some(ProcessHandle::new(child, 0)),
         }));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         let msg = loop {
