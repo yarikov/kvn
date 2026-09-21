@@ -50,7 +50,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-insta
       - run: cargo test --locked
+      # Re-runs the suite against the warm target dir purely to catch .snap
+      # files no test references any more. `cargo insta test` forwards
+      # everything after `--` to the test binary, so `--locked` cannot be
+      # passed here; the run above enforces it.
+      - run: cargo insta test --check --unreferenced=reject
 
   coverage:
     runs-on: ubuntu-latest
