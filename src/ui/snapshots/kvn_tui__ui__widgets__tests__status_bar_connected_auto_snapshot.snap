@@ -2,4 +2,4 @@
 source: src/ui/widgets.rs
 expression: buffer_to_string(&buf)
 ---
- CONNECTED  Alpha                                              Auto  DoH  Global
+ CONNECTED  Alpha                                                                               Auto  DoH  Global
