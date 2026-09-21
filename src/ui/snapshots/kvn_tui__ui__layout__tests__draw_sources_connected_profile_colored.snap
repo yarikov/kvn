@@ -37,3 +37,4 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 └───────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
  CONNECTED  Beta                                                                                      DoH  Global
+[113x35]

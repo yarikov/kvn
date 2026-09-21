@@ -36,4 +36,5 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 └───────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
- DISCONNECTED                                                                     DoH  Bypass RU    (off) never
+ DISCONNECTED                                                                     DoH  Bypass RU    (off) never 
+[113x35]
