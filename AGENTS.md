@@ -2,6 +2,8 @@
 
 This document contains project-specific context and conventions for AI coding agents. It supplements `README.md` with architectural details, coding styles, and rules of thumb.
 
+It is the only agent-instruction file in this repository — there is no `CLAUDE.md`. Agents that look for one (Claude Code among them) fall back to `AGENTS.md`, so keep every convention here rather than splitting it across files.
+
 ---
 
 ## Project Overview
@@ -12,11 +14,28 @@ The app does **not** implement VPN protocols itself. It is a configuration gener
 
 ---
 
+## Commands
+
+```bash
+cargo build --release          # release build
+cargo test                     # run all tests
+cargo test ui::layout          # run a single module's tests
+INSTA_UPDATE=always cargo test # run tests and auto-accept snapshot changes
+cargo insta test --check --unreferenced=reject  # what CI checks: snapshots match, none orphaned
+cargo fmt                      # format (required before committing)
+cargo clippy --all-targets --all-features  # lint (fix warnings before committing)
+cargo llvm-cov --summary-only  # coverage report; both region & line totals must stay ≥ 85 % (CI gate)
+```
+
+The rules behind each gate live in § Testing Patterns, § Coverage Policy, and § Formatting & Linting.
+
+---
+
 ## Module Map
 
 | Module | Path | Responsibility |
 |--------|------|----------------|
-| `cli` | `src/cli.rs` | CLI argument parsing (`--waybar-status`, `status`/`connect`/`disconnect`/`reconnect`/`toggle` one-shot IPC clients, `setup --omarchy`, `--version`) |
+| `cli` | `src/cli.rs` | CLI argument parsing: `--daemon`, `--waybar-status`, `--version`; `status`/`connect`/`disconnect`/`reconnect`/`toggle` one-shot IPC clients; `enable`/`disable --killswitch`; `doctor`, `update`, `migrate`, `config {migrate,reset,recover}`; `setup` and `clean` for the `--omarchy` / `--polkit` / `--killswitch` integrations |
 | `app` | `src/app.rs`, `src/app/model.rs`, `src/app/msg.rs`, `src/app/update.rs`, `src/app/effect.rs` | TEA core: Model, Msg, Update, Effect — pure data, messages, business logic, side-effect declarations |
 | `model` | `src/app/model.rs` | Application state (`Model`), overlay + connection state + subscription state, input state — pure data, no side effects |
 | `msg` | `src/app/msg.rs` | Message enum (`Msg`) — all external events (keys, ticks, logs, geo, resume, etc.) |
@@ -31,7 +50,7 @@ The app does **not** implement VPN protocols itself. It is a configuration gener
 | `test_helpers` | `src/test_helpers.rs` | Shared test utilities (e.g. `model_with_profiles`)
 | `ui` | `src/ui.rs`, `src/ui/layout.rs`, `src/ui/widgets.rs`, `src/ui/styles.rs`, `src/ui/palette.rs`, `src/ui/icons.rs`, `src/ui/nav.rs` | ratatui rendering (used by TUI client only), layout splits, widget definitions, palette-driven `Theme`, Nerd Font / Unicode icon sets selected by `settings.icons`, navigation helpers |
 | `ui::layout` submodules | `src/ui/layout.rs` + `src/ui/layout/` | `src/ui/layout.rs` is the facade: frame split, the `draw*` entry points, and the `pub(crate)` re-exports the TUI client calls. Each concern lives in one submodule — `text.rs` (Unicode width helpers), `log.rs` + `log/navigation.rs` (log formatting; cursor, viewport and selection state), `panes.rs` (pane geometry, mouse hit-testing, main/traffic/status rows), `sources.rs` (the Profiles list), and `overlay.rs` (dispatch on `Model.overlay` + the shared footer wording) over `overlay/` — `popup.rs` (popup geometry and the three modal renderers), `settings_row.rs` (the shared `Label ‹ value ›` row), and one file per overlay: `help`, `settings_menu`, `confirm_delete`, `migration`, `routing`, `dns`, `theme`, `support` |
-| `palette` | `src/ui/palette.rs`, `themes/*.toml`, `build.rs` | 19 vendored Omarchy palettes; `build.rs` compiles `themes/*.toml` into a `BUNDLED` static at compile time (no runtime TOML parsing) |
+| `palette` | `src/ui/palette.rs`, `themes/*.toml`, `build.rs` | 22 vendored Omarchy palettes; `build.rs` compiles `themes/*.toml` into a `BUNDLED` static at compile time (no runtime TOML parsing) |
 | `config` | `src/config.rs`, `src/config/profile.rs`, `src/config/subscription.rs` | JSON config I/O, profile and subscription struct definitions, subscription fetcher |
 | `config::profile` submodules | `src/config/profile/{protocol,protocol_options,protocol_config,tls,entry,schedule,subscription,routing,settings,schema,migrate,dns}.rs`, `src/config/profile/share_link{.rs,/parse.rs,/encode.rs}` | `src/config/profile.rs` is a facade of `pub use` re-exports; each persisted type lives in one submodule — protocol discriminant, per-protocol options and configs, shared TLS/transport blocks, `Profile`, auto-update schedules, `Subscription`, geo routing, `Settings`, the root `Config`, the ordered schema migrations, DNS, and share-link URI parsing/encoding |
 | `singbox` | `src/singbox.rs`, `src/singbox/config.rs`, `src/singbox/runner.rs`, `src/singbox/clash_api.rs`, `src/singbox/process_handle.rs` | Process lifecycle: allocate a free Clash API port, write temp config, run `sing-box check`, spawn `sing-box run`, retry a lost port race, kill on disconnect; Clash API client for live traffic stats; `Child` wrapper carrying the process's Clash API port |
@@ -129,7 +148,7 @@ See the `release` skill in `.agents/skills/release/SKILL.md` for the full versio
 
 ### Naming
 - Modules are snake_case (`singbox`, not `sing_box`).
-- The binary name is `kvn-tui`; the crate name is `kvn-tui`.
+- The binary name is `kvn-tui`; the crate name is `kvn-tui`. The package installs `/usr/bin/kvn` as a symlink to it, so user-facing docs and commands say `kvn`.
 
 ### Module Files
 - Use the **new Rust module style**: a module `foo` with submodules lives in `src/foo.rs` (parent) and `src/foo/bar.rs` (children). Do **not** create `src/foo/mod.rs`; that is the old style and is not used in this project.
