@@ -323,7 +323,7 @@ mod tests {
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         unsafe { std::env::set_var("XDG_STATE_HOME", state.path()) };
         let _ = std::fs::remove_file(crate::paths::profiles_path().unwrap());
-        let current = dir.path().join("omarchy").join("current");
+        let current = state.path().join("omarchy").join("current");
         std::fs::create_dir_all(&current).unwrap();
         std::fs::write(current.join("theme.name"), "catppuccin-mocha\n").unwrap();
 
@@ -351,7 +351,7 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         unsafe { std::env::set_var("XDG_STATE_HOME", state.path()) };
-        let current = dir.path().join("omarchy").join("current");
+        let current = state.path().join("omarchy").join("current");
         std::fs::create_dir_all(&current).unwrap();
         std::fs::write(current.join("theme.name"), "gruvbox\n").unwrap();
 

@@ -2115,7 +2115,7 @@ esac
     }
 
     #[test]
-    fn omarchy_v4_installer_falls_back_to_command_module_without_plugin_registry() {
+    fn omarchy_installer_requires_the_shell_plugin_registry() {
         let (root, home) = installer_fixture(4);
         // Simulate an Omarchy 4 build without the shell plugin registry.
         write_executable(
@@ -2123,18 +2123,18 @@ esac
             "#!/bin/bash\ncase ${1:-} in version) echo '4.0.0-1';; plugin) exit 1;; esac\n",
         );
         write_omarchy_v4_config(&home);
+        let shell_config = home.join(".config/omarchy/shell.json");
+        let before = fs::read_to_string(&shell_config).unwrap();
 
-        assert_success(&run_installer(&root, &home, "y\n\n"));
+        let output = run_installer(&root, &home, "y\n\n");
 
-        let shell: serde_json::Value =
-            serde_json::from_slice(&fs::read(home.join(".config/omarchy/shell.json")).unwrap())
-                .unwrap();
-        let right = shell["bar"]["layout"]["right"].as_array().unwrap();
-        let entry = right
-            .iter()
-            .find(|entry| entry["id"] == "kvn-tui")
-            .expect("legacy command module entry");
-        assert_eq!(entry["exec"], "kvn --waybar-status");
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("shell plugin registry"),
+            "stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read_to_string(&shell_config).unwrap(), before);
         assert!(!home.join(".config/omarchy/plugins/yarikov.omakvn").exists());
     }
 
@@ -2249,7 +2249,7 @@ esac
     }
 
     #[test]
-    fn omarchy_v4_installer_restores_embedded_plugin_when_remote_install_fails() {
+    fn omarchy_installer_rolls_back_when_the_plugin_install_fails() {
         let (root, home) = installer_fixture(4);
         write_omarchy_v4_config(&home);
         let plugin = home.join(".config/omarchy/plugins/kvn.tui");
@@ -2260,14 +2260,62 @@ esac
             &root.path().join("bin/omarchy"),
             "#!/bin/bash\nif [[ ${1:-} == version ]]; then echo '4.0.0-1'; elif [[ ${1:-}:${2:-}:${3:-} == plugin:add:--help ]]; then exit 0; else exit 1; fi\n",
         );
+        let shell_config = home.join(".config/omarchy/shell.json");
+        let before = fs::read_to_string(&shell_config).unwrap();
 
-        assert_success(&run_installer(&root, &home, "\n"));
+        let output = run_installer(&root, &home, "\n");
 
+        assert!(!output.status.success());
+        assert_eq!(fs::read_to_string(&shell_config).unwrap(), before);
+        assert!(!home.join(".config/omarchy/plugins/yarikov.omakvn").exists());
         assert!(!plugin.join(".git").exists());
         assert_eq!(
             fs::read_to_string(plugin.join("Widget.qml")).unwrap(),
             "legacy"
         );
+    }
+
+    #[test]
+    fn omarchy_installer_fails_when_updating_the_plugin_fails() {
+        let (root, home) = installer_fixture(4);
+        write_omarchy_v4_config(&home);
+        let plugin = home.join(".config/omarchy/plugins/yarikov.omakvn");
+        fs::create_dir_all(&plugin).unwrap();
+        assert_success(
+            &ProcessCommand::new("git")
+                .args(["-C", plugin.to_str().unwrap(), "init", "-q"])
+                .output()
+                .unwrap(),
+        );
+        assert_success(
+            &ProcessCommand::new("git")
+                .args([
+                    "-C",
+                    plugin.to_str().unwrap(),
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://github.com/yarikov/omakvn.git",
+                ])
+                .output()
+                .unwrap(),
+        );
+        write_executable(
+            &root.path().join("bin/omarchy"),
+            "#!/bin/bash\ncase \"${1:-}:${2:-}\" in version:) echo '4.0.0-1';; plugin:add) exit 0;; plugin:update) exit 1;; esac\n",
+        );
+        let shell_config = home.join(".config/omarchy/shell.json");
+        let before = fs::read_to_string(&shell_config).unwrap();
+
+        let output = run_installer(&root, &home, "\n");
+
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("failed to update"),
+            "stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read_to_string(&shell_config).unwrap(), before);
     }
 
     #[test]
@@ -2472,90 +2520,20 @@ esac
     }
 
     #[test]
-    fn omarchy_v3_installer_keeps_legacy_waybar_integration() {
+    fn omarchy_installer_rejects_omarchy_three() {
         let (root, home) = installer_fixture(3);
-        let waybar = home.join(".config/waybar");
-        let hypr = home.join(".config/hypr");
-        fs::create_dir_all(&waybar).unwrap();
-        fs::create_dir_all(&hypr).unwrap();
-        fs::write(
-            waybar.join("config.jsonc"),
-            "{\n  \"modules-right\": [\n    \"bluetooth\"\n  ]\n}\n",
-        )
-        .unwrap();
-        fs::write(waybar.join("style.css"), "* { color: white; }\n").unwrap();
-        fs::write(
-            hypr.join("autostart.conf"),
-            "exec-once = kvn-tui --daemon\n",
-        )
-        .unwrap();
-        fs::write(hypr.join("bindings.conf"), "# bindings\n").unwrap();
-        fs::write(hypr.join("hyprland.conf"), "# rules\n").unwrap();
+        write_omarchy_v4_config(&home);
+        let shell_config = home.join(".config/omarchy/shell.json");
+        let before = fs::read_to_string(&shell_config).unwrap();
 
-        assert_success(&run_installer(&root, &home, "y\n\n"));
-
-        let config = fs::read_to_string(waybar.join("config.jsonc")).unwrap();
-        assert!(config.contains(r#""custom/kvn-tui""#));
-        assert!(config.contains(r#""exec": "kvn --waybar-status""#));
-        assert!(
-            fs::read_to_string(waybar.join("style.css"))
-                .unwrap()
-                .contains("#custom-kvn-tui")
-        );
-        assert!(
-            !fs::read_to_string(hypr.join("autostart.conf"))
-                .unwrap()
-                .contains("kvn-tui --daemon")
-        );
-        assert!(
-            fs::read_to_string(hypr.join("bindings.conf"))
-                .unwrap()
-                .contains("SUPER CTRL, K, exec, omarchy-launch-kvn-tui")
-        );
-        assert!(
-            fs::read_to_string(hypr.join("hyprland.conf"))
-                .unwrap()
-                .contains("org.omarchy.kvn-tui")
-        );
-        assert!(
-            !home
-                .join(".local/share/applications/kvn-tui.desktop")
-                .exists()
-        );
-        assert!(
-            !home
-                .join(".local/share/icons/hicolor/scalable/apps/kvn-tui.svg")
-                .exists()
-        );
-    }
-
-    #[test]
-    fn omarchy_v3_failure_restores_the_current_run_snapshot() {
-        let (root, home) = installer_fixture(3);
-        let waybar = home.join(".config/waybar");
-        fs::create_dir_all(&waybar).unwrap();
-        let config = waybar.join("config.jsonc");
-        let style = waybar.join("style.css");
-        let original_config = "{\n  \"modules-right\": [\n    \"bluetooth\"\n  ]\n}\n";
-        let original_style = "* { color: white; }\n";
-        fs::write(&config, original_config).unwrap();
-        fs::write(&style, original_style).unwrap();
-        fs::write(
-            waybar.join("config.jsonc.bak.before-kvn-tui"),
-            "stale config backup",
-        )
-        .unwrap();
-        fs::write(
-            waybar.join("style.css.bak.before-kvn-tui"),
-            "stale style backup",
-        )
-        .unwrap();
-        write_executable(&root.path().join("bin/pgrep"), "#!/bin/bash\nexit 1\n");
-
-        let output = run_installer(&root, &home, "n\n");
+        let output = run_installer(&root, &home, "\n");
 
         assert!(!output.status.success());
-        assert_eq!(fs::read_to_string(config).unwrap(), original_config);
-        assert_eq!(fs::read_to_string(style).unwrap(), original_style);
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Omarchy 4 or newer is required"),
+            "stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read_to_string(&shell_config).unwrap(), before);
     }
 }

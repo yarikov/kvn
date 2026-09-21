@@ -193,11 +193,13 @@ way. Cleanup removes the corresponding stamp.
 kvn setup --omarchy
 ```
 
+Omarchy 4 or newer is required; the installer aborts on older releases, and
+`kvn doctor` reports a warning when it finds an Omarchy 3 installation.
+
 This command runs without sudo and changes only the current user's files.
 Running it as root is rejected to prevent changes under `/root`. `--omarchy`
 cannot be combined with `--polkit` or `--killswitch`; run user-level and
-system-level commands separately. Both Omarchy generations install this
-executable launcher:
+system-level commands separately. It installs this executable launcher:
 
 ```text
 ~/.local/bin/omarchy-launch-kvn-tui
@@ -205,34 +207,20 @@ executable launcher:
 
 The launcher mode is `0755`.
 
-### Omarchy 3
-
-The installer may update:
-
-- `~/.config/waybar/config.jsonc` — status module and click action;
-- `~/.config/waybar/style.css` — module spacing;
-- `~/.config/hypr/autostart.conf` — removes the legacy daemon autostart line;
-- `~/.config/hypr/bindings.conf` — optional launcher binding;
-- `~/.config/hypr/hyprland.conf` — floating-window rule.
-
-It restarts Waybar and restores the Waybar configuration from the current
-backup if the restart fails.
-
-### Omarchy 4
-
-The installer updates:
+### What the installer updates
 
 - `~/.config/omarchy/plugins/yarikov.omakvn/` — a Git-managed checkout of the
-  standalone [omakvn](https://github.com/yarikov/omakvn) Quickshell plugin,
-  installed when the shell plugin registry is available. The widget connects
-  to the daemon's Unix socket (`$XDG_RUNTIME_DIR/kvn-tui.sock`) and exchanges
-  NDJSON: snapshots in, semantic commands (`ConnectProfile`, `Disconnect`,
-  `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`) out.
-  Existing embedded copies are migrated automatically. Without the plugin
-  registry or when a fresh remote install fails, the installer falls back to
-  a `command` bar module running `kvn --waybar-status`;
-- `~/.config/omarchy/shell.json` — the `yarikov.omakvn` bar entry (or the legacy
-  `kvn-tui` command module on fallback), inserted before `omarchy.bluetooth`;
+  standalone [omakvn](https://github.com/yarikov/omakvn) Quickshell plugin.
+  The widget connects to the daemon's Unix socket
+  (`$XDG_RUNTIME_DIR/kvn-tui.sock`) and exchanges NDJSON: snapshots in,
+  semantic commands (`ConnectProfile`, `Disconnect`, `SetRoutingMode`,
+  `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`) out. Existing embedded
+  copies and older `command` bar modules are migrated automatically. The
+  plugin is mandatory: when the shell plugin registry is unavailable or the
+  install fails, setup aborts and rolls back instead of installing a reduced
+  integration;
+- `~/.config/omarchy/shell.json` — the `yarikov.omakvn` bar entry, inserted
+  before `omarchy.bluetooth`;
 - `~/.config/hypr/bindings.lua` — optional launcher binding;
 - `~/.config/hypr/hyprland.lua` — floating-window rule.
 - `~/.local/share/applications/kvn-tui.desktop` — Apps menu entry searchable by
@@ -242,7 +230,7 @@ The installer updates:
 
 When `omarchy-shell` is running, the installer also triggers a plugin rescan
 and an idempotent `omarchy bar put yarikov.omakvn` so the widget appears without a
-re-login. Upgrades from the command-module integration replace the old entry.
+re-login.
 
 The selected shortcut is explicitly unbound before being assigned to kvn.
 The suggested `Super + Ctrl + K` shortcut replaces the default Herdr binding.
@@ -258,7 +246,7 @@ bindings.lua.bak.before-kvn-tui.20260821143012
 ```
 
 At most five kvn backups are retained for each file. To fully remove the
-integration on Omarchy 4, first remove the plugin with Omarchy's plugin manager:
+integration, first remove the plugin with Omarchy's plugin manager:
 
 ```bash
 omarchy plugin remove yarikov.omakvn
@@ -280,5 +268,6 @@ only the backups created by kvn with:
 kvn clean --omarchy
 ```
 
-`clean --omarchy` removes only these backups. It does not remove the plugin,
-launcher, keybinding, window rule, or undo the Omarchy 3 Waybar integration.
+`clean --omarchy` removes only these backups, including those left by earlier
+Omarchy 3 installations. It does not remove the plugin, launcher, keybinding,
+or window rule.

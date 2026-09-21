@@ -631,18 +631,20 @@ fn proc_start_time(stat: &str) -> Option<&str> {
 }
 
 fn check_omarchy() -> Check {
-    match crate::omarchy::detect_omarchy_theme() {
-        Some(_) if omarchy_v4_detected() && !omakvn_plugin_installed() => Check::warning(
-            format!("Omarchy 4 detected; {OMAKVN_PLUGIN_ID} plugin is not installed"),
+    let theme = crate::omarchy::detect_omarchy_theme();
+    match (theme, crate::omarchy::installed_major_version()) {
+        (None, None) => Check::optional("Omarchy was not detected (optional)"),
+        (_, Some(major)) if major < 4 => Check::warning(
+            format!("Omarchy {major} detected; kvn requires Omarchy 4 or newer"),
+            "Upgrade Omarchy, then run `kvn setup --omarchy`.",
+        ),
+        _ if !omakvn_plugin_installed() => Check::warning(
+            format!("Omarchy detected; {OMAKVN_PLUGIN_ID} plugin is not installed"),
             "Run `kvn setup --omarchy` to install the Omarchy Shell plugin.",
         ),
-        Some(theme) => Check::pass(format!("Omarchy detected; active theme: {theme}")),
-        None => Check::optional("Omarchy was not detected (optional)"),
+        (Some(theme), _) => Check::pass(format!("Omarchy detected; active theme: {theme}")),
+        (None, _) => Check::pass("Omarchy detected"),
     }
-}
-
-fn omarchy_v4_detected() -> bool {
-    dirs::state_dir().is_some_and(|state| state.join("omarchy/current/theme.name").is_file())
 }
 
 fn omakvn_plugin_installed() -> bool {
@@ -932,12 +934,14 @@ mod tests {
     }
 
     #[test]
-    fn omarchy_four_check_requires_omakvn_plugin() {
+    fn omarchy_check_requires_omakvn_plugin() {
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let state = tempfile::tempdir().unwrap();
         let config = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
         let _state = EnvGuard::set("XDG_STATE_HOME", state.path());
         let _config = EnvGuard::set("XDG_CONFIG_HOME", config.path());
+        let _path = EnvGuard::set("PATH", scratch.path());
         let current = state.path().join("omarchy/current");
         std::fs::create_dir_all(&current).unwrap();
         std::fs::write(current.join("theme.name"), "tokyo-night\n").unwrap();
@@ -961,6 +965,54 @@ mod tests {
         let installed = check_omarchy();
         assert_eq!(installed.level, Level::Pass);
         assert!(installed.message.contains("active theme: tokyo-night"));
+    }
+
+    #[test]
+    fn omarchy_three_check_reports_an_unsupported_generation() {
+        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let _state = EnvGuard::set("XDG_STATE_HOME", state.path());
+        let _config = EnvGuard::set("XDG_CONFIG_HOME", config.path());
+        let _path = EnvGuard::set("PATH", scratch.path());
+
+        assert_eq!(check_omarchy().level, Level::Optional);
+
+        let legacy = config.path().join("omarchy/current");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("theme.name"), "gruvbox\n").unwrap();
+        assert_eq!(
+            check_omarchy().level,
+            Level::Optional,
+            "a stale legacy theme file alone must not be reported as Omarchy 3"
+        );
+
+        let command = scratch.path().join("omarchy");
+        std::fs::write(&command, "#!/bin/sh\nprintf '3.4.0\\n'\n").unwrap();
+        std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let check = check_omarchy();
+        assert_eq!(check.level, Level::Warning);
+        assert!(check.message.contains("Omarchy 3"));
+        assert_eq!(
+            check.remedy.as_deref(),
+            Some("Upgrade Omarchy, then run `kvn setup --omarchy`.")
+        );
+
+        std::fs::write(&command, "#!/bin/sh\nprintf '4.2.0-1\\n'\n").unwrap();
+        let check = check_omarchy();
+        assert_eq!(check.level, Level::Warning);
+        assert!(check.message.contains(OMAKVN_PLUGIN_ID));
+
+        let plugin = config.path().join("omarchy/plugins").join(OMAKVN_PLUGIN_ID);
+        std::fs::create_dir_all(&plugin).unwrap();
+        std::fs::write(
+            plugin.join("manifest.json"),
+            format!(r#"{{"id":"{OMAKVN_PLUGIN_ID}"}}"#),
+        )
+        .unwrap();
+        assert_eq!(check_omarchy(), Check::pass("Omarchy detected"));
     }
 
     fn current_polkit_root() -> tempfile::TempDir {
