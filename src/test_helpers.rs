@@ -1,6 +1,8 @@
 use chrono::{DateTime, Local, Timelike};
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
+use ratatui::{Frame, Terminal};
 use std::convert::Infallible;
 use std::ffi::{OsStr, OsString};
 use std::sync::{Mutex, MutexGuard};
@@ -76,6 +78,22 @@ pub fn buffer_to_string(buffer: &Buffer) -> String {
         .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+pub fn render_to_buffer<F>(width: u16, height: u16, draw: F) -> Buffer
+where
+    F: FnOnce(&mut Frame),
+{
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(draw).unwrap();
+    terminal.backend().buffer().clone()
+}
+
+pub fn render_to_string<F>(width: u16, height: u16, draw: F) -> String
+where
+    F: FnOnce(&mut Frame),
+{
+    buffer_to_string(&render_to_buffer(width, height, draw))
 }
 
 pub const APP_WINDOW_COLS: u16 = 113;
