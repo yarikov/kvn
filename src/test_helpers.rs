@@ -78,6 +78,10 @@ pub fn buffer_to_string(buffer: &Buffer) -> String {
         .join("\n")
 }
 
+pub const APP_WINDOW_COLS: u16 = 113;
+
+pub const APP_WINDOW_ROWS: u16 = 35;
+
 /// A canonical valid UUID string for tests that need to pass
 /// [`Config::validate`] without caring about the specific value.
 pub const TEST_UUID: &str = "11111111-1111-1111-1111-111111111111";

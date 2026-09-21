@@ -366,7 +366,7 @@ mod tests {
     use super::*;
     use crate::app::model::ConnectionState;
     use crate::config::profile::{GeoAutoUpdate, GeoRegion, Profile, RoutedService, ServiceRoute};
-    use crate::test_helpers::{buffer_to_string, model_with_profiles};
+    use crate::test_helpers::{APP_WINDOW_COLS, buffer_to_string, model_with_profiles};
     use chrono::{Duration, TimeZone};
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
@@ -519,8 +519,8 @@ mod tests {
     #[test]
     fn status_bar_shows_disconnected() {
         let model = model_with_profiles(vec![]);
-        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, 80, 1), &mut buf);
+        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
+        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         let content: String = buf.content.iter().map(|c| c.symbol()).collect();
         assert!(content.starts_with(" DISCONNECTED "));
         assert!(content.contains("Global"));
@@ -541,8 +541,8 @@ mod tests {
         use crate::app::model::ConnectionState;
         let mut model = model_with_profiles(vec![]);
         model.connection = ConnectionState::ConnectPending;
-        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, 80, 1), &mut buf);
+        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
+        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         let content: String = buf.content.iter().map(|c| c.symbol()).collect();
         assert!(content.starts_with(" CONNECTING "));
         let idx = content.find("CONNECTING").unwrap();
@@ -567,8 +567,8 @@ mod tests {
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[0].id);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
-        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, 80, 1), &mut buf);
+        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
+        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         insta::assert_snapshot!(buffer_to_string(&buf));
     }
 
@@ -584,8 +584,8 @@ mod tests {
         model.active_profile_id = Some(model.config.profiles[0].id);
         model.config.settings.auto_connect = true;
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
-        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, 80, 1), &mut buf);
+        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
+        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         insta::assert_snapshot!(buffer_to_string(&buf));
     }
 
@@ -593,8 +593,8 @@ mod tests {
     fn status_bar_does_not_include_transient_geo_state() {
         let mut model = model_with_profiles(vec![]);
         model.geo_updating = true;
-        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, 80, 1), &mut buf);
+        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
+        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         assert!(!buffer_to_string(&buf).contains("Geo"));
     }
 
@@ -602,8 +602,8 @@ mod tests {
     fn status_bar_does_not_include_geo_timestamp() {
         let mut model = model_with_profiles(vec![]);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
-        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, 80, 1), &mut buf);
+        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
+        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         let content: String = buf.content.iter().map(|c| c.symbol()).collect();
         assert!(content.contains("DISCONNECTED"));
         assert!(content.contains("Global"));
@@ -678,8 +678,8 @@ mod tests {
         model.status = crate::app::model::AppStatus::Error(
             "Connection failed: sing-box exited immediately (code: Some(1)). stderr: FATAL[0000] create service: parse outbound[0].server_settings.address: lookup example.com: no such host".to_string(),
         );
-        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, 80, 1), &mut buf);
+        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
+        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         let content = buffer_to_string(&buf);
         assert!(!content.contains("Connection failed"));
         assert!(content.contains("DISCONNECTED"));
@@ -696,8 +696,8 @@ mod tests {
         )]);
         model.connection = ConnectionState::Connecting;
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
-        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, 80, 1), &mut buf);
+        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
+        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         insta::assert_snapshot!(buffer_to_string(&buf));
     }
 
@@ -712,8 +712,8 @@ mod tests {
         )]);
         model.connection = ConnectionState::ConnectPending;
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
-        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, 80, 1), &mut buf);
+        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
+        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         insta::assert_snapshot!(buffer_to_string(&buf));
     }
 
@@ -744,7 +744,7 @@ mod tests {
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model.geo_last_checked_at = Some(chrono::Local::now());
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
-        let area = Rect::new(0, 0, 80, 1);
+        let area = Rect::new(0, 0, APP_WINDOW_COLS, 1);
         let mut buf = Buffer::empty(area);
         StatusBar::new(&model).render(area, &mut buf);
         let content: String = buf.content.iter().map(|cell| cell.symbol()).collect();

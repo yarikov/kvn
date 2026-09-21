@@ -2316,7 +2316,9 @@ mod tests {
     }
     use crate::app::model::{ConnectionState, Overlay};
     use crate::config::profile::Profile;
-    use crate::test_helpers::{buffer_to_string, model_with_profiles};
+    use crate::test_helpers::{
+        APP_WINDOW_COLS, APP_WINDOW_ROWS, buffer_to_string, model_with_profiles,
+    };
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -2791,7 +2793,7 @@ mod tests {
         model.logs.push_back("log line 2".to_string());
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[0].id);
-        insta::assert_snapshot!(snapshot_terminal(&model, 90, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -2799,15 +2801,19 @@ mod tests {
         let mut model = mouse_model();
         model.push_log("must stay hidden".into());
 
-        let output = snapshot_terminal(&model, TWO_PANE_MIN_WIDTH - 1, 20);
+        let output = snapshot_terminal(&model, TWO_PANE_MIN_WIDTH - 1, APP_WINDOW_ROWS);
 
-        assert!(output.contains("Profiles"));
-        assert!(!output.contains("Logs"));
         assert!(!output.contains("must stay hidden"));
         assert_eq!(
-            source_hit_test(&model, Rect::new(0, 0, TWO_PANE_MIN_WIDTH - 1, 20), 60, 4),
+            source_hit_test(
+                &model,
+                Rect::new(0, 0, TWO_PANE_MIN_WIDTH - 1, APP_WINDOW_ROWS),
+                60,
+                4
+            ),
             Some(0)
         );
+        insta::assert_snapshot!(output);
     }
 
     #[test]
@@ -2854,23 +2860,22 @@ mod tests {
             let area = Rect::new(0, 0, width, height);
             let output = snapshot_terminal(&model, width, height);
 
-            assert!(output.contains("Terminal too small"));
-            assert!(output.contains(&format!("Current: {width}×{height}")));
-            assert!(!output.contains("Profiles"));
-            assert!(!output.contains("Logs"));
             assert_eq!(source_hit_test(&model, area, 2, 4), None);
             assert!(log_viewport(&model, area).is_none());
+            insta::with_settings!({snapshot_suffix => format!("{width}x{height}")}, {
+                insta::assert_snapshot!(output);
+            });
         }
     }
 
     #[test]
     fn exact_minimum_size_draws_the_single_pane_ui() {
         let model = mouse_model();
-        let output = snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT);
-
-        assert!(output.contains("Profiles"));
-        assert!(!output.contains("Terminal too small"));
-        assert!(!output.contains("Logs"));
+        insta::assert_snapshot!(snapshot_terminal(
+            &model,
+            MIN_TERMINAL_WIDTH,
+            MIN_TERMINAL_HEIGHT
+        ));
     }
 
     #[test]
@@ -2951,7 +2956,7 @@ mod tests {
             down_total: 3 * 1024 * 1024 * 1024,
             conn_count: 18,
         };
-        insta::assert_snapshot!(snapshot_terminal(&model, 100, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -2962,7 +2967,7 @@ mod tests {
             443,
             "u1".to_string(),
         )]);
-        let output = snapshot_terminal(&model, 100, 20);
+        let output = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
         assert!(
             output.contains("Traffic") && output.contains("0.0 KB/s"),
             "traffic panel must show zeroed stats while disconnected: {}",
@@ -2975,7 +2980,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::Help(crate::app::model::HelpState::default());
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 40));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -2985,14 +2990,14 @@ mod tests {
             context: crate::app::model::HelpContext::Logs,
             selected: 12,
         });
-        insta::assert_snapshot!(snapshot_terminal(&model, 100, 24));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
     fn draw_settings_menu_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Root);
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3000,7 +3005,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.theme = "tokyo-night".into();
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Interface);
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3009,14 +3014,14 @@ mod tests {
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Interface);
         model.theme_draft = Some("catppuccin-latte".into());
         model.interface_settings_draft = Some(crate::config::profile::IconSet::Unicode);
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
     fn draw_routing_menu_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3035,14 +3040,14 @@ mod tests {
                 crate::config::profile::GeoRegion::Ru,
             ));
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
     fn draw_connection_menu_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Connection);
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3055,7 +3060,7 @@ mod tests {
         )]);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::ConfirmDelete;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3113,7 +3118,7 @@ mod tests {
             .set_region(crate::config::profile::GeoRegion::Ru);
         model.overlay = Overlay::RoutingMode;
         model.routing_selected = 2;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3154,7 +3159,7 @@ mod tests {
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::GeoRegions;
         model.geo_region_selected = 1;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3174,7 +3179,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::GeoRegions;
 
-        let required = snapshot_terminal(&model, 80, 20);
+        let required = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
         assert!(required.contains("󰌑 apply"));
         assert!(!required.contains("q/󱊷 close"));
         assert!(!required.contains("j/k navigate"));
@@ -3184,7 +3189,7 @@ mod tests {
             .settings
             .geo_routing
             .set_region(crate::config::profile::GeoRegion::Ru);
-        let optional = snapshot_terminal(&model, 80, 20);
+        let optional = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
         assert!(optional.contains("󰌑 apply · q/󱊷 close"));
         assert!(!optional.contains("j/k navigate"));
     }
@@ -3194,16 +3199,16 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::DnsSettings;
 
-        let direct = snapshot_terminal(&model, 100, 20);
+        let direct = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
         assert!(!direct.contains("⌫ back"));
 
         model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Root);
-        let from_menu = snapshot_terminal(&model, 100, 20);
+        let from_menu = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
         assert!(from_menu.contains("󰌑 apply · q/󱊷 close · ⌫ back"));
 
         model.overlay = Overlay::ServiceRouting;
         model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Routing);
-        let services = snapshot_terminal(&model, 100, 20);
+        let services = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
         assert!(services.contains("󰌑 apply · q/󱊷 close · ⌫ back"));
     }
 
@@ -3214,7 +3219,7 @@ mod tests {
         model.overlay = Overlay::DnsSettings;
         model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Root);
         model.dns_selected = 1;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 24));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Service routing overlay with the cursor on the second row and an
@@ -3241,7 +3246,7 @@ mod tests {
             (RoutedService::Steam, ServiceRoute::Direct),
             (RoutedService::Telegram, ServiceRoute::Proxy),
         ]));
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 24));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Freshly opened overlay with no committed routes: every row renders
@@ -3255,7 +3260,7 @@ mod tests {
         model.overlay = Overlay::ServiceRouting;
         model.service_routing_selected = 0;
         model.service_routing_draft = Some(HashMap::new());
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 24));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Theme picker overlay rendered with the dark default palette.
@@ -3275,7 +3280,7 @@ mod tests {
             .iter()
             .position(|s| s == &model.config.settings.theme)
             .unwrap_or(0);
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 32));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3283,7 +3288,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::Support;
         model.support_selected = 1;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 24));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3300,7 +3305,7 @@ mod tests {
             summary: "Updating integration".into(),
             error: Some("sudo command failed".into()),
         });
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 24));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Theme picker rendered with a light palette — sanity check for
@@ -3328,7 +3333,7 @@ mod tests {
             .iter()
             .position(|s| s == &model.config.settings.theme)
             .unwrap_or(0);
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 32));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3341,7 +3346,7 @@ mod tests {
         model.overlay = Overlay::ThemeSettings;
         model.theme_selected = crate::app::update::theme_picker_slugs().len() - 1;
 
-        let rendered = snapshot_terminal(&model, 80, 24);
+        let rendered = snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT);
         assert!(rendered.contains("white"));
         assert!(rendered.contains("󰌑 apply · q/󱊷 close"));
         assert!(!rendered.contains("j/k navigate"));
@@ -3366,7 +3371,7 @@ mod tests {
             });
         model.overlay = Overlay::DnsSettings;
         model.dns_selected = 2;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 24));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3423,7 +3428,7 @@ mod tests {
             hwid: None,
         });
         model.selected = 0;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// A very long hostname must not push the name column below MIN_NAME_WIDTH.
@@ -3446,7 +3451,7 @@ mod tests {
         let mut model = model_with_profiles(profiles);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.selected = 0;
-        let output = snapshot_terminal(&model, 80, 20);
+        let output = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
         // Name "MyProfile" must still be visible (truncated to MIN_NAME_WIDTH).
         assert!(
             output.contains("MyPro"),
@@ -3474,7 +3479,7 @@ mod tests {
         let mut model = model_with_profiles(profiles);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.selected = 0;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Verify every protocol's UI badge renders without truncation.
@@ -3594,7 +3599,7 @@ mod tests {
         let mut model = model_with_profiles(profiles);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.selected = 0;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 26));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     #[test]
@@ -3617,7 +3622,7 @@ mod tests {
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[1].id);
         model.selected = 1;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Empty Sources pane: pins the "No sources." placeholder at
@@ -3626,7 +3631,7 @@ mod tests {
     fn draw_sources_empty_state_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Routing-mode overlay in Global region: `available_modes()` returns a
@@ -3642,7 +3647,7 @@ mod tests {
             .set_region(crate::config::profile::GeoRegion::Global);
         model.overlay = Overlay::RoutingMode;
         model.routing_selected = 0;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Pin the `[error]`-prefixed log styling path in `draw_main`.
@@ -3661,7 +3666,7 @@ mod tests {
         model
             .logs
             .push_back("[error] sing-box exited with code 1".to_string());
-        insta::assert_snapshot!(snapshot_terminal(&model, 90, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Subscription rendered with a populated `last_updated` and a non-default
@@ -3698,6 +3703,6 @@ mod tests {
             hwid: None,
         });
         model.selected = 0;
-        insta::assert_snapshot!(snapshot_terminal(&model, 80, 20));
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 }

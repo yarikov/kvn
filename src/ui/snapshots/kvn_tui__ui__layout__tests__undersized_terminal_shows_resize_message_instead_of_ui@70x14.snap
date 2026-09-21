@@ -1,0 +1,12 @@
+---
+source: src/ui/layout.rs
+expression: output
+---
+                                                                      
+                                                                      
+                                                                      
+                                                                      
+                                                                      
+                          Terminal too small                          
+                    Minimum: 70×15  Current: 70×14                    
+                       Increase the window size
