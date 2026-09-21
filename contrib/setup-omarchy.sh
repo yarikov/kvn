@@ -92,19 +92,13 @@ append_atomic() {
 }
 
 install_launcher() {
-  local generation="$1"
   local launcher="$HOME/.local/bin/omarchy-launch-kvn-tui"
-  if (( generation < 4 )) && [[ -f $launcher ]]; then
-    echo "Launcher script already present."
-    return
-  fi
 
   echo "Installing or updating launcher script..."
   mkdir -p "$(dirname "$launcher")"
   local tmp
   tmp=$(mktemp "${launcher}.tmp.XXXXXX")
-  if (( generation >= 4 )); then
-    cat >"$tmp" <<'EOF'
+  cat >"$tmp" <<'EOF'
 #!/bin/bash
 plugin_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/yarikov.omakvn"
 if [[ -f "$plugin_dir/manifest.json" ]] && command -v omarchy-shell >/dev/null 2>&1; then
@@ -114,13 +108,6 @@ if [[ -f "$plugin_dir/manifest.json" ]] && command -v omarchy-shell >/dev/null 2
 fi
 exec omarchy-launch-or-focus-tui --app-id=org.omarchy.kvn-tui kvn
 EOF
-  else
-    cat >"$tmp" <<'EOF'
-#!/bin/bash
-exec omarchy-launch-or-focus "org.omarchy.kvn-tui" \
-  "uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.kvn-tui -e kvn"
-EOF
-  fi
   chmod 0755 "$tmp"
   replace_if_changed "$tmp" "$launcher"
 }
@@ -186,103 +173,6 @@ detect_omarchy_major() {
   printf '%s\n' "$major"
 }
 
-install_omarchy_v3() {
-  local waybar_config="$HOME/.config/waybar/config.jsonc"
-  local waybar_style="$HOME/.config/waybar/style.css"
-  local hypr_autostart="$HOME/.config/hypr/autostart.conf"
-  local hypr_bindings="$HOME/.config/hypr/bindings.conf"
-  local hypr_main="$HOME/.config/hypr/hyprland.conf"
-
-  if [[ -f $waybar_config ]]; then
-    if ! grep -q '"custom/kvn-tui"' "$waybar_config"; then
-      echo "Adding kvn module to Waybar config..."
-      if tail -n 1 "$waybar_config" | grep -q '^}$'; then
-        local tmp
-        tmp=$(mktemp "${waybar_config}.tmp.XXXXXX")
-        cp -- "$waybar_config" "$tmp"
-        if grep -q '"bluetooth"' "$tmp"; then
-          sed -i '/"modules-right": \[/,/\],/{s/"bluetooth"/"custom\/kvn-tui",\n    "bluetooth"/}' "$tmp"
-        fi
-        sed -i '$d' "$tmp"
-        sed -i '$ s/[[:space:]]*$/,/' "$tmp"
-        cat >>"$tmp" <<'EOF'
-  "custom/kvn-tui": {
-    "exec": "kvn --waybar-status",
-    "return-type": "json",
-    "interval": 5,
-    "on-click": "omarchy-launch-kvn-tui",
-    "tooltip-format": "kvn VPN client"
-  }
-}
-EOF
-        replace_if_changed "$tmp" "$waybar_config"
-      else
-        echo "Warning: Waybar config does not end with '}' on its own line; skipping module definition."
-      fi
-    else
-      echo "Waybar module already present."
-    fi
-  else
-    echo "Warning: Waybar config not found at $waybar_config"
-  fi
-
-  if [[ -f $waybar_style ]]; then
-    if ! grep -q '#custom-kvn-tui' "$waybar_style"; then
-      echo "Adding kvn styles to Waybar CSS..."
-      append_atomic "$waybar_style" $'\n#custom-kvn-tui {\n  margin-right: 18px;\n}\n'
-    else
-      echo "Waybar CSS already present."
-    fi
-  else
-    echo "Warning: Waybar style not found at $waybar_style"
-  fi
-
-  install_launcher 3
-
-  if [[ -f $hypr_autostart ]] && grep -qE '^[[:space:]]*exec-once[[:space:]]*=[[:space:]]*kvn-tui --daemon[[:space:]]*$' "$hypr_autostart"; then
-    echo "Removing legacy kvn-tui daemon entry from Hyprland autostart..."
-    local tmp
-    tmp=$(mktemp "${hypr_autostart}.tmp.XXXXXX")
-    sed '/^[[:space:]]*exec-once[[:space:]]*=[[:space:]]*kvn-tui --daemon[[:space:]]*$/d' "$hypr_autostart" >"$tmp"
-    replace_if_changed "$tmp" "$hypr_autostart"
-  fi
-
-  if [[ -f $hypr_bindings ]] && grep -q "omarchy-launch-kvn-tui" "$hypr_bindings"; then
-    echo "Hyprland keybinding already configured."
-  else
-    echo
-    read -r -p "Add Hyprland keybinding to launch kvn? [y/N] " binding_answer
-    if [[ $binding_answer =~ ^[Yy]$ ]]; then
-      echo
-      echo "Press Enter to accept the default, or type a custom Hyprland keybinding."
-      echo "Examples: SUPER CTRL, K    SUPER SHIFT, V    SUPER ALT, K"
-      read -r -p "Keybinding (default: SUPER CTRL, K): " binding_input
-      binding_input=${binding_input:-SUPER CTRL, K}
-      echo "Adding Hyprland keybinding ($binding_input)..."
-      mkdir -p "$(dirname "$hypr_bindings")"
-      append_atomic "$hypr_bindings" $'\nbind = '"$binding_input"$', exec, omarchy-launch-kvn-tui\n'
-    else
-      echo "Skipping keybinding."
-    fi
-  fi
-
-  if [[ -f $hypr_main ]] && ! grep -Fq "org.omarchy.kvn-tui" "$hypr_main"; then
-    echo "Adding Hyprland window rule for kvn..."
-    append_atomic "$hypr_main" $'\n# kvn: float, center, and size like other Omarchy TUIs\nwindowrule = tag +floating-window, match:class org.omarchy.kvn-tui\n'
-  fi
-
-  echo "Restarting Waybar..."
-  omarchy restart waybar
-  sleep 2
-  if ! pgrep -x waybar >/dev/null 2>&1; then
-    echo "Error: Waybar failed to start. Restoring backups..." >&2
-    restore_current_backup "$waybar_config"
-    restore_current_backup "$waybar_style"
-    omarchy restart waybar
-    return 1
-  fi
-}
-
 append_marker_block() {
   local file="$1" marker="$2" block="$3"
   if grep -Fq -- "-- kvn-tui ${marker}: begin" "$file"; then
@@ -331,33 +221,33 @@ install_omarchy_v4_plugin_from_source() {
   local dir="$HOME/.config/omarchy/plugins/yarikov.omakvn"
   local legacy_dir="$HOME/.config/omarchy/plugins/kvn.tui"
   local source commit remote_branch local_commits local_commit
-  source=$(realpath -e -- "$PLUGIN_SOURCE") || return 2
+  source=$(realpath -e -- "$PLUGIN_SOURCE") || return 1
   if ! validate_local_plugin "$source"; then
     echo "Error: plugin source must be a clean, independent yarikov.omakvn Git checkout." >&2
-    return 2
+    return 1
   fi
   if [[ $source == "$dir" || $source == "$dir/"* || $dir == "$source/"* ]]; then
     echo "Error: plugin source and installation must be separate directories." >&2
-    return 2
+    return 1
   fi
-  commit=$(plugin_git -C "$source" rev-parse HEAD) || return 2
+  commit=$(plugin_git -C "$source" rev-parse HEAD) || return 1
   if [[ -e $dir || -L $dir ]]; then
     if [[ -L $dir || ! -d $dir ]] ||
       { [[ -e $dir/.git || -L $dir/.git ]] && ! validate_local_plugin "$dir"; } ||
       ! jq -e '.id == "yarikov.omakvn"' "$dir/manifest.json" >/dev/null 2>&1; then
       echo "Error: refusing to overwrite a dirty or unrecognized plugin: $dir" >&2
-      return 2
+      return 1
     fi
     if [[ -d $dir/.git ]]; then
       # Clean worktrees can still contain unpublished commits or a stash.
       # Do not discard them when replacing the repository with a prepared copy.
-      local_commits=$(plugin_git -C "$dir" for-each-ref --format='%(objectname)' refs/heads refs/tags refs/stash) || return 2
-      local_commits+=$'\n'$(plugin_git -C "$dir" rev-parse HEAD) || return 2
+      local_commits=$(plugin_git -C "$dir" for-each-ref --format='%(objectname)' refs/heads refs/tags refs/stash) || return 1
+      local_commits+=$'\n'$(plugin_git -C "$dir" rev-parse HEAD) || return 1
       while IFS= read -r local_commit; do
         [[ -n $local_commit ]] || continue
         if ! plugin_git -C "$source" cat-file -e "$local_commit" 2>/dev/null; then
           echo "Error: refusing to discard local Git history or a stash in $dir." >&2
-          return 2
+          return 1
         fi
       done <<<"$local_commits"
     fi
@@ -365,34 +255,34 @@ install_omarchy_v4_plugin_from_source() {
     if [[ -L $legacy_dir || -e $legacy_dir/.git ]] ||
       ! jq -e '.id == "kvn.tui"' "$legacy_dir/manifest.json" >/dev/null 2>&1; then
       echo "Error: refusing to overwrite an unrecognized legacy plugin: $legacy_dir" >&2
-      return 2
+      return 1
     fi
   fi
 
-  mkdir -p -- "${dir%/*}" || return 2
-  local_plugin_stage=$(mktemp -d "${dir%/*}/.kvn-plugin.XXXXXX") || return 2
-  cp -a -- "$source" "$local_plugin_stage/checkout" || return 2
-  validate_local_plugin "$local_plugin_stage/checkout" || return 2
-  [[ $(plugin_git -C "$local_plugin_stage/checkout" rev-parse HEAD) == "$commit" ]] || return 2
+  mkdir -p -- "${dir%/*}" || return 1
+  local_plugin_stage=$(mktemp -d "${dir%/*}/.kvn-plugin.XXXXXX") || return 1
+  cp -a -- "$source" "$local_plugin_stage/checkout" || return 1
+  validate_local_plugin "$local_plugin_stage/checkout" || return 1
+  [[ $(plugin_git -C "$local_plugin_stage/checkout" rev-parse HEAD) == "$commit" ]] || return 1
   # A pinned resource is detached. Restore default-branch tracking locally so
   # a later, ordinary `omarchy plugin update` can still pull from the origin.
   remote_branch=$(plugin_git -C "$local_plugin_stage/checkout" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)
   if [[ $remote_branch == origin/* ]]; then
-    plugin_git -C "$local_plugin_stage/checkout" checkout -B "${remote_branch#origin/}" "$commit" || return 2
-    plugin_git -C "$local_plugin_stage/checkout" branch --set-upstream-to="$remote_branch" || return 2
+    plugin_git -C "$local_plugin_stage/checkout" checkout -B "${remote_branch#origin/}" "$commit" || return 1
+    plugin_git -C "$local_plugin_stage/checkout" branch --set-upstream-to="$remote_branch" || return 1
   fi
   if [[ -e $dir ]]; then
-    mv -- "$dir" "$V4_TRANSACTION_DIR/legacy-kvn.tui" || return 2
+    mv -- "$dir" "$V4_TRANSACTION_DIR/legacy-kvn.tui" || return 1
     legacy_plugin_staged=1
     legacy_plugin_target=$dir
   elif [[ -e $legacy_dir ]]; then
-    mv -- "$legacy_dir" "$V4_TRANSACTION_DIR/legacy-kvn.tui" || return 2
+    mv -- "$legacy_dir" "$V4_TRANSACTION_DIR/legacy-kvn.tui" || return 1
     legacy_plugin_staged=1
     legacy_plugin_target=$legacy_dir
   fi
   plugin_dir_created=1
-  mv -- "$local_plugin_stage/checkout" "$dir" || return 2
-  rmdir -- "$local_plugin_stage" || return 2
+  mv -- "$local_plugin_stage/checkout" "$dir" || return 1
+  rmdir -- "$local_plugin_stage" || return 1
   local_plugin_stage=""
   echo "Installed yarikov.omakvn from prepared commit $commit."
 }
@@ -411,8 +301,8 @@ install_omarchy_v4_plugin() {
   fi
 
   omarchy plugin add --help >/dev/null 2>&1 || {
-    echo "This Omarchy build lacks the shell plugin registry;" >&2
-    echo "falling back to the command bar module." >&2
+    echo "Error: this Omarchy build lacks the shell plugin registry;" >&2
+    echo "kvn requires it to install the yarikov.omakvn bar plugin." >&2
     return 1
   }
 
@@ -421,13 +311,16 @@ install_omarchy_v4_plugin() {
     case "$origin" in
     https://github.com/yarikov/omakvn | https://github.com/yarikov/omakvn.git | git@github.com:yarikov/omakvn.git)
       echo "Updating the yarikov.omakvn bar plugin from $OMAKVN_REPO..."
-      omarchy plugin update yarikov.omakvn --yes
+      omarchy plugin update yarikov.omakvn --yes || {
+        echo "Error: failed to update the yarikov.omakvn bar plugin from $OMAKVN_REPO." >&2
+        return 1
+      }
       return 0
       ;;
     *)
       echo "Error: yarikov.omakvn is managed by a different Git repository: ${origin:-<unknown>}" >&2
       echo "Refusing to overwrite $dir." >&2
-      return 2
+      return 1
       ;;
     esac
   fi
@@ -435,7 +328,7 @@ install_omarchy_v4_plugin() {
   if [[ -e $dir ]]; then
     if ! jq -e '.id == "yarikov.omakvn"' "$dir/manifest.json" >/dev/null 2>&1; then
       echo "Error: refusing to replace unrecognized plugin directory: $dir" >&2
-      return 2
+      return 1
     fi
     echo "Migrating the embedded yarikov.omakvn plugin to its standalone repository..."
     mv -- "$dir" "$V4_TRANSACTION_DIR/legacy-kvn.tui"
@@ -444,7 +337,7 @@ install_omarchy_v4_plugin() {
   elif [[ -e $legacy_dir ]]; then
     if ! jq -e '.id == "kvn.tui"' "$legacy_dir/manifest.json" >/dev/null 2>&1; then
       echo "Error: refusing to replace unrecognized plugin directory: $legacy_dir" >&2
-      return 2
+      return 1
     fi
     echo "Migrating the kvn.tui plugin to the new yarikov.omakvn ID..."
     mv -- "$legacy_dir" "$V4_TRANSACTION_DIR/legacy-kvn.tui"
@@ -468,16 +361,7 @@ install_omarchy_v4_plugin() {
     return 0
   fi
 
-  rm -rf -- "$dir"
-  if (( legacy_plugin_staged )); then
-    mv -- "$V4_TRANSACTION_DIR/legacy-kvn.tui" "$legacy_plugin_target"
-    legacy_plugin_staged=0
-    plugin_dir_created=0
-    echo "Warning: remote plugin install failed; restored the existing plugin." >&2
-    return 0
-  fi
-
-  echo "Remote plugin install failed; falling back to the command bar module." >&2
+  echo "Error: failed to install the yarikov.omakvn bar plugin from $OMAKVN_REPO." >&2
   return 1
 }
 
@@ -572,17 +456,9 @@ EOF
   trap cleanup_v4 EXIT
 
   echo "Adding kvn module to Omarchy Shell..."
-  local module plugin_installed=0 tmp
-  local plugin_status=0
-  install_omarchy_v4_plugin || plugin_status=$?
-  if (( plugin_status == 0 )); then
-    plugin_installed=1
-    module='{"id":"yarikov.omakvn"}'
-  elif (( plugin_status == 2 )); then
-    return 1
-  else
-    module='{"id":"kvn-tui","type":"command","exec":"kvn --waybar-status","interval":5,"tooltip":"kvn VPN client","onClick":"omarchy-launch-kvn-tui"}'
-  fi
+  local module tmp
+  install_omarchy_v4_plugin || return 1
+  module='{"id":"yarikov.omakvn"}'
   tmp=$(mktemp "${shell_config}.tmp.XXXXXX")
   jq --argjson module "$module" '
     def entry_id: if type == "object" then (.id // "") else tostring end;
@@ -611,7 +487,7 @@ EOF
   # Poke a live shell so the widget appears without a re-login: rescan picks
   # up the freshly installed plugin files, and `bar put` is an idempotent
   # no-op when the watcher already applied the shell.json change above.
-  if (( plugin_installed )) && command -v omarchy-shell >/dev/null 2>&1; then
+  if command -v omarchy-shell >/dev/null 2>&1; then
     timeout 15 omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
     if timeout 15 omarchy bar put yarikov.omakvn --before omarchy.bluetooth >/dev/null 2>&1; then
       echo "Placed yarikov.omakvn on the bar."
@@ -620,7 +496,7 @@ EOF
     fi
   fi
 
-  install_launcher 4
+  install_launcher
   install_app_icon
   install_desktop_entry
 
@@ -703,13 +579,9 @@ o.window("^org\\.omarchy\\.kvn-tui$", { tag = "+floating-window" })
 
 echo "Installing kvn Omarchy integration..."
 omarchy_major=$(detect_omarchy_major)
-if (( omarchy_major >= 4 )); then
-  install_omarchy_v4
-else
-  if [[ -n $PLUGIN_SOURCE ]]; then
-    echo "Error: --plugin-source requires Omarchy 4." >&2
-    exit 1
-  fi
-  install_omarchy_v3
+if (( omarchy_major < 4 )); then
+  echo "Error: Omarchy 4 or newer is required; found Omarchy $omarchy_major." >&2
+  exit 1
 fi
+install_omarchy_v4
 echo "Done."

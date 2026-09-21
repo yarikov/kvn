@@ -1,7 +1,8 @@
 //! Download-only preparation. Never run downloaded code or change the live installation.
 
 use super::*;
-use semver::{Version, VersionReq};
+use crate::omarchy::{detect_omarchy_version, parse_omarchy_version};
+use semver::VersionReq;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -44,41 +45,6 @@ fn applies_to(manifest: &ResourceManifest, omarchy_version: Option<&str>) -> Res
             Ok(requirement.matches(&version))
         }
     }
-}
-
-fn parse_omarchy_version(version: &str) -> Option<Version> {
-    let version = version.trim();
-    let version = version.strip_prefix("Omarchy ").unwrap_or(version);
-    let version = version.strip_prefix('v').unwrap_or(version);
-    let version = version
-        .rsplit_once('-')
-        .filter(|(_, release)| {
-            release
-                .split('.')
-                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
-        })
-        .map_or(version, |(version, _)| version);
-    Version::parse(version).ok()
-}
-
-fn detect_omarchy_version() -> Result<Option<String>> {
-    let output = match Command::new("omarchy")
-        .arg("version")
-        .stdin(Stdio::null())
-        .output()
-    {
-        Ok(output) => output,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(error).context("failed to detect Omarchy for migration resources");
-        }
-    };
-    ensure!(
-        output.status.success(),
-        "omarchy version failed; cannot determine whether plugin resources apply"
-    );
-    let version = String::from_utf8(output.stdout).context("invalid Omarchy version output")?;
-    Ok(Some(version.trim().to_owned()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -528,42 +494,6 @@ mod tests {
             serde_json::to_value(conditional).unwrap()["when"],
             serde_json::json!({"omarchy": true, "version": ">=4.0.0, <5.0.0"})
         );
-    }
-
-    #[test]
-    fn parses_omarchy_semver_and_ignores_numeric_package_release() {
-        for (input, expected) in [
-            ("4.0.0", "4.0.0"),
-            (" 4.2.0-1\n", "4.2.0"),
-            ("4.2.0-1.2", "4.2.0"),
-            ("v4.0.0-beta.1", "4.0.0-beta.1"),
-            ("Omarchy 4.0.0", "4.0.0"),
-            ("Omarchy v4.0.0", "4.0.0"),
-        ] {
-            assert_eq!(parse_omarchy_version(input).unwrap().to_string(), expected);
-        }
-        for version in ["", "unknown", "error 404", "4.invalid", "release 2026.09"] {
-            assert_eq!(parse_omarchy_version(version), None);
-        }
-    }
-
-    #[test]
-    fn detects_missing_omarchy_and_reports_broken_version_commands() {
-        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let scratch = tempfile::tempdir().unwrap();
-        let _path = crate::test_helpers::EnvVarGuard::set("PATH", scratch.path());
-        assert_eq!(detect_omarchy_version().unwrap(), None);
-        let command = scratch.path().join("omarchy");
-        for (script, expected) in [
-            ("#!/bin/sh\nprintf '4.0.0-1\\n'\n", "4.0.0-1"),
-            ("#!/bin/sh\nprintf '3.4.0\\n'\n", "3.4.0"),
-        ] {
-            fs::write(&command, script).unwrap();
-            fs::set_permissions(&command, fs::Permissions::from_mode(0o755)).unwrap();
-            assert_eq!(detect_omarchy_version().unwrap().as_deref(), Some(expected));
-        }
-        fs::write(&command, "#!/bin/sh\nexit 1\n").unwrap();
-        assert!(detect_omarchy_version().is_err());
     }
 
     fn conditional_fixture(scratch: &Path) -> (Store, Migration) {

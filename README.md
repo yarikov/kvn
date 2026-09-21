@@ -160,7 +160,8 @@ status bar shows `KS`.
 ### Omarchy integration (optional)
 
 [Omarchy](https://omarchy.org/) is an Arch-based Linux distribution built around
-Hyprland. If you do not use it, skip this section.
+Hyprland. If you do not use it, skip this section. Omarchy 4 or newer is
+required.
 
 Set up the standalone [omakvn](https://github.com/yarikov/omakvn) Quickshell bar
 plugin together with the `kvn` Apps menu entry, Hyprland shortcuts, and

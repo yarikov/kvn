@@ -1404,7 +1404,7 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_connected_profile: Option<Uuid>,
     /// Active UI theme slug. The literal `"omarchy"` is a sentinel that
-    /// means "follow Omarchy's active XDG state/config theme.name"; any other value
+    /// means "follow Omarchy's active XDG state theme.name"; any other value
     /// names a bundled palette (see `src/ui/palette.rs`).
     #[serde(default = "default_theme")]
     pub theme: String,

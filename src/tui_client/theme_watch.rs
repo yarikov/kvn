@@ -1,9 +1,8 @@
 //! Follow the active Omarchy theme at runtime.
 //!
-//! Omarchy 4 stores its active theme as a single-line slug in
-//! `~/.local/state/omarchy/current/theme.name`; Omarchy 3 used
-//! `~/.config/omarchy/current/theme.name`. The shared detection helper picks
-//! the active layout and this watcher follows its `current/` directory.
+//! Omarchy stores its active theme as a single-line slug in
+//! `~/.local/state/omarchy/current/theme.name`, and this watcher follows the
+//! enclosing `current/` directory.
 //!
 //! On non-Omarchy systems the watched directory does not exist and the
 //! watcher exits immediately without spawning any background work.
@@ -188,7 +187,7 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", config.path()) };
         unsafe { std::env::set_var("XDG_STATE_HOME", state.path()) };
-        let current = config.path().join("omarchy").join("current");
+        let current = state.path().join("omarchy").join("current");
         std::fs::create_dir_all(current.join("theme")).unwrap();
         std::fs::write(current.join("theme.name"), "nord\n").unwrap();
         std::fs::write(current.join("theme").join("colors.toml"), "invalid").unwrap();
