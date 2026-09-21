@@ -8,7 +8,9 @@ use uuid::Uuid;
 
 use crate::app::effect::Effect;
 use crate::app::model::{ConnectionState, Model};
-use crate::config::profile::{Config, Profile};
+use crate::config::profile::{
+    Config, Profile, ProtocolConfig, Subscription, SubscriptionAutoUpdate, VlessConfig,
+};
 
 /// Mutex that recovers after a test panics while holding the lock.
 ///
@@ -156,5 +158,26 @@ pub fn app_log_error(message: &str) -> Effect {
     Effect::AppendAppLog {
         level: "ERROR".to_string(),
         message: message.to_string(),
+    }
+}
+
+pub fn vless_cfg(profile: &Profile) -> &VlessConfig {
+    match &profile.config {
+        ProtocolConfig::Vless(c) => c,
+        other => panic!("expected VLESS, got {:?}", other.protocol()),
+    }
+}
+
+pub fn subscription_with_hwid(send_hwid: bool, hwid: Option<&str>) -> Subscription {
+    Subscription {
+        id: Uuid::new_v4(),
+        name: "Test subscription".to_string(),
+        url: "https://example.com/subscription".to_string(),
+        auto_update: SubscriptionAutoUpdate::Off,
+        last_updated: None,
+        next_auto_update: None,
+        retry_state: None,
+        send_hwid,
+        hwid: hwid.map(str::to_string),
     }
 }
