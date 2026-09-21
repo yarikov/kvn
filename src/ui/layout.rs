@@ -3087,6 +3087,68 @@ mod tests {
     }
 
     #[test]
+    fn overlays_render_at_the_minimum_terminal_size() {
+        use crate::app::model::{MigrationPhase, MigrationStatus, SettingsMenuPage};
+
+        type Setup = fn(&mut Model);
+
+        let cases: Vec<(&str, Setup)> = vec![
+            ("settings-menu", |model: &mut Model| {
+                model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+            }),
+            ("confirm-delete", |model: &mut Model| {
+                model.overlay = Overlay::ConfirmDelete
+            }),
+            ("routing-mode", |model: &mut Model| {
+                model
+                    .config
+                    .settings
+                    .geo_routing
+                    .set_region(crate::config::profile::GeoRegion::Ru);
+                model.overlay = Overlay::RoutingMode;
+                model.routing_selected = 2;
+            }),
+            ("dns-settings", |model: &mut Model| {
+                model.overlay = Overlay::DnsSettings;
+                model.dns_selected = 1;
+            }),
+            ("service-routing", |model: &mut Model| {
+                model.overlay = Overlay::ServiceRouting;
+                model.service_routing_selected = 1;
+            }),
+            ("migration", |model: &mut Model| {
+                model.overlay = Overlay::Migration;
+                model.migration = Some(MigrationStatus {
+                    session_id: "session".into(),
+                    phase: MigrationPhase::Failed,
+                    completed: 2,
+                    total: 4,
+                    summary: "Updating integration".into(),
+                    error: Some("sudo command failed".into()),
+                });
+            }),
+        ];
+
+        for (label, setup) in cases {
+            let mut model = model_with_profiles(vec![Profile::new_vless(
+                "Alpha".to_string(),
+                "1.1.1.1".to_string(),
+                443,
+                "u1".to_string(),
+            )]);
+            model.geo_last_updated = Some("2026-05-31 13:41".to_string());
+            setup(&mut model);
+            insta::with_settings!({snapshot_suffix => label}, {
+                insta::assert_snapshot!(snapshot_terminal(
+                    &model,
+                    MIN_TERMINAL_WIDTH,
+                    MIN_TERMINAL_HEIGHT
+                ));
+            });
+        }
+    }
+
+    #[test]
     fn draw_geo_region_overlay_at_minimum_terminal_size_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::GeoRegions;
