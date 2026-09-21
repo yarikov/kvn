@@ -1,6 +1,11 @@
 ---
 source: src/ui/widgets.rs
-expression: buffer_to_string(&buf)
+expression: status_bar_styles(&model)
 ---
  CONNECTING                                                                                           DoH  Global
 [113x1]
+--- styles ---
+aaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcccbbcccccc
+a fg=Black bg=Yellow BOLD
+b fg=Gray bg=Rgb(14, 14, 14)
+c fg=Cyan bg=Rgb(14, 14, 14) BOLD

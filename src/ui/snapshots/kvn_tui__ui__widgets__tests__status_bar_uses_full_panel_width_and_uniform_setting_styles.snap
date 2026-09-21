@@ -1,0 +1,12 @@
+---
+source: src/ui/widgets.rs
+expression: status_bar_styles(&model)
+---
+ DISCONNECTED                                                        KS  Auto  DoH  Global    (1d) 31 May 13:41 
+[113x1]
+--- styles ---
+aaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbccbbccccbbcccbbccccccbbddddddddddddddddddddd
+a fg=Gray bg=Rgb(43, 43, 43) BOLD
+b fg=Gray bg=Rgb(14, 14, 14)
+c fg=Cyan bg=Rgb(14, 14, 14) BOLD
+d fg=Black bg=Red BOLD
