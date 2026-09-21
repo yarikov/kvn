@@ -72,12 +72,13 @@ impl Drop for EnvVarGuard {
 
 /// Convert a ratatui Buffer to a multi-line string for snapshot testing.
 pub fn buffer_to_string(buffer: &Buffer) -> String {
-    buffer
+    let rows = buffer
         .content
         .chunks(buffer.area.width as usize)
         .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    format!("{rows}\n[{}x{}]", buffer.area.width, buffer.area.height)
 }
 
 pub fn render_to_buffer<F>(width: u16, height: u16, draw: F) -> Buffer

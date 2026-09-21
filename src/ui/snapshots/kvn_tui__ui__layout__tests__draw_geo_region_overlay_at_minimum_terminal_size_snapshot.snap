@@ -17,3 +17,4 @@ expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 │                                                                    │
 └────────────────────────────────────────────────────────────────────┘
  DISCONNECTED                                              DoH  Global
+[70x15]
