@@ -1,0 +1,40 @@
+---
+source: src/ui/layout/overlay/help.rs
+expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
+---
+┌ Traffic ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections                                          │
+└──────────────────────────────┌─────────────────────────────────────────────────┐──────────────────────────────┘
+┌ Profiles ────────────────────│ Navigation                                      │──────────────────────────────┐
+│ No sources. Press p to paste │ Ctrl+h/l   Focus panes                          │                              │
+│URL from clipboard.           │ j/k, ↑/↓   Move or scroll                       │                              │
+│                              │ gg/G       Go to first / last                   │                              │
+│                              │                                                 │                              │
+│                              │ Logs                                            │                              │
+│                              │ y          Yank selected log(s)                 │                              │
+│                              │ Shift+V    Select multiple logs                 │                              │
+│                              │ Esc        Cancel log selection                 │                              │
+│                              │                                                 │                              │
+│                              │ Profiles                                        │                              │
+│                              │ Enter      Connect selected profile             │                              │
+│                              │ e          Open profiles.json in $EDITOR        │                              │
+│                              │ y          Yank profile or subscription         │                              │
+│                              │ p          Paste profile or subscription        │                              │
+│                              │ d          Delete profile or subscription       │                              │
+│                              │ u          Update subscription or geo           │                              │
+│                              │ i/I        Cycle subscription / geo auto-update │                              │
+│                              │ t/T        Test selected / all profiles         │                              │
+│                              │                                                 │                              │
+│                              │ Connection                                      │                              │
+│                              │ r          Reconnect                            │                              │
+│                              │ s          Disconnect                           │                              │
+│                              │ a          Toggle auto-connect                  │                              │
+│                              │ Shift+K    Toggle kill switch                   │                              │
+│                              │                                                 │                              │
+│                              │ Settings                                        │                              │
+│                              │                                                 │                              │
+│                              │                    q/󱊷 close                    │                              │
+│                              └─────────────────────────────────────────────────┘                              │
+└───────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
+ DISCONNECTED                                                                                         DoH  Global
+[113x35]

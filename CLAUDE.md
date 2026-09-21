@@ -27,7 +27,7 @@ See `AGENTS.md` for the full module map, design decisions, and coding convention
 
 **TEA architecture** — business logic lives entirely in the pure function `app::update::update(model, msg) -> Vec<Effect>`. It must not perform I/O. `src/app/update.rs` is only the `Msg` dispatcher; each handler lives in a submodule under `src/app/update/` (keyboard input under `src/app/update/key/`), and tests sit next to the code they cover. Side effects are declared as `Effect` variants and executed exclusively by `daemon::execute_daemon_effect`. To add a new side effect: add an `Effect` variant, handle it there.
 
-**UI rendering** — `src/ui/layout.rs` builds ratatui `Line`/`Span` trees from `Model`. `src/ui/styles.rs` is the single source of truth for colors. `src/ui/nav.rs` handles cursor movement. All UI code is used only by the TUI client, never by the daemon.
+**UI rendering** — `src/ui/layout.rs` is a facade: it owns the frame split and the `draw*` entry points, and delegates to one submodule per concern under `src/ui/layout/` (`text`, `log`, `panes`, `sources`, `overlay` + `overlay/<one file per overlay>`), each of which builds ratatui `Line`/`Span` trees from `Model`. `src/ui/styles.rs` is the single source of truth for colors. `src/ui/nav.rs` handles cursor movement. All UI code is used only by the TUI client, never by the daemon.
 
 **Config** — `~/.config/kvn-tui/profiles.json`. All writes must be atomic (write to `.tmp`, then `fs::rename`). See `config::save_config_at` for the pattern.
 

@@ -198,6 +198,36 @@ pub fn model_with_profiles(profiles: Vec<Profile>) -> Model {
     Model::test_new(config)
 }
 
+pub fn model_with_subscription() -> Model {
+    let sub_id = Uuid::new_v4();
+    let standalone = Profile::new_vless("A".into(), "a".into(), 1, "u".into());
+    let mut nested = Profile::new_vless("B".into(), "b".into(), 2, "v".into());
+    nested.subscription_id = Some(sub_id);
+    let mut model = model_with_profiles(vec![standalone, nested]);
+    model.config.subscriptions.push(Subscription {
+        id: sub_id,
+        name: "Sub".into(),
+        url: "https://example.test".into(),
+        auto_update: SubscriptionAutoUpdate::Off,
+        last_updated: None,
+        next_auto_update: None,
+        retry_state: None,
+        send_hwid: false,
+        hwid: None,
+    });
+    model
+}
+
+pub fn snapshot_terminal(model: &Model, width: u16, height: u16) -> String {
+    render_to_string(width, height, |frame| crate::ui::layout::draw(frame, model))
+}
+
+pub fn snapshot_styles(model: &Model, width: u16, height: u16) -> String {
+    buffer_to_styled_string(&render_to_buffer(width, height, |frame| {
+        crate::ui::layout::draw(frame, model)
+    }))
+}
+
 /// Create a simple `KeyEvent` from a character for testing input handlers.
 pub fn key(c: char) -> KeyEvent {
     KeyEvent::from(KeyCode::Char(c))

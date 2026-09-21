@@ -1,0 +1,20 @@
+---
+source: src/ui/layout/overlay/support.rs
+expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
+---
+┌ Traffic ───────────────────────────────────────────────────────────┐
+│ ↑ 0.0 KB/┌──────────────────────────────────────────────┐connectio │
+└──────────│                Support kvn 🚀                 │──────────┘
+┌ Profiles │kvn is free, open source, and built with care.│──────────┐
+│ No source│If you find it useful, consider supporting its│L from    │
+│clipboard.│            continued development.            │          │
+│          │  Your support helps cover AI tools, testing, │          │
+│          │  bug fixes, improvements, and new features.  │          │
+│          │             Support development              │          │
+│          │             Remind me later                  │          │
+│          │             Don't show again                 │          │
+│          │             󰌑 confirm · q/󱊷 close            │          │
+│          └──────────────────────────────────────────────┘          │
+└────────────────────────────────────────────────────────────────────┘
+ DISCONNECTED                                              DoH  Global
+[70x15]
