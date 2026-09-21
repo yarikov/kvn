@@ -2,6 +2,7 @@ use chrono::{DateTime, Local, Timelike};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
+use ratatui::style::Style;
 use ratatui::{Frame, Terminal};
 use std::convert::Infallible;
 use std::ffi::{OsStr, OsString};
@@ -79,6 +80,65 @@ pub fn buffer_to_string(buffer: &Buffer) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!("{rows}\n[{}x{}]", buffer.area.width, buffer.area.height)
+}
+
+const STYLE_KEYS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+fn style_label(style: &Style) -> String {
+    let mut parts = Vec::new();
+    if let Some(fg) = style.fg {
+        parts.push(format!("fg={fg:?}"));
+    }
+    if let Some(bg) = style.bg {
+        parts.push(format!("bg={bg:?}"));
+    }
+    if !style.add_modifier.is_empty() {
+        parts.push(format!("{:?}", style.add_modifier));
+    }
+    if !style.sub_modifier.is_empty() {
+        parts.push(format!("-{:?}", style.sub_modifier));
+    }
+    parts.join(" ")
+}
+
+pub fn buffer_to_styled_string(buffer: &Buffer) -> String {
+    let width = buffer.area.width as usize;
+    let mut seen: Vec<Style> = Vec::new();
+    let mut map = String::new();
+    for (index, cell) in buffer.content.iter().enumerate() {
+        if index > 0 && index % width == 0 {
+            map.push('\n');
+        }
+        let style = cell.style();
+        if style == Style::default() {
+            map.push(' ');
+            continue;
+        }
+        let key = match seen.iter().position(|known| *known == style) {
+            Some(key) => key,
+            None => {
+                seen.push(style);
+                seen.len() - 1
+            }
+        };
+        map.push(STYLE_KEYS.chars().nth(key).unwrap_or('?'));
+    }
+    let legend = seen
+        .iter()
+        .enumerate()
+        .map(|(key, style)| {
+            format!(
+                "{} {}",
+                STYLE_KEYS.chars().nth(key).unwrap_or('?'),
+                style_label(style)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{}\n--- styles ---\n{map}\n{legend}",
+        buffer_to_string(buffer)
+    )
 }
 
 pub fn render_to_buffer<F>(width: u16, height: u16, draw: F) -> Buffer
