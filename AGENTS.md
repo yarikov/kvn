@@ -20,7 +20,9 @@ The app does **not** implement VPN protocols itself. It is a configuration gener
 | `app` | `src/app.rs`, `src/app/model.rs`, `src/app/msg.rs`, `src/app/update.rs`, `src/app/effect.rs` | TEA core: Model, Msg, Update, Effect — pure data, messages, business logic, side-effect declarations |
 | `model` | `src/app/model.rs` | Application state (`Model`), overlay + connection state + subscription state, input state — pure data, no side effects |
 | `msg` | `src/app/msg.rs` | Message enum (`Msg`) — all external events (keys, ticks, logs, geo, resume, etc.) |
-| `update` | `src/app/update.rs` | Pure `update(model, msg) -> Vec<Effect>` — business logic, input routing, mode transitions |
+| `update` | `src/app/update.rs` + `src/app/update/` | Pure `update(model, msg) -> Vec<Effect>` — the top-level message dispatcher only; every handler lives in a submodule (see below) |
+| `update` submodules | `src/app/update/{status,connection,traffic,config_reload,tick,routing,geo,subscription,paste}.rs` | Non-keyboard message handlers: status/download-blocked helpers, connect lifecycle + kill-switch/polkit results, Clash-API traffic sampling, `ConfigReloaded`, the 250 ms tick and its auto-update schedules, routing-mode / geo-region / service-routing commits, geo download results, subscription fetch results, clipboard paste → profile or subscription |
+| `update::key` | `src/app/update/key.rs` + `src/app/update/key/` | Keyboard input: `handle_key` routes by `Model.overlay` to `sources`, `confirm_delete`, `settings_menu`, `regions`, `dns`, `service_routing`, `theme`; `key/ipc.rs` (+ `ipc/{migration,semantic,support}.rs`) handles `IpcCommand` for non-TUI clients |
 | `effect` | `src/app/effect.rs` | Effect enum — declarative description of side effects to be executed by runtime |
 | `daemon` | `src/daemon.rs` | Headless daemon: owns sing-box process, config, mpsc channel, IPC server, background services |
 | `tui_client` | `src/tui_client.rs` | TUI client: connects to daemon via Unix socket, renders UI, forwards input, reads clipboard |
@@ -169,13 +171,13 @@ See the `release` skill in `.agents/skills/release/SKILL.md` for the full versio
 The application follows **The Elm Architecture (TEA)**:
 1. **Model** (`app/model.rs`) holds all application state as pure data. UI state is split into `Overlay` (popup/modal) and `ConnectionState` (idle/connecting/connected).
 2. **Messages** (`app/msg.rs`) represent every external event — keyboard input, timer ticks, log lines, geo updates, system resume.
-3. **Update** (`app/update.rs`) is a pure function `update(model, msg) -> Vec<Effect>`: no I/O, no threads, no system calls. All business logic lives here.
+3. **Update** (`app/update.rs` and its `app/update/` submodules) is a pure function `update(model, msg) -> Vec<Effect>`: no I/O, no threads, no system calls. All business logic lives here; `update.rs` itself only dispatches each `Msg` to a submodule handler.
 4. **Effects** (`app/effect.rs`) are declarative descriptions of side effects (`Connect`, `DownloadGeo`, `SaveConfig`, `Quit`, etc.).
 5. **Daemon** (`daemon.rs`) owns the canonical `Model`, the `mpsc` channel, the sing-box `process_slot`, and all background services (ticker, suspend watcher, log tailer, IPC server). It exposes a Unix domain socket IPC server (`ipc.rs`) that accepts NDJSON commands from TUI clients.
 6. **TUI Client** (`tui_client.rs`) connects to the daemon socket, enters the alternate screen, renders the UI using ratatui, and forwards keyboard input (plus clipboard/editor actions) as IPC commands. It has its own local `Model` that is kept in sync via `StateSnapshot` broadcasts from the daemon.
-7. **IPC Protocol** (`ipc.rs`) uses newline-delimited JSON over a Unix socket. Commands: `Attach`, `Detach`, `Key`, `SelectSource`, `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `Paste`, `Copied`, `ReloadConfig`, `Quit`, `ClientError`. Responses: `StateSnapshot` pushed by the daemon after every state change. The semantic commands (`ConnectProfile` through `SetAutoConnect`) exist for non-TUI clients — the Omarchy Quickshell module and the `kvn status/connect/disconnect/reconnect/toggle` CLI subcommands. Overlay commits (routing mode, geo region) are shared between the key handlers and IPC via `commit_routing_mode` / `commit_geo_region` in `update.rs` so both paths run identical logic.
+7. **IPC Protocol** (`ipc.rs`) uses newline-delimited JSON over a Unix socket. Commands: `Attach`, `Detach`, `Key`, `SelectSource`, `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `Paste`, `Copied`, `ReloadConfig`, `Quit`, `ClientError`. Responses: `StateSnapshot` pushed by the daemon after every state change. The semantic commands (`ConnectProfile` through `SetAutoConnect`) exist for non-TUI clients — the Omarchy Quickshell module and the `kvn status/connect/disconnect/reconnect/toggle` CLI subcommands. Overlay commits (routing mode, geo region) are shared between the key handlers and IPC via `commit_routing_mode` / `commit_geo_region` in `update/routing.rs` so both paths run identical logic.
 
-This separation makes `update.rs` fully synchronous and trivial to unit-test.
+This separation makes the update tree fully synchronous and trivial to unit-test.
 
 ### Background Services
 Background work is executed in dedicated threads spawned by the **daemon** (`daemon.rs`):
@@ -222,7 +224,7 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 - Transport (WebSocket / gRPC / HTTP): `TransportConfig` shared across VLESS, VMess, Trojan, AnyTLS.
 
 ### Suspend / Resume
-- `services/suspend.rs` runs a blocking zbus listener in a dedicated thread. On resume (`PrepareForSleep` with `false`), it sends `Msg::SystemResumed` through the `mpsc` channel so `update.rs` can schedule a reconnect effect.
+- `services/suspend.rs` runs a blocking zbus listener in a dedicated thread. On resume (`PrepareForSleep` with `false`), it sends `Msg::SystemResumed` through the `mpsc` channel so `update/connection.rs` can schedule a reconnect effect.
 
 ### Kill Switch
 - Uses **nftables** + a systemd unit (`kvn-tui-killswitch.service`) that loads `/etc/kvn-tui/killswitch.nft`. The ruleset drops all outbound traffic except localhost, `kvn*` interfaces, and packets marked `0x29a` by sing-box.
@@ -280,7 +282,7 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 
 ### Auto-Connect
 - `settings.auto_connect` (persisted in `profiles.json`) controls whether the app reconnects to the last used profile on startup.
-- `settings.last_connected_profile` stores the UUID of the most recently connected profile. It is updated in `update.rs` on `Msg::Connected` and saved via `Effect::SaveConfig`.
+- `settings.last_connected_profile` stores the UUID of the most recently connected profile. It is updated in `update/connection.rs` on `Msg::Connected` and saved via `Effect::SaveConfig`.
 - `Model::new()` calls `resolve_startup_state()` to check `auto_connect` + `last_connected_profile`. If both are set and the profile exists, the model starts in `ConnectionState::Connecting` with that profile pre-selected, and the status bar shows `Auto-connecting to {name}…`.
 - The user can toggle `auto_connect` at runtime with the `a` keybinding, the Connection settings overlay, or IPC `SetAutoConnect`. Disabling saves immediately. Enabling first emits `Effect::CheckAutoConnectPolkit` (with `Model::auto_connect_pending` set): the daemon runs `doctor::polkit_readiness()` and replies with `Msg::AutoConnectPolkitChecked`. The flag is flipped and saved only when passwordless polkit is set up and the `kvn-tui` group is active in the daemon's session; otherwise auto-connect stays off and the reason is shown as an error toast and written to the app log.
 - `sudo kvn clean --polkit` / `--killswitch` connect to the invoking user's daemon (`/run/user/$SUDO_UID/kvn-tui.sock`) and send `SetAutoConnect`/`SetKillSwitch { enabled: false }`, so the daemon saves the config as the user. If the daemon is not running, startup reconciliation handles it: `reconcile_kill_switch_state` for the kill switch, and `reconcile_auto_connect_state` turns auto-connect off (before the first tick connects) when `doctor::polkit_authorization_denied()`.

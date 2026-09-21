@@ -1,10 +1,13 @@
+use chrono::{DateTime, Local, Timelike};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
 use std::convert::Infallible;
 use std::ffi::{OsStr, OsString};
 use std::sync::{Mutex, MutexGuard};
+use uuid::Uuid;
 
-use crate::app::model::Model;
+use crate::app::effect::Effect;
+use crate::app::model::{ConnectionState, Model};
 use crate::config::profile::{Config, Profile};
 
 /// Mutex that recovers after a test panics while holding the lock.
@@ -113,4 +116,45 @@ pub fn model_with_profiles(profiles: Vec<Profile>) -> Model {
 /// Create a simple `KeyEvent` from a character for testing input handlers.
 pub fn key(c: char) -> KeyEvent {
     KeyEvent::from(KeyCode::Char(c))
+}
+
+pub fn enter() -> KeyEvent {
+    KeyEvent::from(KeyCode::Enter)
+}
+
+pub fn esc() -> KeyEvent {
+    KeyEvent::from(KeyCode::Esc)
+}
+
+pub fn connected_model() -> (Model, Uuid) {
+    let a = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+    let a_id = a.id;
+    let mut model = model_with_profiles(vec![a]);
+    model.connection = ConnectionState::Connected;
+    model.active_profile_id = Some(a_id);
+    (model, a_id)
+}
+
+pub fn after_update_window() -> DateTime<Local> {
+    Local::now()
+        .with_hour(9)
+        .unwrap()
+        .with_minute(0)
+        .unwrap()
+        .with_second(0)
+        .unwrap()
+}
+
+pub fn app_log_info(message: &str) -> Effect {
+    Effect::AppendAppLog {
+        level: "INFO".to_string(),
+        message: message.to_string(),
+    }
+}
+
+pub fn app_log_error(message: &str) -> Effect {
+    Effect::AppendAppLog {
+        level: "ERROR".to_string(),
+        message: message.to_string(),
+    }
 }
