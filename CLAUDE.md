@@ -24,7 +24,7 @@ See `AGENTS.md` for the full module map, design decisions, and coding convention
 
 **Daemon + TUI client split** — `kvn-tui` auto-starts a headless daemon (`--daemon`) that owns the sing-box process and all state, then connects a TUI client over a Unix socket (NDJSON protocol in `ipc.rs`). Re-running `kvn-tui` re-attaches to the existing daemon without restarting sing-box. `q`/`Esc` detaches the TUI; `Ctrl+C` kills the daemon.
 
-**TEA architecture** — business logic lives entirely in the pure function `app::update::update(model, msg) -> Vec<Effect>`. It must not perform I/O. Side effects are declared as `Effect` variants and executed exclusively by `daemon::execute_daemon_effect`. To add a new side effect: add an `Effect` variant, handle it there.
+**TEA architecture** — business logic lives entirely in the pure function `app::update::update(model, msg) -> Vec<Effect>`. It must not perform I/O. `src/app/update.rs` is only the `Msg` dispatcher; each handler lives in a submodule under `src/app/update/` (keyboard input under `src/app/update/key/`), and tests sit next to the code they cover. Side effects are declared as `Effect` variants and executed exclusively by `daemon::execute_daemon_effect`. To add a new side effect: add an `Effect` variant, handle it there.
 
 **UI rendering** — `src/ui/layout.rs` builds ratatui `Line`/`Span` trees from `Model`. `src/ui/styles.rs` is the single source of truth for colors. `src/ui/nav.rs` handles cursor movement. All UI code is used only by the TUI client, never by the daemon.
 
