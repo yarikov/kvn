@@ -366,10 +366,19 @@ mod tests {
     use super::*;
     use crate::app::model::ConnectionState;
     use crate::config::profile::{GeoAutoUpdate, GeoRegion, Profile, RoutedService, ServiceRoute};
-    use crate::test_helpers::{APP_WINDOW_COLS, buffer_to_string, model_with_profiles};
+    use crate::test_helpers::{
+        APP_WINDOW_COLS, buffer_to_string, buffer_to_styled_string, model_with_profiles,
+    };
     use chrono::{Duration, TimeZone};
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
+
+    fn status_bar_styles(model: &crate::app::model::Model) -> String {
+        let area = Rect::new(0, 0, APP_WINDOW_COLS, 1);
+        let mut buf = Buffer::empty(area);
+        StatusBar::new(model).render(area, &mut buf);
+        buffer_to_styled_string(&buf)
+    }
 
     fn local_time(day: u32, hour: u32) -> chrono::DateTime<chrono::Local> {
         chrono::Local
@@ -519,41 +528,7 @@ mod tests {
     #[test]
     fn status_bar_shows_disconnected() {
         let model = model_with_profiles(vec![]);
-        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
-        let content: String = buf.content.iter().map(|c| c.symbol()).collect();
-        assert!(content.starts_with(" DISCONNECTED "));
-        assert!(content.contains("Global"));
-        let idx = content.find("DISCONNECTED").unwrap();
-        assert_eq!(buf.content[idx].style().fg, model.theme.offline_badge().fg);
-        assert_eq!(buf.content[idx].style().bg, model.theme.offline_badge().bg);
-        assert!(
-            buf.content[idx]
-                .style()
-                .add_modifier
-                .contains(ratatui::style::Modifier::BOLD)
-        );
-        assert_eq!(buf.content[40].style().bg, model.theme.status_bar().bg);
-    }
-
-    #[test]
-    fn status_bar_connect_pending_shows_connecting() {
-        use crate::app::model::ConnectionState;
-        let mut model = model_with_profiles(vec![]);
-        model.connection = ConnectionState::ConnectPending;
-        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
-        let content: String = buf.content.iter().map(|c| c.symbol()).collect();
-        assert!(content.starts_with(" CONNECTING "));
-        let idx = content.find("CONNECTING").unwrap();
-        assert_eq!(
-            buf.content[idx].style().fg,
-            model.theme.connecting_badge().fg
-        );
-        assert_eq!(
-            buf.content[idx].style().bg,
-            model.theme.connecting_badge().bg
-        );
+        insta::assert_snapshot!(status_bar_styles(&model));
     }
 
     #[test]
@@ -712,9 +687,7 @@ mod tests {
         )]);
         model.connection = ConnectionState::ConnectPending;
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
-        let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
-        StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
-        insta::assert_snapshot!(buffer_to_string(&buf));
+        insta::assert_snapshot!(status_bar_styles(&model));
     }
 
     #[test]
@@ -742,32 +715,11 @@ mod tests {
         model.config.settings.kill_switch = true;
         model.config.settings.auto_connect = true;
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.geo_last_checked_at = Some(chrono::Local::now());
+        model.geo_last_checked_at = chrono::Local
+            .with_ymd_and_hms(2026, 5, 31, 13, 41, 0)
+            .single();
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
-        let area = Rect::new(0, 0, APP_WINDOW_COLS, 1);
-        let mut buf = Buffer::empty(area);
-        StatusBar::new(&model).render(area, &mut buf);
-        let content: String = buf.content.iter().map(|cell| cell.symbol()).collect();
-
-        assert!(content.starts_with(" DISCONNECTED "));
-        assert!(content.ends_with(' '));
-        assert!(!content.contains('│'));
-        assert!(!content.contains("DNS"));
-        assert!(!content.contains('·'));
-
-        let ks = content.find("KS").unwrap();
-        let auto = content.find("Auto").unwrap();
-        let dns = content.find("DoH").unwrap();
-        let routing = content.find("Global").unwrap();
-        let rules = content.find('').unwrap();
-        assert!(ks < auto && auto < dns && dns < routing && routing < rules);
-
-        assert_eq!(buf.content[dns].style().fg, buf.content[ks].style().fg);
-        assert_eq!(buf.content[dns].style().bg, buf.content[ks].style().bg);
-        assert_eq!(
-            buf.content[dns].style().add_modifier,
-            buf.content[ks].style().add_modifier
-        );
+        insta::assert_snapshot!(status_bar_styles(&model));
     }
 
     #[test]

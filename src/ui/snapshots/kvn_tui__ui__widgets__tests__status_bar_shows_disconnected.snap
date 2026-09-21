@@ -1,0 +1,11 @@
+---
+source: src/ui/widgets.rs
+expression: status_bar_styles(&model)
+---
+ DISCONNECTED                                                                                         DoH  Global
+[113x1]
+--- styles ---
+aaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcccbbcccccc
+a fg=Gray bg=Rgb(43, 43, 43) BOLD
+b fg=Gray bg=Rgb(14, 14, 14)
+c fg=Cyan bg=Rgb(14, 14, 14) BOLD
