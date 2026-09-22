@@ -129,7 +129,7 @@ fn run_loop(
         };
         let response_error = match &msg {
             Msg::IpcRequest { command, .. }
-                if model.migration.is_some()
+                if model.restart_required
                     && matches!(
                         command,
                         IpcCommand::ConnectProfile { .. }
@@ -138,7 +138,7 @@ fn run_loop(
                             | IpcCommand::Toggle
                     ) =>
             {
-                Some("Cannot change the VPN connection while a migration is in progress".into())
+                Some("Restart the kvn daemon to finish the upgrade".into())
             }
             _ => None,
         };
@@ -150,7 +150,7 @@ fn run_loop(
             .any(|effect| matches!(effect, Effect::SaveConfig))
         {
             let edited = model.config.clone();
-            match commit_config_change(model, &config_before, &edited) {
+            match persist_config_unless_frozen(model, &config_before, &edited) {
                 Ok(config) => {
                     model.replace_config_preserving_selection(config);
                     effects.retain(|effect| !matches!(effect, Effect::SaveConfig));
@@ -220,6 +220,7 @@ fn run_loop(
             ipc_server.broadcast(&build_snapshot(
                 model,
                 log_session_offsets,
+                ipc_server.tui_sessions(),
                 response_to,
                 response_error,
             ));
@@ -228,14 +229,25 @@ fn run_loop(
     Ok(())
 }
 
+fn persist_config_unless_frozen(
+    model: &Model,
+    base: &crate::config::profile::Config,
+    edited: &crate::config::profile::Config,
+) -> anyhow::Result<crate::config::profile::Config> {
+    if model.restart_required {
+        return Ok(edited.clone());
+    }
+    commit_config_change(model, base, edited)
+}
+
 fn commit_config_change(
     model: &Model,
     base: &crate::config::profile::Config,
     edited: &crate::config::profile::Config,
 ) -> anyhow::Result<crate::config::profile::Config> {
     anyhow::ensure!(
-        model.migration.is_none(),
-        "configuration is frozen during migration"
+        !model.restart_required,
+        "configuration is frozen until the kvn daemon is restarted"
     );
     anyhow::ensure!(
         !model.config_persistence_blocked,
@@ -1345,14 +1357,15 @@ fn dns_bootstrap_endpoints(
 pub(crate) fn build_snapshot(
     model: &Model,
     log_session_offsets: LogSessionOffsets,
+    tui_sessions: usize,
     response_to: Option<uuid::Uuid>,
     response_error: Option<String>,
 ) -> StateSnapshot {
     StateSnapshot {
         daemon_version: env!("CARGO_PKG_VERSION").to_string(),
         ipc_version: crate::ipc::IPC_VERSION,
-        migration_protocol_version: crate::ipc::MIGRATION_PROTOCOL_VERSION,
-        migration: model.migration.clone(),
+        tui_sessions,
+        restart_required: model.restart_required,
         response_to,
         response_error,
         connection: model.connection,

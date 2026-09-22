@@ -1,28 +1,9 @@
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-
-struct TempFileCleanup<'a> {
-    path: &'a Path,
-    armed: bool,
-}
-
-impl TempFileCleanup<'_> {
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for TempFileCleanup<'_> {
-    fn drop(&mut self) {
-        if self.armed {
-            let _ = fs::remove_file(self.path);
-        }
-    }
-}
 
 /// Write `data` to `dest` atomically and durably.
 ///
@@ -49,30 +30,20 @@ fn write_inner(dest: &Path, data: &[u8], expected: Option<Option<&[u8]>>) -> Res
     let name = dest
         .file_name()
         .with_context(|| format!("Atomic write: dest {:?} has no file name", dest))?;
-    let temp = dir.join(format!("{}.tmp", name.to_string_lossy()));
-    let mut temp_cleanup = TempFileCleanup {
-        path: &temp,
-        armed: true,
-    };
+    let mut temp = tempfile::Builder::new()
+        .prefix(&format!(".{}.", name.to_string_lossy()))
+        .suffix(".tmp")
+        .tempfile_in(dir)
+        .with_context(|| format!("Failed to create temp file next to {:?}", dest))?;
 
-    {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&temp)
-            .with_context(|| format!("Failed to create temp file {:?}", temp))?;
-        // `mode` applies at creation time, avoiding a window where a new
-        // secret-bearing file has umask-derived permissions. chmod as well so
-        // a pre-existing temp file from an interrupted write is tightened.
-        file.set_permissions(fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("Failed to chmod temp file {:?}", temp))?;
-        file.write_all(data)
-            .with_context(|| format!("Failed to write temp file {:?}", temp))?;
-        file.sync_all()
-            .with_context(|| format!("Failed to fsync temp file {:?}", temp))?;
-    }
+    temp.as_file()
+        .set_permissions(fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("Failed to chmod temp file {:?}", temp.path()))?;
+    temp.write_all(data)
+        .with_context(|| format!("Failed to write temp file {:?}", temp.path()))?;
+    temp.as_file()
+        .sync_all()
+        .with_context(|| format!("Failed to fsync temp file {:?}", temp.path()))?;
 
     if let Some(expected) = expected {
         let actual = match fs::read(dest) {
@@ -87,9 +58,9 @@ fn write_inner(dest: &Path, data: &[u8], expected: Option<Option<&[u8]>>) -> Res
         }
     }
 
-    fs::rename(&temp, dest)
-        .with_context(|| format!("Failed to rename {:?} -> {:?}", temp, dest))?;
-    temp_cleanup.disarm();
+    temp.persist(dest)
+        .map_err(|error| error.error)
+        .with_context(|| format!("Failed to publish temp file as {:?}", dest))?;
 
     // Persist the rename itself. Best-effort: some filesystems (tmpfs, certain
     // FUSE mounts) return errors here even though the rename is safe in
@@ -125,8 +96,44 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("file.json");
         write(&path, b"payload").unwrap();
-        let temp = dir.path().join("file.json.tmp");
-        assert!(!temp.exists(), "temp file must not linger after rename");
+        assert_eq!(entry_names(dir.path()), vec!["file.json".to_string()]);
+    }
+
+    fn entry_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn concurrent_writers_never_publish_each_others_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.json");
+        write(&path, b"seed").unwrap();
+        let payloads: Vec<Vec<u8>> = (0..8)
+            .map(|writer| vec![b'a' + writer as u8; 4096])
+            .collect();
+
+        std::thread::scope(|scope| {
+            for payload in &payloads {
+                let path = path.clone();
+                scope.spawn(move || {
+                    for _ in 0..20 {
+                        write(&path, payload).unwrap();
+                    }
+                });
+            }
+        });
+
+        let published = fs::read(&path).unwrap();
+        assert!(
+            payloads.contains(&published),
+            "destination holds bytes no writer wrote"
+        );
+        assert_eq!(entry_names(dir.path()), vec!["profiles.json".to_string()]);
     }
 
     #[test]
@@ -145,7 +152,7 @@ mod tests {
         fs::create_dir(&destination).unwrap();
 
         assert!(write(&destination, b"payload").is_err());
-        assert!(!dir.path().join("destination.tmp").exists());
+        assert_eq!(entry_names(dir.path()), vec!["destination".to_string()]);
     }
 
     #[test]

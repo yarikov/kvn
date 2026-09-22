@@ -292,6 +292,34 @@ mod tests {
     }
 
     #[test]
+    fn a_frozen_daemon_still_handles_the_tunnel_dying() {
+        let profile_id = uuid::Uuid::new_v4();
+        let mut model = model_with_profiles(vec![]);
+        model.connection = ConnectionState::Connected;
+        model.connect_attempt_id = 3;
+        model.active_profile_id = Some(profile_id);
+        model.singbox_pid = Some(99);
+        model.restart_required = true;
+
+        update(
+            &mut model,
+            Msg::SingBoxExited {
+                attempt_id: 3,
+                code: Some(1),
+                signal: None,
+            },
+        );
+
+        assert_eq!(
+            model.connection,
+            ConnectionState::Idle,
+            "a frozen daemon must not keep reporting a tunnel that is gone"
+        );
+        assert_eq!(model.active_profile_id, None);
+        assert_eq!(model.singbox_pid, None);
+    }
+
+    #[test]
     fn singbox_exit_clears_connection_and_invalidates_attempt() {
         let profile_id = Uuid::new_v4();
         let mut model = Model::test_new(crate::config::profile::Config::default());

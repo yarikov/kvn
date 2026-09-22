@@ -11,16 +11,23 @@ pub(crate) enum RecoveryKind {
     Conflict,
     InvalidEdit,
     Archive,
+    Migration,
 }
 
 impl RecoveryKind {
-    const ALL: [Self; 3] = [Self::Conflict, Self::InvalidEdit, Self::Archive];
+    const ALL: [Self; 4] = [
+        Self::Conflict,
+        Self::InvalidEdit,
+        Self::Archive,
+        Self::Migration,
+    ];
 
     fn prefix(self) -> &'static str {
         match self {
             Self::Conflict => "profiles.json.conflict-",
             Self::InvalidEdit => "profiles.json.conflict-invalid-",
             Self::Archive => "profiles.json.invalid-",
+            Self::Migration => "profiles.json.before-migration-",
         }
     }
 }
@@ -33,6 +40,8 @@ fn classify(name: &str) -> Option<RecoveryKind> {
         Some(RecoveryKind::Conflict)
     } else if has_generated_suffix(name, RecoveryKind::Archive.prefix()) {
         Some(RecoveryKind::Archive)
+    } else if has_generated_suffix(name, RecoveryKind::Migration.prefix()) {
+        Some(RecoveryKind::Migration)
     } else {
         None
     }

@@ -87,16 +87,15 @@ pub(crate) fn load_config_for_recovery(path: &Path) -> Result<Config> {
     migrate_config_contents(&contents, path)
 }
 
-/// Migrate an explicit disposable config candidate in place. The package
-/// migration runner points scripts at this file; the live profiles.json is
-/// never touched by this path.
-pub(crate) fn migrate_candidate_at(path: &Path) -> Result<bool> {
-    migrate_candidate_to_at(path, profile::CURRENT_SCHEMA_VERSION)
+/// Migrate a config file in place to a pinned schema version. The package
+/// migration runner drives this; ordinary config loading never migrates.
+pub(crate) fn migrate_config_at(path: &Path) -> Result<bool> {
+    migrate_config_to_at(path, profile::CURRENT_SCHEMA_VERSION)
 }
 
-pub(crate) fn migrate_candidate_to_at(path: &Path, target_version: u32) -> Result<bool> {
-    let contents = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read migration candidate {:?}", path))?;
+pub(crate) fn migrate_config_to_at(path: &Path, target_version: u32) -> Result<bool> {
+    let contents =
+        fs::read_to_string(path).with_context(|| format!("Failed to read {:?}", path))?;
     let mut config = parse_config(&contents, path)?;
     config
         .migrate_to(target_version)
@@ -107,7 +106,7 @@ pub(crate) fn migrate_candidate_to_at(path: &Path, target_version: u32) -> Resul
         return Ok(false);
     }
     crate::atomic_write::write_if_unchanged(path, migrated.as_bytes(), Some(contents.as_bytes()))
-        .with_context(|| format!("Failed to update migration candidate {:?}", path))?;
+        .with_context(|| format!("Failed to update {:?}", path))?;
     Ok(true)
 }
 
@@ -508,6 +507,20 @@ mod tests {
 
         assert!(error.to_string().contains("kvn migrate"));
         assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+    }
+
+    #[test]
+    fn in_place_migration_upgrades_once_and_then_reports_no_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.json");
+        std::fs::write(&path, r#"{"schema_version":4,"profiles":[],"settings":{}}"#).unwrap();
+
+        assert!(migrate_config_at(&path).unwrap());
+        assert!(!schema_migration_required_at(&path).unwrap());
+
+        let migrated = std::fs::read_to_string(&path).unwrap();
+        assert!(!migrate_config_at(&path).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), migrated);
     }
 
     #[test]

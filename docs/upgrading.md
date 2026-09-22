@@ -6,10 +6,8 @@ Upgrade `kvn` through your usual package manager:
 yay -Syu
 ```
 
-Migrations are applied automatically when needed.
-
-`kvn update` is also available as a convenience command for updating the AUR
-package and running pending migrations.
+Pending migrations run on the next `kvn` launch, or explicitly with
+`kvn migrate`.
 
 Use `kvn migrate --pending` to check pending migrations and `kvn doctor` if an
 upgrade needs attention.

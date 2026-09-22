@@ -1,4 +1,3 @@
-mod migration;
 mod semantic;
 mod support;
 
@@ -22,25 +21,19 @@ pub(in crate::app::update) fn handle_ipc_command(
             model.clear_error_status(status_revision);
             return finish_ipc_effects(vec![]);
         }
-        IpcCommand::MigrationBegin { status } => {
-            return finish_ipc_effects(migration::begin(model, status));
+        IpcCommand::RestartRequired => {
+            model.restart_required = true;
+            model.overlay = Overlay::RestartRequired;
+            return finish_ipc_effects(vec![]);
         }
-        IpcCommand::MigrationProgress { status } => {
-            return finish_ipc_effects(migration::progress(model, status));
-        }
-        IpcCommand::MigrationEnd { session_id } => {
-            return finish_ipc_effects(migration::end(model, session_id));
-        }
-        IpcCommand::MigrationStopDaemon { session_id } => {
-            return finish_ipc_effects(migration::stop_daemon(model, session_id));
-        }
-        _ if model.migration.is_some() => {
+        IpcCommand::Quit => return finish_ipc_effects(vec![Effect::Quit]),
+        _ if model.restart_required => {
             return finish_ipc_effects(vec![]);
         }
         _ => {}
     }
     let effects = match cmd {
-        IpcCommand::Attach | IpcCommand::Detach => vec![],
+        IpcCommand::Attach | IpcCommand::AttachSession | IpcCommand::Detach => vec![],
         IpcCommand::CheckSupportPrompt => support::check_prompt(model),
         IpcCommand::ResolveSupportPrompt { resolution } => {
             support::resolve_prompt(model, resolution)
@@ -72,17 +65,14 @@ pub(in crate::app::update) fn handle_ipc_command(
         IpcCommand::Copied { name, count } => handle_copied_status(model, name, count),
         IpcCommand::ReloadConfig => vec![Effect::ReloadConfig],
         IpcCommand::ApplyEditedConfig { base, edited } => apply_edited_config(model, base, edited),
-        IpcCommand::Quit => vec![Effect::Quit],
         IpcCommand::ClientError { message } => {
             let mut effects = Vec::new();
             push_status(&mut effects, model, AppStatus::Error(message));
             effects
         }
-        IpcCommand::ClearErrorStatus { .. }
-        | IpcCommand::MigrationBegin { .. }
-        | IpcCommand::MigrationProgress { .. }
-        | IpcCommand::MigrationEnd { .. }
-        | IpcCommand::MigrationStopDaemon { .. } => unreachable!("handled above"),
+        IpcCommand::ClearErrorStatus { .. } | IpcCommand::RestartRequired | IpcCommand::Quit => {
+            unreachable!("handled above")
+        }
     };
     finish_ipc_effects(effects)
 }
@@ -130,7 +120,7 @@ pub(in crate::app::update) fn handle_go_first(model: &mut Model) -> Vec<Effect> 
             model.overlay = Overlay::Help(state);
         }
         Overlay::ConfirmDelete => {}
-        Overlay::Migration => {}
+        Overlay::RestartRequired => {}
     }
     vec![]
 }
@@ -176,6 +166,34 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Attach);
         assert_eq!(effects, vec![Effect::BroadcastState]);
+    }
+
+    #[test]
+    fn restart_required_opens_the_overlay_and_freezes_further_commands() {
+        let mut model = model_with_profiles(vec![]);
+
+        let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::RestartRequired);
+
+        assert!(model.restart_required);
+        assert_eq!(model.overlay, Overlay::RestartRequired);
+        assert_eq!(effects, vec![Effect::BroadcastState]);
+
+        let effects = handle_ipc_command(
+            &mut model,
+            crate::app::msg::IpcCommand::SetAutoConnect { enabled: true },
+        );
+        assert!(!model.config.settings.auto_connect);
+        assert_eq!(effects, vec![Effect::BroadcastState]);
+    }
+
+    #[test]
+    fn a_frozen_daemon_still_shuts_down_on_quit() {
+        let mut model = model_with_profiles(vec![]);
+        handle_ipc_command(&mut model, crate::app::msg::IpcCommand::RestartRequired);
+
+        let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Quit);
+
+        assert!(effects.contains(&Effect::Quit));
     }
 
     #[test]

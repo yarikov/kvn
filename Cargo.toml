@@ -68,7 +68,7 @@ libc = "0.2"
 # Filesystem watcher (used to follow the active Omarchy theme at runtime)
 notify = "8"
 
-# Automatically clean interrupted migration resource downloads.
+# Unique temp files for atomic writes.
 tempfile = "3"
 
 [build-dependencies]

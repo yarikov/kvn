@@ -1,8 +1,8 @@
 mod confirm_delete;
 mod dns;
 mod help;
-mod migration;
 pub(super) mod popup;
+mod restart_required;
 mod routing;
 mod settings_menu;
 mod settings_row;
@@ -30,7 +30,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         Overlay::ThemeSettings => theme::draw(frame, model, area),
         Overlay::ServiceRouting => routing::draw_services(frame, model, area),
         Overlay::Support => support::draw(frame, model, area),
-        Overlay::Migration => migration::draw(frame, model, area),
+        Overlay::RestartRequired => restart_required::draw(frame, model, area),
         Overlay::None => {}
     }
 }
@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn overlays_render_at_the_minimum_terminal_size() {
-        use crate::app::model::{MigrationPhase, MigrationStatus, SettingsMenuPage};
+        use crate::app::model::SettingsMenuPage;
 
         type Setup = fn(&mut Model);
 
@@ -101,16 +101,9 @@ mod tests {
                 model.overlay = Overlay::ServiceRouting;
                 model.service_routing_selected = 1;
             }),
-            ("migration", |model: &mut Model| {
-                model.overlay = Overlay::Migration;
-                model.migration = Some(MigrationStatus {
-                    session_id: "session".into(),
-                    phase: MigrationPhase::Failed,
-                    completed: 2,
-                    total: 4,
-                    summary: "Updating integration".into(),
-                    error: Some("sudo command failed".into()),
-                });
+            ("restart-required", |model: &mut Model| {
+                model.overlay = Overlay::RestartRequired;
+                model.restart_required = true;
             }),
         ];
 

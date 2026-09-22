@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -19,11 +20,6 @@ const BROADCAST_WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Current daemon/client wire-schema epoch.
 pub const IPC_VERSION: u32 = 1;
-
-/// Transactional migration protocol understood by the daemon. This is
-/// intentionally independent of the application and general IPC versions so
-/// a daemon from the previous release can keep the VPN alive during upgrade.
-pub const MIGRATION_PROTOCOL_VERSION: u32 = 1;
 
 /// Return the path to the Unix domain socket used for IPC.
 pub fn socket_path() -> anyhow::Result<std::path::PathBuf> {
@@ -78,6 +74,7 @@ pub fn wait_for_daemon_exit(timeout: Duration) -> bool {
 /// Daemon-side IPC server.
 pub struct IpcServer {
     clients: Arc<Mutex<Vec<UnixStream>>>,
+    tui_sessions: Arc<AtomicUsize>,
 }
 
 impl IpcServer {
@@ -96,6 +93,8 @@ impl IpcServer {
             .context("Failed to chmod IPC socket")?;
         let clients: Arc<Mutex<Vec<UnixStream>>> = Arc::new(Mutex::new(Vec::new()));
         let clients_clone = clients.clone();
+        let tui_sessions = Arc::new(AtomicUsize::new(0));
+        let sessions_clone = tui_sessions.clone();
         thread::spawn(move || {
             for stream in listener.incoming() {
                 match stream {
@@ -112,8 +111,10 @@ impl IpcServer {
                         }
                         let tx = tx.clone();
                         let clients = clients_clone.clone();
+                        let sessions = sessions_clone.clone();
                         clients.lock().unwrap().push(writer);
                         thread::spawn(move || {
+                            let mut session = false;
                             let reader = BufReader::new(stream);
                             for line in reader.lines() {
                                 match line {
@@ -129,6 +130,12 @@ impl IpcServer {
                                             if let Ok(command) =
                                                 serde_json::from_value::<IpcCommand>(value)
                                             {
+                                                if matches!(command, IpcCommand::AttachSession)
+                                                    && !session
+                                                {
+                                                    session = true;
+                                                    sessions.fetch_add(1, Ordering::SeqCst);
+                                                }
                                                 let message = match request_id {
                                                     Some(request_id) => Msg::IpcRequest {
                                                         command,
@@ -143,13 +150,19 @@ impl IpcServer {
                                     Err(_) => break,
                                 }
                             }
+                            if session {
+                                sessions.fetch_sub(1, Ordering::SeqCst);
+                            }
                         });
                     }
                     Err(_) => break,
                 }
             }
         });
-        Ok(Self { clients })
+        Ok(Self {
+            clients,
+            tui_sessions,
+        })
     }
 
     /// Send a state snapshot to every connected TUI client.
@@ -190,6 +203,10 @@ impl IpcServer {
             let mut guard = self.clients.lock().unwrap();
             guard.retain(|s| !dead_fds.contains(&s.as_raw_fd()));
         }
+    }
+
+    pub fn tui_sessions(&self) -> usize {
+        self.tui_sessions.load(Ordering::SeqCst)
     }
 }
 
@@ -284,7 +301,7 @@ impl IpcClient {
 
     /// Spawn a background thread that reads state snapshots from the daemon
     /// and forwards them into the given mpsc channel.
-    pub fn spawn_reader(&self, tx: Sender<Msg>, generation: u64) -> anyhow::Result<()> {
+    pub fn spawn_reader(&self, tx: Sender<Msg>) -> anyhow::Result<()> {
         let stream = self
             .stream
             .try_clone()
@@ -304,13 +321,11 @@ impl IpcClient {
                     Ok(line) => match serde_json::from_str::<StateSnapshot>(&line) {
                         Ok(snapshot) => {
                             let _ = tx.send(Msg::StateUpdate {
-                                generation,
                                 snapshot: Box::new(snapshot),
                             });
                         }
                         Err(error) => {
                             let _ = tx.send(Msg::IpcReadFailed {
-                                generation,
                                 message: format!(
                                     "Malformed state snapshot from the daemon: {error}"
                                 ),
@@ -321,7 +336,6 @@ impl IpcClient {
                     },
                     Err(error) => {
                         let _ = tx.send(Msg::IpcReadFailed {
-                            generation,
                             message: format!("Lost connection to the daemon: {error}"),
                         });
                         failure_reported = true;
@@ -331,7 +345,6 @@ impl IpcClient {
             }
             if !failure_reported {
                 let _ = tx.send(Msg::IpcReadFailed {
-                    generation,
                     message: "Daemon closed the IPC connection".to_string(),
                 });
             }
@@ -364,8 +377,8 @@ mod tests {
         StateSnapshot {
             daemon_version: env!("CARGO_PKG_VERSION").into(),
             ipc_version: IPC_VERSION,
-            migration_protocol_version: MIGRATION_PROTOCOL_VERSION,
-            migration: None,
+            tui_sessions: 0,
+            restart_required: false,
             response_to: None,
             response_error: None,
             connection: ConnectionState::Idle,
@@ -440,7 +453,7 @@ mod tests {
 
         let mut client = IpcClient::connect().expect("client connect");
         let (client_tx, client_rx) = channel::<Msg>();
-        client.spawn_reader(client_tx, 0).expect("reader spawn");
+        client.spawn_reader(client_tx).expect("reader spawn");
 
         // Client → server.
         client.send(&IpcCommand::Quit).expect("send quit");
@@ -455,10 +468,7 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
         server.broadcast(&sample_snapshot());
         match drain_one(&client_rx, Duration::from_secs(2)) {
-            Some(Msg::StateUpdate {
-                generation: 0,
-                snapshot: snap,
-            }) => {
+            Some(Msg::StateUpdate { snapshot: snap }) => {
                 assert_eq!(snap.status, "ok");
                 assert!(matches!(snap.connection, ConnectionState::Idle));
             }
@@ -517,7 +527,7 @@ mod tests {
             stream: client_stream,
         };
         let (tx, rx) = channel();
-        client.spawn_reader(tx, 7).unwrap();
+        client.spawn_reader(tx).unwrap();
 
         // Wait well past the inherited handshake timeout before publishing a
         // snapshot. The persistent reader must still be alive and blocked.
@@ -527,33 +537,27 @@ mod tests {
         daemon_stream.flush().unwrap();
 
         match rx.recv_timeout(Duration::from_secs(1)) {
-            Ok(Msg::StateUpdate {
-                generation: 7,
-                snapshot,
-            }) => assert_eq!(snapshot.status, "ok"),
+            Ok(Msg::StateUpdate { snapshot }) => assert_eq!(snapshot.status, "ok"),
             Ok(_) => panic!("expected StateUpdate after idle period, got another message"),
             Err(error) => panic!("reader did not receive snapshot after idle period: {error}"),
         }
     }
 
     #[test]
-    fn snapshot_reader_tags_disconnect_with_its_generation() {
+    fn snapshot_reader_reports_disconnect() {
         let (client_stream, daemon_stream) = UnixStream::pair().unwrap();
         let client = IpcClient {
             stream: client_stream,
         };
         let (tx, rx) = channel();
-        client.spawn_reader(tx, 42).unwrap();
+        client.spawn_reader(tx).unwrap();
         drop(daemon_stream);
 
         match rx.recv_timeout(Duration::from_secs(1)) {
-            Ok(Msg::IpcReadFailed {
-                generation: 42,
-                message,
-            }) => {
+            Ok(Msg::IpcReadFailed { message }) => {
                 assert!(message.contains("closed"));
             }
-            Ok(_) => panic!("expected a generation-tagged disconnect"),
+            Ok(_) => panic!("expected a disconnect report"),
             Err(error) => panic!("reader did not report disconnect: {error}"),
         }
     }
@@ -698,6 +702,42 @@ mod tests {
         // Server must NOT forward a Msg for an unparseable line.
         assert!(drain_one(&server_rx, Duration::from_millis(200)).is_none());
 
+        cleanup_socket();
+        unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+    }
+
+    #[test]
+    fn only_attach_session_connections_count_as_tui_sessions() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_RUNTIME_DIR", tmp.path()) };
+        cleanup_socket();
+
+        let (server_tx, _server_rx) = channel::<Msg>();
+        let server = IpcServer::bind(server_tx).expect("server bind");
+        assert_eq!(server.tui_sessions(), 0);
+
+        drop(IpcClient::connect().expect("probe connect"));
+        let mut oneshot = IpcClient::connect().expect("cli connect");
+        oneshot.send(&IpcCommand::Attach).expect("cli attach");
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(server.tui_sessions(), 0);
+
+        let mut tui = IpcClient::connect().expect("tui connect");
+        tui.send(&IpcCommand::AttachSession).expect("tui attach");
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(server.tui_sessions(), 1);
+
+        drop(tui);
+        for _ in 0..20 {
+            if server.tui_sessions() == 0 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert_eq!(server.tui_sessions(), 0, "a closed window must not count");
+
+        drop(oneshot);
         cleanup_socket();
         unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
     }
