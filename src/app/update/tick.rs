@@ -14,6 +14,10 @@ pub(in crate::app::update) fn handle_tick(model: &mut Model) -> Vec<Effect> {
 fn handle_tick_at(model: &mut Model, now: chrono::DateTime<Local>) -> Vec<Effect> {
     let mut effects = Vec::new();
 
+    if model.restart_required {
+        return tick_running_work(model);
+    }
+
     if geo_update_due(model, now) {
         model.geo_updating = true;
         model.geo_automatic_update = true;
@@ -36,6 +40,16 @@ fn handle_tick_at(model: &mut Model, now: chrono::DateTime<Local>) -> Vec<Effect
             });
         }
     }
+
+    // Auto-update subscriptions that are due.
+    effects.extend(check_due_subscriptions_at(model, now));
+
+    effects.extend(tick_running_work(model));
+    effects
+}
+
+fn tick_running_work(model: &mut Model) -> Vec<Effect> {
+    let mut effects = Vec::new();
 
     // Connection handling
     if model.connection == ConnectionState::Connecting {
@@ -61,9 +75,6 @@ fn handle_tick_at(model: &mut Model, now: chrono::DateTime<Local>) -> Vec<Effect
             effects.push(Effect::BroadcastState);
         }
     }
-
-    // Auto-update subscriptions that are due.
-    effects.extend(check_due_subscriptions_at(model, now));
 
     // Dispatch pending profile tests, max 4 concurrent.
     while model.testing_profiles.len() < 4 {
@@ -398,6 +409,40 @@ mod tests {
         let effects = handle_tick(&mut model);
         assert_eq!(model.connection, ConnectionState::Idle);
         assert_eq!(effects, vec![Effect::BroadcastState]);
+    }
+
+    #[test]
+    fn a_frozen_daemon_stops_scheduling_but_keeps_running_work() {
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.config.subscriptions.push(Subscription {
+            id: uuid::Uuid::new_v4(),
+            name: "Sub".to_string(),
+            url: "http://example.com/sub".to_string(),
+            auto_update: SubscriptionAutoUpdate::Every1d,
+            last_updated: Some(Local::now() - chrono::Duration::hours(25)),
+            next_auto_update: None,
+            retry_state: None,
+            send_hwid: false,
+            hwid: None,
+        });
+        model.connection = ConnectionState::Connected;
+        model.restart_required = true;
+
+        let effects = handle_tick(&mut model);
+
+        assert!(!effects.iter().any(|effect| matches!(
+            effect,
+            Effect::DownloadGeo
+                | Effect::RetryServiceRuleSets { .. }
+                | Effect::UpdateSubscription { .. }
+        )));
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::FetchTrafficStats { .. })),
+            "an already-connected tunnel must keep reporting traffic"
+        );
     }
 
     #[test]

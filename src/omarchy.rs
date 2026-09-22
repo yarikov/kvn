@@ -66,12 +66,12 @@ pub fn detect_omarchy_version() -> Result<Option<String>> {
         Ok(output) => output,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(error).context("failed to detect Omarchy for migration resources");
+            return Err(error).context("failed to detect the installed Omarchy version");
         }
     };
     ensure!(
         output.status.success(),
-        "omarchy version failed; cannot determine whether plugin resources apply"
+        "omarchy version failed; cannot determine the installed Omarchy version"
     );
     let version = String::from_utf8(output.stdout).context("invalid Omarchy version output")?;
     Ok(Some(version.trim().to_owned()))

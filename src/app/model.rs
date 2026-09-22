@@ -24,7 +24,7 @@ pub enum Overlay {
     ThemeSettings,
     ServiceRouting,
     Support,
-    Migration,
+    RestartRequired,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,24 +66,6 @@ impl RoutingSettingsItem {
         items.extend(RoutedService::ALL.map(Self::Service));
         items
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MigrationPhase {
-    Running,
-    Failed,
-    Finalizing,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MigrationStatus {
-    pub session_id: String,
-    pub phase: MigrationPhase,
-    pub completed: usize,
-    pub total: usize,
-    pub summary: String,
-    pub error: Option<String>,
 }
 
 /// Screen that was active when help was opened.
@@ -275,9 +257,7 @@ pub struct Model {
     /// Prevents a fallback config from overwriting an unreadable persisted
     /// config. Cleared only after a successful reload from disk.
     pub config_persistence_blocked: bool,
-    /// Active package migration. While set, the daemon keeps the current VPN
-    /// alive but rejects every user/config mutation.
-    pub migration: Option<MigrationStatus>,
+    pub restart_required: bool,
     /// Persisted schedule for the optional project-support prompt.
     pub support_prompt: crate::support_prompt::SupportPromptState,
     /// TUI-local cursor inside the support prompt. It is intentionally not
@@ -471,7 +451,6 @@ impl Model {
             }
         };
 
-        let migration = crate::migrations::load_ui_status().ok().flatten();
         let support_prompt = crate::support_prompt::load_for_daemon(
             config.settings.geo_routing.current_region.is_some(),
             chrono::Utc::now(),
@@ -488,12 +467,6 @@ impl Model {
         if config.settings.geo_routing.current_region.is_none() {
             connection = ConnectionState::Idle;
             status = AppStatus::Info("Press ? for help".to_string());
-        }
-        // A daemon started for the cutover must wait for MigrationEnd. The
-        // runner restores the previous connection explicitly afterwards.
-        if migration.is_some() {
-            connection = ConnectionState::Idle;
-            status = AppStatus::Info("Finishing configuration migration…".to_string());
         }
         let connecting_profile_id = (connection == ConnectionState::Connecting)
             .then_some(config.settings.last_connected_profile)
@@ -542,7 +515,7 @@ impl Model {
             connection,
             config,
             config_persistence_blocked,
-            migration,
+            restart_required: false,
             support_prompt,
             support_selected: 0,
             selected,
@@ -595,9 +568,6 @@ impl Model {
         };
         if model.config.settings.geo_routing.current_region.is_none() {
             model.overlay = Overlay::GeoRegions;
-        }
-        if model.migration.is_some() {
-            model.overlay = Overlay::Migration;
         }
         if status.text() == "Press ? for help" {
             model.status = status;
@@ -662,7 +632,7 @@ impl Model {
             connection: ConnectionState::Idle,
             config,
             config_persistence_blocked: false,
-            migration: None,
+            restart_required: false,
             support_prompt: crate::support_prompt::SupportPromptState::default(),
             support_selected: 0,
             selected,
@@ -904,7 +874,7 @@ impl Model {
             connection: ConnectionState::Idle,
             config,
             config_persistence_blocked: false,
-            migration: None,
+            restart_required: false,
             support_prompt: crate::support_prompt::SupportPromptState::default(),
             support_selected: 0,
             selected,

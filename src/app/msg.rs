@@ -1,6 +1,6 @@
 use crate::app::model::{
-    ConnectionSettingsDraft, ConnectionState, MainPaneFocus, MigrationStatus, Overlay,
-    RoutingSettingsDraft, TrafficStats,
+    ConnectionSettingsDraft, ConnectionState, MainPaneFocus, Overlay, RoutingSettingsDraft,
+    TrafficStats,
 };
 use crate::config::profile::{
     DnsPreset, DnsStrategy, GeoRegion, Profile, RoutedService, RoutingMode, Settings, Subscription,
@@ -122,22 +122,12 @@ pub enum Msg {
         request_id: Uuid,
     },
     StateUpdate {
-        generation: u64,
         snapshot: Box<StateSnapshot>,
     },
     /// The local TUI's IPC reader stopped or received a snapshot it could not
     /// decode. Daemon-side reducers ignore this; the TUI turns it into a
-    /// visible error, except during the expected migration daemon handoff.
+    /// visible error.
     IpcReadFailed {
-        generation: u64,
-        message: String,
-    },
-    MigrationReconnectReady {
-        generation: u64,
-        snapshot: Box<StateSnapshot>,
-    },
-    MigrationReconnectFailed {
-        generation: u64,
         message: String,
     },
     ConfigReloaded(Box<Result<crate::config::profile::Config, IpcError>>),
@@ -231,6 +221,7 @@ pub enum GeoResult {
 #[serde(tag = "cmd")]
 pub enum IpcCommand {
     Attach,
+    AttachSession,
     /// Clear an error after a TUI rendered its toast. The revision prevents a
     /// delayed client from clearing a newer error.
     ClearErrorStatus {
@@ -298,18 +289,7 @@ pub enum IpcCommand {
         base: Box<crate::config::profile::Config>,
         edited: Box<crate::config::profile::Config>,
     },
-    MigrationBegin {
-        status: MigrationStatus,
-    },
-    MigrationProgress {
-        status: MigrationStatus,
-    },
-    MigrationEnd {
-        session_id: String,
-    },
-    MigrationStopDaemon {
-        session_id: String,
-    },
+    RestartRequired,
     Quit,
     /// Client-side failure the daemon owns none of — e.g. the external editor
     /// path rejecting an edit. The daemon writes it into its model's status
@@ -362,16 +342,9 @@ mod tests {
 
     #[test]
     fn ipc_command_serde_roundtrip_each_variant() {
-        let migration_status = MigrationStatus {
-            session_id: "session".into(),
-            phase: crate::app::model::MigrationPhase::Running,
-            completed: 1,
-            total: 2,
-            summary: "Migrating".into(),
-            error: None,
-        };
         let cmds = vec![
             IpcCommand::Attach,
+            IpcCommand::AttachSession,
             IpcCommand::ClearErrorStatus { status_revision: 7 },
             IpcCommand::CheckSupportPrompt,
             IpcCommand::Detach,
@@ -417,18 +390,7 @@ mod tests {
                 base: Box::new(crate::config::profile::Config::default()),
                 edited: Box::new(crate::config::profile::Config::default()),
             },
-            IpcCommand::MigrationBegin {
-                status: migration_status.clone(),
-            },
-            IpcCommand::MigrationProgress {
-                status: migration_status,
-            },
-            IpcCommand::MigrationEnd {
-                session_id: "session".into(),
-            },
-            IpcCommand::MigrationStopDaemon {
-                session_id: "session".into(),
-            },
+            IpcCommand::RestartRequired,
             IpcCommand::Quit,
         ];
         for cmd in cmds {
@@ -461,12 +423,10 @@ pub struct StateSnapshot {
     /// intentionally broken independently of the application version.
     #[serde(default)]
     pub ipc_version: u32,
-    /// Version of the transactional migration commands understood by this
-    /// daemon. Zero identifies daemons from before the migration framework.
     #[serde(default)]
-    pub migration_protocol_version: u32,
+    pub tui_sessions: usize,
     #[serde(default)]
-    pub migration: Option<MigrationStatus>,
+    pub restart_required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_to: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

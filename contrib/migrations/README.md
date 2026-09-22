@@ -1,13 +1,11 @@
 # kvn package migrations
 
-Breaking migrations are shipped here and installed into
-`/usr/lib/kvn/migrations`. The runner executes every migration in bytewise
-filename order and records successful runs per user.
+Migrations are shipped here and installed into `/usr/lib/kvn/migrations`. The
+runner executes every migration in bytewise filename order.
 
-The framework starts at v0.30.0. Do not add scripts for older releases, and do
-not add a bootstrap migration merely to demonstrate the mechanism. The first
-script in this directory must belong to an actual breaking release after
-v0.30.0.
+A migration can ship in any release; it does not have to be a breaking one.
+Do not add a bootstrap migration merely to demonstrate the mechanism — the
+first script here must do real work for the release that introduces it.
 
 Use a monotonic Unix timestamp and a short slug:
 
@@ -24,132 +22,85 @@ Every script must start with an interpreter and summary:
 set -euo pipefail
 ```
 
-The runner first prepares any declared Git resources while the daemon remains
-fully usable. Only then does it put the daemon into migration mode and save an exact
-`profiles.json` backup and creates a disposable candidate from it. It keeps the
-daemon, VPN, live config, and kill switch online until the whole ordered queue
-succeeds, then performs one short daemon restart for the atomic config and
-binary handoff. Do not split the script queue into migration classes: a later migration
-may depend on every earlier migration having completed.
+## What the runner does
 
-Scripts must be idempotent, exit successfully when they do not apply, and call
-`sudo` only for the exact privileged commands they require. A machine-wide
-operation must use `/var/lib/kvn/migrations/<migration-id>` as its own
-root-owned completion marker. Ordinary migrations must not stop kvn, sing-box,
-or the active VPN; the runner owns the daemon handoff.
+1. Takes `$XDG_RUNTIME_DIR/kvn/migrate.lock` so only one runner runs at a time.
+2. Waits for any active pacman transaction to finish.
+3. Saves `profiles.json` to `~/.config/kvn-tui/recovery/`.
+4. Copies it to a disposable candidate, `.profiles.json.migrating`.
+5. Runs the pending queue in order.
+6. Brings the candidate up to the current schema.
+7. Validates it and replaces the live `profiles.json` with it, once.
+8. Writes a per-user marker for every script in the queue.
+9. Hands off to the daemon (below).
+
+The daemon, the VPN, the live config and the kill switch stay up for the whole
+run, so scripts have working network. Ordinary migrations must not stop kvn,
+sing-box, or the active VPN; the runner owns the daemon handoff.
+
+Markers are written only in step 8, once the whole queue and its config result
+are durable. A run that fails anywhere replays the **entire** queue next time,
+against a candidate rebuilt from the untouched live config — that is what keeps
+the scripts and the candidate from drifting apart, and it is why scripts must
+be idempotent.
+
+So: scripts must be idempotent, must exit successfully when they do not apply,
+and must call `sudo` only for the exact privileged commands they require. A
+machine-wide operation must use `/var/lib/kvn/migrations/<migration-id>` as its
+own root-owned completion marker, since a per-user marker cannot describe it.
+
+While anything is pending the daemon refuses to start, so the VPN stays down
+until the queue has run. Launching `kvn` runs it automatically before the TUI
+opens; `kvn migrate` is for re-running it after a failure. An active pacman
+transaction does not block daemon startup — nothing is pending until its
+payload is installed — but the runner does wait for it.
+
+## Daemon handoff
+
+Once the queue finishes, the running daemon still holds the pre-migration
+config and the previous binary. The runner therefore connects to it and either:
+
+- restarts `kvn-tui.service` itself, when no TUI session is attached; or
+- sends `RestartRequired`, when one is. The daemon then freezes config
+  persistence and background work, and the attached TUI shows a modal overlay
+  that cannot be dismissed: `Enter` quits the TUI and restarts the service,
+  `Ctrl+C` stops the daemon outright. Either way the next `kvn` launch comes
+  up on the new binary, so the overlay never asks the user to type a command.
+
+Sessions are counted from `AttachSession`, which only the TUI sends, so a
+one-shot CLI client is never mistaken for an open window. The freeze still
+lets `Quit` through: the daemon turns `SIGTERM` into it, and swallowing it
+would stall the very restart being asked for.
+
+## Profile schema changes
 
 Migration scripts must not write the live `profiles.json`. Persisted schema
 changes are implemented as ordered `Config::migrate_to` steps. The script for a
-release invokes `kvn config migrate --to N`; the runner supplies the candidate
-path and rejects calls outside an active transaction. Pinning `N` is mandatory:
-it prevents a direct jump across several releases from applying later config
-steps before intervening package scripts. Ordinary config loading rejects an
-old schema. The runner validates and promotes the candidate only after every
-pending script has succeeded.
+release invokes `kvn config migrate --to N`; the runner supplies the **candidate**
+path through `KVN_MIGRATION_PROFILES_PATH` and rejects calls made without it.
+The variable is unset when there is no config file yet.
 
-## Git resources
+Pinning `N` is mandatory: it prevents a direct jump across several releases
+from applying later config steps before intervening package scripts.
 
-Migration scripts must not access the network, including through setup helpers.
-Declare downloads beside the script in `<script-stem>.resources.json`, for
-example `1789000000-refresh-plugin.resources.json` for
-`1789000000-refresh-plugin.sh`:
+Because every step edits the candidate, the live file never holds an
+intermediate schema version: a queue that fails midway leaves it exactly as it
+was. It is replaced once, after the whole queue succeeded and the result loaded
+and validated, and that write is a compare-and-swap against the bytes the
+runner started from — so a concurrent writer makes the migration fail with the
+backup intact instead of clobbering the file.
 
-```json
-{
-  "when": {
-    "omarchy": true,
-    "version": ">=4.0.0, <5.0.0"
-  },
-  "git": [
-    {
-      "id": "omakvn",
-      "url": "https://github.com/yarikov/omakvn.git",
-      "commit": "<replace with the full immutable commit SHA>"
-    }
-  ]
-}
-```
+Ordinary config loading rejects an old schema and never migrates implicitly.
 
-Manifests are optional, root-owned package payloads with mode `0644`. Resource
-IDs may contain ASCII letters, digits, hyphens and underscores. URLs must be
-HTTPS without embedded credentials, query parameters or fragments; branches
-and tags are not accepted as commits. Submodules and Git LFS are unsupported.
-Scripts and manifests are immutable after release.
+## Omarchy integration
 
-`when` applies to the entire resource manifest. Set `"omarchy": true` for
-Omarchy-only resources and optionally constrain its version with a standard
-semver requirement. For example, `">=4.0.0, <5.0.0"` selects Omarchy 4.
-Omitting `version` accepts any installed Omarchy version. Before any Git command
-or cache creation, the runner checks `omarchy version`; its numeric package
-release suffix (for example `-1` in `4.0.3-1`) is ignored for matching. Plain
-Arch and versions outside the declared range skip these resources without
-needing Git or network access. If the command fails, or its version is invalid
-when a version constraint is present, preparation fails before downloading.
-Unknown conditions, `"omarchy": false`, and the legacy string `"omarchy_4"`
-are rejected. Omitting `when` makes resources unconditional and does not require
-an Omarchy probe.
-
-The runner clones and verifies every applicable resource before freezing the daemon or
-creating a profile backup. It rechecks the package queue afterwards. Downloads
-do not execute repository code, hooks, submodules or user-configured filters.
-No resources means no Git dependency and no download. This is a script-author
-contract, not an OS-level network sandbox for arbitrary shell scripts.
-
-Scripts with applicable resources receive `KVN_MIGRATION_RESOURCES_DIR`,
-pointing to their own resource directory. The variable is unset when resources
-are skipped. The condition does not skip the script itself: a plugin-only
-migration should exit successfully when its resources do not apply:
+A script that needs to refresh the `yarikov.omakvn` bar plugin calls the
+ordinary installer, which pulls from the plugin's Git remote:
 
 ```bash
-[[ -n ${KVN_MIGRATION_RESOURCES_DIR:-} ]] || exit 0
-kvn setup --omarchy --plugin-source "${KVN_MIGRATION_RESOURCES_DIR:?}/omakvn"
+command -v omarchy >/dev/null || exit 0
+kvn setup --omarchy
 ```
-
-For scripts with other migration work, guard only the plugin step instead of
-exiting the whole script. Skipped plugin work does not prevent later migrations
-from running. The transaction retains its original resource selection on retry;
-it never re-detects the desktop and starts additional downloads while frozen.
-
-During a migration, `setup --omarchy` refuses to run without `--plugin-source`.
-Local installation validates the plugin identity and clean Git checkout,
-copies it independently (including `.git` and its origin), and uses the existing
-installer rollback on failure. It never invokes remote plugin add/update and
-never silently falls back to a command module. A dirty or unrelated installed
-Git checkout is not overwritten. Ordinary manual setup still uses Omarchy's
-network-backed installer.
-
-Prepared resources and `ready.json` metadata are private per-user cache data at
-`$XDG_STATE_HOME/kvn/migration-resources/<migration-id>-<manifest-digest>/`.
-Preparation errors are recorded separately in `preparation.json` for `kvn doctor`;
-they do not start a migration session or block the TUI. Re-running preparation
-reuses valid completed downloads and discards incomplete temporary clones.
-An active transaction records its resource references in
-`$XDG_STATE_HOME/kvn/migration-session.json` and is serialized by
-`$XDG_RUNTIME_DIR/kvn/migrate.lock`:
-retry only verifies local resources, never fetches while migration mode is active.
-If those resources are missing or changed, restore them before retrying. An
-installed package changed mid-transaction requires recovery with the original
-package before preparing its replacement queue.
-
-The private transaction journal is authoritative after migration mode begins.
-It records the runner version, exact script/resource manifest, completed IDs,
-planned workspace paths, readiness, and the device/inode identities used for
-cutover recovery. Never derive completion markers from a newly discovered
-package queue. A package change before cutover stops recovery until the original
-package is restored; a new queue discovered after the old cutover completes is
-processed as a separate ordered transaction.
-
-Workspace paths are journaled before either file is created. On retry the runner
-finishes only those planned files and verifies their contents. Device/inode pairs
-distinguish pre-exchange and post-exchange layouts even when both JSON files have
-identical bytes. Any third layout is ambiguous and must stop without replacing
-or deleting user data. Journals from older framework builds may use content
-inference only when it proves one unambiguous state.
-
-After successful config/daemon/VPN handoff the runner deletes that transaction's
-resource directories. On failure it retains them. Interrupted handoff recovery
-does not need the checkouts to reconnect and can finish partially completed
-cleanup. Profile recovery backups and the independently installed plugin remain.
 
 Never remove a released migration while upgrades from the release preceding
 it remain supported. This is what makes a direct jump across several breaking

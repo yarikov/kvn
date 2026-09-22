@@ -1,5 +1,5 @@
 ---
-source: src/ui/layout/overlay/migration.rs
+source: src/ui/layout/overlay/restart_required.rs
 expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 ---
 ┌ Traffic ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -13,18 +13,18 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
 │                               ┌──────────────────────────────────────────────┐                                │
-│                               │               Migration failed               │                                │
+│                               │               Restart required               │                                │
 │                               │                                              │                                │
-│                               │             Updating integration             │                                │
-│                               │  Migration continues after closing the TUI.  │                                │
-│                               │                  Step 2 of 4                 │                                │
+│                               │               kvn was updated.               │                                │
 │                               │                                              │                                │
-│                               │              sudo command failed             │                                │
-│                               │   Run `kvn migrate` in a terminal to retry.  │                                │
-│                               │                                              │                                │
-│                               │                   q/󱊷 close                  │                                │
+│                               │             󰌑 restart the daemon             │                                │
 │                               └──────────────────────────────────────────────┘                                │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

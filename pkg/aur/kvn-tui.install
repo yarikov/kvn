@@ -18,7 +18,7 @@ seed_migration_baseline() {
         [[ -f "$migration" ]] || continue
         # Only a fresh installation starts with every shipped migration in its
         # baseline. Upgrades from pre-framework versions still need all later
-        # migrations; stopping an incompatible daemon is a separate prerequisite.
+        # migrations; launching kvn applies them and restarts an outdated daemon.
         if [[ -z "$installed_from" ]]; then
             basename "$migration"
             continue

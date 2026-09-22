@@ -44,12 +44,8 @@ impl Config {
                 "target config schema_version {target_version} is newer than this build supports (max {CURRENT_SCHEMA_VERSION})"
             );
         }
-        if self.schema_version > target_version {
-            anyhow::bail!(
-                "config schema_version {} is already newer than migration target {}",
-                self.schema_version,
-                target_version
-            );
+        if self.schema_version >= target_version {
+            return Ok(());
         }
         if self.schema_version == 0 && target_version >= 1 {
             self.migrate_v0_to_v1();
@@ -179,15 +175,30 @@ mod tests {
     }
 
     #[test]
-    fn migrate_to_rejects_downgrades_and_unknown_targets() {
-        let mut current = Config::default();
-        assert!(current.migrate_to(CURRENT_SCHEMA_VERSION - 1).is_err());
-
+    fn migrate_to_rejects_unknown_targets_and_configs_from_newer_builds() {
         let mut legacy = Config {
             schema_version: 0,
             ..Config::default()
         };
         assert!(legacy.migrate_to(CURRENT_SCHEMA_VERSION + 1).is_err());
+
+        let mut newer = Config {
+            schema_version: CURRENT_SCHEMA_VERSION + 1,
+            ..Config::default()
+        };
+        assert!(newer.migrate_to(CURRENT_SCHEMA_VERSION).is_err());
+    }
+
+    #[test]
+    fn a_pinned_step_the_config_already_passed_is_a_no_op() {
+        let mut current = Config::default();
+        assert_eq!(current.schema_version, CURRENT_SCHEMA_VERSION);
+
+        current.migrate_to(CURRENT_SCHEMA_VERSION - 1).unwrap();
+        assert_eq!(current.schema_version, CURRENT_SCHEMA_VERSION);
+
+        current.migrate_to(CURRENT_SCHEMA_VERSION).unwrap();
+        assert_eq!(current.schema_version, CURRENT_SCHEMA_VERSION);
     }
 
     // ---- Config::migrate ----

@@ -30,20 +30,6 @@ pub use key::theme::{shorten_theme_name, theme_picker_labels, theme_picker_slugs
 /// Pure function: Model + Msg → updated Model + list of Effects.
 /// No I/O, no threads, no system calls.
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
-    if model.migration.is_some()
-        && !matches!(
-            &msg,
-            Msg::IpcCommand(_)
-                | Msg::IpcRequest { .. }
-                | Msg::Resize
-                | Msg::StateUpdate { .. }
-                | Msg::IpcReadFailed { .. }
-                | Msg::MigrationReconnectReady { .. }
-                | Msg::MigrationReconnectFailed { .. }
-        )
-    {
-        return vec![];
-    }
     match msg {
         Msg::Key(key) => handle_key(model, key),
         Msg::Tick => handle_tick(model),
@@ -105,10 +91,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::IpcCommand(cmd) | Msg::IpcRequest { command: cmd, .. } => {
             handle_ipc_command(model, cmd)
         }
-        Msg::StateUpdate { .. }
-        | Msg::IpcReadFailed { .. }
-        | Msg::MigrationReconnectReady { .. }
-        | Msg::MigrationReconnectFailed { .. } => vec![],
+        Msg::StateUpdate { .. } | Msg::IpcReadFailed { .. } => vec![],
         Msg::ConfigReloaded(result) => handle_config_reloaded(model, *result),
         Msg::KillSwitchApplied { enabled, error } => {
             handle_kill_switch_applied(model, enabled, error)

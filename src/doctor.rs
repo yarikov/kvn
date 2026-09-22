@@ -60,11 +60,11 @@ impl Check {
 /// Run all diagnostics, print the report, and fail when a required component
 /// is not usable.
 pub fn run() -> Result<()> {
-    run_at(Path::new("/"))
+    run_at(Path::new("/"), check_migrations())
 }
 
-fn run_at(root: &Path) -> Result<()> {
-    let checks = collect(root);
+fn run_at(root: &Path, migrations: Check) -> Result<()> {
+    let checks = collect(root, migrations);
     print_report(&checks)?;
     let failures = checks
         .iter()
@@ -76,10 +76,10 @@ fn run_at(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn collect(root: &Path) -> Vec<Check> {
+fn collect(root: &Path, migrations: Check) -> Vec<Check> {
     let mut checks = vec![Check::pass(format!("kvn {}", env!("CARGO_PKG_VERSION")))];
 
-    checks.push(check_migrations());
+    checks.push(migrations);
 
     match find_singbox() {
         Some(path) => {
@@ -102,21 +102,6 @@ fn collect(root: &Path) -> Vec<Check> {
 }
 
 fn check_migrations() -> Check {
-    match crate::migrations::session_diagnostic() {
-        Ok(Some(summary)) => {
-            return Check::failure(
-                summary,
-                "Run `kvn migrate` in an interactive terminal to resume it.",
-            );
-        }
-        Err(error) => {
-            return Check::failure(
-                format!("migration transaction could not be inspected: {error:#}"),
-                "Repair the private migration journal, then run `kvn migrate`.",
-            );
-        }
-        Ok(None) => {}
-    }
     check_migration_result(
         crate::migrations::pending(),
         crate::migrations::profile_migration_required(),
@@ -131,8 +116,8 @@ fn check_migration_result(
 ) -> Check {
     if package_transaction {
         return Check::failure(
-            "A pacman package transaction is active; daemon startup is deferred",
-            "Wait for pacman/AUR updates to finish, then launch `kvn` or run `kvn migrate`.",
+            "A pacman package transaction is active; migrations cannot run yet",
+            "Wait for pacman/AUR updates to finish, then run `kvn migrate`.",
         );
     }
     match (result, profile_migration_required) {
@@ -687,7 +672,7 @@ mod tests {
         let check = check_migration_result(Ok(vec![pending]), Ok(false), false);
         assert_eq!(check.level, Level::Failure);
         assert!(check.message.contains("123-test.sh"));
-        assert!(check.remedy.unwrap().contains("kvn migrate"));
+        assert!(check.remedy.unwrap().contains("Run `kvn migrate`"));
 
         let check = check_migration_result(Err(anyhow::anyhow!("broken state")), Ok(false), false);
         assert_eq!(check.level, Level::Failure);
@@ -1248,7 +1233,7 @@ mod tests {
         let _xdg = EnvGuard::set("XDG_CONFIG_HOME", config.path());
         let _wayland = EnvGuard::set("WAYLAND_DISPLAY", "wayland-test");
         let root = current_polkit_root();
-        assert!(run_at(root.path()).is_ok());
+        assert!(run_at(root.path(), Check::pass("All kvn migrations are applied")).is_ok());
     }
 
     #[test]
@@ -1264,6 +1249,6 @@ mod tests {
         let _xdg = EnvGuard::set("XDG_CONFIG_HOME", config.path());
         let _wayland = EnvGuard::remove("WAYLAND_DISPLAY");
         let _session = EnvGuard::remove("XDG_SESSION_TYPE");
-        assert!(run_at(config.path()).is_err());
+        assert!(run_at(config.path(), Check::pass("All kvn migrations are applied")).is_err());
     }
 }

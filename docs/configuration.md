@@ -211,8 +211,9 @@ not supported by older `kvn` releases.
 | Application log | `~/.config/kvn-tui/logs/app.log` |
 | sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |
 | Waybar and recovery state | `~/.config/kvn-tui/state.json` |
-| Migration recovery backups | `~/.config/kvn-tui/recovery/profiles.json.before-migration-*.json` |
-| Active migration journal | `$XDG_STATE_HOME/kvn/migration-session.json` |
+| Migration backups | `~/.config/kvn-tui/recovery/profiles.json.before-migration-*` |
+| Migration candidate | `~/.config/kvn-tui/.profiles.json.migrating` (only during a run) |
+| Applied migration markers | `$XDG_STATE_HOME/kvn/migrations/` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
 | IPC socket | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
 | Generated sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |

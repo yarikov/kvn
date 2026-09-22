@@ -48,24 +48,24 @@ Do not revoke them while another TUN client relies on the same sing-box binary.
 ## Package migrations
 
 Package upgrades may include ordered migration scripts installed under
-`/usr/lib/kvn/migrations/`.
+`/usr/lib/kvn/migrations/`. Updates installed through `yay` or `paru` are
+detected on the next `kvn` launch, or run them explicitly with `kvn migrate`.
 
-Updates installed through `yay` or `paru` are detected automatically on the
-next `kvn` launch. `kvn update` can also update the AUR package and run pending
-migrations.
+The runner takes `$XDG_RUNTIME_DIR/kvn/migrate.lock`, waits for any active
+pacman transaction, backs `profiles.json` up into
+`~/.config/kvn-tui/recovery/`, then runs the pending scripts in order against a
+disposable copy of the config. Only once the whole queue and its config result
+have landed is the queue recorded under `$XDG_STATE_HOME/kvn/migrations/`;
+machine-wide operations use `/var/lib/kvn/migrations/`. A run that fails
+anywhere records nothing and replays from the start next time, which is why
+migration scripts must be idempotent.
 
-Successful migrations are recorded under
-`$XDG_STATE_HOME/kvn/migrations/`; machine-wide operations use
-`/var/lib/kvn/migrations/`.
-
-The runner serializes migration transactions with
-`$XDG_RUNTIME_DIR/kvn/migrate.lock` and stores the active journal at
-`$XDG_STATE_HOME/kvn/migration-session.json`.
-
-Before changing `profiles.json`, kvn creates a private backup under
-`~/.config/kvn-tui/recovery/` and validates the migrated configuration before
-applying it. Failed migrations keep the existing configuration and VPN
-connection intact whenever possible.
+The daemon, the VPN and the kill switch stay up while the scripts run. Once the
+queue finishes, the daemon is still running the previous version and
+configuration, so the runner restarts `kvn-tui.service` — unless a TUI session
+is attached, in which case that session shows a modal prompt instead — `Enter`
+restarts, `Ctrl+C` stops the daemon — and the daemon refuses to persist config
+until it is restarted.
 
 Use:
 
