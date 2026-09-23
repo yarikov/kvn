@@ -22,9 +22,9 @@ impl SubscriptionAutoUpdate {
         match self {
             Self::Off => 0,
             Self::Every1h | Self::Every12h => 1_440,
-            Self::Every1d => 1440,
-            Self::Every3d => 4320,
-            Self::Every7d => 10080,
+            Self::Every1d => 1_440,
+            Self::Every3d => 4_320,
+            Self::Every7d => 10_080,
         }
     }
 
