@@ -35,8 +35,8 @@ fn detect_editor() -> String {
             for candidate in &["nvim", "vim", "vi", "nano"] {
                 if Command::new("sh")
                     .args(["-c", &format!("command -v {candidate}")])
-                    .status()
-                    .is_ok_and(|s| s.success())
+                    .output()
+                    .is_ok_and(|output| output.status.success())
                 {
                     return candidate.to_string();
                 }
