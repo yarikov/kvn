@@ -171,6 +171,7 @@ See the `release` skill in `.agents/skills/release/SKILL.md` for the full versio
 - Use regular unit tests for functional behavior only: input handling, model transitions, persistence, emitted effects, validation, and business logic.
 - When changing existing UI rendering, update the relevant snapshot. Add a new snapshot only when no existing snapshot covers the state being changed.
 - When changing existing logic, test only what the change actually changed. Do not add a test — or an assertion inside a new test — that re-verifies behavior the change left alone; the existing tests already cover it, and the duplicate only makes the diff look bigger than the change. Rebind or rename the existing test instead when a change moves behavior from one input to another.
+- A behavior is asserted at exactly one layer — the one that implements it. A test of an outer layer asserts only what that layer adds, never the inner layer's semantics again: `handle_ipc_command` tests assert that the command reaches the shared `commit_*` helper and that `Effect::BroadcastState` is appended, while `update/key/regions.rs` owns the per-region commit semantics; `generate_config` tests assert composition, while the `build_route` / `build_dns` tests own block contents; `fetch_subscription` tests assert the wire round-trip, while the `build_request_headers` and `hwid_response_error` tests own header and message contents.
 - Example pattern: create a default `Profile`, generate a config, assert on JSON structure.
 
 ### Coverage Policy
