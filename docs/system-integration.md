@@ -52,13 +52,16 @@ Package upgrades may include ordered migration scripts installed under
 detected on the next `kvn` launch, or run them explicitly with `kvn migrate`.
 
 The runner takes `$XDG_RUNTIME_DIR/kvn/migrate.lock`, waits for any active
-pacman transaction, backs `profiles.json` up into
-`~/.config/kvn-tui/recovery/`, then runs the pending scripts in order against a
-disposable copy of the config. Only once the whole queue and its config result
-have landed is the queue recorded under `$XDG_STATE_HOME/kvn/migrations/`;
-machine-wide operations use `/var/lib/kvn/migrations/`. A run that fails
-anywhere records nothing and replays from the start next time, which is why
-migration scripts must be idempotent.
+pacman transaction, backs `profiles.json` up into `~/.config/kvn-tui/recovery/`,
+then runs the pending scripts in order, recording each under
+`$XDG_STATE_HOME/kvn/migrations/` as soon as it succeeds; machine-wide
+operations use `/var/lib/kvn/migrations/`. A run that fails stops there and the
+next run resumes from the script that failed, so each script must be safe to
+rerun.
+
+Migration scripts do not touch `profiles.json`. Its schema migrates itself when
+the config is loaded, and the pre-migration file is kept in the recovery
+directory.
 
 The daemon, the VPN and the kill switch stay up while the scripts run. Once the
 queue finishes, the daemon is still running the previous version and
