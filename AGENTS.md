@@ -43,7 +43,8 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `update` submodules | `src/app/update/{status,connection,traffic,config_reload,tick,routing,geo,subscription,paste}.rs` | Non-keyboard message handlers: status/download-blocked helpers, connect lifecycle + kill-switch/polkit results, Clash-API traffic sampling, `ConfigReloaded`, the 250 ms tick and its auto-update schedules, routing-mode / geo-region / service-routing commits, geo download results, subscription fetch results, clipboard paste → profile or subscription |
 | `update::key` | `src/app/update/key.rs` + `src/app/update/key/` | Keyboard input: `handle_key` routes by `Model.overlay` to `sources`, `confirm_delete`, `confirm_disable`, `settings_menu`, `regions`, `dns`, `service_routing`, `theme`; `key/ipc.rs` (+ `ipc/{semantic,support}.rs`) handles `IpcCommand` for non-TUI clients |
 | `effect` | `src/app/effect.rs` | Effect enum — declarative description of side effects to be executed by runtime |
-| `daemon` | `src/daemon.rs` | Headless daemon: owns sing-box process, config, mpsc channel, IPC server, background services |
+| `daemon` | `src/daemon.rs` | Headless daemon: owns sing-box process, config, mpsc channel, IPC server, background services; `run` / `run_loop`, `DaemonShared`, `build_snapshot`, and the startup reconciliation of kill-switch and auto-connect state |
+| `daemon` submodules | `src/daemon/{effect,connection,geo,config_io,subscription,traffic,profile_test,process_slot}.rs` | Effect execution, mirroring the `app/update/` handler split: `effect.rs` is the `execute_daemon_effect` dispatcher only; `connection.rs` owns connect/disconnect, the kill-switch handshake window and the polkit check; `geo.rs` the seven geo/service rule-set effects plus the shared refresh and result-finalizing helpers; `config_io.rs` the revision-checked `profiles.json` commit, the support-prompt write and config reload; `subscription.rs`, `traffic.rs` and `profile_test.rs` one effect each (the last owns the temporary sing-box SOCKS5 latency probe); `process_slot.rs` the sing-box process slot, its poisoned-lock-safe accessors, the 250 ms ticker and exit polling |
 | `tui_client` | `src/tui_client.rs` | TUI client: connects to daemon via Unix socket, renders UI, forwards input, reads clipboard |
 | `ipc` | `src/ipc.rs` | NDJSON protocol over Unix domain socket for daemon ↔ TUI client communication |
 | `migrations` | `src/migrations.rs`, `contrib/migrations/*.sh` | Ordered package migrations: root-owned script discovery, per-user/machine markers written per script, runner lock, `profiles.json` backup, end-of-run daemon restart handoff |
@@ -189,7 +190,7 @@ See the `release` skill in `.agents/skills/release/SKILL.md` for the full versio
 
   The `TOTAL` line shows region / function / line coverage. Both region and line numbers must be ≥ 85 % for CI to pass.
 - The CI gate parses the `TOTAL` line directly because `cargo-llvm-cov --fail-under-*` flags are silently no-op in the 0.8.x series.
-- 0 %-coverage I/O wrappers (`daemon.rs`, `tui_client.rs`, `main.rs`, `services/killswitch.rs`, `services/suspend.rs`, `tui_client/clipboard.rs`, `tui_client/theme_watch.rs` watcher thread, `singbox/clash_api.rs`, `systemd.rs`, install_* in `cli.rs`) are accepted as-is — they wrap subprocesses, DBus, Unix sockets, HTTP, and filesystem watchers, which need integration harnesses out of scope for unit tests. **Do not rewrite them just to add fake-based tests.** Cover new logic with pure-function tests instead.
+- 0 %-coverage I/O wrappers (`daemon.rs` and its `daemon/` submodules, `tui_client.rs`, `main.rs`, `services/killswitch.rs`, `services/suspend.rs`, `tui_client/clipboard.rs`, `tui_client/theme_watch.rs` watcher thread, `singbox/clash_api.rs`, `systemd.rs`, install_* in `cli.rs`) are accepted as-is — they wrap subprocesses, DBus, Unix sockets, HTTP, and filesystem watchers, which need integration harnesses out of scope for unit tests. **Do not rewrite them just to add fake-based tests.** Cover new logic with pure-function tests instead.
 
 ---
 
@@ -201,7 +202,7 @@ The application follows **The Elm Architecture (TEA)**:
 2. **Messages** (`app/msg.rs`) represent every external event — keyboard input, timer ticks, log lines, geo updates, system resume.
 3. **Update** (`app/update.rs` and its `app/update/` submodules) is a pure function `update(model, msg) -> Vec<Effect>`: no I/O, no threads, no system calls. All business logic lives here; `update.rs` itself only dispatches each `Msg` to a submodule handler.
 4. **Effects** (`app/effect.rs`) are declarative descriptions of side effects (`Connect`, `DownloadGeo`, `SaveConfig`, `Quit`, etc.).
-5. **Daemon** (`daemon.rs`) owns the canonical `Model`, the `mpsc` channel, the sing-box `process_slot`, and all background services (ticker, suspend watcher, log tailer, IPC server). It exposes a Unix domain socket IPC server (`ipc.rs`) that accepts NDJSON commands from TUI clients.
+5. **Daemon** (`daemon.rs` + `daemon/`) owns the canonical `Model`, the `mpsc` channel, the sing-box `process_slot`, and all background services (ticker, suspend watcher, log tailer, IPC server). It exposes a Unix domain socket IPC server (`ipc.rs`) that accepts NDJSON commands from TUI clients.
 6. **TUI Client** (`tui_client.rs`) connects to the daemon socket, enters the alternate screen, renders the UI using ratatui, and forwards keyboard input (plus clipboard/editor actions) as IPC commands. It has its own local `Model` that is kept in sync via `StateSnapshot` broadcasts from the daemon.
 7. **IPC Protocol** (`ipc.rs`) uses newline-delimited JSON over a Unix socket. Commands: `Attach`, `Detach`, `Key`, `SelectSource`, `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `Paste`, `Copied`, `ReloadConfig`, `Quit`, `ClientError`. Responses: `StateSnapshot` pushed by the daemon after every state change. The semantic commands (`ConnectProfile` through `SetAutoConnect`) exist for non-TUI clients — the Omarchy Quickshell module and the `kvn status/connect/disconnect/reconnect/toggle` CLI subcommands. Overlay commits (routing mode, geo region) are shared between the key handlers and IPC via `commit_routing_mode` / `commit_geo_region` in `update/routing.rs` so both paths run identical logic.
 
@@ -334,9 +335,9 @@ Rules of thumb:
 - `Model::new` is allowed to perform initialization I/O (load config, read `state.json`, etc.).
 - `singbox::config::generate_config` is pure: it receives geo file availability (`GeoAvailability`) from the caller and does not touch the file system.
 - `ui::widgets::StatusBar::render` reads only `Model` fields; it does not call `GeoManager` or access files.
-- The daemon (`daemon::execute_daemon_effect`) is the sole executor of `Effect` values. It may perform I/O, spawn threads, and mutate `Model` where appropriate.
+- The daemon (`daemon::effect::execute_daemon_effect`) is the sole executor of `Effect` values. It dispatches each variant to a `daemon/` submodule. It may perform I/O, spawn threads, and mutate `Model` where appropriate.
 
-If you need to add a new side effect from `update`, add a new `Effect` variant and implement it in `daemon::execute_daemon_effect`.
+If you need to add a new side effect from `update`, add a new `Effect` variant, implement it in the matching `daemon/` submodule, and route it there from `daemon::effect::execute_daemon_effect`.
 
 ---
 
