@@ -16,7 +16,6 @@ pub enum VmessSecurity {
 }
 
 impl VmessSecurity {
-    #[allow(dead_code)] // consumed by per-protocol outbound builders landing in PR2
     pub fn as_str(self) -> &'static str {
         match self {
             VmessSecurity::Auto => "auto",
@@ -50,7 +49,6 @@ pub enum ShadowsocksCipher {
 }
 
 impl ShadowsocksCipher {
-    #[allow(dead_code)] // consumed by per-protocol outbound builders landing in PR2
     pub fn as_str(self) -> &'static str {
         match self {
             ShadowsocksCipher::Chacha20IetfPoly1305 => "chacha20-ietf-poly1305",
@@ -92,7 +90,6 @@ pub enum TuicCongestion {
 }
 
 impl TuicCongestion {
-    #[allow(dead_code)] // consumed by per-protocol outbound builders landing in PR2
     pub fn as_str(self) -> &'static str {
         match self {
             TuicCongestion::Bbr => "bbr",
@@ -112,7 +109,6 @@ pub enum TuicUdpRelayMode {
 }
 
 impl TuicUdpRelayMode {
-    #[allow(dead_code)] // consumed by per-protocol outbound builders landing in PR2
     pub fn as_str(self) -> &'static str {
         match self {
             TuicUdpRelayMode::Native => "native",
