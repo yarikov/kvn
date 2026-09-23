@@ -17,7 +17,6 @@ use anyhow::{Context, Result, ensure};
 
 const INSTALLED_DIR: &str = "/usr/lib/kvn/migrations";
 const BASELINE_PATH: &str = "/var/lib/kvn/migration-baseline";
-const DAEMON_UNIT: &str = "kvn-tui.service";
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Migration {
@@ -378,7 +377,7 @@ fn hand_off_to_daemon() {
         return;
     }
     drop(client);
-    restart_daemon_unit();
+    crate::systemd::restart_daemon_unit();
 }
 
 fn attached_tui_sessions(client: &mut crate::ipc::IpcClient) -> Option<u64> {
@@ -388,24 +387,6 @@ fn attached_tui_sessions(client: &mut crate::ipc::IpcClient) -> Option<u64> {
         .ok()?
         .get("tui_sessions")
         .and_then(serde_json::Value::as_u64)
-}
-
-pub(crate) fn restart_daemon_unit() {
-    match Command::new("systemctl")
-        .args(["--user", "restart", DAEMON_UNIT])
-        .status()
-    {
-        Ok(status) if status.success() => {
-            println!("Restarted {DAEMON_UNIT}.");
-        }
-        Ok(status) => print_restart_hint(&format!("systemctl exited with {status}")),
-        Err(error) => print_restart_hint(&format!("systemctl could not be started ({error})")),
-    }
-}
-
-fn print_restart_hint(reason: &str) {
-    eprintln!("Could not restart the kvn daemon automatically: {reason}.");
-    eprintln!("Run: systemctl --user restart {DAEMON_UNIT}");
 }
 
 fn prompt_retry() -> Result<bool> {
@@ -598,36 +579,41 @@ mod tests {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
-    #[test]
-    fn package_baseline_preserves_migrations_when_skipping_framework_release() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        for hook in [
-            include_str!("../pkg/arch/kvn-tui.install"),
-            include_str!("../pkg/aur/kvn-tui.install"),
-        ] {
-            for installed in ["", "0.29.0", "0.30.0", "0.31.0"] {
-                let root = tempfile::tempdir().unwrap();
-                let store = Store::fixture(root.path());
-                for (id, version) in [("100-first.sh", "0.31.0"), ("200-second.sh", "0.35.0")] {
-                    script_body(
-                        &store.migrations_dir,
-                        id,
-                        id,
-                        &format!("# kvn:introduced={version}\nexit 0"),
-                    );
-                }
-                let state = root.path().join("machine-state");
-                let hook = hook
-                    .replace("/var/lib/kvn", state.to_str().unwrap())
-                    .replace(
-                        "/usr/lib/kvn/migrations",
-                        store.migrations_dir.to_str().unwrap(),
-                    );
-                // CI need not have pacman/vercmp; these fixtures use plain
-                // numeric releases for which sort -V has the same ordering.
-                let command = format!(
-                    "{hook}\n{}",
-                    r#"
+    const PACKAGE_HOOKS: [&str; 2] = [
+        include_str!("../pkg/arch/kvn-tui.install"),
+        include_str!("../pkg/aur/kvn-tui.install"),
+    ];
+
+    fn seed_baseline_fixture(
+        hook: &str,
+        installed: &str,
+        preexisting_state: bool,
+    ) -> (HashSet<String>, String) {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::fixture(root.path());
+        for (id, version) in [("100-first.sh", "0.31.0"), ("200-second.sh", "0.35.0")] {
+            script_body(
+                &store.migrations_dir,
+                id,
+                id,
+                &format!("# kvn:introduced={version}\nexit 0"),
+            );
+        }
+        let state = root.path().join("machine-state");
+        if preexisting_state {
+            fs::create_dir_all(&state).unwrap();
+        }
+        let hook = hook
+            .replace("/var/lib/kvn", state.to_str().unwrap())
+            .replace(
+                "/usr/lib/kvn/migrations",
+                store.migrations_dir.to_str().unwrap(),
+            );
+        // CI need not have pacman/vercmp; these fixtures use plain
+        // numeric releases for which sort -V has the same ordering.
+        let command = format!(
+            "{hook}\n{}",
+            r#"
 vercmp() {
     if [[ $1 == "$2" ]]; then echo 0
     elif [[ $(printf '%s\n' "$1" "$2" | sort -V | head -n1) == "$1" ]]; then echo -1
@@ -637,17 +623,29 @@ vercmp() {
 seed_migration_baseline "$1"
 print_migration_notice "$1"
 "#
-                );
-                let output = Command::new("bash")
-                    .args(["-euc", &command, "kvn-install-test", installed])
-                    .output()
-                    .unwrap();
-                assert!(
-                    output.status.success(),
-                    "{}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                let baseline = read_marker_set(&state.join("migration-baseline")).unwrap();
+        );
+        let output = Command::new("bash")
+            .args(["-euc", &command, "kvn-install-test", installed])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let baseline = read_marker_set(&state.join("migration-baseline")).unwrap();
+        (
+            baseline,
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+        )
+    }
+
+    #[test]
+    fn package_baseline_preserves_migrations_when_skipping_framework_release() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        for hook in PACKAGE_HOOKS {
+            for installed in ["", "0.29.0", "0.30.0", "0.31.0"] {
+                let (baseline, stdout) = seed_baseline_fixture(hook, installed, false);
                 let expected: HashSet<String> = match installed {
                     "" => ["100-first.sh", "200-second.sh"]
                         .into_iter()
@@ -658,11 +656,21 @@ print_migration_notice "$1"
                 };
                 assert_eq!(baseline, expected, "upgrading from {installed}");
                 if !installed.is_empty() {
-                    assert!(
-                        String::from_utf8_lossy(&output.stdout).contains("kvn has new migrations")
-                    );
+                    assert!(stdout.contains("kvn has new migrations"));
                 }
             }
+        }
+    }
+
+    #[test]
+    fn package_baseline_stays_empty_when_a_rename_reinstalls_over_existing_state() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        for hook in PACKAGE_HOOKS {
+            let (baseline, _) = seed_baseline_fixture(hook, "", true);
+            assert!(
+                baseline.is_empty(),
+                "a post_install over an existing state directory must leave every migration pending"
+            );
         }
     }
 

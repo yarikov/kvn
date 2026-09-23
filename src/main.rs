@@ -21,6 +21,7 @@ mod redaction;
 mod services;
 mod singbox;
 mod support_prompt;
+mod systemd;
 mod tui_client;
 mod ui;
 
@@ -110,7 +111,7 @@ pub(crate) fn start_daemon() -> Result<()> {
     use std::process::{Command, Stdio};
 
     let systemd_status = Command::new("systemctl")
-        .args(["--user", "start", "kvn-tui.service"])
+        .args(["--user", "start", crate::systemd::DAEMON_UNIT])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
