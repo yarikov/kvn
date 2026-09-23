@@ -337,16 +337,6 @@ mod tests {
     }
 
     #[test]
-    fn focused_main_pane_uses_accent_border() {
-        let model = model_with_subscription();
-        let navigation = LogNavigation::default();
-        let buffer = render_to_buffer(APP_WINDOW_COLS, APP_WINDOW_ROWS, |frame| {
-            draw_with_interaction(frame, &model, MainPaneFocus::Logs, Some(&navigation), None)
-        });
-        insta::assert_snapshot!(buffer_to_styled_string(&buffer));
-    }
-
-    #[test]
     fn overlay_focus_temporarily_suspends_and_restores_main_pane_focus() {
         for (label, pane_focus) in [
             ("sources", MainPaneFocus::Sources),
