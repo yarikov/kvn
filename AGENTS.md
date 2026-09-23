@@ -170,6 +170,7 @@ See the `release` skill in `.agents/skills/release/SKILL.md` for the full versio
 - Render snapshots at `test_helpers::APP_WINDOW_COLS` × `APP_WINDOW_ROWS` (113×35) unless the test is about a specific size. That is the grid the app actually opens with: the Omarchy apps menu launches it through the `floating-window` Hyprland tag, which sizes the window to 875×600 logical pixels, and Foot fills those with 113×35 cells at the default font. The column count shifts with monitor scale and font size; the row count is stable. Sizes that carry meaning of their own — `MIN_TERMINAL_WIDTH`/`MIN_TERMINAL_HEIGHT` for the smallest supported window, `TWO_PANE_MIN_WIDTH - 1` for the single-pane layout — stay explicit.
 - Use regular unit tests for functional behavior only: input handling, model transitions, persistence, emitted effects, validation, and business logic.
 - When changing existing UI rendering, update the relevant snapshot. Add a new snapshot only when no existing snapshot covers the state being changed.
+- When changing existing logic, test only what the change actually changed. Do not add a test — or an assertion inside a new test — that re-verifies behavior the change left alone; the existing tests already cover it, and the duplicate only makes the diff look bigger than the change. Rebind or rename the existing test instead when a change moves behavior from one input to another.
 - Example pattern: create a default `Profile`, generate a config, assert on JSON structure.
 
 ### Coverage Policy
