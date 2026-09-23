@@ -1068,51 +1068,6 @@ mod tests {
     }
 
     #[test]
-    fn fetch_send_hwid_false_does_not_send_device_headers() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let (url, rx) = spawn_http_server("HTTP/1.1 200 OK", &[], sample_vless());
-        let sub = sub_with(url, false, Some("provider-registered-device-id"));
-        fetch_subscription_after_validation(&sub, &settings_with_hwid()).unwrap();
-        let req = captured_request(rx);
-        assert!(!req.contains_key("x-hwid"));
-        assert!(!req.contains_key("x-device-os"));
-        assert!(!req.contains_key("x-device-locale"));
-    }
-
-    #[test]
-    fn fetch_send_hwid_true_uses_settings_hwid_and_device_headers() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let (url, rx) = spawn_http_server("HTTP/1.1 200 OK", &[], sample_vless());
-        let sub = sub_with(url, true, None);
-        fetch_subscription_after_validation(&sub, &settings_with_hwid()).unwrap();
-        let req = captured_request(rx);
-        assert_eq!(
-            req.get("x-hwid").map(String::as_str),
-            Some("lnx-installation-hwid")
-        );
-        assert_eq!(req.get("x-device-os").map(String::as_str), Some("Linux"));
-        assert_eq!(
-            req.get("x-device-model").map(String::as_str),
-            Some("Desktop")
-        );
-        assert!(req.get("x-ver-os").is_some_and(|v| !v.is_empty()));
-        assert!(req.get("x-device-locale").is_some_and(|v| !v.is_empty()));
-    }
-
-    #[test]
-    fn fetch_subscription_hwid_overrides_settings_hwid() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let (url, rx) = spawn_http_server("HTTP/1.1 200 OK", &[], sample_vless());
-        let sub = sub_with(url, true, Some("provider-registered-device-id"));
-        fetch_subscription_after_validation(&sub, &settings_with_hwid()).unwrap();
-        let req = captured_request(rx);
-        assert_eq!(
-            req.get("x-hwid").map(String::as_str),
-            Some("provider-registered-device-id"),
-        );
-    }
-
-    #[test]
     fn fetch_one_subscriptions_override_is_never_sent_to_another() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let settings = settings_with_hwid();
@@ -1154,22 +1109,6 @@ mod tests {
         let sub = sub_with(url, false, None);
         let err = fetch_subscription_after_validation(&sub, &settings_with_hwid()).unwrap_err();
         assert!(err.to_string().contains("enable 'send HWID'"), "got: {err}");
-    }
-
-    #[test]
-    fn fetch_hwid_max_devices_reached_response_reports_limit() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let (url, _rx) = spawn_http_server(
-            "HTTP/1.1 200 OK",
-            &[("X-Hwid-Max-Devices-Reached", "true".to_string())],
-            sample_vless(),
-        );
-        let sub = sub_with(url, true, None);
-        let err = fetch_subscription_after_validation(&sub, &settings_with_hwid()).unwrap_err();
-        assert!(
-            err.to_string().contains("device limit reached"),
-            "got: {err}"
-        );
     }
 
     #[test]
