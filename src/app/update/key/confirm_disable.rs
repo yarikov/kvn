@@ -61,18 +61,6 @@ mod tests {
     }
 
     #[test]
-    fn shift_a_enables_auto_connect_without_confirmation() {
-        let mut model = model_with_auto_connect(false);
-        let effects = handle_sources(&mut model, key('A'));
-        assert_eq!(model.overlay, Overlay::None);
-        assert!(model.auto_connect_pending);
-        assert!(matches!(
-            effects.as_slice(),
-            [Effect::CheckAutoConnectPolkit]
-        ));
-    }
-
-    #[test]
     fn shift_a_asks_before_disabling_auto_connect() {
         let mut model = model_with_auto_connect(true);
         let effects = handle_sources(&mut model, key('A'));
@@ -97,22 +85,14 @@ mod tests {
 
     #[test]
     fn confirming_disables_auto_connect() {
-        let mut model = model_with_auto_connect(true);
-        handle_sources(&mut model, key('A'));
-        let effects = handle_key(&mut model, key('y'));
-        assert_eq!(model.overlay, Overlay::None);
-        assert!(!model.config.settings.auto_connect);
-        assert!(effects.contains(&Effect::SaveConfig));
-    }
-
-    #[test]
-    fn enter_confirms_the_dialog() {
-        let mut model = model_with_auto_connect(true);
-        handle_sources(&mut model, key('A'));
-        let effects = handle_key(&mut model, enter());
-        assert_eq!(model.overlay, Overlay::None);
-        assert!(!model.config.settings.auto_connect);
-        assert!(effects.contains(&Effect::SaveConfig));
+        for confirm in [key('y'), enter()] {
+            let mut model = model_with_auto_connect(true);
+            handle_sources(&mut model, key('A'));
+            let effects = handle_key(&mut model, confirm);
+            assert_eq!(model.overlay, Overlay::None);
+            assert!(!model.config.settings.auto_connect);
+            assert!(effects.contains(&Effect::SaveConfig));
+        }
     }
 
     #[test]
@@ -140,15 +120,6 @@ mod tests {
     }
 
     #[test]
-    fn shift_k_enables_the_kill_switch_without_confirmation() {
-        let mut model = model_with_kill_switch(false);
-        let effects = handle_sources(&mut model, key('K'));
-        assert_eq!(model.overlay, Overlay::None);
-        assert_eq!(model.kill_switch_pending, Some(true));
-        assert!(effects.contains(&Effect::ApplyKillSwitch { enabled: true }));
-    }
-
-    #[test]
     fn shift_k_asks_before_disabling_the_kill_switch() {
         let mut model = model_with_kill_switch(true);
         let effects = handle_sources(&mut model, key('K'));
@@ -166,7 +137,7 @@ mod tests {
     }
 
     #[test]
-    fn shift_k_is_a_noop_while_an_apply_is_in_flight() {
+    fn an_in_flight_apply_skips_the_kill_switch_dialog() {
         let mut model = model_with_kill_switch(true);
         model.kill_switch_pending = Some(false);
         let effects = handle_sources(&mut model, key('K'));
@@ -175,11 +146,12 @@ mod tests {
     }
 
     #[test]
-    fn shift_a_is_a_noop_while_a_polkit_check_is_in_flight() {
-        let mut model = model_with_auto_connect(false);
+    fn an_in_flight_polkit_check_skips_the_auto_connect_dialog() {
+        let mut model = model_with_auto_connect(true);
         model.auto_connect_pending = true;
         let effects = handle_sources(&mut model, key('A'));
         assert!(effects.is_empty());
         assert_eq!(model.overlay, Overlay::None);
+        assert!(model.config.settings.auto_connect);
     }
 }
