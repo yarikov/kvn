@@ -75,7 +75,8 @@ fn handle_logs(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
         | KeyCode::Char('K')
         | KeyCode::Char('r')
         | KeyCode::Char('s')
-        | KeyCode::Char('I') => handle_sources(model, key),
+        | KeyCode::Char('I')
+        | KeyCode::Char('U') => handle_sources(model, key),
         _ => vec![],
     }
 }

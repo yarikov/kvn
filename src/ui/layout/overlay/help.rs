@@ -105,7 +105,7 @@ mod tests {
             ("y", "Yank profile or subscription"),
             ("p", "Paste profile or subscription"),
             ("d", "Delete profile or subscription"),
-            ("u", "Update subscription or geo"),
+            ("u/U", "Update subscription / geo"),
             ("i/I", "Cycle subscription / geo auto-update"),
             ("t/T", "Test selected / all profiles"),
             ("r", "Reconnect"),

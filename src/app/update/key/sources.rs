@@ -42,7 +42,8 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
         KeyCode::Char('m') => {
             open_routing_mode(model, None);
         }
-        KeyCode::Char('u') => return handle_update_key(model),
+        KeyCode::Char('u') => return update_selected_subscription(model),
+        KeyCode::Char('U') => return update_geo(model),
         KeyCode::Char('I') => {
             let schedule = model.config.settings.geo_routing.auto_update.next();
             model.config.settings.geo_routing.auto_update = schedule;
@@ -220,27 +221,40 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
     effects
 }
 
-fn handle_update_key(model: &mut Model) -> Vec<Effect> {
+fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
     let mut effects = Vec::new();
-    if let Some(idx) = model.selected_subscription_index() {
-        if let Some(sub) = model.config.subscriptions.get(idx) {
-            let id = sub.id;
-            let name = sub.name.clone();
-            if !download_allowed(model) {
-                push_download_blocked(&mut effects, model, DownloadKind::Subscription);
-                return effects;
-            }
-            model.subscription_fetching = true;
-            model.subscription_updates.insert(id);
-            let mut result = vec![Effect::SaveConfig, Effect::UpdateSubscription { id }];
-            push_status(
-                &mut result,
-                model,
-                crate::app::model::AppStatus::Info(format!("Updating subscription '{}'…", name)),
-            );
-            return result;
+    if let Some(idx) = model.selected_subscription_index()
+        && let Some(sub) = model.config.subscriptions.get(idx)
+    {
+        let id = sub.id;
+        let name = sub.name.clone();
+        if !download_allowed(model) {
+            push_download_blocked(&mut effects, model, DownloadKind::Subscription);
+            return effects;
         }
-    } else if !model.geo_updating {
+        model.subscription_fetching = true;
+        model.subscription_updates.insert(id);
+        let mut result = vec![Effect::SaveConfig, Effect::UpdateSubscription { id }];
+        push_status(
+            &mut result,
+            model,
+            crate::app::model::AppStatus::Info(format!("Updating subscription '{}'…", name)),
+        );
+        return result;
+    }
+    push_status(
+        &mut effects,
+        model,
+        crate::app::model::AppStatus::Info(
+            "Select a subscription to update, or press U for geo".into(),
+        ),
+    );
+    effects
+}
+
+fn update_geo(model: &mut Model) -> Vec<Effect> {
+    let mut effects = Vec::new();
+    if !model.geo_updating {
         if model.config.settings.geo_routing.current_region == Some(GeoRegion::Global) {
             let services = model.config.settings.geo_routing.enabled_services();
             if services.is_empty() {
@@ -474,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn normal_mode_u_in_global_updates_enabled_services() {
+    fn normal_mode_shift_u_in_global_updates_enabled_services() {
         let mut model = model_with_profiles(vec![]);
         model
             .config
@@ -487,7 +501,7 @@ mod tests {
         );
         model.connection = ConnectionState::Connected;
 
-        let effects = handle_sources(&mut model, key('u'));
+        let effects = handle_sources(&mut model, key('U'));
         assert!(model.geo_updating);
         assert!(!effects.contains(&Effect::DownloadGeo));
         assert!(effects.contains(&Effect::RetryServiceRuleSets {
@@ -496,7 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn normal_mode_u_in_global_without_services_is_noop() {
+    fn normal_mode_shift_u_in_global_without_services_is_noop() {
         let mut model = model_with_profiles(vec![]);
         model
             .config
@@ -504,7 +518,7 @@ mod tests {
             .geo_routing
             .set_region(GeoRegion::Global);
 
-        let effects = handle_sources(&mut model, key('u'));
+        let effects = handle_sources(&mut model, key('U'));
         assert!(!model.geo_updating);
         assert!(!effects.contains(&Effect::DownloadGeo));
         assert!(model.status.text().contains("No enabled service"));
@@ -831,7 +845,7 @@ mod tests {
     fn manual_geo_update_is_blocked_only_by_disconnected_kill_switch() {
         let mut direct = model_with_profiles(vec![]);
         direct.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        let effects = update(&mut direct, Msg::Key(key('u')));
+        let effects = update(&mut direct, Msg::Key(key('U')));
         assert!(effects.contains(&Effect::DownloadGeo));
 
         let mut blocked = model_with_profiles(vec![]);
@@ -841,7 +855,7 @@ mod tests {
             .geo_routing
             .set_region(GeoRegion::Ru);
         blocked.config.settings.kill_switch = true;
-        let effects = update(&mut blocked, Msg::Key(key('u')));
+        let effects = update(&mut blocked, Msg::Key(key('U')));
         assert!(!effects.contains(&Effect::DownloadGeo));
         assert!(!blocked.geo_updating);
         assert!(effects.iter().any(|effect| matches!(
@@ -851,7 +865,7 @@ mod tests {
         )));
 
         blocked.connection = ConnectionState::Connected;
-        let effects = update(&mut blocked, Msg::Key(key('u')));
+        let effects = update(&mut blocked, Msg::Key(key('U')));
         assert!(effects.contains(&Effect::DownloadGeo));
     }
 
@@ -1009,6 +1023,38 @@ mod tests {
         // Cursor on standalone profile, not on a subscription header.
         let effects = handle_sources(&mut model, key('i'));
         assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn sources_u_on_non_subscription_points_at_shift_u() {
+        let mut model = model_with_profiles(vec![Profile::new_vless(
+            "A".into(),
+            "1.1.1.1".into(),
+            443,
+            "u".into(),
+        )]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+
+        let effects = handle_sources(&mut model, key('u'));
+
+        assert!(!model.geo_updating);
+        assert!(!model.subscription_fetching);
+        assert!(!effects.iter().any(|effect| matches!(
+            effect,
+            Effect::DownloadGeo | Effect::UpdateSubscription { .. }
+        )));
+        assert!(model.status.text().contains("press U for geo"));
+    }
+
+    #[test]
+    fn logs_pane_forwards_shift_u() {
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.main_pane_focus = crate::app::model::MainPaneFocus::Logs;
+
+        let effects = handle_key(&mut model, key('U'));
+        assert!(model.geo_updating);
+        assert!(effects.contains(&Effect::DownloadGeo));
     }
 
     // ---- handle_enter_on_sources gaps ----

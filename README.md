@@ -247,7 +247,7 @@ detected problems.
 | `y` | Yank selected profile or subscription |
 | `p` | Paste profile or subscription from clipboard |
 | `d` | Delete selected profile or subscription |
-| `u` | Update selected subscription or geo |
+| `u` / `U` | Update selected subscription / geo |
 | `i` / `I` | Cycle subscription / geo auto-update |
 | `t` / `T` | Test selected / all profiles |
 
