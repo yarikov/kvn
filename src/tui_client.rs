@@ -599,7 +599,7 @@ pub fn run() -> Result<()> {
     drop(terminal);
     drop(terminal_session);
     if outcome == TuiExit::RestartDaemon {
-        crate::migrations::restart_daemon_unit();
+        crate::systemd::restart_daemon_unit();
     }
     Ok(())
 }

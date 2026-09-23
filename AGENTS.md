@@ -58,6 +58,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `paths` | `src/paths.rs` | XDG directory resolution (`~/.config/kvn-tui/`), atomic path construction |
 | `atomic_write` | `src/atomic_write.rs` | Atomic file write helper (write `.tmp` + fsync + rename + parent-dir fsync) |
 | `net` | `src/net.rs` | Free loopback port allocation (bind `127.0.0.1:0`, read the OS-assigned port, drop the listener) for the Clash API control port and the profile-test SOCKS5 port |
+| `systemd` | `src/systemd.rs` | The daemon's systemd user unit name and its restart helper, so a unit rename lands in one place |
 | `waybar` | `src/services/waybar.rs` | Read/write `state.json` for waybar integration and crash recovery |
 | `suspend` | `src/services/suspend.rs` | D-Bus listener for `systemd-logind` `PrepareForSleep` signals (zbus) |
 | `integration_files` | `src/integration_files.rs`, `contrib/killswitch.nft`, `contrib/kvn-tui-killswitch.{service,sudoers}`, `contrib/49-kvn-tui.rules` | Embedded kill-switch/polkit payloads passed to the setup scripts; detects outdated installed files and SHA-256 stamps in `/var/lib/kvn/integrations/` for `kvn doctor` |
@@ -186,7 +187,7 @@ See the `release` skill in `.agents/skills/release/SKILL.md` for the full versio
 
   The `TOTAL` line shows region / function / line coverage. Both region and line numbers must be ≥ 85 % for CI to pass.
 - The CI gate parses the `TOTAL` line directly because `cargo-llvm-cov --fail-under-*` flags are silently no-op in the 0.8.x series.
-- 0 %-coverage I/O wrappers (`daemon.rs`, `tui_client.rs`, `main.rs`, `services/killswitch.rs`, `services/suspend.rs`, `tui_client/clipboard.rs`, `tui_client/theme_watch.rs` watcher thread, `singbox/clash_api.rs`, install_* in `cli.rs`) are accepted as-is — they wrap subprocesses, DBus, Unix sockets, HTTP, and filesystem watchers, which need integration harnesses out of scope for unit tests. **Do not rewrite them just to add fake-based tests.** Cover new logic with pure-function tests instead.
+- 0 %-coverage I/O wrappers (`daemon.rs`, `tui_client.rs`, `main.rs`, `services/killswitch.rs`, `services/suspend.rs`, `tui_client/clipboard.rs`, `tui_client/theme_watch.rs` watcher thread, `singbox/clash_api.rs`, `systemd.rs`, install_* in `cli.rs`) are accepted as-is — they wrap subprocesses, DBus, Unix sockets, HTTP, and filesystem watchers, which need integration harnesses out of scope for unit tests. **Do not rewrite them just to add fake-based tests.** Cover new logic with pure-function tests instead.
 
 ---
 

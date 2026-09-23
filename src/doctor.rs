@@ -1,6 +1,7 @@
 //! Read-only diagnostics for the runtime environment.
 
 use std::env;
+use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -8,7 +9,6 @@ use std::process::{Command, Output};
 use anyhow::Result;
 
 const MIN_SINGBOX_VERSION: (u64, u64, u64) = (1, 12, 0);
-const USER_UNIT: &str = "kvn-tui.service";
 const POLKIT_DNS_ACTIONS: [&str; 3] = [
     "org.freedesktop.resolve1.set-dns-servers",
     "org.freedesktop.resolve1.set-domains",
@@ -319,17 +319,28 @@ fn check_config() -> Check {
 }
 
 fn check_daemon() -> Vec<Check> {
+    let unit = crate::systemd::DAEMON_UNIT;
     let mut checks = Vec::with_capacity(2);
     match systemctl_user_is_enabled() {
         Some(true) => checks.push(Check::pass("daemon autostart is enabled")),
         Some(false) => checks.push(Check::warning(
             "daemon autostart is not enabled",
-            "Run `systemctl --user enable --now kvn-tui.service`.",
+            format!("Run `systemctl --user enable --now {unit}`."),
         )),
         None => checks.push(Check::warning(
             "systemd user service status could not be checked",
-            "Run `systemctl --user status kvn-tui.service` to inspect it.",
+            format!("Run `systemctl --user status {unit}` to inspect it."),
         )),
+    }
+
+    let stale = autostart_wants_dir()
+        .map(|dir| stale_autostart_units(&dir))
+        .unwrap_or_default();
+    for unit_name in stale {
+        checks.push(Check::warning(
+            format!("daemon autostart points at {unit_name}, which is no longer installed"),
+            format!("Run `systemctl --user disable {unit_name}`, then `systemctl --user enable --now {unit}`."),
+        ));
     }
 
     match crate::ipc::socket_path() {
@@ -343,16 +354,38 @@ fn check_daemon() -> Vec<Check> {
         ))),
         Ok(_) => checks.push(Check::warning(
             "daemon IPC socket is not reachable",
-            "Start it with `systemctl --user start kvn-tui.service`; kvn can also start it on demand.",
+            format!(
+                "Start it with `systemctl --user start {unit}`; kvn can also start it on demand."
+            ),
         )),
     }
     checks
 }
 
+fn autostart_wants_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("systemd/user/default.target.wants"))
+}
+
+/// Report enable symlinks left behind by a unit the package no longer ships,
+/// which is how autostart silently stops working after a unit is renamed.
+fn stale_autostart_units(wants_dir: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(wants_dir) else {
+        return Vec::new();
+    };
+    let mut stale: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_symlink() && !entry.path().exists())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with("kvn") && name.ends_with(".service"))
+        .collect();
+    stale.sort();
+    stale
+}
+
 fn systemctl_user_is_enabled() -> Option<bool> {
     let output = Command::new("systemctl")
         .arg("--user")
-        .args(["is-enabled", USER_UNIT])
+        .args(["is-enabled", crate::systemd::DAEMON_UNIT])
         .output()
         .ok()?;
     if output.status.success() {
@@ -654,6 +687,41 @@ fn omakvn_plugin_installed() -> bool {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn stale_autostart_units_reports_a_dangling_enable_symlink() {
+        let wants = tempfile::tempdir().unwrap();
+        assert!(stale_autostart_units(wants.path()).is_empty());
+
+        std::os::unix::fs::symlink(
+            wants.path().join("gone/kvn-tui.service"),
+            wants.path().join("kvn-tui.service"),
+        )
+        .unwrap();
+
+        assert_eq!(stale_autostart_units(wants.path()), vec!["kvn-tui.service"]);
+    }
+
+    #[test]
+    fn stale_autostart_units_ignores_resolving_and_foreign_links() {
+        let wants = tempfile::tempdir().unwrap();
+        let unit = wants.path().join("installed.service");
+        fs::write(&unit, "[Unit]\n").unwrap();
+        std::os::unix::fs::symlink(&unit, wants.path().join("kvn.service")).unwrap();
+        std::os::unix::fs::symlink(
+            wants.path().join("gone/pipewire.service"),
+            wants.path().join("pipewire.service"),
+        )
+        .unwrap();
+
+        assert!(stale_autostart_units(wants.path()).is_empty());
+    }
+
+    #[test]
+    fn stale_autostart_units_tolerates_a_missing_directory() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(stale_autostart_units(&root.path().join("nope")).is_empty());
+    }
 
     #[test]
     fn migration_check_reports_pass_pending_and_inspection_error() {
