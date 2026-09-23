@@ -285,10 +285,10 @@ fn cancel_startup_auto_connect(model: &mut Model) {
         model.connection = ConnectionState::Idle;
         model.connecting_profile_id = None;
     }
-    model.status = AppStatus::Info(
+    model.status = Some(AppStatus::Info(
         "Auto-connect disabled: passwordless polkit is not set up; run `sudo kvn setup --polkit`"
             .into(),
-    );
+    ));
 }
 
 pub(crate) fn build_snapshot(
@@ -306,8 +306,8 @@ pub(crate) fn build_snapshot(
         response_to,
         response_error,
         connection: model.connection,
-        status: model.status.text().to_string(),
-        status_is_error: matches!(model.status, AppStatus::Error(_)),
+        status: model.status_text().to_string(),
+        status_is_error: model.status_is_error(),
         status_revision: model.status_revision,
         singbox_pid: model.singbox_pid,
         active_profile_id: model.active_profile_id.map(|id| id.to_string()),
@@ -399,7 +399,7 @@ mod tests {
         assert!(model.connecting_profile_id.is_none());
         assert!(matches!(
             &model.status,
-            AppStatus::Info(text) if text.contains("sudo kvn setup --polkit")
+            Some(AppStatus::Info(text)) if text.contains("sudo kvn setup --polkit")
         ));
     }
 }

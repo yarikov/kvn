@@ -321,11 +321,8 @@ fn run_loop(
 fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
     model.restart_required = snapshot.restart_required;
     model.connection = snapshot.connection;
-    model.status = if snapshot.status_is_error {
-        crate::app::model::AppStatus::Error(snapshot.status)
-    } else {
-        crate::app::model::AppStatus::Info(snapshot.status)
-    };
+    model.status =
+        crate::app::model::AppStatus::from_snapshot(snapshot.status, snapshot.status_is_error);
     model.status_revision = snapshot.status_revision;
     model.singbox_pid = snapshot.singbox_pid;
     model.active_profile_id = snapshot

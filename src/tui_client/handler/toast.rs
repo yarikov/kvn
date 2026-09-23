@@ -22,9 +22,9 @@ impl ToastState {
         }
     }
 
-    pub(super) fn show_initial_error(&mut self, status: AppStatus, now: Instant) -> bool {
-        if matches!(status, AppStatus::Error(_)) {
-            self.status = Some(status);
+    pub(super) fn show_initial_error(&mut self, status: Option<AppStatus>, now: Instant) -> bool {
+        if matches!(status, Some(AppStatus::Error(_))) {
+            self.status = status;
             self.expires_at = Some(now + TOAST_ERROR_DURATION);
             return true;
         }
@@ -39,18 +39,18 @@ impl ToastState {
     pub(super) fn observe(
         &mut self,
         revision: u64,
-        status: AppStatus,
+        status: Option<AppStatus>,
         now: Instant,
     ) -> Option<u64> {
         if revision == self.last_revision {
             return None;
         }
         self.last_revision = revision;
-        if status.text().is_empty() || status.text() == "Press ? for help" {
+        let Some(status) = status else {
             self.status = None;
             self.expires_at = None;
             return None;
-        }
+        };
         let error_revision = matches!(status, AppStatus::Error(_)).then_some(revision);
         let duration = if matches!(status, AppStatus::Error(_)) {
             TOAST_ERROR_DURATION
@@ -84,13 +84,13 @@ mod tests {
         let start = Instant::now();
         let mut toast = ToastState::new(4);
         assert_eq!(
-            toast.observe(5, AppStatus::Info("Saved".into()), start),
+            toast.observe(5, Some(AppStatus::Info("Saved".into())), start),
             None
         );
         let first_deadline = toast.expires_at.unwrap();
         toast.observe(
             6,
-            AppStatus::Info("Saved".into()),
+            Some(AppStatus::Info("Saved".into())),
             start + Duration::from_secs(1),
         );
         assert_eq!(toast.current().map(AppStatus::text), Some("Saved"));
@@ -111,7 +111,7 @@ mod tests {
         assert_eq!(
             toast.observe(
                 4,
-                AppStatus::Info("unchanged daemon status".into()),
+                Some(AppStatus::Info("unchanged daemon status".into())),
                 start + Duration::from_secs(2),
             ),
             None
@@ -130,14 +130,14 @@ mod tests {
         let start = Instant::now();
         let mut toast = ToastState::new(2);
         assert_eq!(
-            toast.observe(3, AppStatus::Error("Failed".into()), start),
+            toast.observe(3, Some(AppStatus::Error("Failed".into())), start),
             Some(3)
         );
         let deadline = toast.expires_at.unwrap();
         assert_eq!(
             toast.observe(
                 3,
-                AppStatus::Info("stale".into()),
+                Some(AppStatus::Info("stale".into())),
                 start + Duration::from_secs(1),
             ),
             None
@@ -148,12 +148,10 @@ mod tests {
     }
 
     #[test]
-    fn toast_state_suppresses_empty_and_help_messages() {
+    fn toast_state_suppresses_empty_messages() {
         let start = Instant::now();
         let mut toast = ToastState::new(0);
-        toast.observe(1, AppStatus::Info(String::new()), start);
-        assert!(toast.current().is_none());
-        toast.observe(2, AppStatus::Info("Press ? for help".into()), start);
+        toast.observe(1, None, start);
         assert!(toast.current().is_none());
     }
 
@@ -162,13 +160,13 @@ mod tests {
         let start = Instant::now();
         let mut toast = ToastState::new(2);
 
-        assert!(!toast.show_initial_error(AppStatus::Info("Connected".into()), start));
+        assert!(!toast.show_initial_error(Some(AppStatus::Info("Connected".into())), start));
         assert!(toast.current().is_none());
 
-        assert!(toast.show_initial_error(AppStatus::Error("Startup failed".into()), start));
+        assert!(toast.show_initial_error(Some(AppStatus::Error("Startup failed".into())), start));
         assert_eq!(toast.current().map(AppStatus::text), Some("Startup failed"));
 
-        toast.observe(3, AppStatus::Info("Recovered".into()), start);
+        toast.observe(3, Some(AppStatus::Info("Recovered".into())), start);
         assert_eq!(toast.current().map(AppStatus::text), Some("Recovered"));
     }
 }

@@ -109,7 +109,7 @@ mod tests {
             RoutingMode::Only(GeoRegion::Ru)
         );
         assert_eq!(model.overlay, Overlay::None);
-        assert!(model.status.text().contains("Only RU"));
+        assert!(model.status_text().contains("Only RU"));
         assert_eq!(
             effects,
             vec![Effect::SaveConfig, app_log_info("Routing mode: Only RU")]
@@ -372,7 +372,7 @@ mod tests {
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, Some(id));
         assert_eq!(model.selected, 0);
-        assert!(model.status.text().contains("Auto-connecting"));
+        assert!(model.status_text().contains("Auto-connecting"));
         assert_eq!(
             effects,
             vec![
@@ -417,6 +417,6 @@ mod tests {
             Some(GeoRegion::Global)
         );
         assert!(!effects.contains(&Effect::DownloadGeoIfMissing));
-        assert!(!model.status.text().contains("Checking geo databases"));
+        assert!(!model.status_text().contains("Checking geo databases"));
     }
 }

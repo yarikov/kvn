@@ -221,7 +221,7 @@ fn build_docs_preview_state_at(
     model.active_profile_id = Some(active_id);
     model.selected = 2;
     model.main_pane_focus = crate::app::model::MainPaneFocus::Sources;
-    model.status = AppStatus::Info("Connected to 🇺🇸 United States".into());
+    model.status = Some(AppStatus::Info("Connected to 🇺🇸 United States".into()));
     model.geo_last_checked_at = Some(
         preview_now
             .with_hour(8)

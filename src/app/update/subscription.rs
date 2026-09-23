@@ -476,7 +476,7 @@ mod tests {
         );
 
         assert!(effects.contains(&Effect::BroadcastState));
-        assert!(matches!(model.status, AppStatus::Error(_)));
+        assert!(matches!(model.status, Some(AppStatus::Error(_))));
     }
 
     #[test]

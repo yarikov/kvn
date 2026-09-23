@@ -136,14 +136,14 @@ mod tests {
             effects,
             vec![Effect::SaveConfig, app_log_info("Pasted profile: Test")]
         );
-        assert!(model.status.text().contains("Pasted profile"));
+        assert!(model.status_text().contains("Pasted profile"));
 
         // Second paste with same UUID fails
         let effects = handle_clipboard_text(&mut model, uri);
         assert_eq!(model.config.profiles.len(), 1);
         assert_eq!(effects, vec![app_log_error("Profile already exists")]);
-        assert!(model.status.is_error());
-        assert!(model.status.text().contains("already exists"));
+        assert!(model.status_is_error());
+        assert!(model.status_text().contains("already exists"));
     }
 
     #[test]
@@ -217,14 +217,14 @@ mod tests {
         assert!(!effects.contains(&Effect::SaveConfig));
         assert_eq!(model.overlay, crate::app::model::Overlay::None);
         assert!(model.config.profiles.is_empty());
-        assert!(model.status.is_error());
+        assert!(model.status_is_error());
         assert_eq!(
-            model.status.text(),
+            model.status_text(),
             "Not a supported VPN link or subscription URL"
         );
 
         handle_clipboard_text(&mut model, "  \n");
-        assert_eq!(model.status.text(), "Clipboard is empty");
+        assert_eq!(model.status_text(), "Clipboard is empty");
     }
 
     #[test]

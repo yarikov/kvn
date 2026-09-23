@@ -163,17 +163,19 @@ pub enum AppStatus {
 }
 
 impl AppStatus {
+    pub fn from_snapshot(text: String, is_error: bool) -> Option<Self> {
+        match (text.is_empty(), is_error) {
+            (true, _) => None,
+            (false, true) => Some(AppStatus::Error(text)),
+            (false, false) => Some(AppStatus::Info(text)),
+        }
+    }
+
     /// Return the text content of the status.
     pub fn text(&self) -> &str {
         match self {
             AppStatus::Info(s) | AppStatus::Error(s) => s.as_str(),
         }
-    }
-
-    /// Returns true if this is an error status.
-    #[cfg(test)]
-    pub fn is_error(&self) -> bool {
-        matches!(self, AppStatus::Error(_))
     }
 }
 
@@ -275,7 +277,7 @@ pub struct Model {
     /// broadcast: opening a browser belongs to the client that pressed Enter.
     pub support_selected: usize,
     pub selected: usize,
-    pub status: AppStatus,
+    pub status: Option<AppStatus>,
     /// Monotonic revision of the latest status event. TUI clients use it to
     /// show repeated messages as distinct toast notifications even when the
     /// text itself did not change.
@@ -386,6 +388,14 @@ impl Model {
         self.log_scroll = self.logs.len().saturating_sub(1);
     }
 
+    pub fn status_text(&self) -> &str {
+        self.status.as_ref().map_or("", AppStatus::text)
+    }
+
+    pub fn status_is_error(&self) -> bool {
+        matches!(self.status, Some(AppStatus::Error(_)))
+    }
+
     /// Set application status and also push it to the in-memory logs panel.
     /// This method is side-effect-free: it does not write to disk.
     pub fn set_status(&mut self, status: AppStatus) {
@@ -393,7 +403,7 @@ impl Model {
         if !text.is_empty() {
             self.push_log(text.to_string());
         }
-        self.status = status;
+        self.status = Some(status);
         self.status_revision = self.status_revision.wrapping_add(1);
     }
 
@@ -401,10 +411,12 @@ impl Model {
     /// status event. A matching revision prevents a delayed client from
     /// clearing a newer error.
     pub fn clear_error_status(&mut self, status_revision: u64) -> bool {
-        if self.status_revision != status_revision || !matches!(self.status, AppStatus::Error(_)) {
+        if self.status_revision != status_revision
+            || !matches!(self.status, Some(AppStatus::Error(_)))
+        {
             return false;
         }
-        self.status = AppStatus::Info(String::new());
+        self.status = None;
         true
     }
 
@@ -477,7 +489,7 @@ impl Model {
         // Block auto-connect until the user has picked a geo region.
         if config.settings.geo_routing.current_region.is_none() {
             connection = ConnectionState::Idle;
-            status = AppStatus::Info("Press ? for help".to_string());
+            status = None;
         }
         let connecting_profile_id = (connection == ConnectionState::Connecting)
             .then_some(config.settings.last_connected_profile)
@@ -530,7 +542,7 @@ impl Model {
             support_prompt,
             support_selected: 0,
             selected,
-            status: AppStatus::Info(String::new()),
+            status: None,
             status_revision: 0,
             singbox_pid: None,
             active_profile_id: None,
@@ -580,9 +592,7 @@ impl Model {
         if model.config.settings.geo_routing.current_region.is_none() {
             model.overlay = Overlay::GeoRegions;
         }
-        if status.text() == "Press ? for help" {
-            model.status = status;
-        } else {
+        if let Some(status) = status {
             model.set_status(status);
         }
         // A load/validate failure at startup must reach the user. set_status
@@ -647,7 +657,7 @@ impl Model {
             support_prompt: crate::support_prompt::SupportPromptState::default(),
             support_selected: 0,
             selected,
-            status: AppStatus::Info(String::new()),
+            status: None,
             status_revision: 0,
             singbox_pid: None,
             active_profile_id: None,
@@ -706,29 +716,24 @@ impl Model {
     fn resolve_startup_state(
         config: &Config,
         default_selected: usize,
-    ) -> (ConnectionState, usize, AppStatus) {
+    ) -> (ConnectionState, usize, Option<AppStatus>) {
         if config.settings.auto_connect
             && let Some(idx) = config
                 .settings
                 .last_connected_profile
                 .and_then(|id| config.profiles.iter().position(|p| p.id == id))
         {
-            let status = if let Some(profile) = config.profiles.get(idx) {
-                AppStatus::Info(format!("Auto-connecting to {}…", profile.name))
-            } else {
-                AppStatus::Info("Press ? for help".to_string())
-            };
+            let status = config
+                .profiles
+                .get(idx)
+                .map(|profile| AppStatus::Info(format!("Auto-connecting to {}…", profile.name)));
             return (
                 ConnectionState::Connecting,
                 row_for_profile(config, idx),
                 status,
             );
         }
-        (
-            ConnectionState::Idle,
-            default_selected,
-            AppStatus::Info("Press ? for help".to_string()),
-        )
+        (ConnectionState::Idle, default_selected, None)
     }
 
     /// Build the flat list of selectable rows for the current config.
@@ -889,7 +894,7 @@ impl Model {
             support_prompt: crate::support_prompt::SupportPromptState::default(),
             support_selected: 0,
             selected,
-            status: AppStatus::Info(String::new()),
+            status: None,
             status_revision: 0,
             singbox_pid: None,
             active_profile_id: None,
@@ -1077,20 +1082,47 @@ mod tests {
     }
 
     #[test]
+    fn from_snapshot_maps_an_empty_status_to_none() {
+        assert_eq!(AppStatus::from_snapshot(String::new(), false), None);
+        assert_eq!(AppStatus::from_snapshot(String::new(), true), None);
+        assert_eq!(
+            AppStatus::from_snapshot("busy".into(), false),
+            Some(AppStatus::Info("busy".into()))
+        );
+        assert_eq!(
+            AppStatus::from_snapshot("boom".into(), true),
+            Some(AppStatus::Error("boom".into()))
+        );
+    }
+
+    #[test]
+    fn from_snapshot_round_trips_the_wire_representation() {
+        for status in [
+            None,
+            Some(AppStatus::Info("busy".into())),
+            Some(AppStatus::Error("boom".into())),
+        ] {
+            let text = status.as_ref().map_or("", AppStatus::text).to_string();
+            let is_error = matches!(status, Some(AppStatus::Error(_)));
+            assert_eq!(AppStatus::from_snapshot(text, is_error), status);
+        }
+    }
+
+    #[test]
     fn set_status_clears_error_and_mode() {
         let mut model = model_with_profiles(vec![]);
-        model.status = AppStatus::Error("oops".into());
-        model.status = AppStatus::Info("ok".into());
-        assert_eq!(model.status.text(), "ok");
-        assert!(!model.status.is_error());
+        model.status = Some(AppStatus::Error("oops".into()));
+        model.status = Some(AppStatus::Info("ok".into()));
+        assert_eq!(model.status_text(), "ok");
+        assert!(!model.status_is_error());
     }
 
     #[test]
     fn set_error_sets_message_and_mode() {
         let mut model = model_with_profiles(vec![]);
-        model.status = AppStatus::Error("fail".into());
-        assert_eq!(model.status.text(), "fail");
-        assert!(model.status.is_error());
+        model.status = Some(AppStatus::Error("fail".into()));
+        assert_eq!(model.status_text(), "fail");
+        assert!(model.status_is_error());
     }
 
     #[test]
@@ -1110,7 +1142,7 @@ mod tests {
         let (state, selected, status) = Model::resolve_startup_state(&config, 0);
         assert_eq!(state, ConnectionState::Connecting);
         assert_eq!(selected, 0);
-        assert!(status.text().contains("Auto-connecting"));
+        assert!(status.is_some_and(|status| status.text().contains("Auto-connecting")));
     }
 
     #[test]
@@ -1128,7 +1160,7 @@ mod tests {
         let (state, selected, status) = Model::resolve_startup_state(&config, 0);
         assert_eq!(state, ConnectionState::Idle);
         assert_eq!(selected, 0);
-        assert_eq!(status.text(), "Press ? for help");
+        assert!(status.is_none());
     }
 
     #[test]
@@ -1137,7 +1169,7 @@ mod tests {
         let (state, selected, status) = Model::resolve_startup_state(&config, 0);
         assert_eq!(state, ConnectionState::Idle);
         assert_eq!(selected, 0);
-        assert_eq!(status.text(), "Press ? for help");
+        assert!(status.is_none());
     }
 
     #[test]
@@ -1196,14 +1228,14 @@ mod tests {
 
         let model = Model::new().unwrap();
         assert!(
-            model.status.is_error(),
+            model.status_is_error(),
             "status not error: {:?}",
             model.status
         );
         assert!(
-            model.status.text().contains("Config invalid"),
+            model.status_text().contains("Config invalid"),
             "status was: {}",
-            model.status.text(),
+            model.status_text(),
         );
         // Fell back to defaults, so the broken profile is not visible.
         assert!(model.config.profiles.is_empty());
@@ -1232,11 +1264,11 @@ mod tests {
         std::fs::write(&path, "not json at all").unwrap();
 
         let model = Model::new().unwrap();
-        assert!(model.status.is_error());
+        assert!(model.status_is_error());
         assert!(
-            model.status.text().contains("Failed to load"),
+            model.status_text().contains("Failed to load"),
             "status was: {}",
-            model.status.text(),
+            model.status_text(),
         );
         assert!(
             model.logs.iter().any(|l| l.contains("Failed to load")),
@@ -1264,12 +1296,12 @@ mod tests {
         let mut model = Model::test_new(Config::default());
         let initial_revision = model.status_revision;
         model.set_status(AppStatus::Info("hello".into()));
-        assert_eq!(model.status.text(), "hello");
+        assert_eq!(model.status_text(), "hello");
         assert_eq!(model.logs.back().unwrap(), "hello");
         assert_eq!(model.status_revision, initial_revision + 1);
 
         model.set_status(AppStatus::Error("oops".into()));
-        assert_eq!(model.status.text(), "oops");
+        assert_eq!(model.status_text(), "oops");
         assert_eq!(model.logs.back().unwrap(), "oops");
         assert_eq!(model.status_revision, initial_revision + 2);
     }
@@ -1281,9 +1313,9 @@ mod tests {
         let revision = model.status_revision;
 
         assert!(!model.clear_error_status(revision.wrapping_sub(1)));
-        assert_eq!(model.status.text(), "first");
+        assert_eq!(model.status_text(), "first");
         assert!(model.clear_error_status(revision));
-        assert_eq!(model.status, AppStatus::Info(String::new()));
+        assert!(model.status.is_none());
         assert_eq!(model.status_revision, revision);
         assert!(!model.clear_error_status(revision));
     }

@@ -341,9 +341,10 @@ impl Widget for Toast<'_> {
             return;
         }
         Clear.render(area, buf);
-        let border_style = match self.status {
-            AppStatus::Info(_) => self.theme.toast_info(),
-            AppStatus::Error(_) => self.theme.toast_error(),
+        let border_style = if matches!(self.status, AppStatus::Error(_)) {
+            self.theme.toast_error()
+        } else {
+            self.theme.toast_info()
         };
         let inner_width = usize::from(area.width.saturating_sub(4));
         let text = truncate_to_width(self.status.text(), inner_width * 2);
@@ -650,9 +651,9 @@ mod tests {
     fn status_bar_does_not_include_status_message() {
         let mut model = model_with_profiles(vec![]);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
-        model.status = crate::app::model::AppStatus::Error(
+        model.status = Some(crate::app::model::AppStatus::Error(
             "Connection failed: sing-box exited immediately (code: Some(1)). stderr: FATAL[0000] create service: parse outbound[0].server_settings.address: lookup example.com: no such host".to_string(),
-        );
+        ));
         let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
         StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         let content = buffer_to_string(&buf);

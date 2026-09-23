@@ -521,7 +521,7 @@ mod tests {
         let effects = handle_sources(&mut model, key('U'));
         assert!(!model.geo_updating);
         assert!(!effects.contains(&Effect::DownloadGeo));
-        assert!(model.status.text().contains("No enabled service"));
+        assert!(model.status_text().contains("No enabled service"));
     }
 
     #[test]
@@ -536,7 +536,7 @@ mod tests {
             let effects = handle_sources(&mut model, key('I'));
             assert_eq!(model.config.settings.geo_routing.auto_update, expected);
             assert!(effects.contains(&Effect::SaveConfig));
-            assert!(model.status.text().contains(&expected.label()));
+            assert!(model.status_text().contains(&expected.label()));
         }
     }
 
@@ -884,8 +884,8 @@ mod tests {
         model.selected = 0;
         let effects = handle_sources(&mut model, key('d'));
         assert_eq!(model.overlay, Overlay::None);
-        assert!(model.status.is_error());
-        assert!(model.status.text().contains("Disconnect before"));
+        assert!(model.status_is_error());
+        assert!(model.status_text().contains("Disconnect before"));
         // Effect carries the AppendAppLog only (no SaveConfig, no opening overlay).
         assert!(!effects.iter().any(|e| matches!(e, Effect::SaveConfig)));
     }
@@ -914,7 +914,7 @@ mod tests {
         model.selected = crate::app::model::row_for_subscription_header(&model.config, 0);
         let _ = handle_sources(&mut model, key('d'));
         assert_eq!(model.overlay, Overlay::None);
-        assert!(model.status.is_error());
+        assert!(model.status_is_error());
     }
 
     #[test]
@@ -931,7 +931,7 @@ mod tests {
         let effects = handle_sources(&mut model, key('d'));
 
         assert_eq!(model.overlay, Overlay::None);
-        assert!(model.status.text().contains("Disconnect before"));
+        assert!(model.status_text().contains("Disconnect before"));
         assert!(!effects.contains(&Effect::SaveConfig));
     }
 
@@ -1043,7 +1043,7 @@ mod tests {
             effect,
             Effect::DownloadGeo | Effect::UpdateSubscription { .. }
         )));
-        assert!(model.status.text().contains("press U for geo"));
+        assert!(model.status_text().contains("press U for geo"));
     }
 
     #[test]
@@ -1064,7 +1064,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         let effects = handle_enter_on_sources(&mut model);
         // No profile, no subscription → status message, no effects beyond log.
-        assert!(model.status.text().contains("No sources"));
+        assert!(model.status_text().contains("No sources"));
         assert!(!effects.iter().any(|e| matches!(e, Effect::Connect { .. })));
     }
 }
