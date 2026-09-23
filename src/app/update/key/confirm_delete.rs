@@ -165,7 +165,7 @@ mod tests {
 
         assert_eq!(model.config.profiles.len(), 1);
         assert_eq!(model.overlay, Overlay::None);
-        assert!(model.status.text().contains("Disconnect before"));
+        assert!(model.status_text().contains("Disconnect before"));
         assert!(!effects.contains(&Effect::SaveConfig));
     }
 

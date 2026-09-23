@@ -326,7 +326,7 @@ mod tests {
         assert!(!effects.iter().any(|e| matches!(e, Effect::Connect { .. })));
         assert_eq!(model.connection, ConnectionState::ConnectPending);
         assert_eq!(
-            model.status.text(),
+            model.status_text(),
             "Service routing saved — takes effect on next reconnect"
         );
     }

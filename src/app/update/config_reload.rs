@@ -302,7 +302,7 @@ mod tests {
 
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, Some(profile_id));
-        assert_eq!(model.status.text(), "Configuration changed — reconnecting");
+        assert_eq!(model.status_text(), "Configuration changed — reconnecting");
         assert!(!effects.contains(&Effect::Disconnect));
     }
 
@@ -321,7 +321,7 @@ mod tests {
 
         assert_eq!(model.connection, ConnectionState::Connected);
         assert_eq!(model.connecting_profile_id, None);
-        assert_eq!(model.status.text(), "Profiles reloaded");
+        assert_eq!(model.status_text(), "Profiles reloaded");
         assert!(!effects.contains(&Effect::Disconnect));
     }
 
@@ -386,7 +386,7 @@ mod tests {
         assert_eq!(model.connection, ConnectionState::Connected);
         assert!(!model.config.settings.kill_switch);
         assert_eq!(
-            model.status.text(),
+            model.status_text(),
             "Kill switch edit ignored — use K to change it"
         );
     }
@@ -407,7 +407,7 @@ mod tests {
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert!(!model.config.settings.kill_switch);
         assert_eq!(
-            model.status.text(),
+            model.status_text(),
             "Kill switch edit ignored (use K); configuration changed — reconnecting"
         );
         assert!(effects.contains(&app_log_info(

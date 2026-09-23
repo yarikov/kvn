@@ -36,7 +36,7 @@ pub(super) fn disconnect(model: &mut Model) -> Vec<Effect> {
         ConnectionState::Connected
         | ConnectionState::Connecting
         | ConnectionState::ConnectPending => vec![Effect::Disconnect],
-        ConnectionState::Idle if matches!(model.status, AppStatus::Error(_)) => {
+        ConnectionState::Idle if matches!(model.status, Some(AppStatus::Error(_))) => {
             let mut effects = vec![];
             push_status(&mut effects, model, AppStatus::Info("Disconnected".into()));
             effects
@@ -166,7 +166,7 @@ mod tests {
             assert_eq!(model.connection, ConnectionState::Connecting);
             assert_eq!(model.connecting_profile_id, Some(profile_id));
             assert_eq!(model.connect_attempt_id, 8);
-            assert_eq!(model.status.text(), "Reconnecting to A…");
+            assert_eq!(model.status_text(), "Reconnecting to A…");
             assert_eq!(
                 effects,
                 vec![app_log_info("Reconnecting to A…"), Effect::BroadcastState]
@@ -187,7 +187,7 @@ mod tests {
         );
         assert_eq!(model.connection, ConnectionState::Idle);
         assert_eq!(
-            model.status.text(),
+            model.status_text(),
             "Cannot reconnect while VPN is disconnected"
         );
     }
@@ -217,7 +217,7 @@ mod tests {
 
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, Some(profile_id));
-        assert_eq!(model.status.text(), "Connecting to A…");
+        assert_eq!(model.status_text(), "Connecting to A…");
         assert_eq!(
             effects,
             vec![app_log_info("Connecting to A…"), Effect::BroadcastState]
@@ -256,7 +256,7 @@ mod tests {
         );
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, Some(second.id));
-        assert_eq!(model.status.text(), "Connecting to B…");
+        assert_eq!(model.status_text(), "Connecting to B…");
         assert_eq!(
             effects,
             vec![
@@ -279,7 +279,7 @@ mod tests {
         );
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, Some(first.id));
-        assert_eq!(model.status.text(), "Connecting to A…");
+        assert_eq!(model.status_text(), "Connecting to A…");
         assert_eq!(
             effects,
             vec![

@@ -133,11 +133,8 @@ impl<'a> ClientLoop<'a> {
 
     fn apply_state_update(&mut self, snapshot: StateSnapshot) -> Result<Flow> {
         self.pane_focus = snapshot.main_pane_focus;
-        let toast_status = if snapshot.status_is_error {
-            AppStatus::Error(snapshot.status.clone())
-        } else {
-            AppStatus::Info(snapshot.status.clone())
-        };
+        let toast_status =
+            AppStatus::from_snapshot(snapshot.status.clone(), snapshot.status_is_error);
         self.pending_error_status_clear =
             self.toast
                 .observe(snapshot.status_revision, toast_status, Instant::now());

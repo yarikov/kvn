@@ -426,12 +426,12 @@ mod tests {
 
         update(&mut model, Msg::AutoConnectPolkitChecked { error: None });
         assert!(model.config.settings.auto_connect);
-        assert!(model.status.text().contains("enabled"));
+        assert!(model.status_text().contains("enabled"));
 
         handle_sources(&mut model, key('A'));
         let effects = handle_key(&mut model, key('y'));
         assert!(!model.config.settings.auto_connect);
-        assert!(model.status.text().contains("disabled"));
+        assert!(model.status_text().contains("disabled"));
         assert_eq!(
             effects,
             vec![app_log_info("Auto-connect disabled"), Effect::SaveConfig]
@@ -447,7 +447,7 @@ mod tests {
         // Bool is NOT flipped synchronously — it waits for KillSwitchApplied.
         assert!(!model.config.settings.kill_switch);
         assert_eq!(model.kill_switch_pending, Some(true));
-        assert!(model.status.text().contains("enabling"));
+        assert!(model.status_text().contains("enabling"));
         assert_eq!(
             effects,
             vec![

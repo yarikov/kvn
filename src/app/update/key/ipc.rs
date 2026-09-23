@@ -209,7 +209,7 @@ mod tests {
                 status_revision: first_revision.wrapping_sub(1),
             },
         );
-        assert_eq!(model.status, AppStatus::Error("first".into()));
+        assert_eq!(model.status, Some(AppStatus::Error("first".into())));
 
         handle_ipc_command(
             &mut model,
@@ -217,12 +217,12 @@ mod tests {
                 status_revision: first_revision,
             },
         );
-        assert_eq!(model.status, AppStatus::Info(String::new()));
+        assert!(model.status.is_none());
         assert_eq!(model.status_revision, first_revision);
 
         model.set_status(AppStatus::Error("first".into()));
         assert_eq!(model.status_revision, first_revision + 1);
-        assert_eq!(model.status, AppStatus::Error("first".into()));
+        assert_eq!(model.status, Some(AppStatus::Error("first".into())));
     }
 
     #[test]
@@ -241,8 +241,8 @@ mod tests {
                 Effect::BroadcastState,
             ]
         );
-        assert!(model.status.is_error(), "status: {:?}", model.status);
-        assert_eq!(model.status.text(), "Edit rejected: bad UUID");
+        assert!(model.status_is_error(), "status: {:?}", model.status);
+        assert_eq!(model.status_text(), "Edit rejected: bad UUID");
         // set_status also pushes into the in-memory log panel so the message
         // survives a later status overwrite.
         assert!(model.logs.iter().any(|l| l.contains("Edit rejected")));
@@ -604,7 +604,7 @@ mod tests {
             },
         );
         assert!(effects.iter().any(|e| matches!(e, Effect::BroadcastState)));
-        assert!(model.status.text().contains("Alpha"));
+        assert!(model.status_text().contains("Alpha"));
     }
 
     #[test]
@@ -617,7 +617,7 @@ mod tests {
                 count: 1,
             },
         );
-        assert_eq!(model.status.text(), "Copied: log");
+        assert_eq!(model.status_text(), "Copied: log");
     }
 
     #[test]
@@ -630,7 +630,7 @@ mod tests {
                 count: 3,
             },
         );
-        assert_eq!(model.status.text(), "Copied 3 logs");
+        assert_eq!(model.status_text(), "Copied 3 logs");
     }
 
     #[test]

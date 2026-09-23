@@ -257,8 +257,8 @@ mod tests {
         assert_eq!(model.active_profile_id, None);
         assert_eq!(model.traffic_request_id, 0);
         assert_eq!(model.last_traffic_response_id, 0);
-        assert!(model.status.is_error());
-        assert!(model.status.text().contains("Connection failed: timeout"));
+        assert!(model.status_is_error());
+        assert!(model.status_text().contains("Connection failed: timeout"));
         assert_eq!(
             effects,
             vec![
@@ -350,7 +350,7 @@ mod tests {
         assert_eq!(model.traffic_request_id, 0);
         assert_eq!(model.last_traffic_response_id, 0);
         assert_eq!(
-            model.status.text(),
+            model.status_text(),
             "sing-box exited unexpectedly (code 17)"
         );
         assert_eq!(
@@ -385,7 +385,7 @@ mod tests {
         );
 
         assert_eq!(
-            model.status.text(),
+            model.status_text(),
             "sing-box terminated unexpectedly (signal 9)"
         );
     }
@@ -691,7 +691,7 @@ mod tests {
         let message = "Auto-connect not enabled: reboot to activate the `kvn-tui` group";
         assert!(!model.config.settings.auto_connect);
         assert!(!model.auto_connect_pending);
-        assert_eq!(model.status, AppStatus::Error(message.into()));
+        assert_eq!(model.status, Some(AppStatus::Error(message.into())));
         assert_eq!(
             effects,
             vec![
@@ -734,7 +734,7 @@ mod tests {
         );
         assert!(model.config.settings.kill_switch);
         assert_eq!(model.kill_switch_pending, None);
-        assert!(model.status.text().contains("enabled"));
+        assert!(model.status_text().contains("enabled"));
         assert_eq!(
             effects,
             vec![
@@ -758,7 +758,7 @@ mod tests {
         );
         assert!(!model.config.settings.kill_switch);
         assert_eq!(model.kill_switch_pending, None);
-        assert!(model.status.text().contains("helper missing"));
+        assert!(model.status_text().contains("helper missing"));
         assert!(!effects.iter().any(|e| matches!(e, Effect::SaveConfig)));
     }
 

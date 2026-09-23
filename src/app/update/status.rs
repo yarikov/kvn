@@ -4,19 +4,14 @@ use crate::app::model::{AppStatus, ConnectionState, Model};
 /// Set the application status (pure, in-memory) and return an effect that
 /// appends the same message to the on-disk log file.
 pub(in crate::app::update) fn set_status(model: &mut Model, status: AppStatus) -> Option<Effect> {
-    let text = status.text();
-    let effect = if text.is_empty() {
-        None
-    } else {
-        let level = match &status {
-            AppStatus::Info(_) => "INFO",
-            AppStatus::Error(_) => "ERROR",
-        };
-        Some(Effect::AppendAppLog {
-            level: level.to_string(),
-            message: text.to_string(),
-        })
+    let (level, text) = match &status {
+        AppStatus::Info(text) => ("INFO", text),
+        AppStatus::Error(text) => ("ERROR", text),
     };
+    let effect = (!text.is_empty()).then(|| Effect::AppendAppLog {
+        level: level.to_string(),
+        message: text.clone(),
+    });
     model.set_status(status);
     effect
 }
