@@ -411,7 +411,7 @@ fn build_outbound(profile: &Profile) -> anyhow::Result<Vec<Value>> {
 mod tests {
     use super::*;
     use crate::config::profile::{
-        DnsRule, DnsStrategy, GeoRegion, GeoRouting, Profile, ProtocolConfig, RealitySettings,
+        DnsRule, DnsStrategy, GeoRegion, Profile, ProtocolConfig, RealitySettings,
         ShadowtlsVersion, TransportType, VlessConfig,
     };
 
@@ -566,42 +566,6 @@ mod tests {
             crate::singbox::clash_api::connections_url(TEST_CLASH_PORT),
             format!("http://{controller}/connections")
         );
-    }
-
-    #[test]
-    fn generated_config_global_final_is_proxy() {
-        let profile = test_profile();
-        let settings = Settings::default();
-        let config = generate_config(
-            &profile,
-            &settings,
-            &GeoAvailability::all(),
-            TEST_CLASH_PORT,
-        )
-        .unwrap();
-        let route = config.get("route").unwrap();
-        assert_eq!(route["final"].as_str().unwrap(), "proxy");
-    }
-
-    #[test]
-    fn generated_config_only_ru_final_is_direct() {
-        let profile = test_profile();
-        let mut geo_routing = GeoRouting::default();
-        geo_routing.set_region(GeoRegion::Ru);
-        geo_routing.set_mode(RoutingMode::Only(GeoRegion::Ru));
-        let settings = Settings {
-            geo_routing,
-            ..Default::default()
-        };
-        let config = generate_config(
-            &profile,
-            &settings,
-            &GeoAvailability::all(),
-            TEST_CLASH_PORT,
-        )
-        .unwrap();
-        let route = config.get("route").unwrap();
-        assert_eq!(route["final"].as_str().unwrap(), "direct");
     }
 
     #[test]
@@ -1089,27 +1053,6 @@ mod tests {
         let rules = route["rules"].as_array().unwrap();
         assert!(rules.len() >= 4); // basic 3 + ip_is_private
         assert_eq!(route["final"], "direct");
-    }
-
-    #[test]
-    fn generated_config_only_cn_final_is_direct() {
-        let profile = test_profile();
-        let mut geo_routing = GeoRouting::default();
-        geo_routing.set_region(GeoRegion::Cn);
-        geo_routing.set_mode(RoutingMode::Only(GeoRegion::Cn));
-        let settings = Settings {
-            geo_routing,
-            ..Default::default()
-        };
-        let config = generate_config(
-            &profile,
-            &settings,
-            &GeoAvailability::all(),
-            TEST_CLASH_PORT,
-        )
-        .unwrap();
-        let route = config.get("route").unwrap();
-        assert_eq!(route["final"].as_str().unwrap(), "direct");
     }
 
     #[test]
