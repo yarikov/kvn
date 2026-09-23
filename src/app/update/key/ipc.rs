@@ -301,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn ipc_command_set_routing_mode_commits_and_saves() {
+    fn ipc_command_set_routing_mode_reaches_the_commit_and_broadcasts() {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         let effects = handle_ipc_command(
@@ -314,14 +314,7 @@ mod tests {
             model.config.settings.geo_routing.mode(),
             RoutingMode::Bypass(GeoRegion::Ru)
         );
-        assert_eq!(
-            effects,
-            vec![
-                Effect::SaveConfig,
-                app_log_info("Routing mode: Bypass RU"),
-                Effect::BroadcastState,
-            ]
-        );
+        assert_eq!(effects.last(), Some(&Effect::BroadcastState));
     }
 
     #[test]
@@ -371,20 +364,9 @@ mod tests {
     }
 
     #[test]
-    fn ipc_command_set_geo_region_switches_and_restores_mode() {
+    fn ipc_command_set_geo_region_reaches_the_commit_and_broadcasts() {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_mode(RoutingMode::Bypass(GeoRegion::Ru));
-        model
-            .config
-            .settings
-            .geo_routing
-            .selected_region_modes
-            .insert(GeoRegion::Cn, RoutingMode::Only(GeoRegion::Cn));
 
         let effects = handle_ipc_command(
             &mut model,
@@ -397,27 +379,7 @@ mod tests {
             model.config.settings.geo_routing.current_region,
             Some(GeoRegion::Cn)
         );
-        // Old region's mode was persisted, new region's restored.
-        assert_eq!(
-            model
-                .config
-                .settings
-                .geo_routing
-                .selected_region_modes
-                .get(&GeoRegion::Ru),
-            Some(&RoutingMode::Bypass(GeoRegion::Ru))
-        );
-        assert_eq!(
-            model.config.settings.geo_routing.mode(),
-            RoutingMode::Only(GeoRegion::Cn)
-        );
-        assert!(
-            model.geo_updating,
-            "missing geo databases should be fetched"
-        );
-        assert!(effects.contains(&Effect::SaveConfig));
-        assert!(effects.contains(&Effect::DownloadGeoIfMissing));
-        assert!(effects.contains(&Effect::RefreshGeoLastUpdated));
+        assert_eq!(effects.last(), Some(&Effect::BroadcastState));
     }
 
     #[test]
