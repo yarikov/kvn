@@ -7,6 +7,7 @@
 //! the daemon.
 
 pub(super) mod confirm_delete;
+pub(super) mod confirm_disable;
 pub(super) mod dns;
 pub(super) mod ipc;
 pub(super) mod regions;
@@ -18,6 +19,7 @@ pub(super) mod theme;
 use crate::app::effect::Effect;
 use crate::app::model::{HelpContext, HelpState, MainPaneFocus, Model, Overlay, SettingsMenuPage};
 use confirm_delete::handle_confirm_delete;
+use confirm_disable::handle_confirm_disable;
 use crossterm::event::{KeyCode, KeyEvent};
 use dns::handle_dns_settings;
 use regions::{handle_geo_region, handle_routing_mode};
@@ -48,6 +50,7 @@ pub(in crate::app::update) fn handle_key(model: &mut Model, key: KeyEvent) -> Ve
         Overlay::Help(state) => handle_help(model, state, key),
         Overlay::SettingsMenu(page) => handle_settings_menu(model, page, key),
         Overlay::ConfirmDelete => handle_confirm_delete(model, key),
+        Overlay::ConfirmDisable(target) => handle_confirm_disable(model, target, key),
         Overlay::RoutingMode => handle_routing_mode(model, key),
         Overlay::GeoRegions => handle_geo_region(model, key),
         Overlay::DnsSettings => handle_dns_settings(model, key),
@@ -67,6 +70,7 @@ fn handle_logs(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
         | KeyCode::Char('D')
         | KeyCode::Char('S')
         | KeyCode::Char('C')
+        | KeyCode::Char('A')
         | KeyCode::Char('a')
         | KeyCode::Char('K')
         | KeyCode::Char('r')
@@ -84,6 +88,7 @@ fn open_help(model: &mut Model) {
         },
         Overlay::SettingsMenu(page) => HelpContext::SettingsMenu(page),
         Overlay::ConfirmDelete => HelpContext::ConfirmDelete,
+        Overlay::ConfirmDisable(target) => HelpContext::ConfirmDisable(target),
         Overlay::RoutingMode => HelpContext::RoutingMode,
         Overlay::GeoRegions => HelpContext::GeoRegions,
         Overlay::DnsSettings => HelpContext::DnsSettings,

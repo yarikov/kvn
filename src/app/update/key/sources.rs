@@ -4,9 +4,10 @@ use crate::config::profile::{GeoRegion, SubscriptionAutoUpdate};
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::update::connection::queue_connect;
+use crate::app::update::key::confirm_disable::{toggle_auto_connect, toggle_kill_switch};
 use crate::app::update::key::settings_menu::{
     open_dns_settings, open_geo_region, open_routing_mode, open_service_routing,
-    open_theme_settings, toggle_auto_connect, toggle_kill_switch,
+    open_theme_settings,
 };
 use crate::app::update::status::{
     DownloadKind, download_allowed, push_download_blocked, push_status,
@@ -115,7 +116,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
         KeyCode::Char('s') if model.connection == ConnectionState::Connected => {
             return vec![Effect::Disconnect];
         }
-        KeyCode::Char('a') => {
+        KeyCode::Char('A') | KeyCode::Char('a') => {
             return toggle_auto_connect(model);
         }
         KeyCode::Char('K') => {

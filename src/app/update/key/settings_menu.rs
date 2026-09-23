@@ -302,10 +302,6 @@ pub(in crate::app::update) fn set_auto_connect(model: &mut Model, enabled: bool)
     effects
 }
 
-pub(in crate::app::update) fn toggle_auto_connect(model: &mut Model) -> Vec<Effect> {
-    set_auto_connect(model, !model.config.settings.auto_connect)
-}
-
 pub(in crate::app::update) fn set_kill_switch(model: &mut Model, enabled: bool) -> Vec<Effect> {
     if model.kill_switch_pending.is_some() || model.config.settings.kill_switch == enabled {
         return vec![];
@@ -322,10 +318,6 @@ pub(in crate::app::update) fn set_kill_switch(model: &mut Model, enabled: bool) 
     );
     effects.push(Effect::ApplyKillSwitch { enabled });
     effects
-}
-
-pub(in crate::app::update) fn toggle_kill_switch(model: &mut Model) -> Vec<Effect> {
-    set_kill_switch(model, !model.config.settings.kill_switch)
 }
 
 pub(in crate::app::update) fn open_routing_mode(
@@ -425,18 +417,19 @@ mod tests {
     fn toggle_auto_connect() {
         let mut model = model_with_profiles(vec![]);
         assert!(!model.config.settings.auto_connect);
-        let effects = handle_sources(&mut model, key('a'));
+        let effects = handle_sources(&mut model, key('A'));
         assert!(!model.config.settings.auto_connect);
         assert!(model.auto_connect_pending);
         assert_eq!(effects, vec![Effect::CheckAutoConnectPolkit]);
 
-        assert!(handle_sources(&mut model, key('a')).is_empty());
+        assert!(handle_sources(&mut model, key('A')).is_empty());
 
         update(&mut model, Msg::AutoConnectPolkitChecked { error: None });
         assert!(model.config.settings.auto_connect);
         assert!(model.status.text().contains("enabled"));
 
-        let effects = handle_sources(&mut model, key('a'));
+        handle_sources(&mut model, key('A'));
+        let effects = handle_key(&mut model, key('y'));
         assert!(!model.config.settings.auto_connect);
         assert!(model.status.text().contains("disabled"));
         assert_eq!(

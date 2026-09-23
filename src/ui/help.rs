@@ -62,7 +62,7 @@ const LOGS: &[(&str, &str)] = &[
 const CONNECTION: &[(&str, &str)] = &[
     ("r", "Reconnect"),
     ("s", "Disconnect"),
-    ("a", "Toggle auto-connect"),
+    ("Shift+A", "Toggle auto-connect"),
     ("Shift+K", "Toggle kill switch"),
 ];
 
@@ -77,7 +77,7 @@ const SETTINGS: &[(&str, &str)] = &[
 const DIALOGS: &[(&str, &str)] = &[
     ("h/l, ←/→", "Change selected value"),
     ("Enter", "Confirm selection or changes"),
-    ("y/n", "Confirm / cancel deletion"),
+    ("y/n", "Confirm / cancel action"),
     ("q/Esc", "Cancel dialog"),
 ];
 
@@ -119,6 +119,7 @@ fn relevant_groups(context: HelpContext) -> &'static [HelpGroup] {
         HelpContext::Logs => &[HelpGroup::Logs],
         HelpContext::SettingsMenu(_) => &[HelpGroup::Dialogs, HelpGroup::Settings],
         HelpContext::ConfirmDelete
+        | HelpContext::ConfirmDisable(_)
         | HelpContext::RoutingMode
         | HelpContext::GeoRegions
         | HelpContext::DnsSettings
@@ -262,6 +263,7 @@ mod tests {
             HelpContext::SettingsMenu(crate::app::model::SettingsMenuPage::Root),
             HelpContext::SettingsMenu(crate::app::model::SettingsMenuPage::Routing),
             HelpContext::ConfirmDelete,
+            HelpContext::ConfirmDisable(crate::app::model::DisableTarget::KillSwitch),
             HelpContext::RoutingMode,
             HelpContext::GeoRegions,
             HelpContext::DnsSettings,

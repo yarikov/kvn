@@ -162,8 +162,10 @@ Marked traffic includes the sing-box `direct` outbound. This is required for
 Bypass/Only modes and means an explicit Direct service route can leave through
 the physical network while the kill switch is active.
 
-Toggling the kill switch with `K` runs `systemctl enable --now` or
-`disable --now`; an enabled kill switch therefore loads again at boot.
+Toggling the kill switch with `Shift+K` runs `systemctl enable --now` or
+`disable --now`; an enabled kill switch therefore loads again at boot. Turning
+it off from the keybinding is confirmed in a dialog first; the `Space c`
+settings screen and `kvn disable --killswitch` apply without one.
 
 ### Remove the kill switch
 
