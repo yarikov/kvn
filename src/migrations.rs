@@ -200,7 +200,7 @@ pub fn pending() -> Result<Vec<Migration>> {
 /// the profile schema was migrated.
 pub fn run_pending_interactive() -> Result<bool> {
     let store = Store::installed()?;
-    if store.pending()?.is_empty() && !pacman_is_running() && !profile_migration_required()? {
+    if store.pending()?.is_empty() && !pacman_is_running() {
         return Ok(false);
     }
     ensure!(
@@ -221,48 +221,28 @@ where
 {
     wait_for_pacman()?;
     let pending = store.pending()?;
-    if pending.is_empty() && !profile_migration_required()? {
+    if pending.is_empty() {
         return Ok(false);
     }
     backup_profiles()?;
-    let candidate = Candidate::create()?;
-    run_queue(&pending, candidate.as_ref().map(Candidate::path), retry)?;
-    let published = match &candidate {
-        Some(candidate) => {
-            candidate.migrate_to_current()?;
-            candidate.publish()?
-        }
-        None => false,
-    };
-    for migration in &pending {
-        store.mark_applied_id(&migration.id)?;
-    }
-    let changed = !pending.is_empty() || published;
-    if changed {
-        hand_off_to_daemon();
-    }
-    Ok(changed)
+    run_queue(&pending, store, retry)?;
+    hand_off_to_daemon();
+    Ok(true)
 }
 
-fn run_queue<F>(pending: &[Migration], profiles: Option<&Path>, mut retry: F) -> Result<()>
+fn run_queue<F>(pending: &[Migration], store: &Store, mut retry: F) -> Result<()>
 where
     F: FnMut() -> Result<bool>,
 {
     for (index, migration) in pending.iter().enumerate() {
         loop {
             println!("[{}/{}] {}", index + 1, pending.len(), migration.summary);
-            let mut command = Command::new("/usr/bin/bash");
-            command
+            let status = Command::new("/usr/bin/bash")
                 .args(["-euo", "pipefail"])
                 .arg(&migration.path)
                 .stdin(Stdio::inherit())
                 .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit());
-            match profiles {
-                Some(profiles) => command.env("KVN_MIGRATION_PROFILES_PATH", profiles),
-                None => command.env_remove("KVN_MIGRATION_PROFILES_PATH"),
-            };
-            let status = command
+                .stderr(Stdio::inherit())
                 .status()
                 .with_context(|| format!("failed to start migration {}", migration.id))?;
             if status.success() {
@@ -274,6 +254,7 @@ where
                 anyhow::bail!("migration stopped; fix the problem and run `kvn migrate`");
             }
         }
+        store.mark_applied_id(&migration.id)?;
     }
     Ok(())
 }
@@ -294,74 +275,6 @@ fn backup_profiles() -> Result<Option<PathBuf>> {
     .context("failed to back up profiles.json before migrating")?;
     println!("Saved a profiles.json backup to {}", backup.display());
     Ok(Some(backup))
-}
-
-struct Candidate {
-    live: PathBuf,
-    path: PathBuf,
-    original: Vec<u8>,
-}
-
-impl Candidate {
-    fn create() -> Result<Option<Self>> {
-        let live = crate::paths::profiles_path().context("failed to determine profiles path")?;
-        let original = match fs::read(&live) {
-            Ok(original) => original,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => {
-                return Err(error).with_context(|| format!("failed to read {}", live.display()));
-            }
-        };
-        let name = live
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("profiles.json");
-        let path = live.with_file_name(format!(".{name}.migrating"));
-        crate::atomic_write::write(&path, &original)
-            .with_context(|| format!("failed to create {}", path.display()))?;
-        Ok(Some(Self {
-            live,
-            path,
-            original,
-        }))
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-
-    fn migrate_to_current(&self) -> Result<bool> {
-        crate::config::migrate_config_at(&self.path)
-    }
-
-    fn publish(&self) -> Result<bool> {
-        let migrated = fs::read(&self.path)
-            .with_context(|| format!("failed to read {}", self.path.display()))?;
-        if migrated == self.original {
-            self.remove();
-            return Ok(false);
-        }
-        crate::config::load_config_at_read_only(&self.path)
-            .context("migrated profiles.json is invalid")?
-            .validate()
-            .context("migrated profiles.json is invalid")?;
-        crate::atomic_write::write_if_unchanged(&self.live, &migrated, Some(&self.original))
-            .with_context(|| format!("failed to update {}", self.live.display()))?;
-        self.remove();
-        Ok(true)
-    }
-
-    fn remove(&self) {
-        if let Err(error) = fs::remove_file(&self.path)
-            && error.kind() != io::ErrorKind::NotFound
-        {
-            tracing::warn!(
-                "Failed to remove migration candidate {:?}: {}",
-                self.path,
-                error
-            );
-        }
-    }
 }
 
 fn hand_off_to_daemon() {
@@ -462,13 +375,10 @@ impl Drop for MigrationLock {
 /// Refuse to start a new daemon on unmigrated state. An active package
 /// transaction is not one: nothing is pending until its payload is installed.
 pub fn block_daemon_if_pending() -> Result<bool> {
-    report_blocking_state(pending(), profile_migration_required())
+    report_blocking_state(pending())
 }
 
-fn report_blocking_state(
-    pending: Result<Vec<Migration>>,
-    profile_migration_required: Result<bool>,
-) -> Result<bool> {
+fn report_blocking_state(pending: Result<Vec<Migration>>) -> Result<bool> {
     let pending = match pending {
         Ok(pending) => pending,
         Err(error) => {
@@ -479,85 +389,37 @@ fn report_blocking_state(
             return Ok(true);
         }
     };
-    let profile_migration_required = match profile_migration_required {
-        Ok(required) => required,
-        Err(error) => {
-            let message =
-                format!("kvn profile schema could not be inspected: {error:#}. Run: kvn doctor");
-            tracing::error!("{message}");
-            eprintln!("{message}");
-            return Ok(true);
-        }
-    };
-    if pending.is_empty() && !profile_migration_required {
+    if pending.is_empty() {
         return Ok(false);
     }
-    let message = if profile_migration_required && pending.is_empty() {
-        "A kvn profiles.json schema migration is required. Launch `kvn` in a terminal to apply it"
-            .to_string()
-    } else {
-        format!(
-            "{} kvn migration(s) are pending. Launch `kvn` in a terminal to apply them",
-            pending.len()
-        )
-    };
+    let message = format!(
+        "{} kvn migration(s) are pending. Launch `kvn` in a terminal to apply them",
+        pending.len()
+    );
     tracing::error!("{message}");
     eprintln!("{message}");
     Ok(true)
 }
 
 pub fn print_pending() -> Result<bool> {
-    Ok(report_pending(
-        &pending()?,
-        profile_migration_required()?,
-        package_transaction_active(),
-    ))
+    Ok(report_pending(&pending()?, package_transaction_active()))
 }
 
-fn report_pending(
-    pending: &[Migration],
-    profile_migration_required: bool,
-    package_transaction: bool,
-) -> bool {
-    if pending.is_empty() && !profile_migration_required && !package_transaction {
+fn report_pending(pending: &[Migration], package_transaction: bool) -> bool {
+    if pending.is_empty() && !package_transaction {
         println!("No pending kvn migrations.");
     }
     for migration in pending {
         println!("{}\t{}", migration.id, migration.summary);
     }
-    if profile_migration_required {
-        println!("profile-schema\tMigrate profiles.json to the current schema");
-    }
     if package_transaction {
         println!("pacman-transaction\tWait for the active package transaction to finish");
     }
-    !pending.is_empty() || profile_migration_required || package_transaction
+    !pending.is_empty() || package_transaction
 }
 
 pub fn run_command() -> Result<()> {
     run_pending_interactive().map(|_| ())
-}
-
-pub fn prepare_profile_migration(target_version: u32) -> Result<()> {
-    let path = migration_profiles_path_from_environment()
-        .context("`kvn config migrate` is an internal migration step; run `kvn migrate` instead")?;
-    if crate::config::migrate_config_to_at(&path, target_version)? {
-        println!("Migrated profiles.json to schema {target_version}.");
-    } else {
-        println!("profiles.json already uses schema {target_version}.");
-    }
-    Ok(())
-}
-
-fn migration_profiles_path_from_environment() -> Option<PathBuf> {
-    std::env::var_os("KVN_MIGRATION_PROFILES_PATH")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-}
-
-pub fn profile_migration_required() -> Result<bool> {
-    let config = crate::paths::profiles_path().context("failed to determine profiles path")?;
-    crate::config::schema_migration_required_at(&config)
 }
 
 #[cfg(test)]
@@ -778,152 +640,13 @@ print_migration_notice "$1"
         }
 
         let pending = store.pending().unwrap();
-        run_queue(&pending, None, never_retry).unwrap();
+        run_queue(&pending, &store, never_retry).unwrap();
 
         assert_eq!(
             fs::read_to_string(&trace).unwrap(),
             "100-first.sh\n200-second.sh\n300-third.sh\n"
         );
         drop(fixture);
-    }
-
-    #[test]
-    fn migration_scripts_receive_the_candidate_never_the_live_config() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let fixture = profiles_fixture(Some(b"{  original  }"));
-        let root = tempfile::tempdir().unwrap();
-        let store = Store::fixture(root.path());
-        let seen = root.path().join("seen");
-        script_body(
-            &store.migrations_dir,
-            "100-first.sh",
-            "First",
-            &format!(
-                "printf '%s' \"${{KVN_MIGRATION_PROFILES_PATH:?}}\" >{0}\nprintf 'edited' >\"${{KVN_MIGRATION_PROFILES_PATH}}\"",
-                seen.display()
-            ),
-        );
-        let candidate = Candidate::create().unwrap().unwrap();
-
-        run_queue(
-            &store.pending().unwrap(),
-            Some(candidate.path()),
-            never_retry,
-        )
-        .unwrap();
-
-        assert_eq!(
-            fs::read_to_string(&seen).unwrap(),
-            candidate.path().to_str().unwrap()
-        );
-        assert_ne!(candidate.path(), fixture.path);
-        assert_eq!(fs::read(&fixture.path).unwrap(), b"{  original  }");
-    }
-
-    #[test]
-    fn a_queue_that_fails_midway_leaves_the_live_config_untouched() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let fixture =
-            profiles_fixture(Some(br#"{"schema_version":4,"profiles":[],"settings":{}}"#));
-        let root = tempfile::tempdir().unwrap();
-        let store = Store::fixture(root.path());
-        let candidate = Candidate::create().unwrap().unwrap();
-        script_body(
-            &store.migrations_dir,
-            "100-first.sh",
-            "First",
-            "kvn-config-migrate",
-        );
-        script_body(&store.migrations_dir, "200-second.sh", "Second", "exit 1");
-        let migrate = store.migrations_dir.join("kvn-config-migrate");
-        fs::write(
-            &migrate,
-            format!(
-                "#!/bin/bash\nprintf '%s' '{}' >\"${{KVN_MIGRATION_PROFILES_PATH:?}}\"\n",
-                format_args!(
-                    r#"{{"schema_version":{},"profiles":[],"settings":{{}}}}"#,
-                    crate::config::profile::CURRENT_SCHEMA_VERSION
-                )
-            ),
-        )
-        .unwrap();
-        fs::set_permissions(&migrate, fs::Permissions::from_mode(0o755)).unwrap();
-        let path = format!(
-            "{}:{}",
-            store.migrations_dir.display(),
-            std::env::var("PATH").unwrap()
-        );
-        let _path = crate::test_helpers::EnvVarGuard::set("PATH", path);
-
-        assert!(
-            run_queue(
-                &store.pending().unwrap(),
-                Some(candidate.path()),
-                never_retry
-            )
-            .is_err()
-        );
-
-        assert_eq!(
-            fs::read(&fixture.path).unwrap(),
-            br#"{"schema_version":4,"profiles":[],"settings":{}}"#
-        );
-        assert!(crate::config::schema_migration_required_at(&fixture.path).unwrap());
-    }
-
-    #[test]
-    fn publishing_replaces_the_live_config_once_and_removes_the_candidate() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let fixture =
-            profiles_fixture(Some(br#"{"schema_version":4,"profiles":[],"settings":{}}"#));
-        let candidate = Candidate::create().unwrap().unwrap();
-
-        assert!(candidate.migrate_to_current().unwrap());
-        assert!(crate::config::schema_migration_required_at(&fixture.path).unwrap());
-
-        assert!(candidate.publish().unwrap());
-        assert!(!crate::config::schema_migration_required_at(&fixture.path).unwrap());
-        assert!(!candidate.path().exists());
-    }
-
-    #[test]
-    fn publishing_is_a_no_op_when_no_migration_changed_the_candidate() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let fixture = profiles_fixture(Some(b"{  untouched  }"));
-        let candidate = Candidate::create().unwrap().unwrap();
-
-        assert!(!candidate.publish().unwrap());
-        assert_eq!(fs::read(&fixture.path).unwrap(), b"{  untouched  }");
-        assert!(!candidate.path().exists());
-    }
-
-    #[test]
-    fn publishing_refuses_when_the_live_config_changed_during_the_run() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let fixture =
-            profiles_fixture(Some(br#"{"schema_version":4,"profiles":[],"settings":{}}"#));
-        let candidate = Candidate::create().unwrap().unwrap();
-        candidate.migrate_to_current().unwrap();
-
-        fs::write(
-            &fixture.path,
-            br#"{"schema_version":4,"profiles":[],"settings":{}} "#,
-        )
-        .unwrap();
-
-        let error = candidate.publish().unwrap_err().to_string();
-        assert!(error.contains("failed to update"));
-        assert_eq!(
-            fs::read(&fixture.path).unwrap(),
-            br#"{"schema_version":4,"profiles":[],"settings":{}} "#
-        );
-    }
-
-    #[test]
-    fn there_is_no_candidate_without_a_config_file() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let _fixture = profiles_fixture(None);
-        assert!(Candidate::create().unwrap().is_none());
     }
 
     #[test]
@@ -939,17 +662,15 @@ print_migration_notice "$1"
         assert!(run_migrations(&store, never_retry).unwrap());
 
         assert!(store.pending().unwrap().is_empty());
-        assert!(!crate::config::schema_migration_required_at(&fixture.path).unwrap());
-        assert!(
-            !fixture
-                .path
-                .with_file_name(".profiles.json.migrating")
-                .exists()
+        assert_eq!(
+            fs::read(&fixture.path).unwrap(),
+            br#"{"schema_version":4,"profiles":[],"settings":{}}"#,
+            "a package migration must not touch the live config"
         );
     }
 
     #[test]
-    fn a_failed_run_marks_nothing_and_replays_the_whole_queue() {
+    fn a_failed_run_keeps_earlier_markers_and_resumes_from_the_failure() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let _fixture = profiles_fixture(None);
         let root = tempfile::tempdir().unwrap();
@@ -976,8 +697,8 @@ print_migration_notice "$1"
                 .into_iter()
                 .map(|migration| migration.id)
                 .collect::<Vec<_>>(),
-            ["100-first.sh", "200-second.sh", "300-third.sh"],
-            "a partial run must mark nothing"
+            ["200-second.sh", "300-third.sh"],
+            "a migration that succeeded stays applied"
         );
 
         run_migrations(&store, never_retry).unwrap();
@@ -1001,7 +722,7 @@ print_migration_notice "$1"
             ),
         );
 
-        run_queue(&store.pending().unwrap(), None, always_retry).unwrap();
+        run_queue(&store.pending().unwrap(), &store, always_retry).unwrap();
 
         assert_eq!(fs::read_to_string(&attempts).unwrap().lines().count(), 3);
     }
@@ -1024,29 +745,6 @@ print_migration_notice "$1"
             backup.parent().unwrap(),
             fixture.path.parent().unwrap().join("recovery")
         );
-    }
-
-    #[test]
-    fn config_migrate_step_requires_the_runner_environment() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let _cleared = crate::test_helpers::EnvVarGuard::remove("KVN_MIGRATION_PROFILES_PATH");
-        let error = prepare_profile_migration(crate::config::profile::CURRENT_SCHEMA_VERSION)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("kvn migrate"));
-    }
-
-    #[test]
-    fn config_migrate_step_upgrades_the_path_it_is_given() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles.json");
-        fs::write(&path, r#"{"schema_version":4,"profiles":[],"settings":{}}"#).unwrap();
-        let _set = crate::test_helpers::EnvVarGuard::set("KVN_MIGRATION_PROFILES_PATH", &path);
-
-        prepare_profile_migration(crate::config::profile::CURRENT_SCHEMA_VERSION).unwrap();
-
-        assert!(!crate::config::schema_migration_required_at(&path).unwrap());
     }
 
     #[test]
@@ -1077,42 +775,16 @@ print_migration_notice "$1"
     }
 
     #[test]
-    fn pending_listing_reports_scripts_an_outdated_schema_and_a_transaction() {
-        assert!(!report_pending(&[], false, false));
-        assert!(report_pending(&[sample_migration()], false, false));
-        assert!(report_pending(&[], true, false));
-        assert!(report_pending(&[], false, true));
+    fn pending_listing_reports_scripts_and_a_transaction() {
+        assert!(!report_pending(&[], false));
+        assert!(report_pending(&[sample_migration()], false));
+        assert!(report_pending(&[], true));
     }
 
     #[test]
-    fn an_outdated_schema_is_detected_from_the_profiles_file() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let fixture =
-            profiles_fixture(Some(br#"{"schema_version":4,"profiles":[],"settings":{}}"#));
-        assert!(profile_migration_required().unwrap());
-
-        fs::write(
-            &fixture.path,
-            format!(
-                r#"{{"schema_version":{},"profiles":[],"settings":{{}}}}"#,
-                crate::config::profile::CURRENT_SCHEMA_VERSION
-            ),
-        )
-        .unwrap();
-        assert!(!profile_migration_required().unwrap());
-    }
-
-    #[test]
-    fn a_pending_schema_migration_blocks_daemon_startup() {
-        assert!(!report_blocking_state(Ok(Vec::new()), Ok(false)).unwrap());
-        assert!(report_blocking_state(Ok(Vec::new()), Ok(true)).unwrap());
-        assert!(report_blocking_state(Ok(vec![sample_migration()]), Ok(false)).unwrap());
-        assert!(
-            report_blocking_state(Err(anyhow::anyhow!("unreadable store")), Ok(false)).unwrap()
-        );
-        assert!(
-            report_blocking_state(Ok(Vec::new()), Err(anyhow::anyhow!("unreadable config")))
-                .unwrap()
-        );
+    fn a_pending_migration_blocks_daemon_startup() {
+        assert!(!report_blocking_state(Ok(Vec::new())).unwrap());
+        assert!(report_blocking_state(Ok(vec![sample_migration()])).unwrap());
+        assert!(report_blocking_state(Err(anyhow::anyhow!("unreadable store"))).unwrap());
     }
 }

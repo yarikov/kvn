@@ -104,14 +104,12 @@ fn collect(root: &Path, migrations: Check) -> Vec<Check> {
 fn check_migrations() -> Check {
     check_migration_result(
         crate::migrations::pending(),
-        crate::migrations::profile_migration_required(),
         crate::migrations::package_transaction_active(),
     )
 }
 
 fn check_migration_result(
     result: anyhow::Result<Vec<crate::migrations::Migration>>,
-    profile_migration_required: anyhow::Result<bool>,
     package_transaction: bool,
 ) -> Check {
     if package_transaction {
@@ -120,34 +118,19 @@ fn check_migration_result(
             "Wait for pacman/AUR updates to finish, then run `kvn migrate`.",
         );
     }
-    match (result, profile_migration_required) {
-        (Ok(pending), Ok(false)) if pending.is_empty() => {
-            Check::pass("All kvn migrations are applied")
-        }
-        (Ok(pending), Ok(schema_required)) => {
-            if pending.is_empty() && schema_required {
-                return Check::failure(
-                    "profiles.json requires migration",
-                    "Run `kvn migrate` in an interactive terminal.",
-                );
-            }
-            let first = &pending[0];
-            Check::failure(
-                format!(
-                    "{} kvn migration(s) are pending (first: {})",
-                    pending.len(),
-                    first.id
-                ),
-                "Run `kvn migrate` in an interactive terminal.",
-            )
-        }
-        (Err(error), _) => Check::failure(
+    match result {
+        Ok(pending) if pending.is_empty() => Check::pass("All kvn migrations are applied"),
+        Ok(pending) => Check::failure(
+            format!(
+                "{} kvn migration(s) are pending (first: {})",
+                pending.len(),
+                pending[0].id
+            ),
+            "Run `kvn migrate` in an interactive terminal.",
+        ),
+        Err(error) => Check::failure(
             format!("kvn migration state could not be inspected: {error:#}"),
             "Repair the reported permissions or files, then run `kvn migrate`.",
-        ),
-        (_, Err(error)) => Check::failure(
-            format!("profile schema migration could not be inspected: {error:#}"),
-            "Repair profiles.json, then run `kvn migrate`.",
         ),
     }
 }
@@ -726,32 +709,24 @@ mod tests {
     #[test]
     fn migration_check_reports_pass_pending_and_inspection_error() {
         assert_eq!(
-            check_migration_result(Ok(Vec::new()), Ok(false), false).level,
+            check_migration_result(Ok(Vec::new()), false).level,
             Level::Pass
         );
-        let schema = check_migration_result(Ok(Vec::new()), Ok(true), false);
-        assert_eq!(schema.level, Level::Failure);
-        assert!(schema.message.contains("profiles.json requires migration"));
         let pending = crate::migrations::Migration {
             id: "123-test.sh".into(),
             path: PathBuf::from("/migration"),
             summary: "Test".into(),
         };
-        let check = check_migration_result(Ok(vec![pending]), Ok(false), false);
+        let check = check_migration_result(Ok(vec![pending]), false);
         assert_eq!(check.level, Level::Failure);
         assert!(check.message.contains("123-test.sh"));
         assert!(check.remedy.unwrap().contains("Run `kvn migrate`"));
 
-        let check = check_migration_result(Err(anyhow::anyhow!("broken state")), Ok(false), false);
+        let check = check_migration_result(Err(anyhow::anyhow!("broken state")), false);
         assert_eq!(check.level, Level::Failure);
         assert!(check.message.contains("broken state"));
 
-        let check =
-            check_migration_result(Ok(Vec::new()), Err(anyhow::anyhow!("bad stage")), false);
-        assert_eq!(check.level, Level::Failure);
-        assert!(check.message.contains("bad stage"));
-
-        let check = check_migration_result(Ok(Vec::new()), Ok(false), true);
+        let check = check_migration_result(Ok(Vec::new()), true);
         assert_eq!(check.level, Level::Failure);
         assert!(check.message.contains("pacman"));
     }

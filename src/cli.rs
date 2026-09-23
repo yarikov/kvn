@@ -195,13 +195,6 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
-    /// Migrate the package runner's disposable profiles.json candidate.
-    #[command(hide = true)]
-    Migrate {
-        /// Schema version owned by the migration script invoking this step.
-        #[arg(long)]
-        to: u32,
-    },
     /// Archive the current file and create a default configuration.
     Reset {
         /// Confirm the reset (the old file is preserved, not deleted).
@@ -824,7 +817,6 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
         }
         Some(Command::Config { command }) => {
             return Some(match command {
-                ConfigCommand::Migrate { to } => crate::migrations::prepare_profile_migration(*to),
                 ConfigCommand::Reset { yes } => run_config_reset(*yes),
                 ConfigCommand::Recover { file } => run_config_recover(file),
             });
@@ -997,12 +989,6 @@ esac
 
     #[test]
     fn parses_config_recovery_commands() {
-        assert!(matches!(
-            Cli::parse_from(["kvn", "config", "migrate", "--to", "5"]).command,
-            Some(Command::Config {
-                command: ConfigCommand::Migrate { to: 5 }
-            })
-        ));
         assert!(matches!(
             Cli::parse_from(["kvn-tui", "config", "reset", "--yes"]).command,
             Some(Command::Config {
