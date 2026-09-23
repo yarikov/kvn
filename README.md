@@ -145,7 +145,8 @@ The kill-switch sudoers rule uses the same dedicated `kvn-tui` group and allows
 only the validating helper installed at `/usr/lib/kvn-tui/killswitch-helper.sh`.
 
 Toggle it with `Shift+K` or from the `Space c` settings menu; when enabled, the
-status bar shows `KS`.
+status bar shows `KS`. Disabling it with `Shift+K` asks for confirmation first,
+so it cannot be turned off by an accidental key press.
 
 > **Note:** If the daemon crashes or cannot start in this state, use the
 > emergency command below to restore network access.
@@ -266,8 +267,11 @@ detected problems.
 |-----|--------|
 | `r` | Reconnect |
 | `s` | Disconnect |
-| `a` | Toggle auto-connect |
+| `Shift+A` | Toggle auto-connect |
 | `Shift+K` | Toggle kill switch |
+
+Turning either off asks for confirmation first; turning them on applies right
+away. The `Space c` settings screen applies both directions without a dialog.
 
 **Settings**
 
@@ -288,7 +292,7 @@ change its draft value, and `Enter` to apply all changes on the current screen.
 |-----|--------|
 | `h` / `l`, `←` / `→` | Change selected value |
 | `Enter` | Confirm selection or changes |
-| `y` / `n` | Confirm / cancel deletion |
+| `y` / `n` | Confirm / cancel the action |
 | `q` / `Esc` | Cancel dialog |
 
 **Application**

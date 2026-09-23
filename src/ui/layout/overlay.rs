@@ -1,4 +1,5 @@
 mod confirm_delete;
+mod confirm_disable;
 mod dns;
 mod help;
 pub(super) mod popup;
@@ -24,6 +25,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         Overlay::Help(state) => help::draw(frame, model, state, area),
         Overlay::SettingsMenu(page) => settings_menu::draw(frame, model, page, area),
         Overlay::ConfirmDelete => confirm_delete::draw(frame, model, area),
+        Overlay::ConfirmDisable(target) => confirm_disable::draw(frame, model, target, area),
         Overlay::RoutingMode => routing::draw_mode(frame, model, area),
         Overlay::GeoRegions => routing::draw_region(frame, model, area),
         Overlay::DnsSettings => dns::draw(frame, model, area),
@@ -83,6 +85,11 @@ mod tests {
             }),
             ("confirm-delete", |model: &mut Model| {
                 model.overlay = Overlay::ConfirmDelete
+            }),
+            ("confirm-disable", |model: &mut Model| {
+                model.config.settings.kill_switch = true;
+                model.overlay =
+                    Overlay::ConfirmDisable(crate::app::model::DisableTarget::KillSwitch)
             }),
             ("routing-mode", |model: &mut Model| {
                 model

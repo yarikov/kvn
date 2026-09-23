@@ -787,7 +787,8 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.kill_switch = true;
 
-        let effects = handle_sources(&mut model, key('K'));
+        handle_sources(&mut model, key('K'));
+        let effects = crate::app::update::key::handle_key(&mut model, key('y'));
 
         assert_eq!(model.kill_switch_pending, Some(false));
         assert!(effects.contains(&Effect::ApplyKillSwitch { enabled: false }));

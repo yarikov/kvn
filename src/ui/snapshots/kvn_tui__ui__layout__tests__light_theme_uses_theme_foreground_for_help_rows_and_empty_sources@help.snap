@@ -28,7 +28,7 @@ expression: "snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                              │ Connection                                      │                              │
 │                              │ r          Reconnect                            │                              │
 │                              │ s          Disconnect                           │                              │
-│                              │ a          Toggle auto-connect                  │                              │
+│                              │ Shift+A    Toggle auto-connect                  │                              │
 │                              │ Shift+K    Toggle kill switch                   │                              │
 │                              │                                                 │                              │
 │                              │ Settings                                        │                              │

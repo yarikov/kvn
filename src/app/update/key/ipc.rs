@@ -120,6 +120,7 @@ pub(in crate::app::update) fn handle_go_first(model: &mut Model) -> Vec<Effect> 
             model.overlay = Overlay::Help(state);
         }
         Overlay::ConfirmDelete => {}
+        Overlay::ConfirmDisable(_) => {}
         Overlay::RestartRequired => {}
     }
     vec![]

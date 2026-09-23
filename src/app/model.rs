@@ -18,6 +18,7 @@ pub enum Overlay {
     Help(HelpState),
     SettingsMenu(SettingsMenuPage),
     ConfirmDelete,
+    ConfirmDisable(DisableTarget),
     RoutingMode,
     GeoRegions,
     DnsSettings,
@@ -25,6 +26,14 @@ pub enum Overlay {
     ServiceRouting,
     Support,
     RestartRequired,
+}
+
+/// Setting a confirmation dialog is about to turn off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisableTarget {
+    AutoConnect,
+    KillSwitch,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,6 +85,7 @@ pub enum HelpContext {
     Logs,
     SettingsMenu(SettingsMenuPage),
     ConfirmDelete,
+    ConfirmDisable(DisableTarget),
     RoutingMode,
     GeoRegions,
     DnsSettings,
@@ -90,6 +100,7 @@ impl HelpContext {
             Self::Sources | Self::Logs => Overlay::None,
             Self::SettingsMenu(page) => Overlay::SettingsMenu(page),
             Self::ConfirmDelete => Overlay::ConfirmDelete,
+            Self::ConfirmDisable(target) => Overlay::ConfirmDisable(target),
             Self::RoutingMode => Overlay::RoutingMode,
             Self::GeoRegions => Overlay::GeoRegions,
             Self::DnsSettings => Overlay::DnsSettings,
@@ -951,6 +962,19 @@ mod tests {
             let overlay = Overlay::SettingsMenu(page);
             let json = serde_json::to_string(&overlay).unwrap();
             assert_eq!(serde_json::from_str::<Overlay>(&json).unwrap(), overlay);
+        }
+    }
+
+    #[test]
+    fn confirm_disable_overlay_serde_roundtrip() {
+        for target in [DisableTarget::AutoConnect, DisableTarget::KillSwitch] {
+            let overlay = Overlay::ConfirmDisable(target);
+            let json = serde_json::to_string(&overlay).unwrap();
+            assert_eq!(serde_json::from_str::<Overlay>(&json).unwrap(), overlay);
+            assert_eq!(
+                HelpContext::ConfirmDisable(target).restore_overlay(),
+                overlay
+            );
         }
     }
 
