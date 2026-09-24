@@ -123,6 +123,39 @@ See the `release` skill in `.agents/skills/release/SKILL.md` for the full versio
 - If intent is unclear without a comment, refactor the code until the intent is evident instead of explaining it with a comment.
 - Do not remove existing comments unless their removal is directly required by the task.
 
+**Exception — actionable markers.** `TODO`, `FIXME`, `HACK`, `PERF` and
+`NOTE` comments are allowed and are not covered by the rule above. They record
+work, risk or a constraint that does not live in the code, so a marker never
+substitutes for a clearer name or a smaller function.
+
+Each marker states what has to change and why it is not done yet. Name the
+blocker when there is one — a protocol break, a cross-repository release, an
+upstream fix. A marker that only says something is wrong is not useful:
+
+```rust
+// FIXME: sing-box 1.13 renames this field; rename after the PKGBUILD bump.
+// TODO: fold into StateSnapshot once IPC_VERSION can be bumped together
+// with the omakvn plugin, which reads status_is_error.
+// PERF: re-parses every line on each tick; batch once the log pane paginates.
+// NOTE: sing-box exits 0 on an occupied controller port, so a conflict only
+// surfaces on run.
+```
+
+Rules of thumb:
+
+- Use `TODO` for deferred work, `FIXME` for a known defect, `HACK` for a
+  deliberate workaround, `PERF` for a known cost worth revisiting.
+- `NOTE` is for a constraint a reader cannot derive from the code — external
+  behavior, an upstream quirk, a protocol rule. It is not a licence to
+  restate what the code does; if a `NOTE` explains the code itself, the rule
+  above applies and the code should be clearer instead.
+- Do not use a marker to defer work the current change should finish, or to
+  park a decision the reviewer needs to see. Say it in the PR instead.
+- Record debt that outlives one change in the plan document as well, so it
+  stays visible outside the source.
+- Keep markers current: delete one when its work lands, and update it when
+  the blocker changes.
+
 ### Error Handling
 - Use `anyhow::Result<T>` for fallible functions at the application / UI boundary.
 - Use `thiserror` only if you need structured error enums (rare in this codebase).
