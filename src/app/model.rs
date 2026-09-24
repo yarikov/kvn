@@ -163,6 +163,10 @@ pub enum AppStatus {
 }
 
 impl AppStatus {
+    // TODO: carry Option<AppStatus> on the wire instead, which removes this
+    // decoder and StateSnapshot::status_is_error. Blocked on an IPC_VERSION
+    // bump released together with the omakvn plugin, which reads
+    // status_is_error to colour the bar icon.
     pub fn from_snapshot(text: String, is_error: bool) -> Option<Self> {
         match (text.is_empty(), is_error) {
             (true, _) => None,
