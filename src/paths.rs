@@ -63,6 +63,11 @@ pub fn support_prompt_path() -> Option<PathBuf> {
     state_dir().map(|d| d.join("support-prompt.json"))
 }
 
+/// Return the persisted first-run onboarding progress.
+pub fn onboarding_path() -> Option<PathBuf> {
+    state_dir().map(|d| d.join("onboarding.json"))
+}
+
 /// Return the path to `profiles.json`.
 pub fn profiles_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("profiles.json"))

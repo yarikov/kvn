@@ -4,7 +4,7 @@ use crate::app::msg::SupportPromptResolution;
 
 pub(super) fn check_prompt(model: &mut Model) -> Vec<Effect> {
     if model.overlay == Overlay::None
-        && model.config.settings.geo_routing.current_region.is_some()
+        && model.onboarding.is_complete()
         && model.support_prompt.is_due(chrono::Utc::now())
     {
         model.support_selected = 0;
@@ -43,7 +43,7 @@ mod tests {
     use crate::app::update::key::ipc::handle_ipc_command;
 
     #[test]
-    fn support_prompt_check_requires_geo_and_due_deadline() {
+    fn support_prompt_check_requires_finished_onboarding_and_due_deadline() {
         let mut model = crate::test_helpers::model_with_profiles(vec![]);
         model.support_prompt.next_show_at = Some(chrono::Utc::now() - chrono::Duration::seconds(1));
 
@@ -51,11 +51,7 @@ mod tests {
         assert_eq!(model.overlay, Overlay::None);
         assert_eq!(effects, vec![Effect::BroadcastState]);
 
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(crate::config::profile::GeoRegion::Global);
+        model.onboarding.state.complete(chrono::Utc::now());
         let effects = handle_ipc_command(&mut model, IpcCommand::CheckSupportPrompt);
         assert_eq!(model.overlay, Overlay::Support);
         assert_eq!(model.support_selected, 0);

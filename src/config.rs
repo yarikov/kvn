@@ -12,7 +12,7 @@ use profile::Config;
 /// Load configuration from a specific path.
 pub fn load_config_at(path: &Path) -> Result<Config> {
     if !path.exists() {
-        return Ok(Config::default());
+        return Ok(Config::for_first_run());
     }
 
     let contents =
@@ -57,7 +57,7 @@ fn parse_supported_config(contents: &str, path: &Path) -> Result<Config> {
 /// Load and migrate a configuration without modifying the source file.
 pub(crate) fn load_config_at_read_only(path: &Path) -> Result<Config> {
     if !path.exists() {
-        return Ok(Config::default());
+        return Ok(Config::for_first_run());
     }
     let contents =
         fs::read_to_string(path).with_context(|| format!("Failed to read {:?}", path))?;
@@ -205,15 +205,23 @@ mod tests {
     }
 
     #[test]
-    fn load_config_missing_file_returns_default() {
+    fn load_config_missing_file_returns_first_run_preferences() {
         let path = PathBuf::from("/nonexistent/path/profiles.json");
-        let config = load_config_at(&path).unwrap();
-        assert!(config.profiles.is_empty());
-        assert_eq!(config.settings.tun_interface, "kvn0");
-        assert_eq!(
-            config.settings.dns_strategy,
-            profile::DnsStrategy::PreferIpv4
-        );
+        for config in [
+            load_config_at(&path).unwrap(),
+            load_config_at_read_only(&path).unwrap(),
+        ] {
+            assert!(config.profiles.is_empty());
+            assert_eq!(config.settings.tun_interface, "kvn0");
+            assert_eq!(
+                config.settings.dns_strategy,
+                profile::DnsStrategy::PreferIpv4
+            );
+            assert_eq!(
+                config.settings.geo_routing.auto_update,
+                profile::GeoAutoUpdate::Every7d
+            );
+        }
     }
 
     #[test]

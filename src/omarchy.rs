@@ -35,6 +35,29 @@ pub fn theme_colors_path() -> Option<PathBuf> {
     Some(omarchy_current_dir()?.join("theme").join("colors.toml"))
 }
 
+pub const OMAKVN_PLUGIN_ID: &str = "yarikov.omakvn";
+
+/// Whether the Omarchy Shell bar plugin is already installed. Shared by
+/// `doctor` and the first-run tour, which drops its Omarchy card once the
+/// plugin is in place.
+pub fn omakvn_plugin_installed() -> bool {
+    let Some(manifest) = dirs::config_dir().map(|config| {
+        config
+            .join("omarchy/plugins")
+            .join(OMAKVN_PLUGIN_ID)
+            .join("manifest.json")
+    }) else {
+        return false;
+    };
+    let Ok(raw) = std::fs::read_to_string(manifest) else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .and_then(|manifest| manifest.get("id")?.as_str().map(str::to_owned))
+        .is_some_and(|id| id == OMAKVN_PLUGIN_ID)
+}
+
 /// Major version of the installed Omarchy, or `None` when Omarchy is absent
 /// or its version cannot be determined.
 pub fn installed_major_version() -> Option<u64> {

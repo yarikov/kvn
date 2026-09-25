@@ -25,6 +25,7 @@ pub enum Overlay {
     ThemeSettings,
     ServiceRouting,
     Support,
+    Onboarding(crate::onboarding::OnboardingStep),
     RestartRequired,
 }
 
@@ -92,6 +93,7 @@ pub enum HelpContext {
     ThemeSettings,
     ServiceRouting,
     Support,
+    Onboarding(crate::onboarding::OnboardingStep),
 }
 
 impl HelpContext {
@@ -107,6 +109,7 @@ impl HelpContext {
             Self::ThemeSettings => Overlay::ThemeSettings,
             Self::ServiceRouting => Overlay::ServiceRouting,
             Self::Support => Overlay::Support,
+            Self::Onboarding(step) => Overlay::Onboarding(step),
         }
     }
 }
@@ -277,6 +280,12 @@ pub struct Model {
     pub restart_required: bool,
     /// Persisted schedule for the optional project-support prompt.
     pub support_prompt: crate::support_prompt::SupportPromptState,
+    /// First-run tour progress. Daemon-owned: clients read the active card from
+    /// `Overlay::Onboarding` in the broadcast snapshot instead.
+    pub onboarding: crate::onboarding::OnboardingProgress,
+    /// Setup state of the privileged integrations the two protection cards ask
+    /// for. Probed by the daemon, carried to clients in the snapshot.
+    pub integration_setup: crate::onboarding::IntegrationSetup,
     /// TUI-local cursor inside the support prompt. It is intentionally not
     /// broadcast: opening a browser belongs to the client that pressed Enter.
     pub support_selected: usize,
@@ -364,6 +373,13 @@ pub struct Model {
     /// `handle_tick` to throttle Clash-API polling to ~1 Hz. Not serialized —
     /// clients don't need it.
     pub last_traffic_fetch_at: Option<Instant>,
+    /// Throttle for the integration re-probe behind the tour's protection and
+    /// Omarchy cards; the probe spawns `pkcheck` / `id`, so it cannot run per tick.
+    pub last_integration_check_at: Option<Instant>,
+    /// A probe is out and has not reported yet. Without it a probe slower than
+    /// the interval would be started twice and the answers could land out of
+    /// order, putting a stale state back on the card.
+    pub integration_check_pending: bool,
     /// UI color theme. Owned by the TUI client; the daemon never reads it.
     /// On Omarchy systems the client resolves it from `theme.name` at
     /// startup and updates it on file change.
@@ -380,6 +396,14 @@ pub struct Model {
     pub testing_profiles: HashSet<Uuid>,
     /// Queue of profile UUIDs waiting to be tested (batch dispatch).
     pub pending_tests: VecDeque<Uuid>,
+}
+
+/// Whether the first-run tour shows its Omarchy card: an Omarchy desktop whose
+/// bar plugin is not installed yet. Two cheap file reads, decided once per
+/// process; the daemon's answer is the one clients render (`onboarding_omarchy`
+/// in the snapshot).
+fn show_omarchy_card() -> bool {
+    crate::omarchy::detect_omarchy_theme().is_some() && !crate::omarchy::omakvn_plugin_installed()
 }
 
 impl Model {
@@ -478,10 +502,15 @@ impl Model {
             }
         };
 
-        let support_prompt = crate::support_prompt::load_for_daemon(
-            config.settings.geo_routing.current_region.is_some(),
-            chrono::Utc::now(),
+        let now = chrono::Utc::now();
+        let onboarding = crate::onboarding::OnboardingProgress::new(
+            crate::onboarding::load_for_daemon(
+                config.settings.geo_routing.current_region.is_some(),
+                now,
+            ),
+            show_omarchy_card(),
         );
+        let support_prompt = crate::support_prompt::load_for_daemon(onboarding.state.completed_at);
         let (mut connection, selected, mut status) =
             Self::resolve_startup_state(&config, default_selected);
         if stale_cleanup_failed {
@@ -544,6 +573,8 @@ impl Model {
             config_persistence_blocked,
             restart_required: false,
             support_prompt,
+            onboarding,
+            integration_setup: crate::onboarding::IntegrationSetup::default(),
             support_selected: 0,
             selected,
             status: None,
@@ -586,6 +617,8 @@ impl Model {
             traffic_request_id: 0,
             last_traffic_response_id: 0,
             last_traffic_fetch_at: None,
+            last_integration_check_at: None,
+            integration_check_pending: false,
             theme: Theme::legacy(),
             theme_selected: 0,
             theme_draft: None,
@@ -593,7 +626,9 @@ impl Model {
             testing_profiles: HashSet::new(),
             pending_tests: VecDeque::new(),
         };
-        if model.config.settings.geo_routing.current_region.is_none() {
+        if !model.onboarding.is_complete() {
+            model.overlay = Overlay::Onboarding(model.onboarding.step());
+        } else if model.config.settings.geo_routing.current_region.is_none() {
             model.overlay = Overlay::GeoRegions;
         }
         if let Some(status) = status {
@@ -659,6 +694,11 @@ impl Model {
             config_persistence_blocked: false,
             restart_required: false,
             support_prompt: crate::support_prompt::SupportPromptState::default(),
+            onboarding: crate::onboarding::OnboardingProgress::new(
+                crate::onboarding::OnboardingState::default(),
+                show_omarchy_card(),
+            ),
+            integration_setup: crate::onboarding::IntegrationSetup::default(),
             support_selected: 0,
             selected,
             status: None,
@@ -701,6 +741,8 @@ impl Model {
             traffic_request_id: 0,
             last_traffic_response_id: 0,
             last_traffic_fetch_at: None,
+            last_integration_check_at: None,
+            integration_check_pending: false,
             theme: Theme::legacy(),
             theme_selected: 0,
             theme_draft: None,
@@ -896,6 +938,8 @@ impl Model {
             config_persistence_blocked: false,
             restart_required: false,
             support_prompt: crate::support_prompt::SupportPromptState::default(),
+            onboarding: crate::onboarding::OnboardingProgress::default(),
+            integration_setup: crate::onboarding::IntegrationSetup::default(),
             support_selected: 0,
             selected,
             status: None,
@@ -938,6 +982,8 @@ impl Model {
             traffic_request_id: 0,
             last_traffic_response_id: 0,
             last_traffic_fetch_at: None,
+            last_integration_check_at: None,
+            integration_check_pending: false,
             theme: Theme::legacy(),
             theme_selected: 0,
             theme_draft: None,
@@ -1197,9 +1243,58 @@ mod tests {
 
         crate::config::save_config(&config).unwrap();
 
+        let state_dir = tempfile::tempdir().unwrap();
+        let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", state_dir.path());
+
+        let model = Model::new().unwrap();
+        assert_eq!(model.connection, ConnectionState::Idle);
+        assert_eq!(
+            model.overlay,
+            Overlay::Onboarding(crate::onboarding::OnboardingStep::Welcome)
+        );
+
+        // A completed tour still leaves the region mandatory.
+        let mut ended = crate::onboarding::OnboardingState::default();
+        ended.complete(chrono::Utc::now());
+        crate::onboarding::save_at(&crate::paths::onboarding_path().unwrap(), &ended).unwrap();
+
         let model = Model::new().unwrap();
         assert_eq!(model.connection, ConnectionState::Idle);
         assert_eq!(model.overlay, Overlay::GeoRegions);
+    }
+
+    #[test]
+    fn the_omarchy_card_is_dropped_once_the_plugin_is_installed() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", state.path());
+        let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", config.path());
+
+        let current = state.path().join("omarchy/current");
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(current.join("theme.name"), "tokyo-night\n").unwrap();
+        assert!(
+            Model::from_config(Config::default())
+                .onboarding
+                .include_omarchy_card
+        );
+
+        let plugin = config
+            .path()
+            .join("omarchy/plugins")
+            .join(crate::omarchy::OMAKVN_PLUGIN_ID);
+        std::fs::create_dir_all(&plugin).unwrap();
+        std::fs::write(
+            plugin.join("manifest.json"),
+            format!(r#"{{"id":"{}"}}"#, crate::omarchy::OMAKVN_PLUGIN_ID),
+        )
+        .unwrap();
+        assert!(
+            !Model::from_config(Config::default())
+                .onboarding
+                .include_omarchy_card
+        );
     }
 
     #[test]

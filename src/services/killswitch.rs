@@ -104,10 +104,6 @@ pub(crate) fn integration_group_status() -> Option<IntegrationGroup> {
     )
 }
 
-pub(crate) fn integration_group_pending_activation() -> Option<bool> {
-    integration_group_status().map(|status| status == IntegrationGroup::PendingActivation)
-}
-
 fn id_output(args: &[&str]) -> Option<Vec<u8>> {
     let output = Command::new("id").args(args).output().ok()?;
     output.status.success().then_some(output.stdout)

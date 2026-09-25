@@ -19,7 +19,11 @@ pub(in crate::app::update) fn on_connected(
     // Fresh sing-box → fresh counters. Drop the previous sample so the
     // first delta is computed against zero rather than a stale value.
     reset_traffic_state(model);
-    let mut effects = vec![Effect::WriteState];
+    let mut effects = crate::app::update::onboarding::outcome(
+        model,
+        crate::app::update::onboarding::Trigger::TunnelUp,
+    );
+    effects.push(Effect::WriteState);
     // The tunnel is up — fetch rule-sets for enabled service routes
     // through it if any are still missing (they apply on the next
     // reconnect).

@@ -35,7 +35,9 @@ types and share-link schemes.
 
 A subscription contains `id`, `name`, `url`, `auto_update`, and an optional
 `last_updated` timestamp. Valid update schedules are `off`, `every_1h`,
-`every_12h`, `every_1d`, and `every_7d`.
+`every_12h`, `every_1d`, and `every_7d`. An imported subscription starts at
+`every_1d`; existing subscriptions keep whatever they store, and `i` changes the
+schedule at any time.
 
 ## Settings
 
@@ -44,7 +46,7 @@ A subscription contains `id`, `name`, `url`, `auto_update`, and an optional
 | `default_profile` | `null` | UUID of the selected default profile |
 | `tun_interface` | `kvn0` | Name of the sing-box TUN interface; must start with `kvn` |
 | `dns` | Cloudflare DoH | DNS servers, rules, strategy, and fake-IP state |
-| `geo_routing` | no region | Country modes, rule-set updates, and service overrides |
+| `geo_routing` | no region; `auto_update` every 7 days on a new installation, `off` when the field or section is absent (`I` changes it at any time) | Country modes, rule-set updates, and service overrides |
 | `auto_connect` | `false` | Connect to `last_connected_profile` at startup |
 | `kill_switch` | `false` | Persisted kill-switch state |
 | `last_connected_profile` | `null` | Last connected profile; maintained by the application |
@@ -213,6 +215,7 @@ not supported by older `kvn` releases.
 | Waybar and recovery state | `~/.config/kvn-tui/state.json` |
 | Migration backups | `~/.config/kvn-tui/recovery/profiles.json.before-migration-*` |
 | Applied migration markers | `$XDG_STATE_HOME/kvn/migrations/` |
+| First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
 | IPC socket | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
 | Generated sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |

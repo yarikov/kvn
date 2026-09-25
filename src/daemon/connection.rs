@@ -189,6 +189,14 @@ pub(super) fn apply_kill_switch(tx: &Sender<Msg>, enabled: bool) {
     });
 }
 
+pub(super) fn check_integration_setup(tx: &Sender<Msg>) {
+    let tx = tx.clone();
+    thread::spawn(move || {
+        let setup = crate::doctor::integration_setup(std::path::Path::new("/"));
+        let _ = tx.send(Msg::IntegrationSetupChecked(setup));
+    });
+}
+
 pub(super) fn check_auto_connect_polkit(tx: &Sender<Msg>) {
     let tx = tx.clone();
     thread::spawn(move || {
