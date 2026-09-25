@@ -10,7 +10,6 @@ expression: "snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │URL from clipboard.                                    ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
-│                                                       ││                                                      │
 │                           ┌──────────────────────────────────────────────────────┐                            │
 │                           │                Getting started · 9/10                │                            │
 │                           │                                                      │                            │
@@ -21,7 +20,8 @@ expression: "snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                           │                                                      │                            │
 │                           │ First, set it up:                                    │                            │
 │                           │                                                      │                            │
-│                           │ sudo kvn setup --killswitch                          │                            │
+│                           │ sudo pacman -S --needed nftables \                   │                            │
+│                           │   && sudo kvn setup --killswitch                     │                            │
 │                           │                                                      │                            │
 │                           │ Reboot once, then press Shift+K to toggle the kill   │                            │
 │                           │ switch.                                              │                            │
@@ -47,7 +47,6 @@ adddddddddddddddddddddddddddddddddddddddddddddddddddddddaabbbbbbbbbbbbbbbbbbbbbb
 adddddddddddddddddddbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
 abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
 abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
 abbbbbbbbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbbbbbbbba
 abbbbbbbbbbbbbbbbbbbbbbbbbbbeddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbba
 abbbbbbbbbbbbbbbbbbbbbbbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbba
@@ -58,7 +57,8 @@ abbbbbbbbbbbbbbbbbbbbbbbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddd
 abbbbbbbbbbbbbbbbbbbbbbbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbba
 abbbbbbbbbbbbbbbbbbbbbbbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbba
 abbbbbbbbbbbbbbbbbbbbbbbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbbedccccdcccdcccccdccccccccccccddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbedccccccccccccccccccccccccccccccccccdddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbedccccccccccccccccccccccccccccccccdddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbba
 abbbbbbbbbbbbbbbbbbbbbbbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbba
 abbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddcccccccddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbba
 abbbbbbbbbbbbbbbbbbbbbbbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbba

@@ -3,14 +3,14 @@ source: src/ui/layout/overlay.rs
 expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ---
 ┌ Traffic ───────────────────────────────────────────────────────────┐
-│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connectio │
-└──────┌──────────────────────────────────────────────────────┐──────┘
-┌ Profi│                 Getting started · 7/9                │──────┐
-│ └ Alp│                  Set up auto-connect                 │1:443 │
-│      │ Auto-connect reconnects to your last used profile    │      │
+│ ↑ 0.0┌──────────────────────────────────────────────────────┐ectio │
+└──────│                 Getting started · 7/9                │──────┘
+┌ Profi│                  Set up auto-connect                 │──────┐
+│ └ Alp│ Auto-connect reconnects to your last used profile    │1:443 │
 │      │ when the kvn daemon starts.                          │      │
 │      │ First, set up polkit:                                │      │
-│      │ sudo kvn setup --polkit                              │      │
+│      │ sudo pacman -S --needed polkit \                     │      │
+│      │   && sudo kvn setup --polkit                         │      │
 │      │ Reboot once, then press Shift+A to toggle            │      │
 │      │ auto-connect.                                        │      │
 │      │              󰌑 continue · y copy command             │      │

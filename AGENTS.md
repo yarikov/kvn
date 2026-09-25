@@ -398,10 +398,17 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
   A card that shows a shell command answers `y`, which copies it, and the
   `Profiles` card answers `p`, which imports from the clipboard exactly as the
   Profiles list does. Both are handled client-side in
-  `tui_client/handler/key/onboarding.rs` because the clipboard is, and the copied
-  string comes from `OnboardingStep::command(model.integration_setup)` — the same
-  call the card renders — so what is displayed and what is copied cannot diverge,
-  and a card with no command offers no `y` in its footer. A card only
+  `tui_client/handler/key/onboarding.rs` because the clipboard is. The card
+  renders `OnboardingStep::command(model.integration_setup)`, which spells a
+  setup command exactly as the README does — with the `pacman -S --needed`
+  install its package needs, over two lines on a `\` continuation, since a paste
+  has to work on a machine that has neither `polkit` nor `nftables`. `y` copies
+  `clipboard_command`, the same string folded back into one `&&` line: a `\`
+  continuation survives a shell but not every terminal's bracketed paste. The
+  copy is derived from what is rendered, so the two cannot diverge, and
+  `command` gates both, so a card with no command offers no `y` in its footer.
+  The card renders it through `Passage::Command`, which emits one line per
+  source line instead of refilling it as prose like the surrounding copy. A card only
   answers a key its own copy tells the user to press: the `Profiles` card asks
   for `p`, so importing must not require dismissing the card first. Unlike `copy_selected`, a failed write is reported through
   `IpcCommand::ClientError`: the command is the step's instruction, and silently

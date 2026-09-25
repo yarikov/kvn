@@ -14,9 +14,9 @@ pub(super) fn handle(
     completes_go_first: bool,
 ) -> Result<Flow> {
     if key.code == KeyCode::Char('y')
-        && let Some(command) = step.command(state.model.integration_setup)
+        && let Some(command) = step.clipboard_command(state.model.integration_setup)
     {
-        copy_command(state, command)?;
+        copy_command(state, &command)?;
         return Ok(Flow::Continue);
     }
     if key.code == KeyCode::Char('p') && step == OnboardingStep::Profiles {

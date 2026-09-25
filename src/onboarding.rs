@@ -111,20 +111,20 @@ impl OnboardingStep {
             .unwrap_or(Self::Finish)
     }
 
-    /// The shell command this card tells the user to run, if any. The card
-    /// renders it and `y` copies it, so the two cannot drift apart. The two
+    /// The shell command this card shows, if any, written the way the README
+    /// writes it — a setup command comes with the `pacman` install it needs,
+    /// split over two lines on a `\` continuation. It also gates what `y`
+    /// copies, so a card without a command offers no copy. The two
     /// protection cards offer theirs only while their integration is still
     /// missing — an install that already has it needs the toggle, not the setup.
     pub fn command(self, setup: IntegrationSetup) -> Option<&'static str> {
         match self {
             Self::Doctor => Some("kvn doctor"),
             Self::Omarchy => (!setup.omarchy_plugin).then_some("kvn setup --omarchy"),
-            Self::AutoConnect => {
-                (setup.polkit == SetupState::Missing).then_some("sudo kvn setup --polkit")
-            }
-            Self::KillSwitch => {
-                (setup.kill_switch == SetupState::Missing).then_some("sudo kvn setup --killswitch")
-            }
+            Self::AutoConnect => (setup.polkit == SetupState::Missing)
+                .then_some("sudo pacman -S --needed polkit \\\n  && sudo kvn setup --polkit"),
+            Self::KillSwitch => (setup.kill_switch == SetupState::Missing)
+                .then_some("sudo pacman -S --needed nftables \\\n  && sudo kvn setup --killswitch"),
             Self::Welcome
             | Self::Region
             | Self::Routing
@@ -132,6 +132,13 @@ impl OnboardingStep {
             | Self::Connected
             | Self::Finish => None,
         }
+    }
+
+    /// The displayed command folded back into one line for the clipboard: a
+    /// pasted `\` continuation survives in a shell but not in every terminal's
+    /// bracketed paste, and `&&` alone runs the same two commands.
+    pub fn clipboard_command(self, setup: IntegrationSetup) -> Option<String> {
+        Some(self.command(setup)?.replace(" \\\n  ", " "))
     }
 
     /// The real screen this step hands off to, if any. `Routing` has one only
@@ -356,10 +363,46 @@ mod tests {
             vec![
                 (OnboardingStep::Doctor, "kvn doctor"),
                 (OnboardingStep::Omarchy, "kvn setup --omarchy"),
-                (OnboardingStep::AutoConnect, "sudo kvn setup --polkit"),
-                (OnboardingStep::KillSwitch, "sudo kvn setup --killswitch"),
+                (
+                    OnboardingStep::AutoConnect,
+                    "sudo pacman -S --needed polkit \\\n  && sudo kvn setup --polkit",
+                ),
+                (
+                    OnboardingStep::KillSwitch,
+                    "sudo pacman -S --needed nftables \\\n  && sudo kvn setup --killswitch",
+                ),
             ]
         );
+    }
+
+    #[test]
+    fn a_setup_command_is_copied_with_the_package_it_needs() {
+        let setup = IntegrationSetup::default();
+        let copied = |step: OnboardingStep| step.clipboard_command(setup);
+        assert_eq!(
+            copied(OnboardingStep::AutoConnect).as_deref(),
+            Some("sudo pacman -S --needed polkit && sudo kvn setup --polkit")
+        );
+        assert_eq!(
+            copied(OnboardingStep::KillSwitch).as_deref(),
+            Some("sudo pacman -S --needed nftables && sudo kvn setup --killswitch")
+        );
+        assert_eq!(
+            copied(OnboardingStep::Doctor).as_deref(),
+            Some("kvn doctor")
+        );
+        assert_eq!(copied(OnboardingStep::Welcome), None);
+    }
+
+    #[test]
+    fn a_protection_card_with_no_command_has_nothing_to_copy() {
+        let setup = IntegrationSetup {
+            polkit: SetupState::Ready,
+            kill_switch: SetupState::Ready,
+            ..IntegrationSetup::default()
+        };
+        assert_eq!(OnboardingStep::AutoConnect.clipboard_command(setup), None);
+        assert_eq!(OnboardingStep::KillSwitch.clipboard_command(setup), None);
     }
 
     #[test]

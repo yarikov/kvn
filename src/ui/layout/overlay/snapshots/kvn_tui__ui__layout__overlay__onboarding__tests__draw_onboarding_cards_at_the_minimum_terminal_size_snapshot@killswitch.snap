@@ -3,14 +3,14 @@ source: src/ui/layout/overlay/onboarding.rs
 expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ---
 ┌ Traffic ───────────────────────────────────────────────────────────┐
-│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connectio │
-└──────┌──────────────────────────────────────────────────────┐──────┘
-┌ Profi│                Getting started · 9/10                │──────┐
-│ No so│                Set up the kill switch                │om    │
-│clipbo│ The kill switch prevents new internet connections    │      │
-│      │ from going outside the VPN if the tunnel goes down.  │      │
+│ ↑ 0.0┌──────────────────────────────────────────────────────┐ectio │
+└──────│                Getting started · 9/10                │──────┘
+┌ Profi│                Set up the kill switch                │──────┐
+│ No so│ The kill switch prevents new internet connections    │om    │
+│clipbo│ from going outside the VPN if the tunnel goes down.  │      │
 │      │ First, set it up:                                    │      │
-│      │ sudo kvn setup --killswitch                          │      │
+│      │ sudo pacman -S --needed nftables \                   │      │
+│      │   && sudo kvn setup --killswitch                     │      │
 │      │ Reboot once, then press Shift+K to toggle the kill   │      │
 │      │ switch.                                              │      │
 │      │              󰌑 continue · y copy command             │      │

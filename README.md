@@ -112,8 +112,8 @@ three required resolved actions to members of the dedicated `kvn-tui` group;
 it does not grant NetworkManager permissions:
 
 ```bash
-sudo pacman -S --needed polkit
-sudo kvn setup --polkit
+sudo pacman -S --needed polkit \
+  && sudo kvn setup --polkit
 ```
 
 Because authorization is group-wide, every process running as
@@ -129,8 +129,8 @@ The kill switch requires `nftables` and blocks outbound traffic when the VPN is
 not active:
 
 ```bash
-sudo pacman -S --needed nftables
-sudo kvn setup --killswitch
+sudo pacman -S --needed nftables \
+  && sudo kvn setup --killswitch
 ```
 
 The kill-switch sudoers rule uses the same dedicated `kvn-tui` group and allows

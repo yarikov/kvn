@@ -21,13 +21,13 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                           │                                                      │                            │
 │                           │ First, set it up:                                    │                            │
 │                           │                                                      │                            │
-│                           │ sudo kvn setup --killswitch                          │                            │
+│                           │ sudo pacman -S --needed nftables \                   │                            │
+│                           │   && sudo kvn setup --killswitch                     │                            │
 │                           │                                                      │                            │
 │                           │ Then press Shift+K to toggle the kill switch.        │                            │
 │                           │                                                      │                            │
 │                           │              󰌑 continue · y copy command             │                            │
 │                           └──────────────────────────────────────────────────────┘                            │
-│                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

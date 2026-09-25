@@ -21,13 +21,13 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                           │                                                      │                            │
 │                           │ First, set up polkit:                                │                            │
 │                           │                                                      │                            │
-│                           │ sudo kvn setup --polkit                              │                            │
+│                           │ sudo pacman -S --needed polkit \                     │                            │
+│                           │   && sudo kvn setup --polkit                         │                            │
 │                           │                                                      │                            │
 │                           │ Then press Shift+A to toggle auto-connect.           │                            │
 │                           │                                                      │                            │
 │                           │              󰌑 continue · y copy command             │                            │
 │                           └──────────────────────────────────────────────────────┘                            │
-│                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

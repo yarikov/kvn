@@ -40,6 +40,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, step: OnboardingStep, area:
             match passage {
                 Passage::Blank => push_blank(&mut lines),
                 Passage::Text(runs) => lines.extend(wrap(&runs, content_width)),
+                Passage::Command { text, style } => lines.extend(command_lines(&text, style)),
             }
         }
         push_blank(&mut lines);
@@ -94,19 +95,13 @@ struct Run {
 enum Passage {
     Blank,
     Text(Vec<Run>),
+    Command { text: String, style: Style },
 }
 
 fn text(value: impl Into<String>) -> Passage {
     Passage::Text(vec![Run {
         text: value.into(),
         style: None,
-    }])
-}
-
-fn styled(value: impl Into<String>, style: Style) -> Passage {
-    Passage::Text(vec![Run {
-        text: value.into(),
-        style: Some(style),
     }])
 }
 
@@ -138,6 +133,21 @@ fn marked(before: &str, marked: &str, after: &str, style: Style) -> Passage {
         Run::key(marked, style),
         Run::plain(after),
     ])
+}
+
+/// A command as written, one rendered line per source line, so a `\`
+/// continuation stays where it was put instead of being refilled as prose.
+fn command_lines(text: &str, style: Style) -> Vec<Line<'static>> {
+    let indent = " ".repeat(TEXT_MARGIN);
+    text.lines()
+        .map(|line| {
+            Line::from(vec![
+                Span::raw(indent.clone()),
+                Span::styled(line.to_string(), style),
+            ])
+            .left_aligned()
+        })
+        .collect()
 }
 
 /// Fill the runs across `width`, breaking between words only and indenting each
@@ -232,13 +242,13 @@ fn command(model: &Model, step: OnboardingStep) -> Option<&'static str> {
     step.command(model.integration_setup)
 }
 
-/// The command line a card shows, styled so it reads as something to run — and
-/// sourced from the same place `y` copies, so the two cannot diverge.
-fn command_line(model: &Model, step: OnboardingStep) -> Passage {
-    styled(
-        command(model, step).unwrap_or_default(),
-        model.theme.success(),
-    )
+/// The command a card shows, styled so it reads as something to run. `y` copies
+/// `OnboardingStep::clipboard_command`, the same command folded into one line.
+fn command_block(model: &Model, step: OnboardingStep) -> Passage {
+    Passage::Command {
+        text: command(model, step).unwrap_or_default().to_string(),
+        style: model.theme.success(),
+    }
 }
 
 fn body(model: &Model, step: OnboardingStep) -> Vec<Passage> {
@@ -288,7 +298,7 @@ fn body(model: &Model, step: OnboardingStep) -> Vec<Passage> {
         OnboardingStep::Doctor => vec![
             text("If something isn’t working, run:"),
             Passage::Blank,
-            command_line(model, step),
+            command_block(model, step),
             Passage::Blank,
             text(
                 "It checks your kvn setup and points out problems with clear \
@@ -302,7 +312,7 @@ fn body(model: &Model, step: OnboardingStep) -> Vec<Passage> {
             false => vec![
                 text("Run this command to integrate kvn with your Omarchy desktop:"),
                 Passage::Blank,
-                command_line(model, step),
+                command_block(model, step),
             ],
         },
         OnboardingStep::Finish => {
@@ -398,7 +408,7 @@ fn protection_body(model: &Model, card: &ProtectionCard, setup: SetupState) -> V
         SetupState::Missing => passages.extend([
             text(card.setup_lead),
             Passage::Blank,
-            command_line(model, card.step),
+            command_block(model, card.step),
             Passage::Blank,
             toggle_sentence(match model.integration_setup.group_active {
                 true => "Then press ",
