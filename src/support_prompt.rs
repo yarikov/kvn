@@ -71,7 +71,11 @@ pub fn save_at(path: &Path, state: &SupportPromptState) -> Result<()> {
     crate::atomic_write::write(path, json.as_bytes())
 }
 
-pub fn load_for_daemon(geo_configured: bool, now: DateTime<Utc>) -> SupportPromptState {
+// NOTE: this start-up path only recovers a daemon that died between the
+// onboarding write and its support-prompt write. The live daemon arms the
+// deadline from `daemon::config_io::persist_onboarding`, because a daemon can
+// run for weeks without restarting.
+pub fn load_for_daemon(onboarding_completed_at: Option<DateTime<Utc>>) -> SupportPromptState {
     let Some(path) = crate::paths::support_prompt_path() else {
         tracing::warn!("Failed to determine support prompt state path");
         return SupportPromptState::default();
@@ -84,8 +88,8 @@ pub fn load_for_daemon(geo_configured: bool, now: DateTime<Utc>) -> SupportPromp
             SupportPromptState::default()
         }
     };
-    if geo_configured
-        && state.schedule_initial(now)
+    if let Some(completed_at) = onboarding_completed_at
+        && state.schedule_initial(completed_at)
         && let Err(error) = save_at(&path, &state)
     {
         tracing::warn!("Failed to persist support prompt schedule: {error:#}");
@@ -168,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn absent_state_is_not_scheduled_before_geo_setup() {
+    fn absent_state_is_not_scheduled_before_onboarding_completes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("support-prompt.json");
         let state = load_at(&path).unwrap().unwrap_or_default();
@@ -176,19 +180,21 @@ mod tests {
     }
 
     #[test]
-    fn daemon_initializes_schedule_only_after_geo_setup() {
+    fn daemon_counts_the_delay_from_onboarding_completion() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", dir.path());
         let path = crate::paths::support_prompt_path().unwrap();
 
-        assert_eq!(load_for_daemon(false, now()), SupportPromptState::default());
+        assert_eq!(load_for_daemon(None), SupportPromptState::default());
         assert!(!path.exists());
 
-        let state = load_for_daemon(true, now());
+        // A restart days later must not push the deadline out again.
+        let completed_at = now() - Duration::days(3);
+        let state = load_for_daemon(Some(completed_at));
         assert_eq!(
             state.next_show_at,
-            Some(now() + Duration::days(INITIAL_DELAY_DAYS))
+            Some(completed_at + Duration::days(INITIAL_DELAY_DAYS))
         );
         assert_eq!(load_at(&path).unwrap(), Some(state));
     }
@@ -202,7 +208,7 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, "not json").unwrap();
 
-        let state = load_for_daemon(true, now());
+        let state = load_for_daemon(Some(now()));
         assert_eq!(
             state.next_show_at,
             Some(now() + Duration::days(INITIAL_DELAY_DAYS))
@@ -220,6 +226,6 @@ mod tests {
         dismissed.dismiss();
         save_at(&path, &dismissed).unwrap();
 
-        assert_eq!(load_for_daemon(true, now()), dismissed);
+        assert_eq!(load_for_daemon(Some(now())), dismissed);
     }
 }

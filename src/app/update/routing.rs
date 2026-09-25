@@ -101,7 +101,9 @@ pub(in crate::app::update) fn commit_routing_mode(
     }
     let changed = model.config.settings.geo_routing.mode() != mode;
     model.config.settings.geo_routing.set_mode(mode);
-    let mut effects = vec![Effect::SaveConfig];
+    let mut effects =
+        super::onboarding::outcome(model, super::onboarding::Trigger::RoutingCommitted);
+    effects.push(Effect::SaveConfig);
     push_status(
         &mut effects,
         model,
@@ -171,12 +173,6 @@ pub(in crate::app::update) fn commit_routing_settings(
     );
 
     if region_changed {
-        let previous_support = model.support_prompt.clone();
-        if model.support_prompt.schedule_initial(chrono::Utc::now()) {
-            effects.push(Effect::PersistSupportPrompt {
-                previous: previous_support,
-            });
-        }
         effects.push(Effect::RefreshGeoLastUpdated);
         if draft.region != GeoRegion::Global {
             if download_allowed(model) {
@@ -257,13 +253,9 @@ pub(in crate::app::update) fn commit_geo_region(
     let old_mode = model.config.settings.geo_routing.mode();
     let changed = old_region != Some(region);
     model.config.settings.geo_routing.set_region(region);
-    let mut effects = vec![Effect::SaveConfig];
-    let previous_support = model.support_prompt.clone();
-    if model.support_prompt.schedule_initial(chrono::Utc::now()) {
-        effects.push(Effect::PersistSupportPrompt {
-            previous: previous_support,
-        });
-    }
+    let mut effects =
+        super::onboarding::outcome(model, super::onboarding::Trigger::RegionCommitted);
+    effects.push(Effect::SaveConfig);
     if changed {
         effects.push(Effect::RefreshGeoLastUpdated);
     }

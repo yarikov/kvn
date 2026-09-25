@@ -1,0 +1,40 @@
+---
+source: src/ui/layout/overlay/onboarding.rs
+expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
+---
+┌ Traffic ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections                                          │
+└───────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Profiles ─────────────────────────────────────────────┐┌ Logs ────────────────────────────────────────────────┐
+│ No sources. Press p to paste a profile or subscription││                                                      │
+│URL from clipboard.                                    ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                           ┌──────────────────────────────────────────────────────┐                            │
+│                           │                Getting started · 9/10                │                            │
+│                           │                                                      │                            │
+│                           │                Set up the kill switch                │                            │
+│                           │                                                      │                            │
+│                           │ The kill switch prevents new internet connections    │                            │
+│                           │ from going outside the VPN if the tunnel goes down.  │                            │
+│                           │                                                      │                            │
+│                           │ First, set it up:                                    │                            │
+│                           │                                                      │                            │
+│                           │ sudo kvn setup --killswitch                          │                            │
+│                           │                                                      │                            │
+│                           │ Then press Shift+K to toggle the kill switch.        │                            │
+│                           │                                                      │                            │
+│                           │              󰌑 continue · y copy command             │                            │
+│                           └──────────────────────────────────────────────────────┘                            │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+└───────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
+ DISCONNECTED                                                                        DoH  Global    (off) never 
+[113x35]

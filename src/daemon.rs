@@ -76,6 +76,7 @@ pub fn run(mut model: Model) -> Result<()> {
 
     reconcile_kill_switch_state(&mut model);
     reconcile_auto_connect_state(&mut model);
+    probe_integration_setup(&mut model);
 
     let shared = DaemonShared {
         process_slot: Arc::new(Mutex::new(ProcessSlot {
@@ -147,7 +148,9 @@ fn run_loop(
         };
         let config_before = model.config.clone();
         let support_prompt_before = model.support_prompt.clone();
+        let onboarding_before = model.onboarding;
         let mut effects = update(model, msg);
+        let onboarding_transition = config_io::onboarding_transition(&effects);
         if effects
             .iter()
             .any(|effect| matches!(effect, Effect::SaveConfig))
@@ -161,6 +164,13 @@ fn run_loop(
                 Err(error) => {
                     model.replace_config_preserving_selection(config_before);
                     model.support_prompt = support_prompt_before;
+                    if let Some(recovery) = onboarding_transition {
+                        config_io::restore_onboarding_after_failure(
+                            model,
+                            onboarding_before,
+                            recovery,
+                        );
+                    }
                     let message = match crate::config::save_conflict_config(&edited) {
                         Ok(path) => format!(
                             "Failed to save config: {error:#}; unsaved version preserved at {}",
@@ -201,6 +211,7 @@ fn run_loop(
                     | Effect::WriteState
                     | Effect::SaveConfig
                     | Effect::PersistSupportPrompt { .. }
+                    | Effect::PersistOnboarding { .. }
                     | Effect::CommitEditedConfig { .. }
                     | Effect::UpdateSubscription { .. }
                     | Effect::BroadcastState
@@ -260,6 +271,16 @@ fn reconcile_kill_switch_state(model: &mut Model) {
             }
         }
     }
+}
+
+/// Seed the state the tour's protection and Omarchy cards render, so the first
+/// card is painted from a real answer rather than the default. While the tour is
+/// open the cards keep it fresh themselves through `Effect::CheckIntegrationSetup`.
+fn probe_integration_setup(model: &mut Model) {
+    if model.onboarding.is_complete() {
+        return;
+    }
+    model.integration_setup = crate::doctor::integration_setup(std::path::Path::new("/"));
 }
 
 fn reconcile_auto_connect_state(model: &mut Model) {
@@ -322,6 +343,9 @@ pub(crate) fn build_snapshot(
         theme_draft: model.theme_draft.clone(),
         service_routing_selected: model.service_routing_selected,
         service_routing_draft: model.service_routing_draft.clone(),
+        onboarding_awaiting: model.onboarding.awaiting,
+        onboarding_omarchy: model.onboarding.include_omarchy_card,
+        integration_setup: model.integration_setup,
         settings_menu_return: model.settings_menu_return,
         settings_menu_selected: model.settings_menu_selected,
         routing_settings_draft: model.routing_settings_draft.clone(),

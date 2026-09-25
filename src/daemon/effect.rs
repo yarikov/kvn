@@ -25,6 +25,7 @@ pub(super) fn execute_daemon_effect(
         Effect::RevokeKillSwitchExceptions => connection::revoke_kill_switch_exceptions(model),
         Effect::ApplyKillSwitch { enabled } => connection::apply_kill_switch(tx, enabled),
         Effect::CheckAutoConnectPolkit => connection::check_auto_connect_polkit(tx),
+        Effect::CheckIntegrationSetup => connection::check_integration_setup(tx),
         Effect::DownloadGeo => geo::download(tx, model),
         Effect::DownloadGeoIfMissing => geo::download_if_missing(tx, model),
         Effect::DownloadServiceRuleSetsIfMissing => {
@@ -39,6 +40,9 @@ pub(super) fn execute_daemon_effect(
         Effect::SaveConfig => config_io::report_uncommitted_save(model),
         Effect::PersistSupportPrompt { previous } => {
             config_io::persist_support_prompt(model, previous)
+        }
+        Effect::PersistOnboarding { previous, recovery } => {
+            config_io::persist_onboarding(model, previous, recovery)
         }
         Effect::SaveConfigConflict { edited, conflicts } => {
             config_io::save_conflict(model, edited, conflicts)

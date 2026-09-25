@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use super::subscription::validate_hwid;
-use super::{Profile, Settings, Subscription};
+use super::{GeoAutoUpdate, Profile, Settings, Subscription};
 
 /// Current schema version for `profiles.json`. Bumped on every breaking
 /// change to the persisted shape; new migrations go in `Config::migrate`.
@@ -44,6 +44,16 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Preferences for a machine that has never run kvn. Deliberately separate
+    /// from `Default`, which also backs every `#[serde(default)]` in the tree:
+    /// a config file that merely omits a field or a whole section must keep its
+    /// current meaning rather than silently gain background downloads.
+    pub fn for_first_run() -> Self {
+        let mut config = Self::default();
+        config.settings.geo_routing.auto_update = GeoAutoUpdate::Every7d;
+        config
+    }
+
     /// Canonicalize user-provided values that tolerate surrounding whitespace.
     /// Returns whether any value changed.
     pub(crate) fn normalize(&mut self) -> bool {
@@ -137,6 +147,29 @@ mod tests {
     use crate::config::profile::*;
     use crate::test_helpers::subscription_with_hwid;
     use uuid::Uuid;
+
+    #[test]
+    fn first_run_preferences_never_leak_into_a_parsed_config() {
+        assert_eq!(
+            Config::for_first_run().settings.geo_routing.auto_update,
+            GeoAutoUpdate::Every7d
+        );
+        // Every `#[serde(default)]` in the chain must keep meaning "off", at
+        // whichever level the field or section is missing.
+        for json in [
+            r#"{"settings": {"geo_routing": {"auto_update": "off"}}}"#,
+            r#"{"settings": {"geo_routing": {}}}"#,
+            r#"{"settings": {}}"#,
+            r#"{}"#,
+        ] {
+            let parsed: Config = serde_json::from_str(json).unwrap();
+            assert_eq!(
+                parsed.settings.geo_routing.auto_update,
+                GeoAutoUpdate::Off,
+                "{json}"
+            );
+        }
+    }
 
     #[test]
     fn config_default() {

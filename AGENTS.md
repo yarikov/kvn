@@ -40,18 +40,18 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `model` | `src/app/model.rs` | Application state (`Model`), overlay + connection state + subscription state, input state — pure data, no side effects |
 | `msg` | `src/app/msg.rs` | Message enum (`Msg`) — all external events (keys, ticks, logs, geo, resume, etc.) |
 | `update` | `src/app/update.rs` + `src/app/update/` | Pure `update(model, msg) -> Vec<Effect>` — the top-level message dispatcher only; every handler lives in a submodule (see below) |
-| `update` submodules | `src/app/update/{status,connection,traffic,config_reload,tick,routing,geo,subscription,paste}.rs` | Non-keyboard message handlers: status/download-blocked helpers, connect lifecycle + kill-switch/polkit results, Clash-API traffic sampling, `ConfigReloaded`, the 250 ms tick and its auto-update schedules, routing-mode / geo-region / service-routing commits, geo download results, subscription fetch results, clipboard paste → profile or subscription |
-| `update::key` | `src/app/update/key.rs` + `src/app/update/key/` | Keyboard input: `handle_key` routes by `Model.overlay` to `sources`, `confirm_delete`, `confirm_disable`, `settings_menu`, `regions`, `dns`, `service_routing`, `theme`; `key/ipc.rs` (+ `ipc/{semantic,support}.rs`) handles `IpcCommand` for non-TUI clients |
+| `update` submodules | `src/app/update/{status,connection,traffic,config_reload,tick,routing,geo,subscription,paste,onboarding}.rs` | Non-keyboard message handlers: status/download-blocked helpers, connect lifecycle + kill-switch/polkit results, Clash-API traffic sampling, `ConfigReloaded`, the 250 ms tick and its auto-update schedules, routing-mode / geo-region / service-routing commits, geo download results, subscription fetch results, clipboard paste → profile or subscription, and the first-run tour's `handoff` / `advance` / `outcome` / `finish` / `open_when_idle` / `resume` transitions plus its `integration_setup_checked` probe result |
+| `update::key` | `src/app/update/key.rs` + `src/app/update/key/` | Keyboard input: `handle_key` routes by `Model.overlay` to `sources`, `confirm_delete`, `confirm_disable`, `settings_menu`, `regions`, `dns`, `service_routing`, `theme`, `onboarding`; `key/ipc.rs` (+ `ipc/{semantic,support}.rs`) handles `IpcCommand` for non-TUI clients |
 | `effect` | `src/app/effect.rs` | Effect enum — declarative description of side effects to be executed by runtime |
 | `daemon` | `src/daemon.rs` | Headless daemon: owns sing-box process, config, mpsc channel, IPC server, background services; `run` / `run_loop`, `DaemonShared`, `build_snapshot`, and the startup reconciliation of kill-switch and auto-connect state |
-| `daemon` submodules | `src/daemon/{effect,connection,geo,config_io,subscription,traffic,profile_test,process_slot}.rs` | Effect execution, mirroring the `app/update/` handler split: `effect.rs` is the `execute_daemon_effect` dispatcher only; `connection.rs` owns connect/disconnect, the kill-switch handshake window and the polkit check; `geo.rs` the seven geo/service rule-set effects plus the shared refresh and result-finalizing helpers; `config_io.rs` the revision-checked `profiles.json` commit, the support-prompt write and config reload; `subscription.rs`, `traffic.rs` and `profile_test.rs` one effect each (the last owns the temporary sing-box SOCKS5 latency probe); `process_slot.rs` the sing-box process slot, its poisoned-lock-safe accessors, the 250 ms ticker and exit polling |
+| `daemon` submodules | `src/daemon/{effect,connection,geo,config_io,subscription,traffic,profile_test,process_slot}.rs` | Effect execution, mirroring the `app/update/` handler split: `effect.rs` is the `execute_daemon_effect` dispatcher only; `connection.rs` owns connect/disconnect, the kill-switch handshake window, the polkit check and the tour's integration probe; `geo.rs` the seven geo/service rule-set effects plus the shared refresh and result-finalizing helpers; `config_io.rs` the revision-checked `profiles.json` commit, the support-prompt and onboarding-progress writes (including the failed-write recovery in § First-Run Onboarding) and config reload; `subscription.rs`, `traffic.rs` and `profile_test.rs` one effect each (the last owns the temporary sing-box SOCKS5 latency probe); `process_slot.rs` the sing-box process slot, its poisoned-lock-safe accessors, the 250 ms ticker and exit polling |
 | `tui_client` | `src/tui_client.rs` | TUI client orchestration: `run`, the daemon handshake (`connect_to_current_daemon`), terminal setup (`TerminalSession`, OSC colors), snapshot application, and the `run_loop` skeleton that feeds every `Msg` to the handler tree |
 | `tui_client` submodules | `src/tui_client/handler.rs` + `src/tui_client/handler/`, `src/tui_client/docs_preview.rs` | `handler.rs` owns `ClientLoop` (the loop's terminal/pane/log/toast/pointer state) and dispatches each `Msg`; the short branches (paste, snapshot, tick, resize, theme) stay there, while `mouse.rs` handles clicks, drags and log selection, `pointer.rs` the pointer shape plus double-click tracking, and `toast.rs` the client-local status toast lifetime. `handler/key.rs` routes by `Model.overlay` to `key/{support,log_pane,clipboard,editor,quit}.rs` — the client-local half of `app/update/key/`. `docs_preview.rs` builds the fixed state used for documentation captures |
 | `ipc` | `src/ipc.rs` | NDJSON protocol over Unix domain socket for daemon ↔ TUI client communication |
 | `migrations` | `src/migrations.rs`, `contrib/migrations/*.sh` | Ordered package migrations: root-owned script discovery, per-user/machine markers written per script, runner lock, `profiles.json` backup, end-of-run daemon restart handoff |
 | `test_helpers` | `src/test_helpers.rs` | Shared test utilities (e.g. `model_with_profiles`)
 | `ui` | `src/ui.rs`, `src/ui/layout.rs`, `src/ui/widgets.rs`, `src/ui/styles.rs`, `src/ui/palette.rs`, `src/ui/icons.rs`, `src/ui/nav.rs` | ratatui rendering (used by TUI client only), layout splits, widget definitions, palette-driven `Theme`, Nerd Font / Unicode icon sets selected by `settings.icons`, navigation helpers |
-| `ui::layout` submodules | `src/ui/layout.rs` + `src/ui/layout/` | `src/ui/layout.rs` is the facade: frame split, the `draw*` entry points, and the `pub(crate)` re-exports the TUI client calls. Each concern lives in one submodule — `text.rs` (Unicode width helpers), `log.rs` + `log/navigation.rs` (log formatting; cursor, viewport and selection state), `panes.rs` (pane geometry, mouse hit-testing, main/traffic/status rows), `sources.rs` (the Profiles list), and `overlay.rs` (dispatch on `Model.overlay` + the shared footer wording) over `overlay/` — `popup.rs` (popup geometry and the three modal renderers), `settings_row.rs` (the shared `Label ‹ value ›` row), and one file per overlay: `help`, `settings_menu`, `confirm_delete`, `confirm_disable`, `restart_required`, `routing`, `dns`, `theme`, `support` |
+| `ui::layout` submodules | `src/ui/layout.rs` + `src/ui/layout/` | `src/ui/layout.rs` is the facade: frame split, the `draw*` entry points, and the `pub(crate)` re-exports the TUI client calls. Each concern lives in one submodule — `text.rs` (Unicode width helpers), `log.rs` + `log/navigation.rs` (log formatting; cursor, viewport and selection state), `panes.rs` (pane geometry, mouse hit-testing, main/traffic/status rows), `sources.rs` (the Profiles list), and `overlay.rs` (dispatch on `Model.overlay` + the shared footer wording) over `overlay/` — `popup.rs` (popup geometry and the three modal renderers), `settings_row.rs` (the shared `Label ‹ value ›` row), and one file per overlay: `help`, `settings_menu`, `confirm_delete`, `confirm_disable`, `restart_required`, `routing`, `dns`, `theme`, `support`, `onboarding` |
 | `palette` | `src/ui/palette.rs`, `themes/*.toml`, `build.rs` | 22 vendored Omarchy palettes; `build.rs` compiles `themes/*.toml` into a `BUNDLED` static at compile time (no runtime TOML parsing) |
 | `config` | `src/config.rs`, `src/config/profile.rs`, `src/config/subscription.rs` | JSON config I/O, profile and subscription struct definitions, subscription fetcher |
 | `config::profile` submodules | `src/config/profile/{protocol,protocol_options,protocol_config,tls,entry,schedule,subscription,routing,settings,schema,migrate,dns}.rs`, `src/config/profile/share_link{.rs,/parse.rs,/encode.rs}` | `src/config/profile.rs` is a facade of `pub use` re-exports; each persisted type lives in one submodule — protocol discriminant, per-protocol options and configs, shared TLS/transport blocks, `Profile`, auto-update schedules, `Subscription`, geo routing, `Settings`, the root `Config`, the ordered schema migrations, DNS, and share-link URI parsing/encoding |
@@ -61,6 +61,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `atomic_write` | `src/atomic_write.rs` | Atomic file write helper (write `.tmp` + fsync + rename + parent-dir fsync) |
 | `net` | `src/net.rs` | Free loopback port allocation (bind `127.0.0.1:0`, read the OS-assigned port, drop the listener) for the Clash API control port and the profile-test SOCKS5 port |
 | `systemd` | `src/systemd.rs` | The daemon's systemd user unit name and its restart helper, so a unit rename lands in one place |
+| `onboarding` | `src/onboarding.rs` | First-run tour: the ordered `OnboardingStep` cards, their handoff screen and copyable command, the persisted `OnboardingState` and the session-local `OnboardingProgress`, the `IntegrationSetup` / `SetupState` the protection cards render, plus the grandfathering load for installs that predate the tour |
 | `waybar` | `src/services/waybar.rs` | Read/write `state.json` for waybar integration and crash recovery |
 | `suspend` | `src/services/suspend.rs` | D-Bus listener for `systemd-logind` `PrepareForSleep` signals (zbus) |
 | `integration_files` | `src/integration_files.rs`, `contrib/killswitch.nft`, `contrib/kvn-tui-killswitch.{service,sudoers}`, `contrib/49-kvn-tui.rules` | Embedded kill-switch/polkit payloads passed to the setup scripts; detects outdated installed files and SHA-256 stamps in `/var/lib/kvn/integrations/` for `kvn doctor` |
@@ -238,7 +239,7 @@ The application follows **The Elm Architecture (TEA)**:
 4. **Effects** (`app/effect.rs`) are declarative descriptions of side effects (`Connect`, `DownloadGeo`, `SaveConfig`, `Quit`, etc.).
 5. **Daemon** (`daemon.rs` + `daemon/`) owns the canonical `Model`, the `mpsc` channel, the sing-box `process_slot`, and all background services (ticker, suspend watcher, log tailer, IPC server). It exposes a Unix domain socket IPC server (`ipc.rs`) that accepts NDJSON commands from TUI clients.
 6. **TUI Client** (`tui_client.rs`) connects to the daemon socket, enters the alternate screen, renders the UI using ratatui, and forwards keyboard input (plus clipboard/editor actions) as IPC commands. It has its own local `Model` that is kept in sync via `StateSnapshot` broadcasts from the daemon.
-7. **IPC Protocol** (`ipc.rs`) uses newline-delimited JSON over a Unix socket. Commands: `Attach`, `Detach`, `Key`, `SelectSource`, `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `Paste`, `Copied`, `ReloadConfig`, `Quit`, `ClientError`. Responses: `StateSnapshot` pushed by the daemon after every state change. The semantic commands (`ConnectProfile` through `SetAutoConnect`) exist for non-TUI clients — the Omarchy Quickshell module and the `kvn status/connect/disconnect/reconnect/toggle` CLI subcommands. Overlay commits (routing mode, geo region) are shared between the key handlers and IPC via `commit_routing_mode` / `commit_geo_region` in `update/routing.rs` so both paths run identical logic.
+7. **IPC Protocol** (`ipc.rs`) uses newline-delimited JSON over a Unix socket. Commands: `Attach`, `Detach`, `Key`, `SelectSource`, `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `CheckOnboarding`, `CheckSupportPrompt`, `Paste`, `Copied`, `ReloadConfig`, `Quit`, `ClientError`. Responses: `StateSnapshot` pushed by the daemon after every state change. The semantic commands (`ConnectProfile` through `SetAutoConnect`) exist for non-TUI clients — the Omarchy Quickshell module and the `kvn status/connect/disconnect/reconnect/toggle` CLI subcommands. Overlay commits (routing mode, geo region) are shared between the key handlers and IPC via `commit_routing_mode` / `commit_geo_region` in `update/routing.rs` so both paths run identical logic.
 
 This separation makes the update tree fully synchronous and trivial to unit-test.
 
@@ -341,8 +342,208 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 - `GeoRegion::Ru` — download RU geoip/geosite, enable `Global` / `BypassRu` / `OnlyRu`.
 - `GeoRegion::Cn` — download CN geoip/geosite, enable `Global` / `BypassCn` / `OnlyCn`.
 - `GeoRegion::Global` — skip geo downloads, only `Global` mode is available.
-- On first launch (when `geo_routing.current_region` is `None`), a modal overlay forces the user to pick a region before the main UI is usable.
+- A region is mandatory: while `geo_routing.current_region` is `None` the region picker refuses `q`/`Esc`, so the main UI stays unreachable. On a brand-new install the first-run tour (see § First-Run Onboarding) owns that first choice and hands off to the same picker; the bare picker is still forced directly once the tour is complete but no region was chosen.
 - The region can be changed at runtime with the `o` keybinding. When the region changes, the previous region's mode is saved into `geo_routing.selected_region_modes` and the new region's previously stored mode is restored (falling back to `Global`).
+
+### First-Run Onboarding
+
+- On a brand-new install `kvn` opens a guided tour instead of the bare region
+  picker. Cards in order: `Welcome`, `Region`, `Routing`, `Profiles`,
+  `Connected`, `Doctor`, `Omarchy`, `AutoConnect`, `KillSwitch`, `Finish`
+  (`onboarding::OnboardingStep::ORDER`). `Connected` acknowledges the first
+  working tunnel and separates the "get it running" half from the "tune it"
+  half. `Omarchy` precedes the two protection cards on purpose:
+  `kvn setup --omarchy` clones the plugin from GitHub, and a kill switch enabled
+  one card earlier leaves the machine without internet until the reboot its
+  pending group membership needs — the user could not finish that step, nor turn
+  the kill switch back off before rebooting.
+- **`Omarchy` is conditional**, so the tour is ten cards only on an Omarchy
+  desktop that does not have the bar plugin yet, and nine otherwise.
+  `OnboardingStep::sequence(include_omarchy_card)` filters `ORDER`, and `index` / `total` /
+  `next` all read from it, so the `4/10` counter, the advance order and what is
+  rendered cannot disagree. The flag is `OnboardingProgress::include_omarchy_card`
+  — it says whether the card is in the sequence, not whether Omarchy is present,
+  and an installed plugin makes it `false` — decided
+  once per process by `model::show_omarchy_card()` —
+  `omarchy::detect_omarchy_theme().is_some() && !omarchy::omakvn_plugin_installed()`,
+  two cheap file reads of the kind `theme_picker_slugs` already does. It is an
+  environment fact and never persisted, but it *is* sent over IPC as
+  `StateSnapshot::onboarding_omarchy`: the card's own command installs the plugin
+  that removes the card, so a client started after `kvn setup --omarchy` would
+  otherwise count a shorter tour than the daemon and render `Omarchy` with a
+  nonsense counter. The daemon's answer wins; `Model::from_config`'s own guess is
+  only the pre-attach default. `OnboardingProgress::new` normalises a step
+  recorded as `Omarchy` but resumed without that card.
+- Progress lives in `$XDG_STATE_HOME/kvn/onboarding.json` as
+  `OnboardingState { step, completed_at }` — deliberately outside the versioned
+  `profiles.json` schema, like the support prompt. `Model.onboarding` wraps it in
+  `OnboardingProgress`, adding the session-local `awaiting` (a handoff is in
+  flight) and `card_pending` (a result arrived; show the card when the screen is
+  free). The client reads the active card from `Overlay::Onboarding(step)`;
+  `awaiting` is carried separately as `StateSnapshot::onboarding_awaiting`
+  because the pickers render differently while the tour holds them.
+- An install that already has a geo region is **grandfathered**:
+  `onboarding::load_for_daemon` records it complete and persists that, so nobody
+  who already uses kvn sees the tour.
+- **Card keys**: `Enter` performs the step and moves on; there is no skip, no way
+  back and no early exit, so every step is taken exactly once. The card is modal
+  like `Overlay::RestartRequired` — `q`/`Esc` and every other key fall through to
+  a no-op. The two protection cards additionally answer their own toggle,
+  `Shift+A` on `AutoConnect` and `Shift+K` on `KillSwitch`, which is what their
+  copy tells the user to press. They call `set_auto_connect` / `set_kill_switch`
+  rather than the main screen's `toggle_*` helpers: `toggle_*` opens
+  `Overlay::ConfirmDisable` when turning a protection off, which would replace
+  the card and then close to `Overlay::None`, stranding the tour. A card about
+  one setting is explicit enough to skip that dialog, as `Space c` already is.
+  A card that shows a shell command answers `y`, which copies it, and the
+  `Profiles` card answers `p`, which imports from the clipboard exactly as the
+  Profiles list does. Both are handled client-side in
+  `tui_client/handler/key/onboarding.rs` because the clipboard is, and the copied
+  string comes from `OnboardingStep::command(model.integration_setup)` — the same
+  call the card renders — so what is displayed and what is copied cannot diverge,
+  and a card with no command offers no `y` in its footer. A card only
+  answers a key its own copy tells the user to press: the `Profiles` card asks
+  for `p`, so importing must not require dismissing the card first. Unlike `copy_selected`, a failed write is reported through
+  `IpcCommand::ClientError`: the command is the step's instruction, and silently
+  copying nothing is worse than saying so. The last card answers
+  `Space` by opening `Overlay::SettingsMenu(Root)`, since that is what its copy
+  tells the user to press; it sets `card_pending` rather than finishing, so the
+  card returns once that screen is closed and `Enter` still owns completion.
+  `?` works on every card through the intercept in `handle_key`, which restores
+  the card via `HelpContext::Onboarding`. `?` shows the ordinary help; the tour has no section of its own. A
+  daemon restart mid-tour resumes it on the persisted step via
+  `IpcCommand::CheckOnboarding`, which `update/onboarding.rs::resume` answers.
+- **The protection cards follow their setup state.** `Shift+A` and `Shift+K` are
+  useless until `sudo kvn setup --polkit` / `--killswitch` has run *and* the
+  `kvn-tui` group both of them gate on is active. So each card renders its tail
+  from `Model::integration_setup`: `SetupState::Missing` → `First, set up …` +
+  the copyable command, closing with `Reboot once, then press …` or, when
+  `group_active` is already true, just `Then press …` — a session that is already
+  in the group needs no reboot, because the sudoers and polkit rules both key on
+  it. `PendingReboot` → `… setup is complete. Reboot once to activate it, then
+  press …`; `Ready` → just `Press …`. `group_active` lives on `IntegrationSetup`
+  rather than in `SetupState` because it is one property of the session shared by
+  both cards.
+  `doctor::integration_setup` produces the whole struct from the existing signals
+  (`polkit_status` + `integration_files::polkit_rule_state` for polkit, the
+  installed helper + `outdated_killswitch_files` + `killswitch::integration_group_status`
+  for the kill switch and for `group_active`, `omarchy::omakvn_plugin_installed`
+  for the Omarchy card), with the pure `polkit_setup_state_from` /
+  `killswitch_setup_state_from` mappings owning the rules: an unverifiable polkit
+  answer reads as `Missing`, because re-running a setup command is harmless while
+  claiming it is done is not, and a polkit denial reads as `PendingReboot` only
+  while the group itself is pending activation — with the group already active
+  the rule is simply not effective, and a user who is not a member (an install
+  done by someone else) has to be added by `setup --polkit`, so both keep the
+  setup command instead of being sent to a reboot that cannot help. The state
+  reaches clients as `StateSnapshot::integration_setup`.
+- **Those cards are re-probed while they are on screen**, because the card tells
+  the user to run a command in another terminal and then has to show the result.
+  `Effect::CheckIntegrationSetup` → `daemon::connection::check_integration_setup`
+  (a thread, like the polkit check) → `Msg::IntegrationSetupChecked`, reduced by
+  `update/onboarding.rs::integration_setup_checked`, which stores it and returns
+  `Effect::BroadcastState` **only when the value changed** so the poll does not
+  push a snapshot per tick. Three triggers: `daemon::probe_integration_setup`
+  synchronously at startup while the tour is unfinished (so a card's first paint
+  is already right), and `onboarding::probe_visible_card` — called by `advance` /
+  `resume` / `open_when_idle` right after they set `Overlay::Onboarding`, and by
+  the 250 ms tick. That one function owns both the rule (only `Omarchy`,
+  `AutoConnect` and `KillSwitch` report an integration) and the gate: the 2 s
+  cadence in `Model::last_integration_check_at`, in the same shape as the
+  Clash-API sampler because the probe spawns `pkcheck` / `id`, plus
+  `Model::integration_check_pending`, which blocks a second probe while one is
+  still out — a probe slower than the interval would otherwise be started twice
+  and the two answers could land out of order, restoring a stale state on the
+  card. `integration_setup_checked` clears the flag before it compares. Keeping
+  both callers on one gate is the point: a card open that did not record the
+  timestamp let the very next tick fire a second probe. Ordinary daemons never
+  pay for any of it: outside the tour no card is open and the startup probe is
+  skipped.
+  `doctor::integration_setup` resolves the `kvn-tui` group once per probe and
+  threads it into `polkit_status_for` as well as both classifiers, so one `id`
+  answer serves the whole struct and the two integrations cannot disagree about
+  the session; the classifiers themselves stay separate, since their readiness
+  criteria differ.
+- **The `Omarchy` card has two texts.** Without the plugin it shows
+  `kvn setup --omarchy`; with it (installed during the tour — the card itself
+  cannot be dropped mid-process, see above) it confirms `kvn is integrated with
+  your Omarchy desktop: the widget is on your bar.` and offers no command, so
+  `OnboardingStep::command` returns `None` and the footer loses its `y`.
+- **Nothing is marked as already done.** The cards carry no `✓` and no green
+  title, and the region and mode pickers pass `active: None` to
+  `draw_selection_modal` while the tour awaits them, so no entry is painted with
+  `Theme::success()`. In a forward-only tour every card on screen is one the user
+  has yet to complete; a "done" marker could only come from state that predates
+  the tour, which misleads rather than informs. Those two pickers also drop the
+  `q/esc close` action from their footer while awaited, since they refuse it.
+- **Handoff and resume.** `update/onboarding.rs` owns six transitions.
+  `handoff` opens the real screen through the existing `open_*` helpers (which
+  seed the drafts those pages `take()`) and persists nothing, so it cannot fail.
+  `advance` and `finish` move the card; `outcome(trigger)` reacts to a real
+  screen reporting back; `open_when_idle` runs from the 250 ms tick and shows a
+  `card_pending` card only when `model.overlay == Overlay::None`, returning
+  `Effect::BroadcastState` so the client actually sees it; `resume` answers
+  `IpcCommand::CheckOnboarding`. Triggers are raised at
+  each screen's own exit point: `commit_geo_region`, `commit_routing_mode` and
+  `Msg::Connected`. Only three steps hand off at all — `Region`, `Routing` and
+  `Profiles` — and none of their screens can be abandoned, so there is no
+  cancellation path and no `Cancelled` trigger.
+- **A TUI attaching mid-tour never cancels a handoff.** `resume` reopens the
+  stored card only when nothing is in flight (`awaiting.is_none()`) and the
+  screen is free. Clearing `awaiting` instead would strand the tour: a client
+  attaching while the first connection is still being made would take the
+  `Profiles` step off the wait, and the `Msg::Connected` that follows would then
+  find no step to finish. The one case where `resume` does act on a handoff is a
+  trigger that has already fired — `tunnel_already_up` — since `Msg::Connected`
+  is raised once per connection and cannot repeat. `handoff` checks the same
+  thing before opening a screen, so a `Profiles` card reached with the tunnel
+  already up (a failed progress write restores it) moves on like an
+  informational card instead of waiting for an event that has passed.
+- **`Profiles` ends at the first connection, not the first import.**
+  `Trigger::TunnelUp` is raised only from `on_connected`; `paste.rs` and the
+  subscription result handler deliberately raise nothing. A profile on its own
+  proves nothing works, so the step is done once the user has actually
+  connected with one — standalone or from a subscription, either way. Since
+  there is no way to skip a card, the tour cannot be finished before the app has
+  been shown to work once.
+- **The region and mode steps cannot be abandoned.** `handle_geo_region` refuses
+  `q`/`Esc` while no region is set — unchanged — and additionally while
+  `onboarding.awaiting == Some(Region)`; `handle_routing_mode` refuses them while
+  `awaiting == Some(Routing)`. Both steps therefore end only by committing, which
+  advances the card.
+- **`Routing` hands off only where there is a choice.**
+  `OnboardingStep::handoff_screen` takes the `Config`: under a country region it
+  returns `HandoffScreen::RoutingMode` (the `m` picker, not the full `Space r`
+  page), and under `Global` or no region it returns `None`, so `Enter` just moves
+  the card on. The card's title and primary action branch the same way. The
+  trigger lives in `commit_routing_mode`, placed after its availability check so
+  a mode rejected through IPC cannot advance the tour while confirming the
+  current mode still does.
+- **Failed progress write.** `Effect::PersistOnboarding` carries the whole
+  previous `OnboardingProgress` plus an `OnboardingRecovery`, which names what
+  has to happen rather than where the transition came from:
+  `RestoreCard` (the transition owned the screen) or `WaitForIdle` (a real screen
+  is still in front of the user).
+  `config_io::restore_onboarding_after_failure` reverts `state`, clears
+  `awaiting` (the handed-off screen is gone and will never report again) and
+  either restores the card directly or sets `card_pending`;
+  `config_io::onboarding_transition` hands the same value to the `SaveConfig`
+  error path. It is what makes a failed `finish` recoverable: `finish` may
+  navigate to the unescapable region picker, so the card must come back at the
+  originating step. Settings the same update already
+  committed are never rolled back. On the `SaveConfig` error path in
+  `daemon.rs`, the revert is gated on `config_io::onboarding_transition`, read
+  before the effect list is filtered — an unrelated failed save must not reopen
+  a finished tour.
+- **Support prompt.** The 7-day clock starts from `completed_at`, armed by
+  `persist_onboarding` right after a successful write; `check_prompt` gates on
+  `onboarding.is_complete()`. `support_prompt::load_for_daemon` keeps a
+  start-time path only as crash recovery between the two writes.
+- **First-install defaults.** `Config::for_first_run` (used only when
+  `profiles.json` does not exist) sets `geo_routing.auto_update` to `Every7d`,
+  and a pasted subscription gets `Every1d`. Every `Default`/`#[serde(default)]`
+  in that chain still means `Off`, so a config that omits the field — or the
+  whole `geo_routing` or `settings` section — keeps its current behaviour.
 
 ### Disable Confirmation
 
@@ -364,7 +565,7 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 The TEA update function (`app::update::update`) must remain free of I/O, threads, and system calls. Side effects are declared as `Effect` values and executed by the daemon runtime.
 
 Rules of thumb:
-- `app::update::update(model, msg) -> Vec<Effect>` must not call functions from `services`, `geo`, `paths`, `atomic_write`, `config::load_config`, `config::subscription`, `singbox::clash_api`, `singbox::runner`, `tui_client::clipboard`, `tui_client::editor`, or perform any file/network/process I/O. **Documented exception**: `theme_picker_slugs()` (used by the `C` key handler and `handle_theme_picker`) calls `theme_watch::detect_omarchy_theme()`, which does a single small `fs::read_to_string` of the Omarchy state theme path to decide whether to show the Auto entry. Cheap, deterministic, and scoped to a key press; promoted to "OK" because the alternative (caching in `Model`) costs more clarity than it saves. The full `Theme` resolution stays out of `update`: the picker handler only mutates `theme_draft`/`settings.theme`, and the TUI client recomputes `model.theme` via `resolve_active` on snapshot apply.
+- `app::update::update(model, msg) -> Vec<Effect>` must not call functions from `services`, `geo`, `paths`, `atomic_write`, `config::load_config`, `config::subscription`, `singbox::clash_api`, `singbox::runner`, `tui_client::clipboard`, `tui_client::editor`, or perform any file/network/process I/O. **Documented exceptions**: `theme_picker_slugs()` (used by the `C` key handler and `handle_theme_picker`) calls `theme_watch::detect_omarchy_theme()`, which does a single small `fs::read_to_string` of the Omarchy state theme path to decide whether to show the Auto entry; `model::show_omarchy_card()` adds `omarchy::omakvn_plugin_installed()`, one more small read of the plugin manifest, while the model is constructed. Cheap, deterministic, and scoped to a key press; promoted to "OK" because the alternative (caching in `Model`) costs more clarity than it saves. The full `Theme` resolution stays out of `update`: the picker handler only mutates `theme_draft`/`settings.theme`, and the TUI client recomputes `model.theme` via `resolve_active` on snapshot apply.
 - `Model::set_status` is pure (mutates only in-memory state). Any message that should also be persisted to the application log must return `Effect::AppendAppLog`.
 - `Model::new` is allowed to perform initialization I/O (load config, read `state.json`, etc.).
 - `singbox::config::generate_config` is pure: it receives geo file availability (`GeoAvailability`) from the caller and does not touch the file system.
@@ -393,6 +594,7 @@ behavior changes, update the corresponding documentation in the same change.
 | Temp sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
 | Runtime state (waybar) | `~/.config/kvn-tui/state.json` |
 | IPC socket (daemon ↔ TUI) | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
+| First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
 | Applied migration markers | `$XDG_STATE_HOME/kvn/migrations/` |
 | Migration backups | `~/.config/kvn-tui/recovery/profiles.json.before-migration-*` |

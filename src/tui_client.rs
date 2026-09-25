@@ -142,6 +142,7 @@ pub fn run() -> Result<()> {
     client.spawn_reader(tx.clone())?;
     client.send(&IpcCommand::AttachSession)?;
     if !initial_snapshot.restart_required {
+        client.send(&IpcCommand::CheckOnboarding)?;
         client.send(&IpcCommand::CheckSupportPrompt)?;
     }
 
@@ -340,6 +341,9 @@ fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
     model.theme_draft = snapshot.theme_draft.clone();
     model.service_routing_selected = snapshot.service_routing_selected;
     model.service_routing_draft = snapshot.service_routing_draft;
+    model.onboarding.awaiting = snapshot.onboarding_awaiting;
+    model.onboarding.include_omarchy_card = snapshot.onboarding_omarchy;
+    model.integration_setup = snapshot.integration_setup;
     model.settings_menu_return = snapshot.settings_menu_return;
     model.settings_menu_selected = snapshot.settings_menu_selected;
     model.routing_settings_draft = snapshot.routing_settings_draft;

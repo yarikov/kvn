@@ -1,0 +1,40 @@
+---
+source: src/ui/layout/overlay/onboarding.rs
+expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
+---
+┌ Traffic ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections                                          │
+└───────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Profiles ─────────────────────────────────────────────┐┌ Logs ────────────────────────────────────────────────┐
+│ No sources. Press p to paste a profile or subscription││                                                      │
+│URL from clipboard.                                    ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                           ┌──────────────────────────────────────────────────────┐                            │
+│                           │                Getting started · 1/10                │                            │
+│                           │                                                      │                            │
+│                           │                    Welcome to kvn                    │                            │
+│                           │                                                      │                            │
+│                           │ This quick tour will help you get kvn set up and     │                            │
+│                           │ ready to use by guiding you through routing, your    │                            │
+│                           │ first VPN profile, auto-connect, and the kill        │                            │
+│                           │ switch.                                              │                            │
+│                           │                                                      │                            │
+│                           │                        󰌑 start                       │                            │
+│                           └──────────────────────────────────────────────────────┘                            │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+└───────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
+ DISCONNECTED                                                                        DoH  Global    (off) never 
+[113x35]

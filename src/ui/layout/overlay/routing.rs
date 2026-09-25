@@ -4,6 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::app::model::Model;
+use crate::onboarding::OnboardingStep;
 use crate::ui::layout::text::visual_width;
 
 use super::popup::{draw_selection_modal, settings_content_sized_rect};
@@ -15,9 +16,13 @@ pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
     let modes = model.config.settings.geo_routing.available_modes();
     let label_strings: Vec<String> = modes.iter().map(|m| m.to_string()).collect();
     let labels: Vec<&str> = label_strings.iter().map(String::as_str).collect();
-    let active = modes
-        .iter()
-        .position(|m| *m == model.config.settings.geo_routing.mode());
+    let active = (!awaits(model, OnboardingStep::Routing))
+        .then(|| {
+            modes
+                .iter()
+                .position(|m| *m == model.config.settings.geo_routing.mode())
+        })
+        .flatten();
     draw_selection_modal(
         frame,
         &model.theme,
@@ -26,7 +31,11 @@ pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
         &labels,
         model.routing_selected,
         active,
-        settings_overlay_footer(model),
+        if awaits(model, OnboardingStep::Routing) {
+            overlay_footer(model, Some(APPLY_ACTION), false, false)
+        } else {
+            settings_overlay_footer(model)
+        },
     );
 }
 
@@ -34,12 +43,16 @@ pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
 pub(super) fn draw_region(frame: &mut Frame, model: &Model, area: Rect) {
     use crate::config::profile::GeoRegion;
     let labels = GeoRegion::ALL.map(geo_region_label);
-    let active = model
-        .config
-        .settings
-        .geo_routing
-        .current_region
-        .and_then(|r| GeoRegion::ALL.iter().position(|x| *x == r));
+    let active = (!awaits(model, OnboardingStep::Region))
+        .then(|| {
+            model
+                .config
+                .settings
+                .geo_routing
+                .current_region
+                .and_then(|r| GeoRegion::ALL.iter().position(|x| *x == r))
+        })
+        .flatten();
     draw_selection_modal(
         frame,
         &model.theme,
@@ -48,7 +61,9 @@ pub(super) fn draw_region(frame: &mut Frame, model: &Model, area: Rect) {
         &labels,
         model.geo_region_selected,
         active,
-        if model.settings_menu_return.is_some() {
+        if awaits(model, OnboardingStep::Region) {
+            overlay_footer(model, Some(APPLY_ACTION), false, false)
+        } else if model.settings_menu_return.is_some() {
             settings_overlay_footer(model)
         } else if model.config.settings.geo_routing.current_region.is_some() {
             overlay_footer(model, Some(APPLY_ACTION), true, false)
@@ -56,6 +71,12 @@ pub(super) fn draw_region(frame: &mut Frame, model: &Model, area: Rect) {
             overlay_footer(model, Some(APPLY_ACTION), false, false)
         },
     );
+}
+
+/// These pickers refuse `q`/`Esc` while the tour waits on them, so the footer
+/// must not offer a way out that does nothing.
+fn awaits(model: &Model, step: OnboardingStep) -> bool {
+    model.onboarding.awaiting == Some(step)
 }
 
 pub(super) fn geo_region_label(region: crate::config::profile::GeoRegion) -> &'static str {
@@ -134,6 +155,41 @@ mod tests {
         APP_WINDOW_COLS, APP_WINDOW_ROWS, model_with_profiles, snapshot_styles, snapshot_terminal,
     };
     use crate::ui::layout::{MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
+
+    #[test]
+    fn the_tour_pickers_drop_the_close_action_and_the_active_highlight() {
+        use crate::onboarding::OnboardingStep;
+
+        for (step, overlay) in [
+            (OnboardingStep::Region, Overlay::GeoRegions),
+            (OnboardingStep::Routing, Overlay::RoutingMode),
+        ] {
+            let mut model = model_with_profiles(vec![]);
+            model
+                .config
+                .settings
+                .geo_routing
+                .set_region(crate::config::profile::GeoRegion::Ru);
+            model.overlay = overlay;
+
+            let free = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
+            assert!(free.contains("close"), "{step:?} outside the tour");
+
+            model.onboarding.awaiting = Some(step);
+            let held = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
+            assert!(!held.contains("close"), "{step:?} during the tour");
+
+            // Nothing is "already active" during the tour: the user is choosing
+            // for the first time, so the green marker only misleads.
+            insta::with_settings!({snapshot_suffix => format!("{step:?}").to_lowercase()}, {
+                insta::assert_snapshot!(snapshot_styles(
+                    &model,
+                    APP_WINDOW_COLS,
+                    APP_WINDOW_ROWS
+                ));
+            });
+        }
+    }
 
     #[test]
     fn draw_routing_mode_overlay_snapshot() {

@@ -1,0 +1,40 @@
+---
+source: src/ui/layout/overlay/onboarding.rs
+expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
+---
+┌ Traffic ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections                                          │
+└───────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Profiles ─────────────────────────────────────────────┐┌ Logs ────────────────────────────────────────────────┐
+│ No sources. Press p to paste a profile or subscription││                                                      │
+│URL from clipboard.                                    ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                           ┌──────────────────────────────────────────────────────┐                            │
+│                           │                Getting started · 5/10                │                            │
+│                           │                                                      │                            │
+│                           │                   You’re connected!                  │                            │
+│                           │                                                      │                            │
+│                           │ Your first VPN connection is up and running.         │                            │
+│                           │                                                      │                            │
+│                           │ Next, let’s make sure everything is set up           │                            │
+│                           │ correctly.                                           │                            │
+│                           │                                                      │                            │
+│                           │                      󰌑 continue                      │                            │
+│                           └──────────────────────────────────────────────────────┘                            │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+└───────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
+ DISCONNECTED                                                                        DoH  Global    (off) never 
+[113x35]

@@ -44,6 +44,8 @@ fn handle_tick_at(model: &mut Model, now: chrono::DateTime<Local>) -> Vec<Effect
     // Auto-update subscriptions that are due.
     effects.extend(check_due_subscriptions_at(model, now));
 
+    effects.extend(crate::app::update::onboarding::open_when_idle(model));
+    effects.extend(crate::app::update::onboarding::probe_visible_card(model));
     effects.extend(tick_running_work(model));
     effects
 }
@@ -231,6 +233,7 @@ fn check_due_subscriptions_at(model: &mut Model, now: chrono::DateTime<Local>) -
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::app::msg::Msg;
     use crate::app::update::key::sources::handle_sources;

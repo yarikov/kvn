@@ -10,6 +10,7 @@ pub(super) mod confirm_delete;
 pub(super) mod confirm_disable;
 pub(super) mod dns;
 pub(super) mod ipc;
+pub(super) mod onboarding;
 pub(super) mod regions;
 pub(super) mod service_routing;
 pub(super) mod settings_menu;
@@ -22,6 +23,7 @@ use confirm_delete::handle_confirm_delete;
 use confirm_disable::handle_confirm_disable;
 use crossterm::event::{KeyCode, KeyEvent};
 use dns::handle_dns_settings;
+use onboarding::handle_onboarding;
 use regions::{handle_geo_region, handle_routing_mode};
 use service_routing::handle_service_routing;
 use settings_menu::handle_settings_menu;
@@ -56,6 +58,7 @@ pub(in crate::app::update) fn handle_key(model: &mut Model, key: KeyEvent) -> Ve
         Overlay::DnsSettings => handle_dns_settings(model, key),
         Overlay::ThemeSettings => handle_theme_picker(model, key),
         Overlay::ServiceRouting => handle_service_routing(model, key),
+        Overlay::Onboarding(step) => handle_onboarding(model, step, key),
         // Navigation and activation are client-local because the selected
         // action may need to launch a browser in that client's GUI session.
         Overlay::Support => vec![],
@@ -96,6 +99,7 @@ fn open_help(model: &mut Model) {
         Overlay::ThemeSettings => HelpContext::ThemeSettings,
         Overlay::ServiceRouting => HelpContext::ServiceRouting,
         Overlay::Support => HelpContext::Support,
+        Overlay::Onboarding(step) => HelpContext::Onboarding(step),
         Overlay::RestartRequired => return,
         Overlay::Help(_) => return,
     };

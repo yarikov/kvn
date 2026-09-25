@@ -126,6 +126,9 @@ fn relevant_groups(context: HelpContext) -> &'static [HelpGroup] {
         | HelpContext::ThemeSettings
         | HelpContext::ServiceRouting
         | HelpContext::Support => &[HelpGroup::Dialogs],
+        // The tour has no shortcuts of its own worth a section; `?` shows the
+        // same map as the rest of the app.
+        HelpContext::Onboarding(_) => &[],
     }
 }
 
@@ -288,6 +291,16 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_tour_shows_the_default_help() {
+        assert_eq!(
+            headings(HelpContext::Onboarding(
+                crate::onboarding::OnboardingStep::Region
+            )),
+            headings(HelpContext::Sources)
+        );
     }
 
     #[test]

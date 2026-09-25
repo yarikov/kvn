@@ -25,7 +25,10 @@ pub(in crate::app::update) fn handle_routing_mode(model: &mut Model, key: KeyEve
             }
         }
         KeyCode::Backspace if return_to_settings_menu(model) => {}
-        KeyCode::Char('q') | KeyCode::Esc => {
+        // Like the region picker, the tour's mode step ends only by choosing.
+        KeyCode::Char('q') | KeyCode::Esc
+            if model.onboarding.awaiting != Some(crate::onboarding::OnboardingStep::Routing) =>
+        {
             model.settings_menu_return = None;
             model.overlay = Overlay::None;
         }
@@ -53,8 +56,11 @@ pub(in crate::app::update) fn handle_geo_region(model: &mut Model, key: KeyEvent
             }
         }
         KeyCode::Backspace if return_to_settings_menu(model) => {}
+        // Unescapable without a region, and unescapable during the tour even
+        // with one: the tour's region step ends only by choosing a region.
         KeyCode::Char('q') | KeyCode::Esc
-            if model.config.settings.geo_routing.current_region.is_some() =>
+            if model.config.settings.geo_routing.current_region.is_some()
+                && model.onboarding.awaiting != Some(crate::onboarding::OnboardingStep::Region) =>
         {
             model.settings_menu_return = None;
             model.overlay = Overlay::None;
@@ -187,9 +193,6 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
-                Effect::PersistSupportPrompt {
-                    previous: crate::support_prompt::SupportPromptState::default(),
-                },
                 Effect::RefreshGeoLastUpdated,
                 app_log_info("Geo region: cn"),
                 app_log_info("Checking geo databases..."),
@@ -276,9 +279,6 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
-                Effect::PersistSupportPrompt {
-                    previous: crate::support_prompt::SupportPromptState::default(),
-                },
                 Effect::RefreshGeoLastUpdated,
                 app_log_info("Geo region: global"),
                 app_log_info("Routing mode: Global")
@@ -377,9 +377,6 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
-                Effect::PersistSupportPrompt {
-                    previous: crate::support_prompt::SupportPromptState::default(),
-                },
                 Effect::RefreshGeoLastUpdated,
                 app_log_info("Geo region: ru"),
                 app_log_info("Checking geo databases..."),

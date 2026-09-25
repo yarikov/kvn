@@ -16,9 +16,9 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
 
 - [Features](#features)
 - [Supported Protocols](#supported-protocols)
-- [First Connection](#first-connection)
 - [Installation (Arch Linux)](#installation-arch-linux)
   - [AUR](#aur)
+  - [First launch](#first-launch)
   - [Polkit setup](#polkit-setup-optional)
   - [Kill switch setup](#kill-switch-setup-optional)
   - [Omarchy integration](#omarchy-integration-optional)
@@ -72,25 +72,6 @@ the clipboard using supported share links.
 
 ---
 
-## First Connection
-
-After installation, launch the TUI:
-
-```bash
-kvn
-```
-
-Choose a regional routing preset on first launch, then:
-
-1. Copy a share link (`vless://`, `ss://`, `hysteria2://`, …) or a subscription URL to the clipboard.
-2. Press `p` to import it.
-3. Select a profile with `j` / `k` and press `Enter` to connect.
-
-Clipboard import requires `wl-clipboard` on Wayland or `xclip` / `xsel` on X11.
-Press `?` at any time to see the full key map.
-
----
-
 ## Installation (Arch Linux)
 
 Optional setup commands modify system or desktop configuration. See
@@ -108,11 +89,22 @@ systemctl --user enable --now kvn-tui.service
 available after login. The package also restores the TUN capabilities on
 `/usr/bin/sing-box` automatically after pacman upgrades it.
 
-> **Note:** Both optional setups below (`kvn setup --polkit` and
-> `kvn setup --killswitch`) add you to the dedicated `kvn-tui` group; reboot
-> once afterwards to activate it.
+### First launch
+
+Run `kvn`:
+
+```bash
+kvn
+```
+
+On first launch, kvn guides you through setup and your first VPN connection.
+You’ll need a VPN share link or subscription URL from your provider.
 
 ### Polkit setup (optional)
+
+> **Note:** This setup and the kill switch setup below (`kvn setup --killswitch`)
+> both add you to the dedicated `kvn-tui` group; reboot once afterwards to
+> activate it.
 
 Install the polkit rule to avoid repeated authentication prompts when sing-box
 configures per-link DNS through systemd-resolved. The rule grants only the

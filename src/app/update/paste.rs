@@ -80,9 +80,11 @@ fn add_and_fetch_subscription(model: &mut Model, url: &str) -> Vec<Effect> {
         id,
         name: name.clone(),
         url: url.to_string(),
-        auto_update: SubscriptionAutoUpdate::default(),
+        auto_update: SubscriptionAutoUpdate::Every1d,
         last_updated: None,
-        next_auto_update: None,
+        next_auto_update: Some(crate::config::profile::next_update_window_date(
+            chrono::Local::now(),
+        )),
         retry_state: None,
         send_hwid: false,
         hwid: None,
@@ -225,6 +227,23 @@ mod tests {
 
         handle_clipboard_text(&mut model, "  \n");
         assert_eq!(model.status_text(), "Clipboard is empty");
+    }
+
+    #[test]
+    fn a_pasted_subscription_opts_into_daily_refresh() {
+        use crate::config::profile::SubscriptionAutoUpdate;
+
+        let mut model = model_with_profiles(vec![]);
+        handle_clipboard_text(&mut model, "https://example.com/sub");
+
+        let sub = &model.config.subscriptions[0];
+        assert_eq!(sub.auto_update, SubscriptionAutoUpdate::Every1d);
+        assert_eq!(
+            sub.next_auto_update,
+            Some(crate::config::profile::next_update_window_date(
+                chrono::Local::now()
+            ))
+        );
     }
 
     #[test]

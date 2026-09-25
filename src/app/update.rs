@@ -2,6 +2,7 @@ mod config_reload;
 mod connection;
 mod geo;
 mod key;
+mod onboarding;
 mod paste;
 mod routing;
 mod status;
@@ -97,6 +98,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             handle_kill_switch_applied(model, enabled, error)
         }
         Msg::AutoConnectPolkitChecked { error } => handle_auto_connect_polkit_checked(model, error),
+        Msg::IntegrationSetupChecked(setup) => onboarding::integration_setup_checked(model, setup),
         Msg::TrafficStatsUpdated {
             attempt_id,
             request_id,

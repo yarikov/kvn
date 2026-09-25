@@ -8,13 +8,14 @@ use std::process::{Command, Output};
 
 use anyhow::Result;
 
+use crate::onboarding::{IntegrationSetup, SetupState};
+
 const MIN_SINGBOX_VERSION: (u64, u64, u64) = (1, 12, 0);
 const POLKIT_DNS_ACTIONS: [&str; 3] = [
     "org.freedesktop.resolve1.set-dns-servers",
     "org.freedesktop.resolve1.set-domains",
     "org.freedesktop.resolve1.set-default-route",
 ];
-const OMAKVN_PLUGIN_ID: &str = "yarikov.omakvn";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Level {
@@ -502,6 +503,10 @@ enum PolkitStatus {
 }
 
 fn polkit_status() -> PolkitStatus {
+    polkit_status_for(crate::services::killswitch::integration_group_status())
+}
+
+fn polkit_status_for(group: Option<crate::services::killswitch::IntegrationGroup>) -> PolkitStatus {
     let Some(identity) = polkit_process_identity() else {
         return PolkitStatus::IdentityUnknown;
     };
@@ -526,7 +531,7 @@ fn polkit_status() -> PolkitStatus {
             }
         }
     }
-    if crate::services::killswitch::integration_group_pending_activation() == Some(true) {
+    if group == Some(crate::services::killswitch::IntegrationGroup::PendingActivation) {
         return PolkitStatus::GroupPendingActivation;
     }
     PolkitStatus::Ready
@@ -558,6 +563,75 @@ fn polkit_readiness_from(status: PolkitStatus) -> Result<()> {
         PolkitStatus::GroupPendingActivation => {
             anyhow::bail!("reboot to activate the `kvn-tui` group")
         }
+    }
+}
+
+/// The setup state of both privileged integrations, for the first-run tour's
+/// protection cards. Both gate on the same `kvn-tui` group, so one reboot
+/// activates them together.
+pub(crate) fn integration_setup(root: &Path) -> IntegrationSetup {
+    let group = crate::services::killswitch::integration_group_status();
+    IntegrationSetup {
+        polkit: polkit_setup_state_from(
+            polkit_status_for(group),
+            crate::integration_files::polkit_rule_state(root),
+            group,
+        ),
+        kill_switch: killswitch_setup_state_from(killswitch_files_installed(root), group),
+        group_active: matches!(
+            group,
+            Some(crate::services::killswitch::IntegrationGroup::Active)
+        ),
+        omarchy_plugin: crate::omarchy::omakvn_plugin_installed(),
+    }
+}
+
+fn killswitch_files_installed(root: &Path) -> bool {
+    crate::integration_files::under_root(root, crate::integration_files::KILLSWITCH_HELPER_PATH)
+        .is_file()
+        && crate::integration_files::outdated_killswitch_files(root).is_empty()
+}
+
+// NOTE: an unverifiable polkit answer (`pkcheck` missing, identity unknown)
+// reads as `Missing`: rerunning `sudo kvn setup --polkit` is harmless, while
+// claiming the setup is done is not.
+fn polkit_setup_state_from(
+    status: PolkitStatus,
+    rule: crate::integration_files::StampState,
+    group: Option<crate::services::killswitch::IntegrationGroup>,
+) -> SetupState {
+    use crate::integration_files::StampState;
+    use crate::services::killswitch::IntegrationGroup;
+
+    // NOTE: a denial is one reboot away only while the group itself is pending.
+    // With the group active the rule is simply not effective, and a user who is
+    // not a member needs `setup --polkit` to be added — neither is fixed by
+    // rebooting, so both keep the setup command.
+    match status {
+        PolkitStatus::Ready => SetupState::Ready,
+        PolkitStatus::GroupPendingActivation | PolkitStatus::Denied { .. }
+            if rule == StampState::Current
+                && group == Some(IntegrationGroup::PendingActivation) =>
+        {
+            SetupState::PendingReboot
+        }
+        _ => SetupState::Missing,
+    }
+}
+
+fn killswitch_setup_state_from(
+    files_installed: bool,
+    group: Option<crate::services::killswitch::IntegrationGroup>,
+) -> SetupState {
+    use crate::services::killswitch::IntegrationGroup;
+
+    if !files_installed {
+        return SetupState::Missing;
+    }
+    match group {
+        Some(IntegrationGroup::Active) => SetupState::Ready,
+        Some(IntegrationGroup::PendingActivation) => SetupState::PendingReboot,
+        Some(IntegrationGroup::NotMember) | None => SetupState::Missing,
     }
 }
 
@@ -639,8 +713,11 @@ fn check_omarchy() -> Check {
             format!("Omarchy {major} detected; kvn requires Omarchy 4 or newer"),
             "Upgrade Omarchy, then run `kvn setup --omarchy`.",
         ),
-        _ if !omakvn_plugin_installed() => Check::warning(
-            format!("Omarchy detected; {OMAKVN_PLUGIN_ID} plugin is not installed"),
+        _ if !crate::omarchy::omakvn_plugin_installed() => Check::warning(
+            format!(
+                "Omarchy detected; {} plugin is not installed",
+                crate::omarchy::OMAKVN_PLUGIN_ID
+            ),
             "Run `kvn setup --omarchy` to install the Omarchy Shell plugin.",
         ),
         (Some(theme), _) => Check::pass(format!("Omarchy detected; active theme: {theme}")),
@@ -648,27 +725,10 @@ fn check_omarchy() -> Check {
     }
 }
 
-fn omakvn_plugin_installed() -> bool {
-    let Some(manifest) = dirs::config_dir().map(|config| {
-        config
-            .join("omarchy/plugins")
-            .join(OMAKVN_PLUGIN_ID)
-            .join("manifest.json")
-    }) else {
-        return false;
-    };
-    let Ok(raw) = std::fs::read_to_string(manifest) else {
-        return false;
-    };
-    serde_json::from_str::<serde_json::Value>(&raw)
-        .ok()
-        .and_then(|manifest| manifest.get("id")?.as_str().map(str::to_owned))
-        .is_some_and(|id| id == OMAKVN_PLUGIN_ID)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::omarchy::OMAKVN_PLUGIN_ID;
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -1084,6 +1144,103 @@ mod tests {
             check.remedy.as_deref(),
             Some("Reboot to activate the `kvn-tui` group.")
         );
+    }
+
+    #[test]
+    fn polkit_setup_state_claims_a_pending_reboot_only_for_a_pending_group() {
+        use crate::integration_files::StampState;
+        use crate::services::killswitch::IntegrationGroup;
+
+        let unverifiable = [
+            PolkitStatus::IdentityUnknown,
+            PolkitStatus::PkcheckUnavailable,
+            PolkitStatus::CheckFailed {
+                action: "a",
+                error: "boom".into(),
+            },
+        ];
+        for group in [
+            Some(IntegrationGroup::Active),
+            Some(IntegrationGroup::PendingActivation),
+            Some(IntegrationGroup::NotMember),
+            None,
+        ] {
+            for stamp in [
+                StampState::Current,
+                StampState::Outdated,
+                StampState::Missing,
+            ] {
+                assert_eq!(
+                    polkit_setup_state_from(PolkitStatus::Ready, stamp, group),
+                    SetupState::Ready,
+                    "{stamp:?} {group:?}"
+                );
+                for status in &unverifiable {
+                    assert_eq!(
+                        polkit_setup_state_from(status.clone(), stamp, group),
+                        SetupState::Missing,
+                        "{status:?} {stamp:?} {group:?}"
+                    );
+                }
+            }
+
+            // An installed rule that does not grant access is one reboot away
+            // only while the group is pending: an active group means the rule is
+            // not effective, and a non-member needs `setup --polkit` to be added.
+            let installed = match group {
+                Some(IntegrationGroup::PendingActivation) => SetupState::PendingReboot,
+                _ => SetupState::Missing,
+            };
+            for status in [
+                PolkitStatus::GroupPendingActivation,
+                PolkitStatus::Denied { action: "a" },
+            ] {
+                assert_eq!(
+                    polkit_setup_state_from(status.clone(), StampState::Current, group),
+                    installed,
+                    "{status:?} {group:?}"
+                );
+                for stamp in [StampState::Outdated, StampState::Missing] {
+                    assert_eq!(
+                        polkit_setup_state_from(status.clone(), stamp, group),
+                        SetupState::Missing,
+                        "{status:?} {stamp:?} {group:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn killswitch_setup_state_follows_the_group_once_the_files_are_installed() {
+        use crate::services::killswitch::IntegrationGroup;
+
+        for group in [
+            Some(IntegrationGroup::Active),
+            Some(IntegrationGroup::PendingActivation),
+            Some(IntegrationGroup::NotMember),
+            None,
+        ] {
+            assert_eq!(
+                killswitch_setup_state_from(false, group),
+                SetupState::Missing,
+                "{group:?}"
+            );
+        }
+
+        assert_eq!(
+            killswitch_setup_state_from(true, Some(IntegrationGroup::Active)),
+            SetupState::Ready
+        );
+        assert_eq!(
+            killswitch_setup_state_from(true, Some(IntegrationGroup::PendingActivation)),
+            SetupState::PendingReboot
+        );
+        assert_eq!(
+            killswitch_setup_state_from(true, Some(IntegrationGroup::NotMember)),
+            SetupState::Missing
+        );
+        assert_eq!(killswitch_setup_state_from(true, None), SetupState::Missing);
     }
 
     #[test]

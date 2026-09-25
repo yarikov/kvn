@@ -16,6 +16,7 @@ mod ipc;
 mod migrations;
 mod net;
 mod omarchy;
+mod onboarding;
 mod paths;
 mod redaction;
 mod services;

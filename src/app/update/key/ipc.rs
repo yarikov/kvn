@@ -7,6 +7,7 @@ use crate::app::model::{AppStatus, Model, Overlay};
 use crate::app::update::key::handle_key;
 use crate::app::update::key::settings_menu::{set_auto_connect, set_kill_switch};
 use crate::app::update::key::theme::theme_picker_slugs;
+use crate::app::update::onboarding;
 use crate::app::update::paste::handle_clipboard_text;
 use crate::app::update::routing::{commit_geo_region, commit_routing_mode};
 use crate::app::update::status::{handle_copied_status, push_status};
@@ -34,6 +35,7 @@ pub(in crate::app::update) fn handle_ipc_command(
     }
     let effects = match cmd {
         IpcCommand::Attach | IpcCommand::AttachSession | IpcCommand::Detach => vec![],
+        IpcCommand::CheckOnboarding => onboarding::resume(model),
         IpcCommand::CheckSupportPrompt => support::check_prompt(model),
         IpcCommand::ResolveSupportPrompt { resolution } => {
             support::resolve_prompt(model, resolution)
@@ -115,6 +117,7 @@ pub(in crate::app::update) fn handle_go_first(model: &mut Model) -> Vec<Effect> 
             crate::ui::nav::select_first(&mut model.service_routing_selected);
         }
         Overlay::Support => crate::ui::nav::select_first(&mut model.support_selected),
+        Overlay::Onboarding(_) => {}
         Overlay::Help(mut state) => {
             state.selected = crate::ui::help::first_command(&crate::ui::help::rows(state.context));
             model.overlay = Overlay::Help(state);

@@ -2,6 +2,7 @@ mod confirm_delete;
 mod confirm_disable;
 mod dns;
 mod help;
+mod onboarding;
 pub(super) mod popup;
 mod restart_required;
 mod routing;
@@ -32,6 +33,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         Overlay::ThemeSettings => theme::draw(frame, model, area),
         Overlay::ServiceRouting => routing::draw_services(frame, model, area),
         Overlay::Support => support::draw(frame, model, area),
+        Overlay::Onboarding(step) => onboarding::draw(frame, model, step, area),
         Overlay::RestartRequired => restart_required::draw(frame, model, area),
         Overlay::None => {}
     }
@@ -111,6 +113,9 @@ mod tests {
             ("restart-required", |model: &mut Model| {
                 model.overlay = Overlay::RestartRequired;
                 model.restart_required = true;
+            }),
+            ("onboarding", |model: &mut Model| {
+                model.overlay = Overlay::Onboarding(crate::onboarding::OnboardingStep::AutoConnect);
             }),
         ];
 

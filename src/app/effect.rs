@@ -32,6 +32,12 @@ pub enum Effect {
     PersistSupportPrompt {
         previous: crate::support_prompt::SupportPromptState,
     },
+    PersistOnboarding {
+        previous: crate::onboarding::OnboardingProgress,
+        /// How a failed write has to repair the screen — see
+        /// `daemon::config_io::restore_onboarding_after_failure`.
+        recovery: crate::onboarding::OnboardingRecovery,
+    },
     SaveConfigConflict {
         edited: Box<Config>,
         conflicts: Vec<String>,
@@ -54,6 +60,9 @@ pub enum Effect {
         enabled: bool,
     },
     CheckAutoConnectPolkit,
+    /// Re-probe the privileged integrations behind the tour's protection and
+    /// Omarchy cards, so their copy follows a setup run in another terminal.
+    CheckIntegrationSetup,
     /// Ask the daemon to scrape the Clash API once. IDs bind the asynchronous
     /// reply to the current connection and order overlapping requests.
     FetchTrafficStats {

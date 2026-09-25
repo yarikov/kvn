@@ -138,6 +138,7 @@ pub enum Msg {
     AutoConnectPolkitChecked {
         error: Option<IpcError>,
     },
+    IntegrationSetupChecked(crate::onboarding::IntegrationSetup),
     /// Raw sample of cumulative byte counters from sing-box's Clash API,
     /// timestamped so the pure-layer can compute a per-second rate against
     /// the previous sample stored in `Model::traffic`.
@@ -227,6 +228,10 @@ pub enum IpcCommand {
     ClearErrorStatus {
         status_revision: u64,
     },
+    /// Ask the daemon to resume an unfinished first-run tour. Only a fresh TUI
+    /// launch sends this command, and it is sent before `CheckSupportPrompt` so
+    /// the two can never stack.
+    CheckOnboarding,
     /// Ask the daemon to show the support prompt when its persisted deadline
     /// is due. Only a fresh TUI launch sends this command.
     CheckSupportPrompt,
@@ -346,6 +351,7 @@ mod tests {
             IpcCommand::Attach,
             IpcCommand::AttachSession,
             IpcCommand::ClearErrorStatus { status_revision: 7 },
+            IpcCommand::CheckOnboarding,
             IpcCommand::CheckSupportPrompt,
             IpcCommand::Detach,
             IpcCommand::Key {
@@ -463,6 +469,18 @@ pub struct StateSnapshot {
             crate::config::profile::ServiceRoute,
         >,
     >,
+    /// Step whose real screen the first-run tour is waiting on. The pickers
+    /// render differently while it is set, so it has to reach the client.
+    #[serde(default)]
+    pub onboarding_awaiting: Option<crate::onboarding::OnboardingStep>,
+    /// Whether the tour includes its Omarchy card. The daemon decides it, since
+    /// the card's own command installs the plugin that removes it — a client
+    /// started afterwards would otherwise count a shorter tour than the daemon.
+    #[serde(default)]
+    pub onboarding_omarchy: bool,
+    /// Setup state of the privileged integrations the protection cards ask for.
+    #[serde(default)]
+    pub integration_setup: crate::onboarding::IntegrationSetup,
     #[serde(default)]
     pub settings_menu_return: Option<crate::app::model::SettingsMenuPage>,
     #[serde(default)]

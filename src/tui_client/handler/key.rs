@@ -1,6 +1,7 @@
 mod clipboard;
 mod editor;
 mod log_pane;
+mod onboarding;
 mod quit;
 mod support;
 
@@ -30,6 +31,7 @@ pub(super) fn handle(state: &mut ClientLoop, key: KeyEvent) -> Result<Flow> {
         return Ok(quit::stop_daemon(state));
     }
     match state.model.overlay {
+        Overlay::Onboarding(step) => onboarding::handle(state, step, key, completes_go_first),
         Overlay::Support => support::handle(state, key, completes_go_first),
         Overlay::None => main_screen(state, key, completes_go_first),
         _ => overlay(state, key, completes_go_first),
