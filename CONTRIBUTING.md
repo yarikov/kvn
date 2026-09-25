@@ -104,10 +104,10 @@ Total region and line coverage must remain at or above 85%. Before opening a
 pull request, run:
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --locked
-cargo llvm-cov --locked --summary-only
+cargo fmt --check \
+  && cargo clippy --all-targets --all-features -- -D warnings \
+  && cargo test --locked \
+  && cargo llvm-cov --locked --summary-only
 ```
 
 The last command requires `cargo-llvm-cov`. CI runs the same formatting,

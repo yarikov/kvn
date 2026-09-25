@@ -81,8 +81,8 @@ permissions, and removal instructions.
 ### AUR
 
 ```bash
-yay -S kvn-tui-bin
-systemctl --user enable --now kvn-tui.service
+yay -S kvn-tui-bin \
+  && systemctl --user enable --now kvn-tui.service
 ```
 
 `sing-box` is installed automatically. The user service keeps the daemon
@@ -181,25 +181,25 @@ Requires Rust 1.88+, sing-box 1.12+, `base-devel`, `dbus`, and a clipboard tool
 (`wl-clipboard` on Wayland or `xclip` / `xsel` on X11).
 
 ```bash
-yay -S base-devel rust dbus sing-box wl-clipboard
-git clone https://github.com/yarikov/kvn-tui.git
-cd kvn-tui
+yay -S base-devel rust dbus sing-box wl-clipboard \
+  && git clone https://github.com/yarikov/kvn-tui.git \
+  && cd kvn-tui
 ```
 
 For a packaged installation with the binary in `/usr/bin` and the systemd user
 service included:
 
 ```bash
-cd pkg/arch
-makepkg -si
+cd pkg/arch \
+  && makepkg -si
 ```
 
 Alternatively, install only the binary from the repository root:
 
 ```bash
-cargo build --release --locked
-sudo install -Dm755 target/release/kvn-tui /usr/local/bin/kvn
-sudo setcap cap_net_admin,cap_net_raw+ep "$(command -v sing-box)"
+cargo build --release --locked \
+  && sudo install -Dm755 target/release/kvn-tui /usr/local/bin/kvn \
+  && sudo setcap cap_net_admin,cap_net_raw+ep "$(command -v sing-box)"
 ```
 
 The capabilities allow sing-box to use TUN without running kvn as root. The
