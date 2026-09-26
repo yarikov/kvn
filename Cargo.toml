@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Dmitry Yarikov <dmitry@yarikov.com>"]
 description = "kvn — keyboard-first TUI for managing VPN connections"
 license = "MIT"
-repository = "https://github.com/yarikov/kvn-tui"
+repository = "https://github.com/yarikov/kvn"
 rust-version = "1.88"
 
 [dependencies]

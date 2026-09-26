@@ -40,7 +40,7 @@ jobs:
 
       - name: Download tarball and compute checksum
         run: |
-          curl -sL "https://github.com/yarikov/kvn-tui/releases/download/v${VERSION}/kvn-tui-${VERSION}-x86_64-linux.tar.gz" -o /tmp/pkg.tar.gz
+          curl -sL "https://github.com/yarikov/kvn/releases/download/v${VERSION}/kvn-tui-${VERSION}-x86_64-linux.tar.gz" -o /tmp/pkg.tar.gz
           SHA256=$(sha256sum /tmp/pkg.tar.gz | awk '{print $1}')
           echo "SHA256=$SHA256" >> $GITHUB_ENV
 

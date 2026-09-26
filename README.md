@@ -1,10 +1,10 @@
 # kvn
 
-[![CI](https://github.com/yarikov/kvn-tui/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/yarikov/kvn-tui/actions/workflows/ci.yml)
+[![CI](https://github.com/yarikov/kvn/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/yarikov/kvn/actions/workflows/ci.yml)
 [![AUR version](https://img.shields.io/aur/version/kvn-tui-bin?logo=arch-linux&label=AUR)](https://aur.archlinux.org/packages/kvn-tui-bin)
-[![GitHub Release](https://img.shields.io/github/v/release/yarikov/kvn-tui?logo=github&label=release)](https://github.com/yarikov/kvn-tui/releases/latest)
+[![GitHub Release](https://img.shields.io/github/v/release/yarikov/kvn?logo=github&label=release)](https://github.com/yarikov/kvn/releases/latest)
 [![Rust Version](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![License](https://img.shields.io/github/license/yarikov/kvn-tui)](LICENSE)
+[![License](https://img.shields.io/github/license/yarikov/kvn)](LICENSE)
 
 Keyboard-first TUI for managing VPN connections. It provides a fast, minimal interface for configuring profiles, connecting via [sing-box](https://sing-box.sagernet.org/) and routing traffic.
 
@@ -167,8 +167,8 @@ Requires Rust 1.88+, sing-box 1.12+, `base-devel`, `dbus`, and a clipboard tool
 
 ```bash
 yay -S base-devel rust dbus sing-box wl-clipboard \
-  && git clone https://github.com/yarikov/kvn-tui.git \
-  && cd kvn-tui
+  && git clone https://github.com/yarikov/kvn.git \
+  && cd kvn
 ```
 
 For a packaged installation with the binary in `/usr/bin` and the systemd user

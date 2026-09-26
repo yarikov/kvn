@@ -1,6 +1,6 @@
 [Unit]
 Description=kvn-tui VPN daemon
-Documentation=https://github.com/yarikov/kvn-tui
+Documentation=https://github.com/yarikov/kvn
 
 [Service]
 Type=simple

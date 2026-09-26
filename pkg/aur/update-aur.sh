@@ -11,7 +11,7 @@ TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 # Download tarball to compute checksum
-curl -sL "https://github.com/yarikov/kvn-tui/releases/download/v${VERSION}/kvn-tui-${VERSION}-x86_64-linux.tar.gz" -o "$TMPDIR/pkg.tar.gz"
+curl -sL "https://github.com/yarikov/kvn/releases/download/v${VERSION}/kvn-tui-${VERSION}-x86_64-linux.tar.gz" -o "$TMPDIR/pkg.tar.gz"
 SHA256=$(sha256sum "$TMPDIR/pkg.tar.gz" | awk '{print $1}')
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

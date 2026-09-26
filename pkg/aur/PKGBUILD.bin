@@ -4,7 +4,7 @@ pkgver={{VERSION}}
 pkgrel=1
 pkgdesc="Terminal VPN client for Arch Linux with vim navigation"
 arch=('x86_64')
-url="https://github.com/yarikov/kvn-tui"
+url="https://github.com/yarikov/kvn"
 license=('MIT')
 install=kvn-tui.install
 depends=('gcc-libs' 'dbus' 'libcap' 'sing-box')
@@ -16,7 +16,7 @@ optdepends=(
 )
 provides=('kvn-tui')
 conflicts=('kvn-tui')
-source=("https://github.com/yarikov/kvn-tui/releases/download/v{{VERSION}}/kvn-tui-{{VERSION}}-x86_64-linux.tar.gz")
+source=("https://github.com/yarikov/kvn/releases/download/v{{VERSION}}/kvn-tui-{{VERSION}}-x86_64-linux.tar.gz")
 sha256sums=('{{SHA256SUM}}')
 
 package() {
