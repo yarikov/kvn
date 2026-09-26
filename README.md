@@ -18,7 +18,7 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
 - [Supported Protocols](#supported-protocols)
 - [Installation (Arch Linux)](#installation-arch-linux)
   - [AUR](#aur)
-  - [First launch](#first-launch)
+  - [Getting started](#getting-started)
   - [Polkit setup](#polkit-setup-optional)
   - [Kill switch setup](#kill-switch-setup-optional)
   - [Omarchy integration](#omarchy-integration-optional)
@@ -89,7 +89,7 @@ yay -S kvn-tui-bin \
 available after login. The package also restores the TUN capabilities on
 `/usr/bin/sing-box` automatically after pacman upgrades it.
 
-### First launch
+### Getting started
 
 Run `kvn`:
 
@@ -102,50 +102,37 @@ You’ll need a VPN share link or subscription URL from your provider.
 
 ### Polkit setup (optional)
 
-> **Note:** This setup and the kill switch setup below (`kvn setup --killswitch`)
-> both add you to the dedicated `kvn-tui` group; reboot once afterwards to
-> activate it.
+> **Note:** This setup and the kill switch setup below both add you to the
+> dedicated `kvn-tui` group; reboot once afterwards to activate it.
 
-Install the polkit rule to avoid repeated authentication prompts when sing-box
-configures per-link DNS through systemd-resolved. The rule grants only the
-three required resolved actions to members of the dedicated `kvn-tui` group;
-it does not grant NetworkManager permissions:
+Polkit lets kvn auto-connect and reconnect without authentication prompts. Set
+it up:
 
 ```bash
 sudo pacman -S --needed polkit \
   && sudo kvn setup --polkit
 ```
 
-Because authorization is group-wide, every process running as
-an enrolled user can request those three DNS operations. Skip this setup if you
-prefer interactive polkit authorization and do not need unattended auto-connect
-or resume reconnects. Enabling auto-connect requires this setup: kvn refuses to
-turn it on until the polkit rule is installed and the `kvn-tui` group is active
-in the current session.
+After setup and a reboot, toggle it with `Shift+A`.
 
 ### Kill switch setup (optional)
 
-The kill switch requires `nftables` and blocks outbound traffic when the VPN is
-not active:
+> **Note:** If the daemon crashes or cannot start while the kill switch is
+> enabled, use the emergency command below to restore network access.
+>
+> ```bash
+> kvn disable --killswitch
+> ```
+
+The kill switch prevents new internet connections from going outside the VPN
+if the tunnel goes down. Set it up:
 
 ```bash
 sudo pacman -S --needed nftables \
   && sudo kvn setup --killswitch
 ```
 
-The kill-switch sudoers rule uses the same dedicated `kvn-tui` group and allows
-only the validating helper installed at `/usr/lib/kvn-tui/killswitch-helper.sh`.
-
-Toggle it with `Shift+K` or from the `Space c` settings menu; when enabled, the
-status bar shows `KS`. Disabling it with `Shift+K` asks for confirmation first,
-so it cannot be turned off by an accidental key press.
-
-> **Note:** If the daemon crashes or cannot start in this state, use the
-> emergency command below to restore network access.
->
-> ```bash
-> kvn disable --killswitch
-> ```
+After setup and a reboot, toggle it with `Shift+K`.
 
 ### Omarchy integration (optional)
 
@@ -172,8 +159,6 @@ kvn clean --omarchy
 ```
 
 This removes only the backups and leaves the active integration unchanged.
-Removal instructions are documented in
-[`docs/system-integration.md`](docs/system-integration.md#backups-and-removal).
 
 ### Build from source
 
@@ -262,13 +247,7 @@ detected problems.
 | `Shift+A` | Toggle auto-connect |
 | `Shift+K` | Toggle kill switch |
 
-Turning either off asks for confirmation first; turning them on applies right
-away. The `Space c` settings screen applies both directions without a dialog.
-
 **Settings**
-
-Press `Space` to open settings. Use `j` / `k` to select an item, `h` / `l` to
-change its draft value, and `Enter` to apply all changes on the current screen.
 
 | Key | Action |
 |-----|--------|
