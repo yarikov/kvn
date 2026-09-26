@@ -12,7 +12,7 @@ use crate::ui::layout::text::visual_width;
 use super::overlay_footer;
 use super::popup::centered_fixed_width_rect;
 
-const ONBOARDING_POPUP_WIDTH: u16 = 56;
+pub(super) const ONBOARDING_POPUP_WIDTH: u16 = 56;
 const TEXT_MARGIN: usize = 1;
 
 pub(super) fn draw(frame: &mut Frame, model: &Model, step: OnboardingStep, area: Rect) {
@@ -189,6 +189,10 @@ fn wrap(runs: &[Run], width: usize) -> Vec<Line<'static>> {
         lines.push(Line::from(spans).left_aligned());
     }
     lines
+}
+
+pub(super) fn wrap_plain(value: &str, width: usize) -> Vec<Line<'static>> {
+    wrap(&[Run::plain(value)], width)
 }
 
 fn title(model: &Model, step: OnboardingStep) -> &'static str {

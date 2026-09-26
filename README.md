@@ -336,7 +336,7 @@ request titles are used in generated release notes.
 
 Created and maintained by [Dmitry Yarikov](https://github.com/yarikov) — <dmitry@yarikov.com>.
 
-If `kvn` saves you time, you can [buy me a coffee](https://web.tribute.tg/d/QbU) ☕
+If `kvn` saves you time, you can [buy me a coffee](https://web.tribute.tg/d/QUv) ☕
 
 ## License
 

@@ -6,12 +6,13 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use crate::app::model::Model;
 use crate::ui::layout::text::{align_in_centered_column, visual_width};
 
-use super::popup::{DIALOG_POPUP_WIDTH, centered_fixed_width_rect};
+use super::onboarding::{ONBOARDING_POPUP_WIDTH, wrap_plain};
+use super::popup::centered_fixed_width_rect;
 use super::{CONFIRM_ACTION, overlay_footer};
 
 pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
-    const ITEMS: [&str; 3] = ["Support development", "Remind me later", "Don't show again"];
-    let horizontal_area = centered_fixed_width_rect(DIALOG_POPUP_WIDTH, area);
+    const ITEMS: [&str; 3] = ["Buy me a coffee ☕", "Maybe later", "Don't ask again"];
+    let horizontal_area = centered_fixed_width_rect(ONBOARDING_POPUP_WIDTH, area);
     let row_width = horizontal_area.width.saturating_sub(2) as usize;
     let column_width = ITEMS
         .iter()
@@ -20,25 +21,14 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         .unwrap_or(0)
         .min(row_width);
     let build_lines = |compact: bool| {
-        let mut lines = vec![Line::from(Span::styled(
-            "Support kvn 🚀",
-            model.theme.accent(),
-        ))];
+        let mut lines =
+            vec![Line::from(Span::styled("Enjoying kvn?", model.theme.normal())).centered()];
         if !compact {
             lines.push(Line::from(""));
         }
-        lines.push(Line::from("kvn is free, open source, and built with care."));
-        if !compact {
-            lines.push(Line::from(""));
-        }
-        lines.push(Line::from(
-            "If you find it useful, consider supporting its continued development.",
-        ));
-        if !compact {
-            lines.push(Line::from(""));
-        }
-        lines.push(Line::from(
-            "Your support helps cover AI tools, testing, bug fixes, improvements, and new features.",
+        lines.extend(wrap_plain(
+            "If it saves you time, you can say thanks with a coffee.",
+            row_width,
         ));
         if !compact {
             lines.push(Line::from(""));

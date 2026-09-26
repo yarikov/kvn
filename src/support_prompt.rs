@@ -5,10 +5,10 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-pub const INITIAL_DELAY_DAYS: i64 = 7;
+pub const INITIAL_DELAY_DAYS: i64 = 14;
 pub const REMINDER_DELAY_DAYS: i64 = 30;
 pub const SUPPORTED_DELAY_DAYS: i64 = 180;
-pub const SUPPORT_URL: &str = "https://web.tribute.tg/d/QbU";
+pub const SUPPORT_URL: &str = "https://web.tribute.tg/d/QUv";
 
 /// Small, non-config UX state. Keeping it outside profiles.json avoids making
 /// an optional prompt part of the versioned VPN configuration schema.
@@ -107,12 +107,12 @@ mod tests {
     }
 
     #[test]
-    fn initial_schedule_becomes_due_after_seven_days() {
+    fn initial_schedule_becomes_due_after_fourteen_days() {
         let now = now();
         let mut state = SupportPromptState::default();
         assert!(state.schedule_initial(now));
-        assert!(!state.is_due(now + Duration::days(7) - Duration::seconds(1)));
-        assert!(state.is_due(now + Duration::days(7)));
+        assert!(!state.is_due(now + Duration::days(14) - Duration::seconds(1)));
+        assert!(state.is_due(now + Duration::days(14)));
         assert!(!state.schedule_initial(now + Duration::days(1)));
     }
 

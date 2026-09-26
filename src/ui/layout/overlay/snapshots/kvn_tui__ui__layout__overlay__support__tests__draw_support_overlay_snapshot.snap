@@ -11,23 +11,23 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
-│                               ┌──────────────────────────────────────────────┐                                │
-│                               │                Support kvn 🚀                 │                                │
-│                               │                                              │                                │
-│                               │kvn is free, open source, and built with care.│                                │
-│                               │                                              │                                │
-│                               │If you find it useful, consider supporting its│                                │
-│                               │            continued development.            │                                │
-│                               │                                              │                                │
-│                               │  Your support helps cover AI tools, testing, │                                │
-│                               │  bug fixes, improvements, and new features.  │                                │
-│                               │                                              │                                │
-│                               │             Support development              │                                │
-│                               │             Remind me later                  │                                │
-│                               │             Don't show again                 │                                │
-│                               │                                              │                                │
-│                               │             󰌑 confirm · q/󱊷 close            │                                │
-│                               └──────────────────────────────────────────────┘                                │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                           ┌──────────────────────────────────────────────────────┐                            │
+│                           │                     Enjoying kvn?                    │                            │
+│                           │                                                      │                            │
+│                           │ If it saves you time, you can say thanks with a      │                            │
+│                           │ coffee.                                              │                            │
+│                           │                                                      │                            │
+│                           │                  Buy me a coffee ☕                   │                            │
+│                           │                  Maybe later                         │                            │
+│                           │                  Don't ask again                     │                            │
+│                           │                                                      │                            │
+│                           │                 󰌑 confirm · q/󱊷 close                │                            │
+│                           └──────────────────────────────────────────────────────┘                            │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
