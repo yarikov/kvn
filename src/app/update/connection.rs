@@ -123,7 +123,7 @@ pub(in crate::app::update) fn on_system_resumed(model: &mut Model) -> Vec<Effect
     push_status(
         &mut effects,
         model,
-        AppStatus::Info("Resumed — reconnecting…".into()),
+        AppStatus::Info("VPN resumed — reconnecting…".into()),
     );
     effects
 }
@@ -172,7 +172,7 @@ pub(in crate::app::update) fn handle_kill_switch_applied(
             push_status(
                 &mut effects,
                 model,
-                AppStatus::Error(format!("Kill switch: {}", err)),
+                AppStatus::Error(format!("Kill switch failed: {}", err)),
             );
             effects.push(Effect::BroadcastState);
         }
@@ -203,7 +203,7 @@ pub(in crate::app::update) fn handle_auto_connect_polkit_checked(
             push_status(
                 &mut effects,
                 model,
-                AppStatus::Error(format!("Auto-connect not enabled: {err}")),
+                AppStatus::Error(format!("Auto-connect failed: {err}")),
             );
         }
     }
@@ -563,7 +563,7 @@ mod tests {
         let effects = update(&mut model, Msg::SystemResumed);
 
         assert_eq!(model.connecting_profile_id, Some(a_id));
-        assert!(effects.contains(&app_log_info("Resumed — reconnecting…")));
+        assert!(effects.contains(&app_log_info("VPN resumed — reconnecting…")));
         let tick_effects = handle_tick(&mut model);
         assert!(
             tick_effects.iter().any(
@@ -692,7 +692,7 @@ mod tests {
             },
         );
 
-        let message = "Auto-connect not enabled: reboot to activate the `kvn-tui` group";
+        let message = "Auto-connect failed: reboot to activate the `kvn-tui` group";
         assert!(!model.config.settings.auto_connect);
         assert!(!model.auto_connect_pending);
         assert_eq!(model.status, Some(AppStatus::Error(message.into())));

@@ -25,7 +25,7 @@ pub(super) fn connect_profile(model: &mut Model, profile_id: Uuid) -> Vec<Effect
         None => push_status(
             &mut effects,
             model,
-            AppStatus::Error("Cannot connect: profile no longer exists".into()),
+            AppStatus::Error("Connection failed: profile no longer exists".into()),
         ),
     }
     effects
@@ -56,7 +56,7 @@ pub(super) fn reconnect(model: &mut Model) -> Vec<Effect> {
             push_status(
                 &mut effects,
                 model,
-                AppStatus::Error("Cannot reconnect while VPN is disconnected".into()),
+                AppStatus::Error("Reconnect failed: VPN is disconnected".into()),
             );
             return effects;
         }
@@ -65,7 +65,7 @@ pub(super) fn reconnect(model: &mut Model) -> Vec<Effect> {
         model,
         profile_id,
         "Reconnecting to",
-        "Cannot reconnect: profile no longer exists",
+        "Reconnect failed: profile no longer exists",
     )
 }
 
@@ -78,7 +78,7 @@ pub(super) fn toggle(model: &mut Model) -> Vec<Effect> {
             model,
             model.config.settings.last_connected_profile,
             "Connecting to",
-            "No previous profile to connect; run `kvn connect <name>` first",
+            "Connection failed: no previous profile; run `kvn connect <name>` first",
         ),
     }
 }
@@ -181,15 +181,12 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                app_log_error("Cannot reconnect while VPN is disconnected"),
+                app_log_error("Reconnect failed: VPN is disconnected"),
                 Effect::BroadcastState,
             ]
         );
         assert_eq!(model.connection, ConnectionState::Idle);
-        assert_eq!(
-            model.status_text(),
-            "Cannot reconnect while VPN is disconnected"
-        );
+        assert_eq!(model.status_text(), "Reconnect failed: VPN is disconnected");
     }
 
     #[test]
@@ -234,7 +231,9 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                app_log_error("No previous profile to connect; run `kvn connect <name>` first"),
+                app_log_error(
+                    "Connection failed: no previous profile; run `kvn connect <name>` first"
+                ),
                 Effect::BroadcastState,
             ]
         );

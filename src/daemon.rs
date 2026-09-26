@@ -173,11 +173,11 @@ fn run_loop(
                     }
                     let message = match crate::config::save_conflict_config(&edited) {
                         Ok(path) => format!(
-                            "Failed to save config: {error:#}; unsaved version preserved at {}",
+                            "Configuration save failed: {error:#}; unsaved version preserved at {}",
                             path.display()
                         ),
                         Err(save_error) => format!(
-                            "Failed to save config: {error:#}; failed to preserve unsaved version: {save_error:#}"
+                            "Configuration save failed: {error:#}; unsaved version preservation failed: {save_error:#}"
                         ),
                     };
                     model.set_status(AppStatus::Error(message.clone()));

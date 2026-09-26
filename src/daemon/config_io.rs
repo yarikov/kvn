@@ -58,7 +58,7 @@ pub(super) fn report_uncommitted_save(model: &mut Model) {
     // `commit_config_change` before executing effects. Never fall
     // back to an unconditional write here.
     model.set_status(AppStatus::Error(
-        "Internal error: uncommitted SaveConfig effect".into(),
+        "Configuration save failed: uncommitted SaveConfig effect".into(),
     ));
 }
 
@@ -71,7 +71,7 @@ pub(super) fn persist_support_prompt(model: &mut Model, previous: SupportPromptS
         if model.support_prompt.is_due(chrono::Utc::now()) {
             model.overlay = Overlay::Support;
         }
-        let message = format!("Failed to save support prompt state: {error:#}");
+        let message = format!("Support prompt save failed: {error:#}");
         model.set_status(AppStatus::Error(message.clone()));
         crate::services::log_tailer::append_app_log("ERROR", &message);
     }
@@ -89,7 +89,7 @@ pub(super) fn persist_onboarding(
         Ok(()) => arm_support_prompt_after_onboarding(model),
         Err(error) => {
             restore_onboarding_after_failure(model, previous, recovery);
-            let message = format!("Failed to save onboarding progress: {error:#}");
+            let message = format!("Onboarding progress save failed: {error:#}");
             model.set_status(AppStatus::Error(message.clone()));
             crate::services::log_tailer::append_app_log("ERROR", &message);
         }
@@ -146,12 +146,12 @@ fn arm_support_prompt_after_onboarding(model: &mut Model) {
 pub(super) fn save_conflict(model: &mut Model, edited: Box<Config>, conflicts: Vec<String>) {
     match crate::config::save_conflict_config(&edited) {
         Ok(path) => model.set_status(AppStatus::Error(format!(
-            "Edit conflicts at {}; edited version saved to {}",
+            "Configuration edit failed: conflicts at {}; edited version saved to {}",
             conflicts.join(", "),
             path.display()
         ))),
         Err(error) => model.set_status(AppStatus::Error(format!(
-            "Edit conflicts at {}; failed to save edited version: {error:#}",
+            "Configuration edit failed: conflicts at {}; edited version save failed: {error:#}",
             conflicts.join(", ")
         ))),
     }
@@ -176,11 +176,11 @@ pub(super) fn commit_edited(
         Err(error) => {
             let message = match crate::config::save_conflict_config(&edited) {
                 Ok(path) => format!(
-                    "Failed to apply edited config: {error:#}; edited version saved to {}",
+                    "Configuration edit failed: {error:#}; edited version saved to {}",
                     path.display()
                 ),
                 Err(save_error) => format!(
-                    "Failed to apply edited config: {error:#}; failed to preserve edited version: {save_error:#}"
+                    "Configuration edit failed: {error:#}; edited version preservation failed: {save_error:#}"
                 ),
             };
             model.set_status(AppStatus::Error(message.clone()));

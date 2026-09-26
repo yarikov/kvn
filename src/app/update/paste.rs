@@ -13,7 +13,7 @@ pub(in crate::app::update) fn handle_clipboard_text(model: &mut Model, text: &st
         let message = if trimmed.is_empty() {
             "Clipboard is empty"
         } else {
-            "Not a supported VPN link or subscription URL"
+            "Profile import failed: unsupported VPN link or subscription URL"
         };
         let mut effects = Vec::new();
         push_status(
@@ -34,7 +34,9 @@ pub(in crate::app::update) fn handle_clipboard_text(model: &mut Model, text: &st
                 push_status(
                     &mut effects,
                     model,
-                    crate::app::model::AppStatus::Error("Profile already exists".into()),
+                    crate::app::model::AppStatus::Error(
+                        "Profile import failed: profile already exists".into(),
+                    ),
                 );
                 return effects;
             }
@@ -44,7 +46,7 @@ pub(in crate::app::update) fn handle_clipboard_text(model: &mut Model, text: &st
             push_status(
                 &mut effects,
                 model,
-                crate::app::model::AppStatus::Info(format!("Pasted profile: {}", name)),
+                crate::app::model::AppStatus::Info(format!("Profile imported: {}", name)),
             );
             effects
         }
@@ -53,7 +55,7 @@ pub(in crate::app::update) fn handle_clipboard_text(model: &mut Model, text: &st
             push_status(
                 &mut effects,
                 model,
-                crate::app::model::AppStatus::Error(format!("Invalid URI: {}", e)),
+                crate::app::model::AppStatus::Error(format!("Profile import failed: {}", e)),
             );
             effects
         }
@@ -69,7 +71,7 @@ fn add_and_fetch_subscription(model: &mut Model, url: &str) -> Vec<Effect> {
         push_status(
             &mut effects,
             model,
-            crate::app::model::AppStatus::Error(error.to_string()),
+            crate::app::model::AppStatus::Error(format!("Subscription import failed: {error}")),
         );
         return effects;
     }
@@ -106,7 +108,7 @@ fn add_and_fetch_subscription(model: &mut Model, url: &str) -> Vec<Effect> {
         &mut effects,
         model,
         crate::app::model::AppStatus::Info(format!(
-            "Added subscription '{}' and fetching profiles…",
+            "Subscription added: {} — fetching profiles…",
             name
         )),
     );
@@ -136,14 +138,19 @@ mod tests {
         assert_eq!(model.config.profiles.len(), 1);
         assert_eq!(
             effects,
-            vec![Effect::SaveConfig, app_log_info("Pasted profile: Test")]
+            vec![Effect::SaveConfig, app_log_info("Profile imported: Test")]
         );
-        assert!(model.status_text().contains("Pasted profile"));
+        assert!(model.status_text().contains("Profile imported"));
 
         // Second paste with same UUID fails
         let effects = handle_clipboard_text(&mut model, uri);
         assert_eq!(model.config.profiles.len(), 1);
-        assert_eq!(effects, vec![app_log_error("Profile already exists")]);
+        assert_eq!(
+            effects,
+            vec![app_log_error(
+                "Profile import failed: profile already exists"
+            )]
+        );
         assert!(model.status_is_error());
         assert!(model.status_text().contains("already exists"));
     }
@@ -174,7 +181,7 @@ mod tests {
                 Effect::UpdateSubscription {
                     id: model.config.subscriptions[0].id
                 },
-                app_log_info("Added subscription '192.0.2.10' and fetching profiles…")
+                app_log_info("Subscription added: 192.0.2.10 — fetching profiles…")
             ]
         );
     }
@@ -207,7 +214,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![app_log_error(
-                "Insecure HTTP subscriptions are blocked; use HTTPS"
+                "Subscription import failed: Insecure HTTP subscriptions are blocked; use HTTPS"
             )]
         );
     }
@@ -222,7 +229,7 @@ mod tests {
         assert!(model.status_is_error());
         assert_eq!(
             model.status_text(),
-            "Not a supported VPN link or subscription URL"
+            "Profile import failed: unsupported VPN link or subscription URL"
         );
 
         handle_clipboard_text(&mut model, "  \n");
@@ -260,7 +267,7 @@ mod tests {
         ));
         assert_eq!(
             effects,
-            vec![Effect::SaveConfig, app_log_info("Pasted profile: Test")]
+            vec![Effect::SaveConfig, app_log_info("Profile imported: Test")]
         );
     }
 
@@ -282,7 +289,7 @@ mod tests {
         assert!(effects.iter().any(|effect| matches!(
             effect,
             Effect::AppendAppLog { message, .. }
-                if message.contains("Subscription update is blocked")
+                if message.contains("Subscription update failed: blocked")
         )));
     }
 

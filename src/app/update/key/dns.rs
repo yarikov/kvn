@@ -157,7 +157,7 @@ fn apply_dns_drafts(model: &mut Model) -> Vec<Effect> {
     push_status(
         &mut effects,
         model,
-        AppStatus::Info("DNS settings updated".into()),
+        AppStatus::Info("DNS settings changed".into()),
     );
     if model.connection == ConnectionState::Connected
         && let Some(active_id) = model.active_profile_id

@@ -64,7 +64,7 @@ pub(in crate::app::update) fn handle_ipc_command(
         IpcCommand::SetKillSwitch { enabled } => set_kill_switch(model, enabled),
         IpcCommand::SetAutoConnect { enabled } => set_auto_connect(model, enabled),
         IpcCommand::Paste { text } => handle_clipboard_text(model, &text),
-        IpcCommand::Copied { name, count } => handle_copied_status(model, name, count),
+        IpcCommand::Copied { target } => handle_copied_status(model, target),
         IpcCommand::ReloadConfig => vec![Effect::ReloadConfig],
         IpcCommand::ApplyEditedConfig { base, edited } => apply_edited_config(model, base, edited),
         IpcCommand::ClientError { message } => {
@@ -92,7 +92,7 @@ fn apply_edited_config(
     push_status(
         &mut effects,
         model,
-        AppStatus::Error("Cannot apply an edit over an unreadable profiles.json".into()),
+        AppStatus::Error("Configuration edit failed: profiles.json is unreadable".into()),
     );
     effects
 }
@@ -335,8 +335,7 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
-                app_log_info("Routing mode: Bypass RU"),
-                app_log_info("Mode changed to Bypass RU — reconnecting"),
+                app_log_info("Routing mode changed: Bypass RU — reconnecting"),
                 Effect::BroadcastState,
             ]
         );
@@ -360,7 +359,9 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                app_log_error("Routing mode Only RU is unavailable for region GLOBAL"),
+                app_log_error(
+                    "Routing mode change failed: Only RU is unavailable for region GLOBAL"
+                ),
                 Effect::BroadcastState,
             ]
         );
@@ -413,7 +414,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                app_log_info("Kill switch enabling…"),
+                app_log_info("Enabling kill switch…"),
                 Effect::ApplyKillSwitch { enabled: true },
                 Effect::BroadcastState,
             ]
@@ -597,43 +598,23 @@ mod tests {
     }
 
     #[test]
-    fn ipc_command_copied_sets_status_and_broadcasts() {
+    fn ipc_copy_routes_to_the_status_handler_and_broadcasts() {
         let mut model = model_with_profiles(vec![]);
         let effects = handle_ipc_command(
             &mut model,
             crate::app::msg::IpcCommand::Copied {
-                name: "Alpha".into(),
-                count: 3,
+                target: crate::app::msg::CopiedTarget::Profile {
+                    name: "Alpha".into(),
+                },
             },
         );
-        assert!(effects.iter().any(|e| matches!(e, Effect::BroadcastState)));
-        assert!(model.status_text().contains("Alpha"));
-    }
-
-    #[test]
-    fn ipc_log_copy_sets_clear_status() {
-        let mut model = model_with_profiles(vec![]);
-        handle_ipc_command(
-            &mut model,
-            crate::app::msg::IpcCommand::Copied {
-                name: "log".into(),
-                count: 1,
-            },
+        assert!(model.status.is_some());
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::AppendAppLog { .. }))
         );
-        assert_eq!(model.status_text(), "Copied: log");
-    }
-
-    #[test]
-    fn ipc_multi_log_copy_uses_log_count_in_status() {
-        let mut model = model_with_profiles(vec![]);
-        handle_ipc_command(
-            &mut model,
-            crate::app::msg::IpcCommand::Copied {
-                name: "log".into(),
-                count: 3,
-            },
-        );
-        assert_eq!(model.status_text(), "Copied 3 logs");
+        assert_eq!(effects.last(), Some(&Effect::BroadcastState));
     }
 
     #[test]

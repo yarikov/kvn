@@ -17,7 +17,7 @@ pub(in crate::app::update) fn handle_confirm_delete(
                 push_status(
                     &mut effects,
                     model,
-                    AppStatus::Error("Disconnect before deleting".into()),
+                    AppStatus::Error("Delete failed: disconnect first".into()),
                 );
                 return effects;
             }
@@ -34,7 +34,7 @@ pub(in crate::app::update) fn handle_confirm_delete(
                             &mut effects,
                             model,
                             crate::app::model::AppStatus::Info(format!(
-                                "Profile '{}' deleted",
+                                "Profile deleted: {}",
                                 name
                             )),
                         );
@@ -50,7 +50,7 @@ pub(in crate::app::update) fn handle_confirm_delete(
                             &mut effects,
                             model,
                             crate::app::model::AppStatus::Info(format!(
-                                "Subscription '{}' deleted",
+                                "Subscription deleted: {}",
                                 name
                             )),
                         );
@@ -90,7 +90,7 @@ mod tests {
         assert_eq!(model.overlay, Overlay::None);
         assert_eq!(
             effects,
-            vec![Effect::SaveConfig, app_log_info("Profile 'A' deleted")]
+            vec![Effect::SaveConfig, app_log_info("Profile deleted: A")]
         );
     }
 
@@ -144,7 +144,7 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
-                app_log_info("Subscription 'Sub' deleted")
+                app_log_info("Subscription deleted: Sub")
             ]
         );
     }
@@ -165,7 +165,7 @@ mod tests {
 
         assert_eq!(model.config.profiles.len(), 1);
         assert_eq!(model.overlay, Overlay::None);
-        assert!(model.status_text().contains("Disconnect before"));
+        assert_eq!(model.status_text(), "Delete failed: disconnect first");
         assert!(!effects.contains(&Effect::SaveConfig));
     }
 

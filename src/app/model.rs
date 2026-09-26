@@ -462,7 +462,8 @@ impl Model {
             Ok(cfg) => match cfg.validate() {
                 Ok(()) => cfg,
                 Err(e) => {
-                    let msg = format!("Config invalid, using defaults: {e:#}");
+                    let msg =
+                        format!("Configuration load failed: invalid config; using defaults: {e:#}");
                     tracing::error!("{msg}");
                     startup_error = Some(msg);
                     config_persistence_blocked = true;
@@ -470,7 +471,7 @@ impl Model {
                 }
             },
             Err(e) => {
-                let msg = format!("Failed to load config, using defaults: {e:#}");
+                let msg = format!("Configuration load failed; using defaults: {e:#}");
                 tracing::error!("{msg}");
                 startup_error = Some(msg);
                 config_persistence_blocked = true;
@@ -492,7 +493,7 @@ impl Model {
                 false
             }
             Err(e) => {
-                let msg = format!("Failed to clean up stale VPN process: {e:#}");
+                let msg = format!("Stale VPN cleanup failed: {e:#}");
                 tracing::error!("{msg}");
                 startup_error = Some(match startup_error.take() {
                     Some(previous) => format!("{previous}; {msg}"),
@@ -1332,7 +1333,7 @@ mod tests {
             model.status
         );
         assert!(
-            model.status_text().contains("Config invalid"),
+            model.status_text().contains("Configuration load failed"),
             "status was: {}",
             model.status_text(),
         );
@@ -1340,14 +1341,17 @@ mod tests {
         assert!(model.config.profiles.is_empty());
         // Error is also persisted in the in-memory log panel.
         assert!(
-            model.logs.iter().any(|l| l.contains("Config invalid")),
+            model
+                .logs
+                .iter()
+                .any(|l| l.contains("Configuration load failed")),
             "logs: {:?}",
             model.logs,
         );
         // …and on disk in app.log.
         let on_disk = std::fs::read_to_string(crate::paths::app_log_path()).unwrap();
         assert!(
-            on_disk.contains("Config invalid") && on_disk.contains("ERROR"),
+            on_disk.contains("Configuration load failed") && on_disk.contains("ERROR"),
             "app.log was: {on_disk:?}",
         );
     }
@@ -1365,12 +1369,15 @@ mod tests {
         let model = Model::new().unwrap();
         assert!(model.status_is_error());
         assert!(
-            model.status_text().contains("Failed to load"),
+            model.status_text().contains("Configuration load failed"),
             "status was: {}",
             model.status_text(),
         );
         assert!(
-            model.logs.iter().any(|l| l.contains("Failed to load")),
+            model
+                .logs
+                .iter()
+                .any(|l| l.contains("Configuration load failed")),
             "logs: {:?}",
             model.logs,
         );

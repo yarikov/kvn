@@ -48,7 +48,7 @@ fn resolve_selected(state: &mut ClientLoop) -> Result<()> {
                 resolution: SupportPromptResolution::Supported,
             })?,
             Err(error) => state.client.send(&IpcCommand::ClientError {
-                message: format!("Failed to open support page: {error:#}"),
+                message: format!("Support page open failed: {error:#}"),
             })?,
         },
         1 => state.client.send(&IpcCommand::ResolveSupportPrompt {

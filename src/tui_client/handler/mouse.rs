@@ -4,7 +4,7 @@ use anyhow::Result;
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 use crate::app::model::{MainPaneFocus, Overlay, SourceRow};
-use crate::app::msg::IpcCommand;
+use crate::app::msg::{CopiedTarget, IpcCommand};
 
 use super::pointer::PointerShape;
 use super::{ClientLoop, Flow};
@@ -93,11 +93,10 @@ fn release(state: &mut ClientLoop, mouse: MouseEvent) -> Result<()> {
     if let Some(result) = copy_result {
         match result {
             Ok(()) => state.client.send(&IpcCommand::Copied {
-                name: "log".into(),
-                count: 1,
+                target: CopiedTarget::Logs,
             })?,
             Err(error) => state.client.send(&IpcCommand::ClientError {
-                message: format!("Failed to copy log text: {error:#}"),
+                message: format!("Log copy failed: {error:#}"),
             })?,
         }
     }

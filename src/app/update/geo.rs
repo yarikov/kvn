@@ -52,7 +52,10 @@ pub(in crate::app::update) fn handle_geo_result(
             let status = if warnings.is_empty() {
                 AppStatus::Info("Geo databases updated".into())
             } else {
-                AppStatus::Error(format!("Geo updated partially: {}", warnings.join("; ")))
+                AppStatus::Error(format!(
+                    "Geo update partially failed: {}",
+                    warnings.join("; ")
+                ))
             };
             push_status(&mut log_effects, model, status);
             if !pending_geo_reconnect
@@ -86,7 +89,7 @@ pub(in crate::app::update) fn handle_geo_result(
             }
             let mut effects = Vec::new();
             let status = if warnings.is_empty() {
-                AppStatus::Info("Geo databases are up to date".into())
+                AppStatus::Info("Geo databases up to date".into())
             } else {
                 AppStatus::Error(format!(
                     "Service rule-set update failed: {}",
@@ -118,7 +121,7 @@ pub(in crate::app::update) fn handle_geo_result(
             push_status(
                 &mut effects,
                 model,
-                crate::app::model::AppStatus::Error(message),
+                crate::app::model::AppStatus::Error(format!("Geo update failed: {message}")),
             );
             append_download_hint(&mut effects, model, DownloadKind::Geo);
             for part in updated_parts {
@@ -254,7 +257,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                app_log_info("Geo databases are up to date"),
+                app_log_info("Geo databases up to date"),
                 Effect::BroadcastState
             ]
         );
@@ -286,7 +289,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                app_log_error("net fail"),
+                app_log_error("Geo update failed: net fail"),
                 Effect::AppendAppLog {
                     level: "WARN".into(),
                     message:

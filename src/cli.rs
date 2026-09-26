@@ -670,7 +670,7 @@ fn kill_switch_result(
 ) -> Option<Result<()>> {
     if current == enabled {
         Some(Ok(()))
-    } else if status_is_error && status.starts_with("Kill switch:") {
+    } else if status_is_error && status.starts_with("Kill switch failed:") {
         Some(Err(anyhow::anyhow!(status.to_string())))
     } else {
         None
@@ -1211,10 +1211,10 @@ esac
 
     #[test]
     fn kill_switch_result_surfaces_daemon_helper_errors() {
-        let error = kill_switch_result(true, true, "Kill switch: helper failed", false)
+        let error = kill_switch_result(true, true, "Kill switch failed: helper failed", false)
             .unwrap()
             .unwrap_err();
-        assert_eq!(error.to_string(), "Kill switch: helper failed");
+        assert_eq!(error.to_string(), "Kill switch failed: helper failed");
         assert!(kill_switch_result(true, true, "another error", false).is_none());
     }
 

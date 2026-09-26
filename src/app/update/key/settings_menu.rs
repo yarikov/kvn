@@ -180,7 +180,7 @@ fn commit_interface_settings(model: &mut Model) -> Vec<Effect> {
         push_status(
             &mut effects,
             model,
-            AppStatus::Info(format!("Theme: {slug}")),
+            AppStatus::Info(format!("Theme selected: {slug}")),
         );
     }
     effects
@@ -312,8 +312,8 @@ pub(in crate::app::update) fn set_kill_switch(model: &mut Model, enabled: bool) 
         &mut effects,
         model,
         AppStatus::Info(format!(
-            "Kill switch {}…",
-            if enabled { "enabling" } else { "disabling" }
+            "{} kill switch…",
+            if enabled { "Enabling" } else { "Disabling" }
         )),
     );
     effects.push(Effect::ApplyKillSwitch { enabled });
@@ -447,11 +447,11 @@ mod tests {
         // Bool is NOT flipped synchronously — it waits for KillSwitchApplied.
         assert!(!model.config.settings.kill_switch);
         assert_eq!(model.kill_switch_pending, Some(true));
-        assert!(model.status_text().contains("enabling"));
+        assert!(model.status_text().contains("Enabling"));
         assert_eq!(
             effects,
             vec![
-                app_log_info("Kill switch enabling…"),
+                app_log_info("Enabling kill switch…"),
                 Effect::ApplyKillSwitch { enabled: true },
             ]
         );
@@ -558,7 +558,7 @@ mod tests {
         );
         assert!(effects.iter().any(|effect| matches!(
             effect,
-            Effect::AppendAppLog { message, .. } if *message == format!("Theme: {}", slugs[1])
+            Effect::AppendAppLog { message, .. } if *message == format!("Theme selected: {}", slugs[1])
         )));
         assert_eq!(model.config.settings.theme, slugs[1]);
         assert_eq!(model.config.settings.icons, IconSet::Unicode);

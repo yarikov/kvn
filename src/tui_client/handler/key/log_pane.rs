@@ -3,7 +3,7 @@ use std::time::Instant;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::msg::IpcCommand;
+use crate::app::msg::{CopiedTarget, IpcCommand};
 use crate::tui_client::clipboard;
 
 use super::super::{ClientLoop, Flow};
@@ -70,17 +70,16 @@ fn enter_visual(state: &mut ClientLoop) -> Result<()> {
 }
 
 fn copy_selection(state: &mut ClientLoop) -> Result<()> {
-    if let Some((text, count)) = state.log_navigation.selected_text(state.model) {
+    if let Some(text) = state.log_navigation.selected_text(state.model) {
         match clipboard::write_clipboard_text(&text) {
             Ok(()) => {
                 state.log_navigation.copied(Instant::now());
                 state.client.send(&IpcCommand::Copied {
-                    name: "log".into(),
-                    count,
+                    target: CopiedTarget::Logs,
                 })?;
             }
             Err(error) => state.client.send(&IpcCommand::ClientError {
-                message: format!("Failed to copy log text: {error:#}"),
+                message: format!("Log copy failed: {error:#}"),
             })?,
         }
     }
