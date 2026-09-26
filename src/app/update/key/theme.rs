@@ -88,7 +88,7 @@ pub(in crate::app::update) fn handle_theme_picker(model: &mut Model, key: KeyEve
                 push_status(
                     &mut effects,
                     model,
-                    crate::app::model::AppStatus::Info(format!("Theme: {}", slug)),
+                    crate::app::model::AppStatus::Info(format!("Theme selected: {}", slug)),
                 );
                 return effects;
             }

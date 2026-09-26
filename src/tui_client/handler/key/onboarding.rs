@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::msg::IpcCommand;
+use crate::app::msg::{CopiedTarget, IpcCommand};
 use crate::onboarding::OnboardingStep;
 use crate::tui_client::clipboard;
 
@@ -29,11 +29,10 @@ pub(super) fn handle(
 fn copy_command(state: &mut ClientLoop, command: &str) -> Result<()> {
     match clipboard::write_clipboard_text(command) {
         Ok(()) => state.client.send(&IpcCommand::Copied {
-            name: command.to_string(),
-            count: 1,
+            target: CopiedTarget::Command,
         })?,
         Err(error) => state.client.send(&IpcCommand::ClientError {
-            message: format!("Failed to copy: {error:#}"),
+            message: format!("Command copy failed: {error:#}"),
         })?,
     }
     Ok(())

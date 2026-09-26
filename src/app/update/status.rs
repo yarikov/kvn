@@ -1,5 +1,6 @@
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model};
+use crate::app::msg::CopiedTarget;
 
 /// Set the application status (pure, in-memory) and return an effect that
 /// appends the same message to the on-disk log file.
@@ -43,10 +44,10 @@ pub(in crate::app::update) fn push_download_blocked(
 ) {
     let message = match kind {
         DownloadKind::Geo => {
-            "Geo download is blocked by the kill switch. Connect to VPN and retry."
+            "Geo download failed: blocked by kill switch; connect to VPN and retry"
         }
         DownloadKind::Subscription => {
-            "Subscription update is blocked by the kill switch. Connect to VPN and retry."
+            "Subscription update failed: blocked by kill switch; connect to VPN and retry"
         }
     };
     push_status(effects, model, AppStatus::Error(message.into()));
@@ -82,17 +83,55 @@ pub(in crate::app::update) fn append_download_hint(
 
 pub(in crate::app::update) fn handle_copied_status(
     model: &mut Model,
-    name: String,
-    count: usize,
+    target: CopiedTarget,
 ) -> Vec<Effect> {
-    let msg = if name == "log" && count > 1 {
-        format!("Copied {count} logs")
-    } else if count <= 1 {
-        format!("Copied: {name}")
-    } else {
-        format!("Copied {count} links from {name}")
+    let msg = match target {
+        CopiedTarget::Profile { name } => format!("Profile copied: {name}"),
+        CopiedTarget::Subscription { name } => format!("Subscription copied: {name}"),
+        CopiedTarget::Logs => "Logs copied".to_string(),
+        CopiedTarget::Command => "Command copied".to_string(),
     };
     let mut effects = Vec::new();
     push_status(&mut effects, model, crate::app::model::AppStatus::Info(msg));
     effects
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::model_with_profiles;
+
+    #[test]
+    fn copied_status_matches_the_target() {
+        let cases = [
+            (
+                CopiedTarget::Profile {
+                    name: "Alpha".into(),
+                },
+                "Profile copied: Alpha",
+            ),
+            (
+                CopiedTarget::Subscription {
+                    name: "Beta".into(),
+                },
+                "Subscription copied: Beta",
+            ),
+            (CopiedTarget::Logs, "Logs copied"),
+            (CopiedTarget::Command, "Command copied"),
+        ];
+
+        for (target, expected) in cases {
+            let mut model = model_with_profiles(vec![]);
+            let effects = handle_copied_status(&mut model, target);
+
+            assert_eq!(model.status_text(), expected);
+            assert_eq!(
+                effects,
+                vec![Effect::AppendAppLog {
+                    level: "INFO".into(),
+                    message: expected.into(),
+                }]
+            );
+        }
+    }
 }

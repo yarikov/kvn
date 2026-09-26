@@ -51,7 +51,7 @@ pub(super) fn open(state: &mut ClientLoop) -> Result<()> {
             // editor. Route the snapshot error through
             // the daemon so it survives the next state
             // broadcast and appears in app.log.
-            let message = format!("Edit rejected: {e:#}");
+            let message = format!("Configuration edit failed: {e:#}");
             state.client.send(&IpcCommand::ClientError { message })?;
         }
     }

@@ -79,14 +79,13 @@ impl LogNavigation {
         Some(anchor.min(cursor)..=anchor.max(cursor))
     }
 
-    pub(crate) fn selected_text(&self, model: &Model) -> Option<(String, usize)> {
+    pub(crate) fn selected_text(&self, model: &Model) -> Option<String> {
         let range = self.selected_range()?;
         let lines = range
-            .clone()
             .filter_map(|index| model.logs.get(index))
             .map(|line| format_log_for_display(line).text)
             .collect::<Vec<_>>();
-        (!lines.is_empty()).then(|| (lines.join("\n"), lines.len()))
+        (!lines.is_empty()).then(|| lines.join("\n"))
     }
 
     pub(crate) fn copied(&mut self, now: Instant) {
@@ -281,10 +280,9 @@ mod tests {
 
         assert_eq!(
             navigation.selected_text(&model),
-            Some((
-                "09:25:39 [sbx] INFO dns: exchanged OPT OPT PSEUDOSECTION: EDNS: version 0 flags: udp: 1232".into(),
-                1,
-            ))
+            Some(
+                "09:25:39 [sbx] INFO dns: exchanged OPT OPT PSEUDOSECTION: EDNS: version 0 flags: udp: 1232".into()
+            )
         );
     }
 
@@ -338,7 +336,7 @@ mod tests {
         assert_eq!(navigation.cursor(), Some(0));
         navigation.move_by(1, model.logs.len(), now);
         assert_eq!(navigation.cursor(), Some(1));
-        assert_eq!(navigation.selected_text(&model), Some(("next".into(), 1)));
+        assert_eq!(navigation.selected_text(&model), Some("next".into()));
     }
 
     #[test]
@@ -355,7 +353,7 @@ mod tests {
         navigation.move_by(-2, model.logs.len(), now);
         assert_eq!(
             navigation.selected_text(&model),
-            Some(("first\nsecond\nthird".into(), 3))
+            Some("first\nsecond\nthird".into())
         );
 
         navigation.copied(now);
@@ -413,7 +411,6 @@ mod tests {
 
         navigation.select_buffer_edge(model.logs.len(), true, now);
         assert_eq!(navigation.selected_range(), Some(0..=4));
-        assert_eq!(navigation.selected_text(&model).unwrap().1, 5);
         navigation.select_buffer_edge(model.logs.len(), false, now);
         assert_eq!(navigation.selected_range(), Some(4..=5));
     }
@@ -439,10 +436,7 @@ mod tests {
         navigation.oldest_log_evicted();
         model.logs.pop_front();
         assert_eq!(navigation.cursor(), Some(0));
-        assert_eq!(
-            navigation.selected_text(&model),
-            Some(("selected".into(), 1))
-        );
+        assert_eq!(navigation.selected_text(&model), Some("selected".into()));
     }
 
     #[test]

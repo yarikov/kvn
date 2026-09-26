@@ -101,7 +101,7 @@ pub(crate) fn handle_config_reloaded(
             } else if model.pending_service_reconnect && service_routes_changed {
                 "Configuration changed — updating rule-sets"
             } else {
-                "Profiles reloaded"
+                "Configuration reloaded"
             };
             push_status(&mut effects, model, AppStatus::Info(status.into()));
             effects
@@ -111,7 +111,7 @@ pub(crate) fn handle_config_reloaded(
             push_status(
                 &mut effects,
                 model,
-                AppStatus::Error(format!("Failed to reload: {}", e)),
+                AppStatus::Error(format!("Configuration reload failed: {}", e)),
             );
             effects
         }
@@ -166,7 +166,10 @@ mod tests {
         assert!(!model.config_persistence_blocked);
         assert_eq!(
             effects,
-            vec![Effect::BroadcastState, app_log_info("Profiles reloaded")]
+            vec![
+                Effect::BroadcastState,
+                app_log_info("Configuration reloaded")
+            ]
         );
     }
 
@@ -209,7 +212,7 @@ mod tests {
             effects,
             vec![
                 Effect::BroadcastState,
-                app_log_error("Failed to reload: parse error")
+                app_log_error("Configuration reload failed: parse error")
             ]
         );
     }
@@ -321,7 +324,7 @@ mod tests {
 
         assert_eq!(model.connection, ConnectionState::Connected);
         assert_eq!(model.connecting_profile_id, None);
-        assert_eq!(model.status_text(), "Profiles reloaded");
+        assert_eq!(model.status_text(), "Configuration reloaded");
         assert!(!effects.contains(&Effect::Disconnect));
     }
 

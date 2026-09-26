@@ -33,7 +33,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 push_status(
                     &mut effects,
                     model,
-                    AppStatus::Error("Disconnect before deleting".into()),
+                    AppStatus::Error("Delete failed: disconnect first".into()),
                 );
                 return effects;
             }
@@ -56,9 +56,8 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 &mut effects,
                 model,
                 AppStatus::Info(format!(
-                    "Rule sets {} {}",
-                    crate::ui::icons::icons(model.config.settings.icons).refresh,
-                    schedule.label()
+                    "Rule-set update interval changed: {}",
+                    schedule.interval_label()
                 )),
             );
             return effects;
@@ -81,10 +80,9 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                     &mut effects,
                     model,
                     crate::app::model::AppStatus::Info(format!(
-                        "Subscription '{}' {} {}",
-                        name,
-                        crate::ui::icons::icons(model.config.settings.icons).refresh,
-                        label
+                        "Subscription update interval changed: {} ({})",
+                        label.trim_matches(['(', ')']),
+                        name
                     )),
                 );
                 return effects;
@@ -135,7 +133,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                     &mut effects,
                     model,
                     crate::app::model::AppStatus::Info(
-                        "Profile latency testing is disabled in profiles.json".into(),
+                        "Latency testing disabled: enable it in profiles.json".into(),
                     ),
                 );
                 return effects;
@@ -153,7 +151,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                     &mut effects,
                     model,
                     crate::app::model::AppStatus::Info(
-                        "Profile latency testing is disabled in profiles.json".into(),
+                        "Latency testing disabled: enable it in profiles.json".into(),
                     ),
                 );
                 return effects;
@@ -207,7 +205,7 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
             push_status(
                 &mut result,
                 model,
-                crate::app::model::AppStatus::Info(format!("Updating subscription '{}'…", name)),
+                crate::app::model::AppStatus::Info(format!("Updating subscription {name}…")),
             );
             return result;
         }
@@ -215,7 +213,9 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
         push_status(
             &mut effects,
             model,
-            crate::app::model::AppStatus::Info("No sources. Press p to paste or e to edit.".into()),
+            crate::app::model::AppStatus::Info(
+                "Sources empty: press p to paste or e to edit".into(),
+            ),
         );
     }
     effects
@@ -238,7 +238,7 @@ fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
         push_status(
             &mut result,
             model,
-            crate::app::model::AppStatus::Info(format!("Updating subscription '{}'…", name)),
+            crate::app::model::AppStatus::Info(format!("Updating subscription {name}…")),
         );
         return result;
     }
@@ -246,7 +246,7 @@ fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
         &mut effects,
         model,
         crate::app::model::AppStatus::Info(
-            "Select a subscription to update, or press U for geo".into(),
+            "Subscription selection required: select one or press U for geo".into(),
         ),
     );
     effects
@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(model.overlay, Overlay::None);
         assert_eq!(
             effects,
-            vec![app_log_info("No sources. Press p to paste or e to edit.")]
+            vec![app_log_info("Sources empty: press p to paste or e to edit")]
         );
     }
 
@@ -536,7 +536,13 @@ mod tests {
             let effects = handle_sources(&mut model, key('I'));
             assert_eq!(model.config.settings.geo_routing.auto_update, expected);
             assert!(effects.contains(&Effect::SaveConfig));
-            assert!(model.status_text().contains(&expected.label()));
+            assert_eq!(
+                model.status_text(),
+                format!(
+                    "Rule-set update interval changed: {}",
+                    expected.interval_label()
+                )
+            );
         }
     }
 
@@ -665,7 +671,7 @@ mod tests {
             vec![
                 Effect::SaveConfig,
                 Effect::UpdateSubscription { id: sub_id },
-                app_log_info("Updating subscription 'Sub'…"),
+                app_log_info("Updating subscription Sub…"),
             ]
         );
     }
@@ -696,12 +702,14 @@ mod tests {
             SubscriptionAutoUpdate::Every3d
         );
         assert!(effects.contains(&Effect::SaveConfig));
-        assert!(effects.contains(&app_log_info("Subscription 'Sub'  (3d)")));
+        assert!(effects.contains(&app_log_info(
+            "Subscription update interval changed: 3d (Sub)"
+        )));
         assert!(model.config.subscriptions[0].retry_state.is_none());
     }
 
     #[test]
-    fn subscription_interval_status_uses_configured_icon_set() {
+    fn subscription_interval_status_is_icon_independent() {
         use crate::config::profile::{IconSet, Subscription};
 
         let mut model = model_with_profiles(vec![]);
@@ -721,7 +729,9 @@ mod tests {
 
         let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Char('i')));
 
-        assert!(effects.contains(&app_log_info("Subscription 'Sub' ↻ (3d)")));
+        assert!(effects.contains(&app_log_info(
+            "Subscription update interval changed: 3d (Sub)"
+        )));
     }
 
     #[test]
@@ -740,26 +750,22 @@ mod tests {
         });
         model.selected = 0;
 
-        let _ = handle_sources(&mut model, KeyEvent::from(KeyCode::Char('i')));
-        assert_eq!(
-            model.config.subscriptions[0].auto_update,
-            SubscriptionAutoUpdate::Every1d
-        );
-        let _ = handle_sources(&mut model, KeyEvent::from(KeyCode::Char('i')));
-        assert_eq!(
-            model.config.subscriptions[0].auto_update,
-            SubscriptionAutoUpdate::Every3d
-        );
-        let _ = handle_sources(&mut model, KeyEvent::from(KeyCode::Char('i')));
-        assert_eq!(
-            model.config.subscriptions[0].auto_update,
-            SubscriptionAutoUpdate::Every7d
-        );
-        let _ = handle_sources(&mut model, KeyEvent::from(KeyCode::Char('i')));
-        assert_eq!(
-            model.config.subscriptions[0].auto_update,
-            SubscriptionAutoUpdate::Off
-        );
+        for expected in [
+            SubscriptionAutoUpdate::Every1d,
+            SubscriptionAutoUpdate::Every3d,
+            SubscriptionAutoUpdate::Every7d,
+            SubscriptionAutoUpdate::Off,
+        ] {
+            handle_sources(&mut model, KeyEvent::from(KeyCode::Char('i')));
+            assert_eq!(model.config.subscriptions[0].auto_update, expected);
+            assert_eq!(
+                model.status_text(),
+                format!(
+                    "Subscription update interval changed: {} (Sub)",
+                    expected.interval_label()
+                )
+            );
+        }
     }
 
     // ── Profile testing ──────────────────────────────────────────────────────
@@ -798,7 +804,7 @@ mod tests {
             assert!(model.pending_tests.is_empty());
             assert!(effects.iter().any(|effect| matches!(
                 effect,
-                Effect::AppendAppLog { message, .. } if message.contains("latency testing is disabled")
+                Effect::AppendAppLog { message, .. } if message.contains("Latency testing disabled")
             )));
         }
     }
@@ -861,7 +867,7 @@ mod tests {
         assert!(effects.iter().any(|effect| matches!(
             effect,
             Effect::AppendAppLog { message, .. }
-                if message.contains("blocked by the kill switch")
+                if message.contains("blocked by kill switch")
         )));
 
         blocked.connection = ConnectionState::Connected;
@@ -885,7 +891,7 @@ mod tests {
         let effects = handle_sources(&mut model, key('d'));
         assert_eq!(model.overlay, Overlay::None);
         assert!(model.status_is_error());
-        assert!(model.status_text().contains("Disconnect before"));
+        assert_eq!(model.status_text(), "Delete failed: disconnect first");
         // Effect carries the AppendAppLog only (no SaveConfig, no opening overlay).
         assert!(!effects.iter().any(|e| matches!(e, Effect::SaveConfig)));
     }
@@ -931,7 +937,7 @@ mod tests {
         let effects = handle_sources(&mut model, key('d'));
 
         assert_eq!(model.overlay, Overlay::None);
-        assert!(model.status_text().contains("Disconnect before"));
+        assert_eq!(model.status_text(), "Delete failed: disconnect first");
         assert!(!effects.contains(&Effect::SaveConfig));
     }
 
@@ -1064,7 +1070,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         let effects = handle_enter_on_sources(&mut model);
         // No profile, no subscription → status message, no effects beyond log.
-        assert!(model.status_text().contains("No sources"));
+        assert!(model.status_text().contains("Sources empty"));
         assert!(!effects.iter().any(|e| matches!(e, Effect::Connect { .. })));
     }
 }

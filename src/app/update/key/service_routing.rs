@@ -93,7 +93,7 @@ pub(in crate::app::update) fn handle_service_routing(
                         &mut effects,
                         model,
                         crate::app::model::AppStatus::Info(
-                            "Service routing saved — takes effect on next reconnect".into(),
+                            "Service routing changed — applies after reconnect".into(),
                         ),
                     );
                 }
@@ -108,7 +108,7 @@ pub(in crate::app::update) fn handle_service_routing(
                         push_status(
                             &mut effects,
                             model,
-                            crate::app::model::AppStatus::Info("Service routing updated".into()),
+                            crate::app::model::AppStatus::Info("Service routing changed".into()),
                         );
                     } else if download_allowed(model) {
                         push_status(
@@ -327,7 +327,7 @@ mod tests {
         assert_eq!(model.connection, ConnectionState::ConnectPending);
         assert_eq!(
             model.status_text(),
-            "Service routing saved — takes effect on next reconnect"
+            "Service routing changed — applies after reconnect"
         );
     }
 }

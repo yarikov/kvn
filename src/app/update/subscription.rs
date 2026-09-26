@@ -113,16 +113,15 @@ fn handle_subscription_result_at(
                 push_status(
                     &mut effects,
                     model,
-                    crate::app::model::AppStatus::Info(format!(
-                        "Imported {} profile(s) from subscription",
-                        imported
-                    )),
+                    crate::app::model::AppStatus::Info(format!("Profiles imported: {}", imported)),
                 );
             } else {
                 push_status(
                     &mut effects,
                     model,
-                    crate::app::model::AppStatus::Info("No new profiles in subscription".into()),
+                    crate::app::model::AppStatus::Info(
+                        "Subscription unchanged: no new profiles".into(),
+                    ),
                 );
             }
             effects
@@ -144,7 +143,7 @@ fn handle_subscription_result_at(
             push_status(
                 &mut effects,
                 model,
-                crate::app::model::AppStatus::Error(format!("Subscription failed: {}", err)),
+                crate::app::model::AppStatus::Error(format!("Subscription update failed: {}", err)),
             );
             append_download_hint(&mut effects, model, DownloadKind::Subscription);
             effects
@@ -242,10 +241,7 @@ mod tests {
         assert_eq!(model.config.profiles.len(), 2);
         assert_eq!(
             effects,
-            vec![
-                Effect::SaveConfig,
-                app_log_info("Imported 2 profile(s) from subscription")
-            ]
+            vec![Effect::SaveConfig, app_log_info("Profiles imported: 2")]
         );
     }
 
@@ -277,10 +273,7 @@ mod tests {
         assert_eq!(model.config.profiles.len(), 2);
         assert_eq!(
             effects,
-            vec![
-                Effect::SaveConfig,
-                app_log_info("Imported 2 profile(s) from subscription")
-            ]
+            vec![Effect::SaveConfig, app_log_info("Profiles imported: 2")]
         );
     }
 
@@ -335,7 +328,7 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
-                app_log_info("No new profiles in subscription")
+                app_log_info("Subscription unchanged: no new profiles")
             ]
         );
     }
@@ -381,10 +374,7 @@ mod tests {
         assert_eq!(model.config.profiles[0].subscription_id, Some(sub_id));
         assert_eq!(
             effects,
-            vec![
-                Effect::SaveConfig,
-                app_log_info("Imported 1 profile(s) from subscription")
-            ]
+            vec![Effect::SaveConfig, app_log_info("Profiles imported: 1")]
         );
     }
 
@@ -397,7 +387,7 @@ mod tests {
         assert_eq!(model.config.profiles.len(), 0);
         assert_eq!(
             effects,
-            vec![app_log_info("No new profiles in subscription")]
+            vec![app_log_info("Subscription unchanged: no new profiles")]
         );
     }
 
@@ -454,7 +444,7 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
-                app_log_error("Subscription failed: network down"),
+                app_log_error("Subscription update failed: network down"),
                 Effect::AppendAppLog {
                     level: "WARN".into(),
                     message: "VPN is disconnected. Try connecting to VPN and retrying the subscription update."
@@ -529,10 +519,7 @@ mod tests {
         assert!(model.config.subscriptions[0].retry_state.is_none());
         assert_eq!(
             effects,
-            vec![
-                Effect::SaveConfig,
-                app_log_info("Imported 1 profile(s) from subscription")
-            ]
+            vec![Effect::SaveConfig, app_log_info("Profiles imported: 1")]
         );
     }
 

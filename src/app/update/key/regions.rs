@@ -118,7 +118,10 @@ mod tests {
         assert!(model.status_text().contains("Only RU"));
         assert_eq!(
             effects,
-            vec![Effect::SaveConfig, app_log_info("Routing mode: Only RU")]
+            vec![
+                Effect::SaveConfig,
+                app_log_info("Routing mode changed: Only RU")
+            ]
         );
     }
 
@@ -188,13 +191,18 @@ mod tests {
             Some(GeoRegion::Cn)
         );
         assert_eq!(model.overlay, Overlay::None);
-        assert!(model.logs.iter().any(|l| l.contains("Geo region: cn")));
+        assert!(
+            model
+                .logs
+                .iter()
+                .any(|l| l.contains("Geo region selected: cn"))
+        );
         assert_eq!(
             effects,
             vec![
                 Effect::SaveConfig,
                 Effect::RefreshGeoLastUpdated,
-                app_log_info("Geo region: cn"),
+                app_log_info("Geo region selected: cn"),
                 app_log_info("Checking geo databases..."),
                 Effect::DownloadGeoIfMissing,
             ]
@@ -280,8 +288,8 @@ mod tests {
             vec![
                 Effect::SaveConfig,
                 Effect::RefreshGeoLastUpdated,
-                app_log_info("Geo region: global"),
-                app_log_info("Routing mode: Global")
+                app_log_info("Geo region selected: global"),
+                app_log_info("Routing mode changed: Global")
             ]
         );
     }
@@ -322,7 +330,7 @@ mod tests {
             model.config.settings.geo_routing.mode(),
             RoutingMode::Bypass(GeoRegion::Ru)
         );
-        assert!(effects.iter().any(|e| matches!(e, Effect::AppendAppLog { message, .. } if message.contains("Routing mode: Bypass RU"))));
+        assert!(effects.iter().any(|e| matches!(e, Effect::AppendAppLog { message, .. } if message.contains("Routing mode changed: Bypass RU"))));
     }
 
     #[test]
@@ -378,7 +386,7 @@ mod tests {
             vec![
                 Effect::SaveConfig,
                 Effect::RefreshGeoLastUpdated,
-                app_log_info("Geo region: ru"),
+                app_log_info("Geo region selected: ru"),
                 app_log_info("Checking geo databases..."),
                 Effect::DownloadGeoIfMissing,
                 app_log_info("Auto-connecting to Auto…")

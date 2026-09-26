@@ -241,10 +241,8 @@ fn build_docs_preview_state_at(
     for line in [
         format!("[app] {} INFO Connected to 🇺🇸 United States", log_time(1)),
         format!("[app] {} WARN {deprecated_http_warning}", log_time(1)),
-        format!(
-            "[app] {} INFO Imported 2 profile(s) from subscription",
-            log_time(1)
-        ),
+        format!("[app] {} INFO Profiles imported: 2", log_time(1)),
+        format!("[app] {} INFO Theme selected: tokyo-night", log_time(1)),
         format!(
             "[sb] {} INFO inbound/tun[tun-in]: inbound connection from 10.222.0.1:57460",
             log_time(2)

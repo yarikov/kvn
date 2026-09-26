@@ -286,8 +286,7 @@ pub enum IpcCommand {
         text: String,
     },
     Copied {
-        name: String,
-        count: usize,
+        target: CopiedTarget,
     },
     ReloadConfig,
     ApplyEditedConfig {
@@ -302,6 +301,15 @@ pub enum IpcCommand {
     ClientError {
         message: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CopiedTarget {
+    Profile { name: String },
+    Subscription { name: String },
+    Logs,
+    Command,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -388,8 +396,16 @@ mod tests {
                 text: "hello".into(),
             },
             IpcCommand::Copied {
-                name: "A".into(),
-                count: 2,
+                target: CopiedTarget::Profile { name: "A".into() },
+            },
+            IpcCommand::Copied {
+                target: CopiedTarget::Subscription { name: "B".into() },
+            },
+            IpcCommand::Copied {
+                target: CopiedTarget::Logs,
+            },
+            IpcCommand::Copied {
+                target: CopiedTarget::Command,
             },
             IpcCommand::ReloadConfig,
             IpcCommand::ApplyEditedConfig {
