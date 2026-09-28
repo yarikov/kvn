@@ -4,13 +4,27 @@ use std::thread;
 use anyhow::{Context, Result};
 
 use crate::app::model::{AppStatus, Model, Overlay};
-use crate::app::msg::{IpcError, Msg};
+use crate::app::msg::{ConfigEditResult, IpcError, Msg};
 use crate::config::profile::Config;
 use crate::onboarding::{OnboardingProgress, OnboardingRecovery};
 use crate::support_prompt::SupportPromptState;
 
 use super::DaemonShared;
 use super::effect::execute_daemon_effect;
+
+#[derive(Debug)]
+struct ConfigConflict {
+    current: Box<Config>,
+    paths: Vec<String>,
+}
+
+impl std::fmt::Display for ConfigConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "config conflicts at {}", self.paths.join(", "))
+    }
+}
+
+impl std::error::Error for ConfigConflict {}
 
 pub(super) fn persist_config_unless_frozen(
     model: &Model,
@@ -46,8 +60,17 @@ pub(super) fn commit_config_change(
         Some(bytes) => crate::config::load_config_bytes_read_only(bytes, &path)?,
         None => Config::default(),
     };
-    let mut merged = crate::config::merge::merge_configs(base, &current, edited)
-        .map_err(|conflicts| anyhow::anyhow!("config conflicts at {}", conflicts.join(", ")))?;
+    let mut merged = crate::config::merge::merge_configs(base, &current, edited).map_err(
+        |error| match error {
+            crate::config::merge::MergeError::Conflicts(paths) => {
+                anyhow::Error::new(ConfigConflict {
+                    current: Box::new(current.clone()),
+                    paths,
+                })
+            }
+            error => anyhow::Error::new(error),
+        },
+    )?;
     merged.settings.kill_switch = edited.settings.kill_switch;
     crate::config::save_config_at_revision(&path, &merged, expected.as_deref())?;
     Ok(merged)
@@ -163,17 +186,30 @@ pub(super) fn commit_edited(
     shared: &DaemonShared,
     base: Box<Config>,
     edited: Box<Config>,
-) -> Result<()> {
+    reply_requested: bool,
+) -> Result<ConfigEditResult> {
     let mut edited_for_commit = (*edited).clone();
     edited_for_commit.settings.kill_switch = model.config.settings.kill_switch;
     let result = commit_config_change(model, &base, &edited_for_commit);
     match result {
         Ok(config) => {
             for nested in crate::app::update::handle_config_reloaded(model, Ok(config)) {
-                execute_daemon_effect(nested, tx, model, shared)?;
+                execute_daemon_effect(nested, tx, model, shared, false)?;
             }
+            Ok(ConfigEditResult::Saved)
         }
         Err(error) => {
+            if reply_requested {
+                return Ok(match error.downcast::<ConfigConflict>() {
+                    Ok(conflict) => ConfigEditResult::Conflict {
+                        current: conflict.current,
+                        paths: conflict.paths,
+                    },
+                    Err(error) => ConfigEditResult::Failed {
+                        message: format!("{error:#}"),
+                    },
+                });
+            }
             let message = match crate::config::save_conflict_config(&edited) {
                 Ok(path) => format!(
                     "Configuration edit failed: {error:#}; edited version saved to {}",
@@ -185,9 +221,9 @@ pub(super) fn commit_edited(
             };
             model.set_status(AppStatus::Error(message.clone()));
             crate::services::log_tailer::append_app_log("ERROR", &message);
+            Ok(ConfigEditResult::Failed { message })
         }
     }
-    Ok(())
 }
 
 pub(super) fn reload(tx: &Sender<Msg>) {

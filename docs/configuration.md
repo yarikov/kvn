@@ -8,11 +8,34 @@
 
 This is the default location; `XDG_CONFIG_HOME` is respected when set.
 
-Press `e` in the TUI to edit the file with `$VISUAL` or `$EDITOR`. The daemon
-reloads and validates the result when the editor closes. Keep a backup before
-substantial manual changes. Saves performed by kvn use an atomic temporary
-file and rename, so an interrupted write cannot replace a valid configuration
-with a partial file.
+Press `e` in the TUI to edit a private copy with `$VISUAL` or `$EDITOR`.
+After the editor exits, kvn validates the copy and waits for the daemon to
+confirm saving it. For JSON or validation errors, a temporary screen shows the
+current reason, replacing any previous error: press Enter to reopen the same
+file, or press `q` or Esc to cancel immediately, without Enter. Scroll long
+messages with `j`/`k`, Up/Down, or `g`/`G` (start/end). The action
+keys remain visible while scrolling.
+
+Independent changes made while the editor was open are merged automatically.
+If the same values changed on both sides, kvn shows the conflicting fields and
+asks whether to continue editing or cancel. Press Enter to reopen the file with
+`<<<<<<< YOUR EDIT`, `=======`, and `>>>>>>> CURRENT` markers. Keep the desired
+values, remove all markers, then save and exit the editor again. Conflicts
+involving deletion or array order show the whole enclosing object or array.
+If markers remain, kvn offers to continue editing or cancel. Each save checks
+for further changes.
+
+Cancellation is shown as an informational message. Cancellation or a failure
+preserves the unfinished copy in the recovery directory only if its contents
+differ from the original snapshot. The snapshot ends with a newline, so saving
+unchanged content with Vim or Neovim does not create a recovery copy on failure.
+A generated conflict document already
+contains unsaved edits and is preserved even if it has not been edited further.
+The message includes the recovery path when a copy was saved.
+If the daemon's reply is lost, saving may have
+succeeded: check the current configuration before retrying. Saves performed by
+kvn use an atomic temporary file and rename, so an interrupted write cannot
+replace a valid configuration with a partial file.
 
 ## File structure
 

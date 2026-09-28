@@ -5,14 +5,35 @@ use serde_json::Value;
 
 use super::profile::Config;
 
+pub(crate) mod resolution;
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum MergeError {
+    Conflicts(Vec<String>),
+    Invalid(String),
+}
+
+impl std::fmt::Display for MergeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflicts(paths) => write!(f, "config conflicts at {}", paths.join(", ")),
+            Self::Invalid(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for MergeError {}
+
 pub(crate) fn merge_configs(
     base: &Config,
     current: &Config,
     edited: &Config,
-) -> Result<Config, Vec<String>> {
+) -> Result<Config, MergeError> {
     for (label, config) in [("base", base), ("current", current), ("edited", edited)] {
         if let Err(error) = config.validate() {
-            return Err(vec![format!("{label} config is invalid: {error}")]);
+            return Err(MergeError::Invalid(format!(
+                "{label} config is invalid: {error}"
+            )));
         }
     }
     let base = serde_json::to_value(base).expect("Config serialization cannot fail");
@@ -25,13 +46,14 @@ pub(crate) fn merge_configs(
         Some(&edited),
         "",
         &mut conflicts,
+        false,
     );
     if !conflicts.is_empty() {
-        return Err(conflicts);
+        return Err(MergeError::Conflicts(conflicts));
     }
     let config: Config = serde_json::from_value(merged.expect("root config cannot be deleted"))
         .context("merged config is invalid")
-        .map_err(|error| vec![error.to_string()])?;
+        .map_err(|error| MergeError::Invalid(error.to_string()))?;
     let mut config = config;
     if config
         .settings
@@ -43,7 +65,7 @@ pub(crate) fn merge_configs(
     config
         .validate()
         .context("merged config failed validation")
-        .map_err(|error| vec![error.to_string()])?;
+        .map_err(|error| MergeError::Invalid(error.to_string()))?;
     Ok(config)
 }
 
@@ -53,6 +75,7 @@ fn merge_value(
     edited: Option<&Value>,
     path: &str,
     conflicts: &mut Vec<String>,
+    prefer_edited: bool,
 ) -> Option<Value> {
     if edited == base {
         return current.cloned();
@@ -74,9 +97,14 @@ fn merge_value(
                 } else {
                     format!("{path}.{key}")
                 };
-                if let Some(value) =
-                    merge_value(b.get(key), c.get(key), e.get(key), &child_path, conflicts)
-                {
+                if let Some(value) = merge_value(
+                    b.get(key),
+                    c.get(key),
+                    e.get(key),
+                    &child_path,
+                    conflicts,
+                    prefer_edited,
+                ) {
                     out.insert(key.clone(), value);
                 }
             }
@@ -85,7 +113,7 @@ fn merge_value(
         (Some(Value::Array(b)), Some(Value::Array(c)), Some(Value::Array(e)))
             if path == "profiles" || path == "subscriptions" =>
         {
-            merge_uuid_array(b, c, e, path, conflicts)
+            merge_uuid_array(b, c, e, path, conflicts, prefer_edited)
         }
         _ => {
             conflicts.push(if path.is_empty() {
@@ -93,7 +121,11 @@ fn merge_value(
             } else {
                 path.into()
             });
-            current.cloned()
+            if prefer_edited {
+                edited.cloned()
+            } else {
+                current.cloned()
+            }
         }
     }
 }
@@ -104,6 +136,7 @@ fn merge_uuid_array(
     edited: &[Value],
     path: &str,
     conflicts: &mut Vec<String>,
+    prefer_edited: bool,
 ) -> Option<Value> {
     fn index(values: &[Value]) -> HashMap<String, &Value> {
         values
@@ -130,12 +163,14 @@ fn merge_uuid_array(
     let edited_order = id_order(edited);
     let current_reordered = common_order_changed(&base_order, &current_order);
     let edited_reordered = common_order_changed(&base_order, &edited_order);
-    if current_reordered && edited_reordered && current_order != edited_order {
+    let order_conflict = current_reordered && edited_reordered && current_order != edited_order;
+    if order_conflict {
         conflicts.push(format!("{path} order"));
     }
     let mut ids = Vec::new();
-    let first = if edited_reordered { edited } else { current };
-    let second = if edited_reordered { current } else { edited };
+    let use_edited_order = edited_reordered && (!order_conflict || prefer_edited);
+    let first = if use_edited_order { edited } else { current };
+    let second = if use_edited_order { current } else { edited };
     for value in first.iter().chain(second) {
         if let Some(id) = value.get("id").and_then(Value::as_str)
             && !ids.iter().any(|known| known == id)
@@ -151,6 +186,7 @@ fn merge_uuid_array(
             e.get(&id).copied(),
             &format!("{path}[{id}]"),
             conflicts,
+            prefer_edited,
         ) {
             out.push(value);
         }
@@ -196,7 +232,7 @@ mod tests {
         edited.settings.theme = "catppuccin".into();
         assert_eq!(
             merge_configs(&base, &current, &edited).unwrap_err(),
-            vec!["settings.theme"]
+            MergeError::Conflicts(vec!["settings.theme".into()])
         );
     }
 
@@ -250,7 +286,9 @@ mod tests {
         edited.profiles[0].name = "Edited".into();
 
         let conflicts = merge_configs(&base, &current, &edited).unwrap_err();
-        assert!(conflicts[0].starts_with("profiles["));
+        assert!(
+            matches!(conflicts, MergeError::Conflicts(paths) if paths[0].starts_with("profiles["))
+        );
     }
 
     #[test]
@@ -264,9 +302,13 @@ mod tests {
         );
         base.profiles = vec![profile.clone(), profile];
 
-        let errors = merge_configs(&base, &Config::default(), &Config::default()).unwrap_err();
-        assert!(errors[0].contains("base config is invalid"));
-        assert!(errors[0].contains("duplicate id"));
+        let MergeError::Invalid(message) =
+            merge_configs(&base, &Config::default(), &Config::default()).unwrap_err()
+        else {
+            panic!("expected validation error")
+        };
+        assert!(message.contains("base config is invalid"));
+        assert!(message.contains("duplicate id"));
     }
 
     #[test]
@@ -310,9 +352,7 @@ mod tests {
         let mut edited = base.clone();
         edited.profiles.swap(1, 2);
         assert!(
-            merge_configs(&base, &current, &edited)
-                .unwrap_err()
-                .contains(&"profiles order".to_string())
+            matches!(merge_configs(&base, &current, &edited), Err(MergeError::Conflicts(paths)) if paths.contains(&"profiles order".into()))
         );
     }
 

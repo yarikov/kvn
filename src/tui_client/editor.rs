@@ -2,11 +2,17 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 
 use crate::app::model::SourceRow;
+use crate::app::msg::{ConfigEditResult, IpcCommand};
 use crate::config::profile::Config;
+
+mod retry;
+
+use retry::retry_edit;
 
 /// Config object that should be selected when the editor opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,14 +154,15 @@ fn editor_args(editor: &str, path: &Path, line: usize) -> Vec<String> {
     }
 }
 
-pub(super) struct EditedConfig {
-    pub base: Config,
-    pub edited: Config,
-}
-
 struct EditorSnapshot {
     path: PathBuf,
     remove_on_drop: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum EditorOutcome {
+    Saved,
+    Cancelled { recovery: Option<PathBuf> },
 }
 
 impl EditorSnapshot {
@@ -209,7 +216,7 @@ fn preserve_invalid_edit(snapshot: EditorSnapshot) -> Result<PathBuf> {
 }
 
 /// Edit an isolated snapshot. The live `profiles.json` remains daemon-owned.
-pub fn open_profiles_editor(target: Option<EditorTarget>, base: Config) -> Result<EditedConfig> {
+pub fn open_profiles_editor(target: Option<EditorTarget>, base: Config) -> Result<EditorOutcome> {
     let editor = detect_editor();
     let (program, base_args) = split_editor(&editor);
     let runtime_dir = crate::paths::ensure_runtime_dir()?;
@@ -219,54 +226,286 @@ pub fn open_profiles_editor(target: Option<EditorTarget>, base: Config) -> Resul
         path: path.clone(),
         remove_on_drop: true,
     };
+    let mut original = fs::read(&path).context("Failed to read original editor snapshot")?;
+    original.push(b'\n');
+    crate::atomic_write::write(&path, &original).context("Failed to finish editor snapshot")?;
 
-    let args = if let Some(line) = target.and_then(|target| find_target_line(&path, target)) {
-        editor_args(&program, &path, line)
-    } else {
-        vec![path.display().to_string()]
-    };
+    let line = target.and_then(|target| find_target_line(&path, target));
+    let result = edit_until_saved(&path, base, &program, &base_args, line);
+    finish_edit(snapshot, &original, result)
+}
 
-    let status = Command::new(&program)
-        .args(&base_args)
-        .args(&args)
-        .status()
-        .with_context(|| format!("Failed to launch editor: {}", editor))?;
-
-    if !status.success() {
-        anyhow::bail!("Editor exited with non-zero status");
+fn finish_edit(
+    snapshot: EditorSnapshot,
+    original: &[u8],
+    result: Result<EditorOutcome>,
+) -> Result<EditorOutcome> {
+    if matches!(result, Ok(EditorOutcome::Saved))
+        || fs::read(&snapshot.path).is_ok_and(|contents| contents == original)
+    {
+        return result;
     }
-
-    let edited = match crate::config::load_config_at(&path) {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            let conflict = preserve_invalid_edit(snapshot)?;
-            return Err(e).with_context(|| {
-                format!(
-                    "Invalid JSON; live config was not changed. Edited version saved to {}.",
-                    conflict.display()
-                )
-            });
+    let recovery = preserve_invalid_edit(snapshot).with_context(|| match &result {
+        Err(error) => format!("{error:#}"),
+        _ => "Configuration edit cancelled".into(),
+    })?;
+    match result {
+        Ok(_) => Ok(EditorOutcome::Cancelled {
+            recovery: Some(recovery),
+        }),
+        Err(error) => {
+            Err(error).with_context(|| format!("Edited version saved to {}", recovery.display()))
         }
-    };
+    }
+}
 
-    if let Err(e) = edited.validate() {
-        let conflict = preserve_invalid_edit(snapshot)?;
-        return Err(e).with_context(|| {
-            format!(
-                "Validation failed; live config was not changed. Edited version saved to {}.",
-                conflict.display()
-            )
+fn edit_until_saved(
+    path: &Path,
+    mut base: Config,
+    program: &str,
+    base_args: &[String],
+    mut line: Option<usize>,
+) -> Result<EditorOutcome> {
+    loop {
+        let args = match line {
+            Some(line) => editor_args(program, path, line),
+            None => vec![path.display().to_string()],
+        };
+        let status = Command::new(program)
+            .args(base_args)
+            .args(args)
+            .status()
+            .with_context(|| format!("Failed to launch editor: {program}"))?;
+        anyhow::ensure!(status.success(), "Editor exited with non-zero status");
+        let contents = fs::read_to_string(path).context("Failed to read editor snapshot")?;
+        let edited = match check_edit(&contents, path) {
+            Ok(edited) => edited,
+            Err(issue) => {
+                line = issue.line;
+                if retry_edit(&issue.message)? {
+                    continue;
+                }
+                return Ok(EditorOutcome::Cancelled { recovery: None });
+            }
+        };
+        match submit_edit(&base, &edited)? {
+            ConfigEditResult::Saved => return Ok(EditorOutcome::Saved),
+            ConfigEditResult::Conflict { current, paths } => {
+                let document = crate::config::merge::resolution::document(&base, &current, &edited);
+                crate::atomic_write::write(path, document.as_bytes())?;
+                line = crate::config::merge::resolution::first_marker_line(&document);
+                base = *current;
+                if !retry_edit(&format!(
+                    "Conflicts at {}. Keep the desired values and remove the conflict markers.",
+                    paths.join(", ")
+                ))? {
+                    return Ok(EditorOutcome::Cancelled { recovery: None });
+                }
+            }
+            ConfigEditResult::Failed { message } => anyhow::bail!("{message}"),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct EditIssue {
+    message: String,
+    line: Option<usize>,
+}
+
+fn check_edit(contents: &str, path: &Path) -> Result<Config, EditIssue> {
+    if let Some(line) = crate::config::merge::resolution::first_marker_line(contents) {
+        return Err(EditIssue {
+            message:
+                "Unresolved conflicts: keep the desired values and remove all conflict markers."
+                    .into(),
+            line: Some(line),
         });
     }
+    crate::config::load_config_bytes_read_only(contents.as_bytes(), path)
+        .and_then(|config| {
+            config.validate()?;
+            Ok(config)
+        })
+        .map_err(|error| EditIssue {
+            line: error.chain().find_map(|cause| {
+                cause
+                    .downcast_ref::<serde_json::Error>()
+                    .map(|error| error.line().max(1))
+            }),
+            message: format!("{error:#}"),
+        })
+}
 
-    drop(snapshot);
-    Ok(EditedConfig { base, edited })
+fn submit_edit(base: &Config, edited: &Config) -> Result<ConfigEditResult> {
+    let mut client = crate::ipc::IpcClient::connect()?;
+    let request = client.send_request(&IpcCommand::ApplyEditedConfig {
+        base: Box::new(base.clone()),
+        edited: Box::new(edited.clone()),
+    })?;
+    let snapshot = client.read_response(request, Duration::from_secs(10))
+        .context("Could not confirm whether the configuration was saved; check the current configuration before retrying")?;
+    snapshot.config_edit_result.context(
+        "The daemon did not return an editor save result; restart kvn before editing again",
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn invalid_json_reports_its_line_and_accepts_correction() {
+        let path = Path::new("snapshot.json");
+        let issue = check_edit("{\n invalid\n}", path).unwrap_err();
+        assert_eq!(issue.line, Some(2));
+        assert!(issue.message.contains("line 2"));
+        let fixed = serde_json::to_string(&Config::default()).unwrap();
+        assert!(check_edit(&fixed, path).is_ok());
+    }
+
+    #[test]
+    fn validation_error_keeps_the_edit_available_for_correction() {
+        let mut config = Config::default();
+        let profile = crate::config::profile::Profile::new_vless(
+            "A".into(),
+            "example.com".into(),
+            443,
+            uuid::Uuid::new_v4().to_string(),
+        );
+        config.profiles = vec![profile.clone(), profile];
+        let path = Path::new("snapshot.json");
+        let issue = check_edit(&serde_json::to_string(&config).unwrap(), path).unwrap_err();
+        assert!(issue.message.contains("duplicate id"));
+        assert_eq!(issue.line, None);
+        config.profiles.pop();
+        assert!(check_edit(&serde_json::to_string(&config).unwrap(), path).is_ok());
+    }
+
+    #[test]
+    fn unresolved_conflicts_explain_how_to_continue() {
+        let issue = check_edit("{\n<<<<<<< YOUR EDIT\n", Path::new("snapshot.json")).unwrap_err();
+        assert_eq!(issue.line, Some(2));
+        assert!(issue.message.contains("remove all conflict markers"));
+    }
+
+    #[test]
+    fn saving_without_net_changes_before_editor_failure_does_not_create_recovery() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
+        let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let script = dir.path().join("editor.sh");
+        let _visual = crate::test_helpers::EnvVarGuard::set(
+            "VISUAL",
+            format!("/bin/sh {}", script.display()),
+        );
+        let recovery = crate::paths::profiles_path()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("recovery");
+        for interim_edit in [":", "printf 'BROKEN\\n' > \"$1\""] {
+            fs::write(&script, format!(
+                "contents=$(cat -- \"$1\")\n{interim_edit}\nprintf '%s\\n' \"$contents\" > \"$1\"\nexit 1\n"
+            )).unwrap();
+            let error = open_profiles_editor(None, Config::default()).unwrap_err();
+            assert!(format!("{error:#}").contains("non-zero status"));
+            assert!(!recovery.exists());
+            assert!(!format!("{error:#}").contains("Edited version saved"));
+        }
+    }
+
+    #[test]
+    fn editor_launch_failure_does_not_create_recovery() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
+        let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let _visual =
+            crate::test_helpers::EnvVarGuard::set("VISUAL", dir.path().join("missing-editor"));
+        let error = open_profiles_editor(None, Config::default()).unwrap_err();
+        assert!(format!("{error:#}").contains("Failed to launch editor"));
+        assert!(!dir.path().join("kvn-tui/recovery").exists());
+    }
+
+    #[test]
+    fn cancelling_an_unchanged_snapshot_needs_no_recovery() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("snapshot.json");
+        fs::write(&path, "original").unwrap();
+        let result = finish_edit(
+            EditorSnapshot {
+                path: path.clone(),
+                remove_on_drop: true,
+            },
+            b"original",
+            Ok(EditorOutcome::Cancelled { recovery: None }),
+        )
+        .unwrap();
+        assert_eq!(result, EditorOutcome::Cancelled { recovery: None });
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn cancelling_a_generated_conflict_document_preserves_unsaved_edits() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let path = dir.path().join("snapshot.json");
+        let base = Config::default();
+        let mut current = base.clone();
+        current.settings.theme = "nord".into();
+        let mut edited = base.clone();
+        edited.settings.theme = "catppuccin".into();
+        let document = crate::config::merge::resolution::document(&base, &current, &edited);
+        fs::write(&path, &document).unwrap();
+        let result = finish_edit(
+            EditorSnapshot {
+                path,
+                remove_on_drop: true,
+            },
+            &serde_json::to_vec_pretty(&base).unwrap(),
+            Ok(EditorOutcome::Cancelled { recovery: None }),
+        )
+        .unwrap();
+        let EditorOutcome::Cancelled {
+            recovery: Some(path),
+        } = result
+        else {
+            panic!("expected cancellation with recovery")
+        };
+        assert_eq!(fs::read_to_string(path).unwrap(), document);
+    }
+
+    #[test]
+    fn editor_failure_preserves_changed_contents() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let path = dir.path().join("snapshot.json");
+        fs::write(&path, "edited").unwrap();
+        let error = finish_edit(
+            EditorSnapshot {
+                path,
+                remove_on_drop: true,
+            },
+            b"original",
+            Err(anyhow::anyhow!("Editor exited with non-zero status")),
+        )
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("non-zero status"));
+        assert!(message.contains("Edited version saved"));
+        let recovery = fs::read_dir(dir.path().join("kvn-tui/recovery"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_eq!(fs::read_to_string(recovery).unwrap(), "edited");
+    }
 
     #[test]
     fn editor_snapshot_removes_file_on_drop() {
