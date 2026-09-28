@@ -1596,6 +1596,7 @@ esac
             restart_required: false,
             response_to: None,
             response_error: None,
+            config_edit_result: None,
             connection: ConnectionState::Idle,
             status: "ok".into(),
             status_is_error: false,

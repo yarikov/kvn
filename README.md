@@ -282,7 +282,8 @@ their physical US key positions regardless of the active keyboard layout.
 ## Configuration
 
 Configuration is stored in `~/.config/kvn-tui/profiles.json`. Press `e` to edit
-it in `$EDITOR`; invalid configuration is rejected when reloaded.
+it in `$VISUAL` or `$EDITOR`. Errors can be corrected in the same editing
+session; concurrent changes are merged, with conflicts reopened in the editor.
 
 See the [configuration guide](docs/configuration.md) for the JSON structure,
 advanced DNS and routing, validation, migrations, and runtime file locations.

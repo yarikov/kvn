@@ -7,7 +7,9 @@
 //! another script. This small reader keeps using Crossterm's public event
 //! types while decoding the subset of terminal input used by kvn.
 
+use std::fs::File;
 use std::io::{self, Read, Write};
+use std::os::fd::AsFd;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -102,11 +104,18 @@ pub(super) fn spawn_event_reader(tx: Sender<Msg>, control: Arc<EventReaderContro
     spawn_resize_reader(tx.clone());
     thread::spawn(move || {
         let mut decoder = Decoder::default();
-        let mut stdin = io::stdin().lock();
+        let mut stdin = match unbuffered_reader(&io::stdin()) {
+            Ok(stdin) => stdin,
+            Err(error) => {
+                tracing::error!("Failed to open terminal input: {error}");
+                return;
+            }
+        };
         let mut bytes = [0_u8; 64];
 
         loop {
             if !control.reading_enabled.load(Ordering::Acquire) {
+                decoder = Decoder::default();
                 control.paused.store(true, Ordering::Release);
                 thread::sleep(POLL_INTERVAL);
                 continue;
@@ -137,6 +146,42 @@ pub(super) fn spawn_event_reader(tx: Sender<Msg>, control: Arc<EventReaderContro
             }
         }
     });
+}
+
+pub(super) fn unbuffered_reader(source: &impl AsFd) -> io::Result<File> {
+    source.as_fd().try_clone_to_owned().map(File::from)
+}
+
+pub(super) struct PausedInputReader {
+    stdin: File,
+    decoder: Decoder,
+}
+
+impl PausedInputReader {
+    pub(super) fn new() -> io::Result<Self> {
+        Ok(Self {
+            stdin: unbuffered_reader(&io::stdin())?,
+            decoder: Decoder::default(),
+        })
+    }
+
+    pub(super) fn read_events(&mut self) -> io::Result<Option<Vec<InputEvent>>> {
+        let ready = match stdin_ready(POLL_INTERVAL) {
+            Ok(ready) => ready,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => false,
+            Err(error) => return Err(error),
+        };
+        if ready {
+            let mut bytes = [0; 64];
+            match self.stdin.read(&mut bytes) {
+                Ok(0) => return Ok(None),
+                Ok(read) => self.decoder.push(&bytes[..read]),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(Some(self.decoder.drain(Instant::now())))
+    }
 }
 
 fn spawn_resize_reader(tx: Sender<Msg>) {
@@ -182,7 +227,7 @@ fn stdin_ready(timeout: Duration) -> io::Result<bool> {
     if result < 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(result > 0 && fd.revents & libc::POLLIN != 0)
+    Ok(result > 0 && fd.revents & (libc::POLLIN | libc::POLLHUP) != 0)
 }
 
 #[derive(Default)]
@@ -235,7 +280,7 @@ enum ParseResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum InputEvent {
+pub(super) enum InputEvent {
     Key(KeyEvent),
     Mouse(MouseEvent),
     Paste(String),
@@ -549,6 +594,25 @@ fn event(code: KeyCode, modifiers: KeyModifiers, used: usize) -> ParseResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unbuffered_reader_leaves_long_paste_remainder_on_the_descriptor() {
+        use std::io::{Seek, SeekFrom};
+
+        let mut source = tempfile::tempfile().unwrap();
+        let mut paste = b"\x1b[200~".to_vec();
+        paste.extend(vec![b'x'; 512]);
+        paste.extend_from_slice(b"\x1b[201~q\n");
+        source.write_all(&paste).unwrap();
+        source.seek(SeekFrom::Start(0)).unwrap();
+        let mut reader = unbuffered_reader(&source).unwrap();
+        let mut first = [0; 64];
+        assert_eq!(reader.read(&mut first).unwrap(), 64);
+        let mut remaining = Vec::new();
+        source.read_to_end(&mut remaining).unwrap();
+        assert_eq!(remaining, paste[64..]);
+        assert_eq!(reader.read(&mut first).unwrap(), 0);
+    }
 
     #[test]
     fn event_reader_control_waits_for_pause_acknowledgement() {

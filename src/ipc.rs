@@ -381,6 +381,7 @@ mod tests {
             restart_required: false,
             response_to: None,
             response_error: None,
+            config_edit_result: None,
             connection: ConnectionState::Idle,
             status: "ok".into(),
             status_is_error: false,
@@ -518,6 +519,14 @@ mod tests {
 
         cleanup_socket();
         unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+    }
+
+    #[test]
+    fn snapshots_without_editor_results_remain_compatible() {
+        let value = serde_json::to_value(sample_snapshot()).unwrap();
+        assert!(value.get("config_edit_result").is_none());
+        let snapshot: StateSnapshot = serde_json::from_value(value).unwrap();
+        assert!(snapshot.config_edit_result.is_none());
     }
 
     #[test]

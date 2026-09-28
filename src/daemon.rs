@@ -147,6 +147,15 @@ fn run_loop(
             _ => None,
         };
         let config_before = model.config.clone();
+        let edit_requested = matches!(
+            &msg,
+            Msg::IpcRequest {
+                command: IpcCommand::ApplyEditedConfig { .. },
+                ..
+            }
+        );
+        let mut config_edit_result =
+            edit_requested.then(|| missing_edit_result(model.restart_required));
         let support_prompt_before = model.support_prompt.clone();
         let onboarding_before = model.onboarding;
         let mut effects = update(model, msg);
@@ -223,7 +232,11 @@ fn run_loop(
         }
 
         for effect in effects {
-            execute_daemon_effect(effect, tx, model, shared)?;
+            if let Some(result) = execute_daemon_effect(effect, tx, model, shared, edit_requested)?
+                && edit_requested
+            {
+                config_edit_result = Some(result);
+            }
         }
 
         if model.should_quit {
@@ -231,16 +244,29 @@ fn run_loop(
         }
 
         if should_broadcast {
-            ipc_server.broadcast(&build_snapshot(
+            let mut snapshot = build_snapshot(
                 model,
                 log_session_offsets,
                 ipc_server.tui_sessions(),
                 response_to,
                 response_error,
-            ));
+            );
+            snapshot.config_edit_result = config_edit_result;
+            ipc_server.broadcast(&snapshot);
         }
     }
     Ok(())
+}
+
+fn missing_edit_result(restart_required: bool) -> crate::app::msg::ConfigEditResult {
+    crate::app::msg::ConfigEditResult::Failed {
+        message: if restart_required {
+            "Restart the kvn daemon to finish the upgrade"
+        } else {
+            "Internal error: the daemon did not produce a configuration save result"
+        }
+        .into(),
+    }
 }
 
 /// At daemon startup, align `settings.kill_switch` with the actual systemd
@@ -326,6 +352,7 @@ pub(crate) fn build_snapshot(
         restart_required: model.restart_required,
         response_to,
         response_error,
+        config_edit_result: None,
         connection: model.connection,
         status: model.status_text().to_string(),
         status_is_error: model.status_is_error(),
@@ -408,6 +435,110 @@ fn spawn_signal_handler(tx: Sender<Msg>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::cancel_startup_auto_connect;
+
+    #[test]
+    fn missing_editor_result_only_requests_restart_when_required() {
+        use crate::app::msg::ConfigEditResult;
+
+        let ConfigEditResult::Failed { message } = super::missing_edit_result(false) else {
+            panic!("expected failure")
+        };
+        assert!(message.contains("Internal error"));
+        assert!(!message.contains("Restart"));
+        let ConfigEditResult::Failed { message } = super::missing_edit_result(true) else {
+            panic!("expected failure")
+        };
+        assert!(message.contains("Restart the kvn daemon"));
+    }
+
+    #[test]
+    fn editor_requests_report_commit_results_without_leaking_into_later_snapshots() {
+        use super::*;
+        use crate::app::msg::ConfigEditResult;
+        use crate::config::profile::Config;
+        use crate::ipc::IpcClient;
+        use crate::test_helpers::{ENV_LOCK, EnvVarGuard};
+        use std::time::Duration;
+
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _runtime = EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
+        let _config = EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let base = Config::default();
+        let mut current = base.clone();
+        current.settings.theme = "nord".into();
+        crate::config::save_config(&current).unwrap();
+        let mut model = Model::test_new(current.clone());
+        let (tx, rx) = channel();
+        let server = IpcServer::bind(tx.clone()).unwrap();
+        let worker = thread::spawn(move || {
+            let shared = DaemonShared {
+                process_slot: Arc::new(Mutex::new(ProcessSlot {
+                    attempt_id: 0,
+                    handle: None,
+                })),
+                connect_coordinator: Arc::new(Mutex::new(())),
+                singbox_log_pruned_at: Arc::new(Mutex::new(None)),
+            };
+            run_loop(
+                &mut model,
+                rx,
+                &tx,
+                &shared,
+                &server,
+                LogSessionOffsets::default(),
+            )
+            .unwrap();
+        });
+        let mut client = IpcClient::connect().unwrap();
+        let mut request = |command| {
+            let id = client.send_request(&command).unwrap();
+            client.read_response(id, Duration::from_secs(2)).unwrap()
+        };
+        let mut edited = base.clone();
+        edited.settings.theme = "catppuccin".into();
+        let response = request(IpcCommand::ApplyEditedConfig {
+            base: Box::new(base),
+            edited: Box::new(edited.clone()),
+        });
+        assert!(
+            matches!(response.config_edit_result, Some(ConfigEditResult::Conflict { current: actual, paths }) if *actual == current && paths == vec!["settings.theme"])
+        );
+        let response = request(IpcCommand::Attach);
+        assert!(response.config_edit_result.is_none());
+        let response = request(IpcCommand::ApplyEditedConfig {
+            base: Box::new(current),
+            edited: Box::new(edited.clone()),
+        });
+        assert!(matches!(
+            response.config_edit_result,
+            Some(ConfigEditResult::Saved)
+        ));
+        assert_eq!(
+            crate::config::load_config_at_read_only(&crate::paths::profiles_path().unwrap())
+                .unwrap()
+                .settings
+                .theme,
+            "catppuccin"
+        );
+        let recovery = crate::paths::profiles_path()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("recovery");
+        assert!(!recovery.exists());
+        request(IpcCommand::RestartRequired);
+        let response = request(IpcCommand::ApplyEditedConfig {
+            base: Box::new(edited.clone()),
+            edited: Box::new(edited),
+        });
+        assert!(
+            matches!(response.config_edit_result, Some(ConfigEditResult::Failed { message }) if message.contains("Restart"))
+        );
+        client.send(&IpcCommand::Quit).unwrap();
+        worker.join().unwrap();
+        cleanup_socket();
+    }
 
     #[test]
     fn startup_auto_connect_is_cancelled_when_polkit_is_missing() {

@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::app::effect::Effect;
 use crate::app::model::Model;
-use crate::app::msg::Msg;
+use crate::app::msg::{ConfigEditResult, Msg};
 
 use super::process_slot::lock_process_slot;
 use super::{DaemonShared, config_io, connection, geo, profile_test, subscription, traffic};
@@ -14,7 +14,8 @@ pub(super) fn execute_daemon_effect(
     tx: &Sender<Msg>,
     model: &mut Model,
     shared: &DaemonShared,
-) -> Result<()> {
+    reply_requested: bool,
+) -> Result<Option<ConfigEditResult>> {
     match effect {
         Effect::Connect {
             profile,
@@ -45,10 +46,16 @@ pub(super) fn execute_daemon_effect(
             config_io::persist_onboarding(model, previous, recovery)
         }
         Effect::SaveConfigConflict { edited, conflicts } => {
+            if reply_requested {
+                return Ok(Some(ConfigEditResult::Failed {
+                    message: conflicts.join(", "),
+                }));
+            }
             config_io::save_conflict(model, edited, conflicts)
         }
         Effect::CommitEditedConfig { base, edited } => {
-            config_io::commit_edited(tx, model, shared, base, edited)?
+            return config_io::commit_edited(tx, model, shared, base, edited, reply_requested)
+                .map(Some);
         }
         Effect::ReloadConfig => config_io::reload(tx),
         Effect::UpdateSubscription { id } => subscription::fetch(tx, model, id),
@@ -68,5 +75,5 @@ pub(super) fn execute_daemon_effect(
             model.should_quit = true;
         }
     }
-    Ok(())
+    Ok(None)
 }
