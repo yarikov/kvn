@@ -35,7 +35,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 
 | Module | Path | Responsibility |
 |--------|------|----------------|
-| `cli` | `src/cli.rs` | CLI argument parsing: `--daemon`, `--waybar-status`, `--version`; `status`/`connect`/`disconnect`/`reconnect`/`toggle` one-shot IPC clients; `enable`/`disable --killswitch`; `doctor`, `migrate`, `config {migrate,reset,recover}`; `setup` and `clean` for the `--omarchy` / `--polkit` / `--killswitch` integrations |
+| `cli` | `src/cli.rs`, `src/cli/clean_all.rs` | CLI argument parsing: `--daemon`, `--waybar-status`, `--version`; `status`/`connect`/`disconnect`/`reconnect`/`toggle` one-shot IPC clients; `enable`/`disable --killswitch`; `doctor`, `migrate`, `config {migrate,reset,recover}`; `setup` and `clean` for the `--omarchy` / `--polkit` / `--killswitch` integrations (`clean --omarchy` reverts the whole Omarchy integration through `contrib/remove-omarchy.sh`, `clean --omarchy-backups` deletes only its backups); `sudo kvn clean --all` (`clean_all.rs`) stops the invoking user's daemon, runs every integration cleanup, reverts the Omarchy integration as that user through `contrib/remove-omarchy.sh`, and deletes that user's config, state and runtime files |
 | `app` | `src/app.rs`, `src/app/model.rs`, `src/app/msg.rs`, `src/app/update.rs`, `src/app/effect.rs` | TEA core: Model, Msg, Update, Effect — pure data, messages, business logic, side-effect declarations |
 | `model` | `src/app/model.rs` | Application state (`Model`), overlay + connection state + subscription state, input state — pure data, no side effects |
 | `msg` | `src/app/msg.rs` | Message enum (`Msg`) — all external events (keys, ticks, logs, geo, resume, etc.) |

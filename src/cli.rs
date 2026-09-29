@@ -11,6 +11,8 @@ use crate::app::msg::{IpcCommand, StateSnapshot};
 use crate::ipc::IpcClient;
 use crate::services::waybar;
 
+mod clean_all;
+
 /// How long a one-shot CLI client waits for the daemon to answer with a
 /// state snapshot before giving up.
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -176,12 +178,16 @@ enum Command {
         ArgGroup::new("targets")
             .required(true)
             .multiple(true)
-            .args(["omarchy", "polkit", "killswitch"])
+            .args(["omarchy", "omarchy_backups", "polkit", "killswitch", "all"])
     ))]
     Clean {
-        /// Remove backup files created by `setup --omarchy`.
-        #[arg(long, conflicts_with_all = ["polkit", "killswitch"])]
+        /// Remove the Omarchy integration added by `setup --omarchy`, backups included.
+        #[arg(long, conflicts_with_all = ["omarchy_backups", "polkit", "killswitch"])]
         omarchy: bool,
+
+        /// Remove only the backup files created by `setup --omarchy`.
+        #[arg(long, conflicts_with_all = ["polkit", "killswitch"])]
+        omarchy_backups: bool,
 
         /// Remove the optional passwordless DNS polkit rule.
         #[arg(long)]
@@ -190,6 +196,14 @@ enum Command {
         /// Disable and remove the nftables-based kill switch.
         #[arg(long)]
         killswitch: bool,
+
+        /// Stop the daemon and remove every file kvn created, profiles included.
+        #[arg(long, conflicts_with_all = ["omarchy", "omarchy_backups", "polkit", "killswitch"])]
+        all: bool,
+
+        /// Skip the confirmation prompt of `--all`.
+        #[arg(long, conflicts_with_all = ["omarchy", "omarchy_backups", "polkit", "killswitch"])]
+        yes: bool,
     },
 }
 
@@ -231,10 +245,15 @@ fn archive_current(path: &Path) -> Result<Option<PathBuf>> {
 }
 
 fn confirm_config_reset<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> Result<bool> {
-    write!(
+    confirm(
+        input,
         output,
-        "Archive the current configuration and create a default one? [y/N] "
-    )?;
+        "Archive the current configuration and create a default one?",
+    )
+}
+
+fn confirm<R: BufRead, W: Write>(input: &mut R, output: &mut W, question: &str) -> Result<bool> {
+    write!(output, "{question} [y/N] ")?;
     output.flush()?;
     let mut answer = String::new();
     input.read_line(&mut answer)?;
@@ -300,11 +319,13 @@ fn run_config_recover(file: &Path) -> Result<()> {
 /// in a predictable temporary file. `bash -c` preserves the caller's stdin,
 /// which the interactive Omarchy installer needs for its prompts.
 fn run_embedded_script(name: &str, script: &str, args: &[&str]) -> Result<()> {
-    let status = std::process::Command::new("bash")
-        .arg("-c")
-        .arg(script)
-        .arg(name)
-        .args(args)
+    let mut command = std::process::Command::new("bash");
+    command.arg("-c").arg(script).arg(name).args(args);
+    run_embedded_script_command(name, command)
+}
+
+fn run_embedded_script_command(name: &str, mut command: std::process::Command) -> Result<()> {
+    let status = command
         .status()
         .with_context(|| format!("failed to run {name}"))?;
     if !status.success() {
@@ -327,6 +348,14 @@ fn clean_omarchy() -> Result<()> {
     run_embedded_script(
         "clean-omarchy.sh",
         include_str!("../contrib/clean-omarchy.sh"),
+        &[],
+    )
+}
+
+fn remove_omarchy() -> Result<()> {
+    run_embedded_script(
+        "remove-omarchy.sh",
+        include_str!("../contrib/remove-omarchy.sh"),
         &[],
     )
 }
@@ -412,15 +441,17 @@ fn report_daemon_setting_off(setting: &str, result: Option<Result<()>>) {
 }
 
 fn validate_integration_privileges(
-    omarchy: bool,
+    omarchy_flag: Option<&str>,
     system: bool,
     effective_uid: u32,
     sudo_user: Option<&str>,
     action: &str,
 ) -> Result<()> {
-    if omarchy && effective_uid == 0 {
+    if let Some(flag) = omarchy_flag
+        && effective_uid == 0
+    {
         anyhow::bail!(
-            "Omarchy integration changes user files; run `kvn {action} --omarchy` without sudo"
+            "Omarchy integration changes user files; run `kvn {action} {flag}` without sudo"
         );
     }
 
@@ -441,7 +472,7 @@ fn validate_integration_privileges(
 }
 
 fn validate_current_integration_privileges(
-    omarchy: bool,
+    omarchy_flag: Option<&str>,
     polkit: bool,
     killswitch: bool,
     action: &str,
@@ -450,7 +481,7 @@ fn validate_current_integration_privileges(
     let effective_uid = unsafe { libc::geteuid() };
     let sudo_user = std::env::var("SUDO_USER").ok();
     validate_integration_privileges(
-        omarchy,
+        omarchy_flag,
         polkit || killswitch,
         effective_uid,
         sudo_user.as_deref(),
@@ -827,7 +858,12 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
             killswitch,
         }) => {
             let result = (|| {
-                validate_current_integration_privileges(*omarchy, *polkit, *killswitch, "setup")?;
+                validate_current_integration_privileges(
+                    omarchy.then_some("--omarchy"),
+                    *polkit,
+                    *killswitch,
+                    "setup",
+                )?;
                 if *omarchy {
                     install_omarchy()?;
                 }
@@ -841,14 +877,30 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
             })();
             return Some(result);
         }
+        Some(Command::Clean { all: true, yes, .. }) => return Some(clean_all::run(*yes)),
         Some(Command::Clean {
             omarchy,
+            omarchy_backups,
             polkit,
             killswitch,
+            ..
         }) => {
             let result = (|| {
-                validate_current_integration_privileges(*omarchy, *polkit, *killswitch, "clean")?;
+                let omarchy_flag = if *omarchy {
+                    Some("--omarchy")
+                } else {
+                    omarchy_backups.then_some("--omarchy-backups")
+                };
+                validate_current_integration_privileges(
+                    omarchy_flag,
+                    *polkit,
+                    *killswitch,
+                    "clean",
+                )?;
                 if *omarchy {
+                    remove_omarchy()?;
+                }
+                if *omarchy || *omarchy_backups {
                     clean_omarchy()?;
                 }
                 // Stop and remove the firewall before removing the shared
@@ -925,6 +977,10 @@ plugin:add)
   printf '%s\n' 'import QtQuick' >"$target/Widget.qml"
   printf '%s\n' 'import QtQuick' >"$target/KvnService.qml"
   ;;
+plugin:remove)
+  [[ -f "$HOME/plugin-remove-fails" ]] && exit 1
+  rm -rf "$HOME/.config/omarchy/plugins/${3:-}"
+  ;;
 plugin:update|plugin:validate|plugin:list|bar:put)
   exit 0
   ;;
@@ -974,6 +1030,23 @@ esac
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let script = root.path().join("clean-omarchy.sh");
         fs::write(&script, include_str!("../contrib/clean-omarchy.sh")).unwrap();
+        let path = format!(
+            "{}:{}",
+            root.path().join("bin").display(),
+            std::env::var("PATH").unwrap()
+        );
+        ProcessCommand::new("bash")
+            .arg(&script)
+            .env("HOME", home)
+            .env("PATH", path)
+            .output()
+            .unwrap()
+    }
+
+    fn run_omarchy_removal(root: &TempDir, home: &Path) -> std::process::Output {
+        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let script = root.path().join("remove-omarchy.sh");
+        fs::write(&script, include_str!("../contrib/remove-omarchy.sh")).unwrap();
         let path = format!(
             "{}:{}",
             root.path().join("bin").display(),
@@ -1161,6 +1234,7 @@ esac
                 omarchy: true,
                 polkit: false,
                 killswitch: false,
+                ..
             })
         ));
     }
@@ -1300,6 +1374,7 @@ esac
                 omarchy: false,
                 polkit: true,
                 killswitch: true,
+                ..
             })
         ));
     }
@@ -1322,8 +1397,24 @@ esac
             cli.command,
             Some(Command::Clean {
                 omarchy: true,
+                omarchy_backups: false,
                 polkit: false,
                 killswitch: false,
+                all: false,
+                yes: false,
+            })
+        ));
+    }
+
+    #[test]
+    fn clean_omarchy_backups_option_detected() {
+        let cli = Cli::parse_from(["kvn-tui", "clean", "--omarchy-backups"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Clean {
+                omarchy: false,
+                omarchy_backups: true,
+                ..
             })
         ));
     }
@@ -1335,16 +1426,42 @@ esac
             cli.command,
             Some(Command::Clean {
                 omarchy: false,
+                omarchy_backups: false,
                 polkit: true,
                 killswitch: true,
+                all: false,
+                yes: false,
             })
         ));
     }
 
     #[test]
     fn clean_omarchy_conflicts_with_system_cleanup() {
-        assert!(Cli::try_parse_from(["kvn-tui", "clean", "--omarchy", "--polkit"]).is_err());
-        assert!(Cli::try_parse_from(["kvn-tui", "clean", "--omarchy", "--killswitch"]).is_err());
+        for omarchy in ["--omarchy", "--omarchy-backups"] {
+            for other in ["--polkit", "--killswitch", "--all"] {
+                assert!(Cli::try_parse_from(["kvn-tui", "clean", omarchy, other]).is_err());
+            }
+        }
+        assert!(
+            Cli::try_parse_from(["kvn-tui", "clean", "--omarchy", "--omarchy-backups"]).is_err()
+        );
+    }
+
+    #[test]
+    fn clean_all_parses_alone_with_optional_yes() {
+        let cli = Cli::parse_from(["kvn-tui", "clean", "--all", "--yes"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Clean {
+                all: true,
+                yes: true,
+                ..
+            })
+        ));
+        for other in ["--omarchy", "--polkit", "--killswitch"] {
+            assert!(Cli::try_parse_from(["kvn-tui", "clean", "--all", other]).is_err());
+        }
+        assert!(Cli::try_parse_from(["kvn-tui", "clean", "--polkit", "--yes"]).is_err());
     }
 
     #[test]
@@ -1354,16 +1471,23 @@ esac
 
     #[test]
     fn integration_privileges_separate_user_and_system_actions() {
-        assert!(validate_integration_privileges(true, false, 1000, None, "setup").is_ok());
-        assert!(validate_integration_privileges(false, true, 0, Some("alice"), "setup").is_ok());
+        assert!(
+            validate_integration_privileges(Some("--omarchy"), false, 1000, None, "setup").is_ok()
+        );
+        assert!(validate_integration_privileges(None, true, 0, Some("alice"), "setup").is_ok());
 
-        let omarchy_as_root =
-            validate_integration_privileges(true, false, 0, Some("alice"), "setup")
-                .unwrap_err()
-                .to_string();
-        assert!(omarchy_as_root.contains("without sudo"));
+        let omarchy_as_root = validate_integration_privileges(
+            Some("--omarchy-backups"),
+            false,
+            0,
+            Some("alice"),
+            "clean",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(omarchy_as_root.contains("run `kvn clean --omarchy-backups` without sudo"));
 
-        let system_as_user = validate_integration_privileges(false, true, 1000, None, "clean")
+        let system_as_user = validate_integration_privileges(None, true, 1000, None, "clean")
             .unwrap_err()
             .to_string();
         assert!(system_as_user.contains("sudo kvn clean"));
@@ -1372,7 +1496,7 @@ esac
     #[test]
     fn system_integrations_require_non_root_sudo_user() {
         for sudo_user in [None, Some(""), Some("root")] {
-            let error = validate_integration_privileges(false, true, 0, sudo_user, "setup")
+            let error = validate_integration_privileges(None, true, 0, sudo_user, "setup")
                 .unwrap_err()
                 .to_string();
             assert!(error.contains("non-root invoking user"));
@@ -2206,6 +2330,150 @@ esac
                     .any(|content| content.contains(&format!("\"test_revision\": {revision}")))
             );
         }
+    }
+
+    #[test]
+    fn omarchy_removal_reverts_everything_setup_added() {
+        let (root, home) = installer_fixture(4);
+        write_omarchy_v4_config(&home);
+        let shell_config = home.join(".config/omarchy/shell.json");
+        let hypr = home.join(".config/hypr");
+        assert_success(&run_installer(&root, &home, "y\n\n"));
+
+        assert_success(&run_omarchy_removal(&root, &home));
+
+        let shell: serde_json::Value =
+            serde_json::from_slice(&fs::read(&shell_config).unwrap()).unwrap();
+        assert_eq!(
+            shell["bar"]["layout"]["right"],
+            serde_json::json!([
+                {"id": "omarchy.tray"},
+                {"id": "omarchy.bluetooth"},
+                {"id": "omarchy.network"}
+            ])
+        );
+        assert_eq!(
+            fs::read_to_string(hypr.join("bindings.lua")).unwrap(),
+            "-- personal bindings\n"
+        );
+        assert_eq!(
+            fs::read_to_string(hypr.join("hyprland.lua")).unwrap(),
+            "-- personal rules\n"
+        );
+        for path in [
+            ".config/omarchy/plugins/yarikov.omakvn",
+            ".local/bin/omarchy-launch-kvn-tui",
+            ".local/share/applications/kvn-tui.desktop",
+            ".local/share/icons/hicolor/scalable/apps/kvn-tui.svg",
+        ] {
+            assert!(!home.join(path).exists(), "{path} was not removed");
+        }
+
+        let shell_before = fs::read(&shell_config).unwrap();
+        assert_success(&run_omarchy_removal(&root, &home));
+        assert_eq!(fs::read(&shell_config).unwrap(), shell_before);
+    }
+
+    #[test]
+    fn omarchy_removal_without_an_integration_reloads_nothing() {
+        let (root, home) = installer_fixture(4);
+        write_omarchy_v4_config(&home);
+        let calls = root.path().join("calls");
+        for tool in ["hyprctl", "omarchy-shell"] {
+            write_executable(
+                &root.path().join("bin").join(tool),
+                &format!("#!/bin/bash\necho {tool} >>'{}'\n", calls.display()),
+            );
+        }
+
+        let output = run_omarchy_removal(&root, &home);
+
+        assert_success(&output);
+        assert!(!calls.exists());
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("No kvn Omarchy integration found.")
+        );
+    }
+
+    #[test]
+    fn omarchy_removal_fails_on_an_unreadable_shell_config() {
+        let (root, home) = installer_fixture(4);
+        write_omarchy_v4_config(&home);
+        let shell_config = home.join(".config/omarchy/shell.json");
+        fs::write(&shell_config, "{\"version\":1,\"bar\":").unwrap();
+
+        let output = run_omarchy_removal(&root, &home);
+
+        assert!(!output.status.success());
+        assert_eq!(
+            fs::read_to_string(&shell_config).unwrap(),
+            "{\"version\":1,\"bar\":"
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("could not read"));
+    }
+
+    #[test]
+    fn omarchy_removal_keeps_lua_files_with_unpaired_markers_intact() {
+        let (root, home) = installer_fixture(4);
+        write_omarchy_v4_config(&home);
+        let bindings = home.join(".config/hypr/bindings.lua");
+        let original = "-- personal bindings\n\
+            \n\
+            -- kvn-tui keybinding: begin\n\
+            o.bind(\"SUPER + CTRL + K\", \"kvn VPN client\", \"omarchy-launch-kvn-tui\")\n\
+            -- kvn-tui keybinding: end\n\
+            -- kvn-tui keybinding: begin\n\
+            o.bind(\"SUPER + V\", \"clipboard\", \"clipse\")\n\
+            -- personal code after the broken block\n";
+        fs::write(&bindings, original).unwrap();
+
+        let output = run_omarchy_removal(&root, &home);
+
+        assert_success(&output);
+        assert_eq!(fs::read_to_string(&bindings).unwrap(), original);
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("unpaired kvn keybinding markers")
+        );
+    }
+
+    #[test]
+    fn omarchy_removal_deletes_only_an_omakvn_checkout_when_plugin_remove_fails() {
+        let (root, home) = installer_fixture(4);
+        write_omarchy_v4_config(&home);
+        assert_success(&run_installer(&root, &home, "n\n"));
+        fs::write(home.join("plugin-remove-fails"), "").unwrap();
+        let plugin = home.join(".config/omarchy/plugins/yarikov.omakvn");
+        let git = |args: &[&str]| {
+            assert!(
+                ProcessCommand::new("git")
+                    .arg("-C")
+                    .arg(&plugin)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        };
+
+        git(&[
+            "remote",
+            "set-url",
+            "origin",
+            "https://example.com/fork.git",
+        ]);
+        let output = run_omarchy_removal(&root, &home);
+        assert_success(&output);
+        assert!(plugin.is_dir());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("remove it manually"));
+
+        git(&[
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/yarikov/omakvn.git",
+        ]);
+        assert_success(&run_omarchy_removal(&root, &home));
+        assert!(!plugin.exists());
     }
 
     #[test]

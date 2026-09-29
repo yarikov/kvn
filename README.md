@@ -155,7 +155,7 @@ The idempotent installer creates backups before editing user configuration.
 Remove them after verification with:
 
 ```bash
-kvn clean --omarchy
+kvn clean --omarchy-backups
 ```
 
 This removes only the backups and leaves the active integration unchanged.
