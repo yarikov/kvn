@@ -250,29 +250,81 @@ Changed configuration files receive timestamped backups such as:
 bindings.lua.bak.before-kvn-tui.20260821143012
 ```
 
-At most five kvn backups are retained for each file. To fully remove the
-integration, first remove the plugin with Omarchy's plugin manager:
+At most five kvn backups are retained for each file. After confirming the
+active configuration no longer needs them, delete only the backups created by
+kvn, including those left by earlier Omarchy 3 installations, with:
 
 ```bash
-omarchy plugin remove yarikov.omakvn
+kvn clean --omarchy-backups
 ```
 
-Then restore a suitable backup or manually remove the legacy `kvn-tui` module,
-binding, and window-rule entries. Remove the launcher separately:
+It does not touch the plugin, launcher, keybinding, or window rule.
 
-```bash
-rm ~/.local/bin/omarchy-launch-kvn-tui
-rm ~/.local/share/applications/kvn-tui.desktop
-rm ~/.local/share/icons/hicolor/scalable/apps/kvn-tui.svg
-```
-
-After confirming the active configuration no longer needs the backups, delete
-only the backups created by kvn with:
+To remove the whole integration, run without `sudo`:
 
 ```bash
 kvn clean --omarchy
 ```
 
-`clean --omarchy` removes only these backups, including those left by earlier
-Omarchy 3 installations. It does not remove the plugin, launcher, keybinding,
-or window rule.
+It removes the `yarikov.omakvn` plugin (through `omarchy plugin remove`, or
+directly when no live Omarchy Shell answers and the directory is an omakvn
+checkout), drops the kvn widget from `~/.config/omarchy/shell.json`, deletes the
+`-- kvn-tui keybinding` block from `~/.config/hypr/bindings.lua` and the
+`-- kvn-tui window rule` block from `~/.config/hypr/hyprland.lua`, removes the
+launcher, Apps entry and icon, and finally deletes the backups as
+`--omarchy-backups` does:
+
+```text
+~/.local/bin/omarchy-launch-kvn-tui
+~/.local/share/applications/kvn-tui.desktop
+~/.local/share/icons/hicolor/scalable/apps/kvn-tui.svg
+```
+
+A kvn shortcut added by hand outside those blocks is reported, not edited.
+
+## Remove everything
+
+To start over, or before uninstalling the package, remove everything kvn has
+created with one command:
+
+```bash
+sudo kvn clean --all
+```
+
+It lists the files it is about to delete and asks for confirmation; `--yes`
+skips the prompt. The command must be run through `sudo` from the account that
+uses kvn, and it cannot be combined with the other `clean` options. In order,
+it:
+
+1. Stops that user's kvn daemon and its sing-box process. The
+   `kvn-tui.service` user unit stays enabled.
+2. Removes the kill switch and then the polkit rule, exactly as
+   `clean --killswitch` and `clean --polkit` do, including the `kvn-tui` group
+   and the `/var/lib/kvn` stamps.
+3. Removes the Omarchy integration and its backups exactly as `clean --omarchy`
+   does, running as that user so every edited file keeps its owner. The step,
+   and its mention in the confirmation prompt, is skipped when no trace of the
+   integration is found.
+4. Permanently deletes the user's kvn files:
+
+   ```text
+   ~/.config/kvn-tui/          profiles, settings, geo rule-sets, logs, state, recovery copies
+   ~/.local/state/kvn/         first-run tour, support prompt, applied migrations
+   /run/user/$UID/kvn-tui/     temporary sing-box configuration
+   /run/user/$UID/kvn/         migration lock
+   /run/user/$UID/kvn-tui.sock daemon socket
+   ```
+
+Symbolic links are removed without following them. Because `sudo` resets the
+environment, the default XDG locations above are used; a custom
+`XDG_CONFIG_HOME` or `XDG_STATE_HOME` is not honored.
+
+What is left is the package itself and the autostart link of the enabled
+`kvn-tui.service` user unit. If you keep the package, the daemon starts again at
+your next login and creates a fresh initial configuration and its socket. To
+uninstall, disable the service before removing the package:
+
+```bash
+systemctl --user disable --now kvn-tui.service
+sudo pacman -R kvn-tui
+```
