@@ -4,74 +4,74 @@ expression: "snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 ---
 ┌ Traffic ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections                                          │
-└──────────────────────────┌─────────────────────────────────────────────────────────┐──────────────────────────┘
-┌ Profiles ────────────────│ Navigation                                              │──────────────────────────┐
-│ No sources. Press p to pa│ Ctrl+h/l, Ctrl+←/→ Focus panes                          │                          │
-│URL from clipboard.       │ j/k, ↑/↓           Move or scroll                       │                          │
-│                          │ gg/G               Go to first / last                   │                          │
-│                          │                                                         │                          │
-│                          │ Profiles                                                │                          │
-│                          │ Enter              Connect selected profile             │                          │
-│                          │ e                  Open profiles.json in $EDITOR        │                          │
-│                          │ y                  Yank profile or subscription         │                          │
-│                          │ p                  Paste profile or subscription        │                          │
-│                          │ d                  Delete profile or subscription       │                          │
-│                          │ u/U                Update subscription / geo            │                          │
-│                          │ i/I                Cycle subscription / geo auto-update │                          │
-│                          │ t/T                Test selected / all profiles         │                          │
-│                          │                                                         │                          │
-│                          │ Logs                                                    │                          │
-│                          │ y                  Yank selected log(s)                 │                          │
-│                          │ Shift+V            Select multiple logs                 │                          │
-│                          │ Esc                Cancel log selection                 │                          │
-│                          │                                                         │                          │
-│                          │ Connection                                              │                          │
-│                          │ r                  Reconnect                            │                          │
-│                          │ s                  Disconnect                           │                          │
-│                          │ Shift+A            Toggle auto-connect                  │                          │
-│                          │ Shift+K            Toggle kill switch                   │                          │
-│                          │                                                         │                          │
-│                          │ Settings                                                │                          │
-│                          │                                                         │                          │
-│                          │                        q/󱊷 close                        │                          │
-│                          └─────────────────────────────────────────────────────────┘                          │
+└──────────────────────────────┌─────────────────────────────────────────────────┐──────────────────────────────┘
+┌ Profiles ────────────────────│ Navigation                                      │──────────────────────────────┐
+│ No sources. Press p to paste │ Ctrl+h/←   Focus left pane                      │                              │
+│URL from clipboard.           │ Ctrl+l/→   Focus right pane                     │                              │
+│                              │ j/k, ↑/↓   Move or scroll                       │                              │
+│                              │ gg/G       Go to first / last                   │                              │
+│                              │                                                 │                              │
+│                              │ Profiles                                        │                              │
+│                              │ Enter      Connect selected profile             │                              │
+│                              │ e          Open profiles.json in $EDITOR        │                              │
+│                              │ y          Yank profile or subscription         │                              │
+│                              │ p          Paste profile or subscription        │                              │
+│                              │ d          Delete profile or subscription       │                              │
+│                              │ u/U        Update subscription / geo            │                              │
+│                              │ i/I        Cycle subscription / geo auto-update │                              │
+│                              │ t/T        Test selected / all profiles         │                              │
+│                              │                                                 │                              │
+│                              │ Logs                                            │                              │
+│                              │ y          Yank selected log(s)                 │                              │
+│                              │ Shift+V    Select multiple logs                 │                              │
+│                              │ Esc        Cancel log selection                 │                              │
+│                              │                                                 │                              │
+│                              │ Connection                                      │                              │
+│                              │ r          Reconnect                            │                              │
+│                              │ s          Disconnect                           │                              │
+│                              │ Shift+A    Toggle auto-connect                  │                              │
+│                              │ Shift+K    Toggle kill switch                   │                              │
+│                              │                                                 │                              │
+│                              │                                                 │                              │
+│                              │                    q/󱊷 close                    │                              │
+│                              └─────────────────────────────────────────────────┘                              │
 └───────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
  DISCONNECTED                                                                                         DoH  Global
 [113x35]
 --- styles ---
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 abccddddddddbbeeddddddddbbbbdddddddccddddddbbeeddddddbbbbeddddddddddddbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
-aaaaaaaaaaaaaaaaaaaaaaaaaaaeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaaaaaaaaaaaaaaaaaaaaaaaaaaeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeaaaaaaaaaaaaaaaaaaaaaaaaaaa
-addddddddddddddddddddddddddefffffffffffffffffffffffffffffffffffffffffffffffffffffffffebbbbbbbbbbbbbbbbbbbbbbbbbba
-adddddddddddddddddddbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbba
-abbbbbbbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbbbbbba
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+addddddddddddddddddddddddddddddefffffffffffffffffffffffffffffffffffffffffffffffffebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+adddddddddddddddddddbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 gggggggggggggghhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhiiihhiiiiii
 a fg=Rgb(172, 176, 190) bg=Rgb(239, 241, 245)
