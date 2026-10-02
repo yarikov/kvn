@@ -17,6 +17,7 @@ pub(in crate::app::update) fn handle_ipc_command(
     cmd: crate::app::msg::IpcCommand,
 ) -> Vec<Effect> {
     use crate::app::msg::IpcCommand;
+    model.scroll_result = None;
     match cmd {
         IpcCommand::ClearErrorStatus { status_revision } => {
             model.clear_error_status(status_revision);
@@ -48,6 +49,33 @@ pub(in crate::app::update) fn handle_ipc_command(
             if index < model.source_rows().len() {
                 model.selected = index;
             }
+            vec![]
+        }
+        IpcCommand::ScrollViewport {
+            context,
+            start,
+            visible,
+            delta,
+        } => {
+            if crate::app::scroll::context(model.overlay) == context
+                && let Some((rows, selected)) = crate::app::scroll::list(model)
+            {
+                let position = crate::app::scroll::scroll(
+                    &rows,
+                    visible.min(u16::MAX as usize),
+                    crate::app::scroll::ScrollPosition { start, selected },
+                    delta.clamp(-7, 7),
+                );
+                if position.selected != selected {
+                    crate::app::scroll::select(model, position.selected);
+                }
+                model.scroll_result = Some(position);
+            }
+            vec![]
+        }
+        IpcCommand::MoveSourceSelection { delta } => {
+            let last = model.source_rows().len().saturating_sub(1);
+            model.selected = model.selected.saturating_add_signed(delta).min(last);
             vec![]
         }
         IpcCommand::SetMainPaneFocus { focus } => {
@@ -703,5 +731,70 @@ mod tests {
             crate::app::msg::IpcCommand::SelectSource { index: 99 },
         );
         assert_eq!(model.selected, 0);
+    }
+
+    #[test]
+    fn ipc_relative_source_selection_moves_from_the_daemon_selection_and_clamps() {
+        let profiles = (0..5)
+            .map(|index| Profile::new_vless(format!("P{index}"), "e".into(), 1, "u".into()))
+            .collect();
+        let mut model = model_with_profiles(profiles);
+        model.selected = 1;
+        for delta in [2, 2] {
+            handle_ipc_command(
+                &mut model,
+                crate::app::msg::IpcCommand::MoveSourceSelection { delta },
+            );
+        }
+        assert_eq!(model.selected, 4);
+        handle_ipc_command(
+            &mut model,
+            crate::app::msg::IpcCommand::MoveSourceSelection { delta: -9 },
+        );
+        assert_eq!(model.selected, 0);
+    }
+    #[test]
+    fn ipc_wheel_updates_selection_and_returns_a_request_scoped_position() {
+        let profiles = (0..40)
+            .map(|index| Profile::new_vless(format!("P{index}"), "e".into(), 1, "u".into()))
+            .collect();
+        let mut model = model_with_profiles(profiles);
+        let effects = handle_ipc_command(
+            &mut model,
+            crate::app::msg::IpcCommand::ScrollViewport {
+                context: Overlay::None,
+                start: 0,
+                visible: 10,
+                delta: 1,
+            },
+        );
+        assert_eq!(model.selected, 1);
+        assert_eq!(
+            model.scroll_result,
+            Some(crate::app::scroll::ScrollPosition {
+                start: 1,
+                selected: 1
+            })
+        );
+        assert!(matches!(effects.as_slice(), [Effect::BroadcastState]));
+        handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Attach);
+        assert_eq!(model.scroll_result, None);
+    }
+
+    #[test]
+    fn ipc_wheel_rejects_a_closed_overlay() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::DnsSettings;
+        handle_ipc_command(
+            &mut model,
+            crate::app::msg::IpcCommand::ScrollViewport {
+                context: Overlay::GeoRegions,
+                start: 0,
+                visible: 10,
+                delta: 1,
+            },
+        );
+        assert_eq!(model.dns_selected, 0);
+        assert_eq!(model.scroll_result, None);
     }
 }

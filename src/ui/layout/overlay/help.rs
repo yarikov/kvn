@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState}
 
 use crate::app::model::Model;
 
+use super::super::scrollbar::{ScrollWindow, draw_scrollbar, right_border_track};
 use super::overlay_footer;
 use super::popup::{centered_fixed_width_rect, centered_rect};
 
@@ -20,13 +21,7 @@ pub(super) fn draw(
 ) {
     let theme = &model.theme;
     let help_rows = crate::ui::help::rows(help_state.context);
-    let needed = help_rows.len() as u16 + 2 + 2;
-    let percent = needed
-        .saturating_mul(100)
-        .checked_div(area.height)
-        .unwrap_or(90)
-        .clamp(50, 90);
-    let popup_area = centered_fixed_width_rect(HELP_POPUP_WIDTH, centered_rect(100, percent, area));
+    let popup_area = popup_area(area, help_rows.len());
 
     frame.render_widget(Clear, popup_area);
 
@@ -44,13 +39,7 @@ pub(super) fn draw(
         .split(inner);
     let visible_count = chunks[0].height as usize;
     let selected = help_state.selected.min(help_rows.len().saturating_sub(1));
-    let window_start = if help_rows.len() > visible_count {
-        selected
-            .saturating_sub(visible_count / 2)
-            .min(help_rows.len() - visible_count)
-    } else {
-        0
-    };
+    let window_start = window_start(&help_rows, visible_count, selected, model.overlay_scroll);
     let window_end = (window_start + visible_count).min(help_rows.len());
     let rows = help_rows[window_start..window_end]
         .iter()
@@ -67,6 +56,20 @@ pub(super) fn draw(
         .highlight_symbol(" ");
     let mut table_state = TableState::default().with_selected(Some(selected - window_start));
     frame.render_stateful_widget(table, chunks[0], &mut table_state);
+    let track = right_border_track(popup_area);
+    draw_scrollbar(
+        frame,
+        Rect {
+            height: chunks[0].height,
+            ..track
+        },
+        ScrollWindow {
+            total: help_rows.len(),
+            visible: visible_count,
+            start: window_start,
+        },
+        theme.accent(),
+    );
 
     frame.render_widget(
         Paragraph::new(vec![
@@ -76,6 +79,29 @@ pub(super) fn draw(
         .style(theme.normal()),
         chunks[1],
     );
+}
+
+pub(in crate::ui::layout) fn window_start(
+    rows: &[crate::ui::help::HelpLine],
+    visible: usize,
+    selected: usize,
+    scroll: Option<usize>,
+) -> usize {
+    if selected == crate::ui::help::first_command(rows) && selected < visible {
+        0
+    } else {
+        super::popup::selection_window_start(rows.len(), visible, selected, scroll)
+    }
+}
+
+pub(in crate::ui::layout) fn popup_area(area: Rect, total: usize) -> Rect {
+    let needed = total as u16 + 2 + 2;
+    let percent = needed
+        .saturating_mul(100)
+        .checked_div(area.height)
+        .unwrap_or(90)
+        .clamp(50, 90);
+    centered_fixed_width_rect(HELP_POPUP_WIDTH, centered_rect(100, percent, area))
 }
 
 #[cfg(test)]

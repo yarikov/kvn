@@ -419,7 +419,12 @@ fn parse_sgr_mouse(parameters: &str, terminator: u8, used: usize) -> ParseResult
     let kind = if button & 32 != 0 {
         MouseEventKind::Moved
     } else if button & 64 != 0 {
-        return ParseResult::Discard(used);
+        match button & 3 {
+            0 => MouseEventKind::ScrollUp,
+            1 => MouseEventKind::ScrollDown,
+            2 => MouseEventKind::ScrollLeft,
+            _ => MouseEventKind::ScrollRight,
+        }
     } else {
         let mouse_button = match button & 3 {
             0 => MouseButton::Left,
@@ -733,6 +738,16 @@ mod tests {
 
         let up = mouse(b"\x1b[<0;2;3m");
         assert_eq!(up.kind, MouseEventKind::Up(MouseButton::Left));
+    }
+
+    #[test]
+    fn decodes_sgr_mouse_wheel() {
+        let up = mouse(b"\x1b[<64;5;6M");
+        assert_eq!(up.kind, MouseEventKind::ScrollUp);
+        assert_eq!((up.column, up.row), (4, 5));
+        assert_eq!(mouse(b"\x1b[<65;5;6M").kind, MouseEventKind::ScrollDown);
+        assert_eq!(mouse(b"\x1b[<66;5;6M").kind, MouseEventKind::ScrollLeft);
+        assert_eq!(mouse(b"\x1b[<67;5;6M").kind, MouseEventKind::ScrollRight);
     }
 
     #[test]

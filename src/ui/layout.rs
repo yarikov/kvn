@@ -1,6 +1,7 @@
 mod log;
 mod overlay;
 mod panes;
+mod scrollbar;
 mod sources;
 mod text;
 
@@ -8,6 +9,55 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
+
+pub(crate) fn wheel_window(
+    model: &crate::app::model::Model,
+    area: ratatui::layout::Rect,
+) -> Option<(usize, usize)> {
+    use crate::app::model::Overlay;
+    if !terminal_size_supported(area) {
+        return None;
+    }
+    let (rows, selected) = crate::app::scroll::list(model)?;
+    let visible = match model.overlay {
+        Overlay::None => {
+            let (sources, _) = panes::main_panes(area);
+            let visible = panes::panel_inner(sources).height as usize;
+            return Some((sources::sources_window_start(model, visible), visible));
+        }
+        Overlay::Help(state) => {
+            let visible = overlay::help::popup_area(area, rows.len())
+                .height
+                .saturating_sub(4) as usize;
+            return Some((
+                overlay::help::window_start(
+                    &crate::ui::help::rows(state.context),
+                    visible,
+                    selected,
+                    model.overlay_scroll,
+                ),
+                visible,
+            ));
+        }
+        Overlay::ThemeSettings
+        | Overlay::GeoRegions
+        | Overlay::RoutingMode
+        | Overlay::DnsSettings => overlay::popup::selection_visible(area, rows.len()),
+        _ => rows.len(),
+    };
+    Some((
+        overlay::popup::selection_window_start(rows.len(), visible, selected, model.overlay_scroll),
+        visible,
+    ))
+}
+
+pub(crate) fn sync_overlay_scroll(model: &mut Model, area: Rect) {
+    if model.overlay_scroll.is_some()
+        && let Some((start, _)) = wheel_window(model, area)
+    {
+        model.overlay_scroll = Some(start);
+    }
+}
 
 #[cfg(test)]
 use crate::app::model::AppStatus;
@@ -18,7 +68,8 @@ use panes::{draw_main, draw_status_bar, draw_traffic_panel};
 
 pub(crate) use log::navigation::{LogNavigation, LogSelection};
 pub(crate) use panes::{
-    log_viewport, log_viewport_with_navigation, logs_visible, source_hit_test, sync_log_scroll,
+    log_viewport, log_viewport_with_navigation, logs_visible, main_pane_at, scroll_logs,
+    source_hit_test, sync_log_scroll, sync_sources_scroll,
 };
 
 /// Height (including borders) of the full-width traffic header rendered at
@@ -180,6 +231,67 @@ mod tests {
         APP_WINDOW_COLS, APP_WINDOW_ROWS, model_with_profiles, model_with_subscription,
         render_to_string, snapshot_styles, snapshot_terminal,
     };
+
+    #[test]
+    fn help_keyboard_round_trip_restores_the_leading_heading_offset() {
+        use crate::app::model::{HelpState, Overlay};
+        use crate::app::msg::Msg;
+        use crossterm::event::{KeyCode, KeyEvent};
+
+        let area = Rect::new(0, 0, APP_WINDOW_COLS, APP_WINDOW_ROWS);
+        let rows = crate::ui::help::rows(HelpState::default().context);
+        for offset in [None, Some(0)] {
+            let mut model = model_with_profiles(vec![]);
+            model.overlay = Overlay::Help(HelpState::default());
+            model.overlay_scroll = offset;
+            for key in ['j', 'k'] {
+                for _ in 0..rows.len() {
+                    crate::app::update::update(
+                        &mut model,
+                        Msg::Key(KeyEvent::from(KeyCode::Char(key))),
+                    );
+                    sync_overlay_scroll(&mut model, area);
+                }
+                if key == 'j' {
+                    assert!(wheel_window(&model, area).unwrap().0 > 0);
+                }
+            }
+            assert_eq!(wheel_window(&model, area).unwrap().0, 0);
+            assert_eq!(model.overlay_scroll, offset);
+        }
+    }
+
+    #[test]
+    fn overlay_keyboard_navigation_retains_and_advances_the_scroll_offset() {
+        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let mut model = crate::test_helpers::model_with_profiles(vec![]);
+        model.overlay = crate::app::model::Overlay::ThemeSettings;
+        model.overlay_scroll = Some(8);
+        crate::app::scroll::select(&mut model, 8);
+        let area = Rect::new(0, 0, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT);
+        let (_, visible) = wheel_window(&model, area).unwrap();
+        for step in 1..=visible {
+            crate::app::update::update(
+                &mut model,
+                crate::app::msg::Msg::Key(crossterm::event::KeyEvent::from(
+                    crossterm::event::KeyCode::Char('j'),
+                )),
+            );
+            sync_overlay_scroll(&mut model, area);
+            assert_eq!(
+                model.overlay_scroll,
+                Some(if step < visible { 8 } else { 9 })
+            );
+        }
+        crate::app::update::update(
+            &mut model,
+            crate::app::msg::Msg::Key(crossterm::event::KeyEvent::from(
+                crossterm::event::KeyCode::Char('k'),
+            )),
+        );
+        sync_overlay_scroll(&mut model, area);
+        assert_eq!(model.overlay_scroll, Some(9));
+    }
 
     #[test]
     fn toast_renders_over_the_top_right_corner() {

@@ -22,6 +22,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         "Settings › Theme",
         &label_refs,
         model.theme_selected,
+        model.overlay_scroll,
         active,
         settings_overlay_footer(model),
     );

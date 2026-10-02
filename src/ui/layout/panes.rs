@@ -1,17 +1,20 @@
+use std::time::Instant;
+
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 
-use crate::app::model::{MainPaneFocus, Model, Overlay, SourceRow};
+use crate::app::model::{MainPaneFocus, Model, Overlay};
 use crate::ui::widgets::{
     StatusBar, format_bps_field, format_bytes_field, format_connections_field,
     format_connections_padding,
 };
 
 use super::log::navigation::{LogNavigation, LogSelection, LogViewport};
-use super::log::{build_log_viewport, log_display_line};
-use super::sources::draw_sources;
+use super::log::{build_log_viewport, log_display_line, scroll_log_viewport};
+use super::scrollbar::{ScrollWindow, draw_scrollbar, right_border_track};
+use super::sources::{draw_sources, source_visual_rows, sources_window_start};
 use super::{TRAFFIC_PANEL_HEIGHT, terminal_size_supported};
 
 /// Minimum terminal width that leaves enough room for both main panes. At
@@ -61,20 +64,61 @@ pub(crate) fn log_viewport_with_navigation(
     terminal_area: Rect,
     navigation: Option<&LogNavigation>,
 ) -> Option<LogViewport> {
+    let area = log_content_area(model, terminal_area)?;
+    Some(build_log_viewport(model, area, navigation))
+}
+
+fn log_content_area(model: &Model, terminal_area: Rect) -> Option<Rect> {
     if model.overlay != Overlay::None || !terminal_size_supported(terminal_area) {
         return None;
     }
     let (_, logs) = main_panes(terminal_area);
     let area = panel_inner(logs);
-    if area.width == 0 || area.height == 0 {
-        return None;
-    }
-    Some(build_log_viewport(model, area, navigation))
+    (area.width > 0 && area.height > 0).then_some(area)
 }
 
 pub(crate) fn sync_log_scroll(model: &Model, terminal_area: Rect, navigation: &mut LogNavigation) {
     if let Some(viewport) = log_viewport_with_navigation(model, terminal_area, Some(navigation)) {
         navigation.set_scroll_top_from(&viewport);
+    }
+}
+
+pub(crate) fn scroll_logs(
+    model: &Model,
+    terminal_area: Rect,
+    navigation: &mut LogNavigation,
+    delta_rows: isize,
+    now: Instant,
+) -> bool {
+    log_content_area(model, terminal_area)
+        .is_some_and(|area| scroll_log_viewport(model, area, navigation, delta_rows, now))
+}
+
+pub(crate) fn sync_sources_scroll(model: &mut Model, terminal_area: Rect) {
+    if !terminal_size_supported(terminal_area) {
+        return;
+    }
+    let (sources, _) = main_panes(terminal_area);
+    model.sources_scroll = sources_window_start(model, panel_inner(sources).height as usize);
+}
+
+pub(crate) fn main_pane_at(
+    model: &Model,
+    terminal_area: Rect,
+    column: u16,
+    row: u16,
+) -> Option<MainPaneFocus> {
+    if model.overlay != Overlay::None || !terminal_size_supported(terminal_area) {
+        return None;
+    }
+    let (sources, logs) = main_panes(terminal_area);
+    let position = Position::new(column, row);
+    if sources.contains(position) {
+        Some(MainPaneFocus::Sources)
+    } else if logs.contains(position) {
+        Some(MainPaneFocus::Logs)
+    } else {
+        None
     }
 }
 
@@ -99,29 +143,9 @@ pub(crate) fn source_hit_test(
         return None;
     }
 
-    let rows = model.source_rows();
-    let mut visual_rows = Vec::new();
-    let standalone: Vec<_> = rows
-        .iter()
-        .enumerate()
-        .filter(|(_, source)| matches!(source, SourceRow::StandaloneProfile(_)))
-        .map(|(index, _)| index)
-        .collect();
-    if !standalone.is_empty() {
-        visual_rows.extend(standalone.into_iter().map(Some));
-        visual_rows.push(None);
-    }
-    for sub_idx in 0..model.config.subscriptions.len() {
-        visual_rows.push(rows.iter().position(
-            |source| matches!(source, SourceRow::SubscriptionHeader(index) if *index == sub_idx),
-        ));
-        visual_rows.extend(rows.iter().enumerate().filter_map(|(index, source)| {
-            matches!(source, SourceRow::SubscriptionProfile { sub_idx: index_sub, .. } if *index_sub == sub_idx)
-                .then_some(Some(index))
-        }));
-        visual_rows.push(None);
-    }
-    let line = row.saturating_sub(content.y) as usize;
+    let visual_rows = source_visual_rows(model);
+    let line = row.saturating_sub(content.y) as usize
+        + sources_window_start(model, content.height as usize);
     visual_rows.get(line).copied().flatten()
 }
 
@@ -149,14 +173,15 @@ pub(super) fn draw_main(
         return;
     }
 
+    let log_border_style = if main_focus_active && pane_focus == MainPaneFocus::Logs {
+        theme.accent()
+    } else {
+        theme.border()
+    };
     let log_block = Block::default()
         .title(" Logs ")
         .borders(Borders::ALL)
-        .border_style(if main_focus_active && pane_focus == MainPaneFocus::Logs {
-            theme.accent()
-        } else {
-            theme.border()
-        });
+        .border_style(log_border_style);
 
     let inner = panel_inner(logs_area);
     let viewport = log_selection
@@ -182,6 +207,16 @@ pub(super) fn draw_main(
 
     let logs = Paragraph::new(log_text).block(log_block);
     frame.render_widget(logs, logs_area);
+    draw_scrollbar(
+        frame,
+        right_border_track(logs_area),
+        ScrollWindow {
+            total: viewport.total_rows,
+            visible: inner.height as usize,
+            start: viewport.first_row,
+        },
+        log_border_style,
+    );
 }
 
 /// Render the full-width traffic header: instantaneous ↑/↓ rate, cumulative
@@ -322,6 +357,124 @@ mod tests {
             Some(0)
         );
         insta::assert_snapshot!(output);
+    }
+
+    #[test]
+    fn main_pane_at_maps_both_panes_and_rejects_overlays() {
+        let mut model = model_with_subscription();
+        let area = Rect::new(0, 0, 90, 20);
+        assert_eq!(
+            main_pane_at(&model, area, 0, 3),
+            Some(MainPaneFocus::Sources)
+        );
+        assert_eq!(
+            main_pane_at(&model, area, 45, 18),
+            Some(MainPaneFocus::Logs)
+        );
+        assert_eq!(main_pane_at(&model, area, 45, 1), None);
+        assert_eq!(main_pane_at(&model, area, 45, 19), None);
+        assert_eq!(
+            main_pane_at(&model, Rect::new(0, 0, TWO_PANE_MIN_WIDTH - 1, 20), 88, 5),
+            Some(MainPaneFocus::Sources)
+        );
+        model.overlay = Overlay::Help(crate::app::model::HelpState::default());
+        assert_eq!(main_pane_at(&model, area, 0, 3), None);
+    }
+
+    fn model_with_overflowing_panes() -> Model {
+        let profiles = (0..40)
+            .map(|index| {
+                Profile::new_vless(
+                    format!("Profile {index}"),
+                    format!("10.0.0.{index}"),
+                    443,
+                    format!("u{index}"),
+                )
+            })
+            .collect();
+        let mut model = model_with_profiles(profiles);
+        for index in 0..80 {
+            model.push_log(format!("line {index}"));
+        }
+        model.selected = 30;
+        model
+    }
+
+    #[test]
+    fn log_record_and_text_selection_styles_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model.push_log((0..300).map(|index| format!("word{index:03} ")).collect());
+        model.push_log("tail".into());
+        let area = Rect::new(0, 0, APP_WINDOW_COLS, APP_WINDOW_ROWS);
+        let viewport = log_viewport(&model, area).unwrap();
+        let mut navigation = LogNavigation::default();
+        let column = viewport.area.x + 3;
+        let row = viewport.area.y + 2;
+        navigation.select_at(&model, &viewport, column, row, Instant::now());
+        let mut selection = LogSelection::start(viewport, column, row).unwrap();
+        for name in ["clicked", "dragging"] {
+            if name == "dragging" {
+                selection.update(column + 8, row);
+            }
+            let buffer = render_to_buffer(area.width, area.height, |frame| {
+                draw_with_interaction(
+                    frame,
+                    &model,
+                    MainPaneFocus::Logs,
+                    Some(&navigation),
+                    Some(&selection),
+                );
+            });
+            insta::assert_snapshot!(format!("log_{name}"), buffer_to_styled_string(&buffer));
+        }
+    }
+
+    #[test]
+    fn overflowing_panes_scroll_with_scrollbars_snapshot() {
+        let model = model_with_overflowing_panes();
+        let area = Rect::new(0, 0, APP_WINDOW_COLS, APP_WINDOW_ROWS);
+        let mut navigation = LogNavigation::default();
+        scroll_logs(&model, area, &mut navigation, -28, Instant::now());
+
+        let buffer = render_to_buffer(APP_WINDOW_COLS, APP_WINDOW_ROWS, |frame| {
+            draw_with_interaction(
+                frame,
+                &model,
+                MainPaneFocus::Sources,
+                Some(&navigation),
+                None,
+            )
+        });
+        insta::assert_snapshot!(buffer_to_styled_string(&buffer));
+    }
+
+    #[test]
+    fn scrolled_profiles_list_keeps_its_offset_so_a_double_click_hits_one_profile() {
+        let mut model = model_with_overflowing_panes();
+        let area = Rect::new(0, 0, APP_WINDOW_COLS, APP_WINDOW_ROWS);
+        sync_sources_scroll(&mut model, area);
+        assert_eq!(model.sources_scroll, 2);
+
+        model.sources_scroll = 12;
+        for _ in 0..2 {
+            let clicked = source_hit_test(&model, area, 2, 4).unwrap();
+            assert_eq!(clicked, 12);
+            model.selected = clicked;
+            sync_sources_scroll(&mut model, area);
+            assert_eq!(model.sources_scroll, 12);
+        }
+
+        model.selected = 0;
+        sync_sources_scroll(&mut model, area);
+        assert_eq!(model.sources_scroll, 0);
+    }
+
+    #[test]
+    fn long_subscription_name_stays_on_one_line_snapshot() {
+        let mut model = model_with_subscription();
+        model.config.subscriptions[0].name =
+            "A subscription name far too long to fit in the Profiles pane".into();
+        insta::assert_snapshot!(snapshot_terminal(&model, TWO_PANE_MIN_WIDTH, 16));
     }
 
     #[test]

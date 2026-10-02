@@ -5,23 +5,23 @@ expression: "snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 ┌ Traffic ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections                                          │
 └──────────────────────────────┌─────────────────────────────────────────────────┐──────────────────────────────┘
-┌ Profiles ────────────────────│ Navigation                                      │──────────────────────────────┐
-│ No sources. Press p to paste │ Ctrl+h/←   Focus left pane                      │                              │
-│URL from clipboard.           │ Ctrl+l/→   Focus right pane                     │                              │
-│                              │ j/k, ↑/↓   Move or scroll                       │                              │
-│                              │ gg/G       Go to first / last                   │                              │
-│                              │                                                 │                              │
-│                              │ Profiles                                        │                              │
-│                              │ Enter      Connect selected profile             │                              │
-│                              │ e          Open profiles.json in $EDITOR        │                              │
-│                              │ y          Yank profile or subscription         │                              │
-│                              │ p          Paste profile or subscription        │                              │
-│                              │ d          Delete profile or subscription       │                              │
-│                              │ u/U        Update subscription / geo            │                              │
-│                              │ i/I        Cycle subscription / geo auto-update │                              │
-│                              │ t/T        Test selected / all profiles         │                              │
-│                              │                                                 │                              │
-│                              │ Logs                                            │                              │
+┌ Profiles ────────────────────│ Navigation                                      ┃──────────────────────────────┐
+│ No sources. Press p to paste │ Ctrl+h/←   Focus left pane                      ┃                              │
+│URL from clipboard.           │ Ctrl+l/→   Focus right pane                     ┃                              │
+│                              │ j/k, ↑/↓   Move or scroll                       ┃                              │
+│                              │ gg/G       Go to first / last                   ┃                              │
+│                              │                                                 ┃                              │
+│                              │ Profiles                                        ┃                              │
+│                              │ Enter      Connect selected profile             ┃                              │
+│                              │ e          Open profiles.json in $EDITOR        ┃                              │
+│                              │ y          Yank profile or subscription         ┃                              │
+│                              │ p          Paste profile or subscription        ┃                              │
+│                              │ d          Delete profile or subscription       ┃                              │
+│                              │ u/U        Update subscription / geo            ┃                              │
+│                              │ i/I        Cycle subscription / geo auto-update ┃                              │
+│                              │ t/T        Test selected / all profiles         ┃                              │
+│                              │                                                 ┃                              │
+│                              │ Logs                                            ┃                              │
 │                              │ y          Yank selected log(s)                 │                              │
 │                              │ Shift+V    Select multiple logs                 │                              │
 │                              │ Esc        Cancel log selection                 │                              │

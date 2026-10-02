@@ -3,6 +3,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
+use crate::ui::layout::scrollbar::{ScrollWindow, draw_scrollbar};
 use crate::ui::layout::text::{align_in_centered_column, fit_to_visual_width, visual_width};
 use crate::ui::styles::Theme;
 
@@ -101,7 +102,7 @@ pub(super) fn draw_settings_modal(
     area: Rect,
     popup_width: u16,
     lines: Vec<Line>,
-) {
+) -> Rect {
     let popup_area = settings_content_sized_rect(area, popup_width, &lines);
 
     frame.render_widget(Clear, popup_area);
@@ -118,6 +119,7 @@ pub(super) fn draw_settings_modal(
         .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, popup_area);
+    popup_area
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -128,6 +130,7 @@ pub(super) fn draw_selection_modal(
     heading: &str,
     items: &[&str],
     selected: usize,
+    scroll: Option<usize>,
     active: Option<usize>,
     footer: String,
 ) {
@@ -152,16 +155,8 @@ pub(super) fn draw_selection_modal(
         .max()
         .unwrap_or(0)
         .min(content_width);
-    let footer_height = 1;
-    let max_visible_items = popup_area.height.saturating_sub(5 + footer_height) as usize;
-    let visible_count = items.len().min(max_visible_items);
-    let window_start = if items.len() > visible_count {
-        selected
-            .saturating_sub(visible_count / 2)
-            .min(items.len() - visible_count)
-    } else {
-        0
-    };
+    let visible_count = selection_visible(area, items.len());
+    let window_start = selection_window_start(items.len(), visible_count, selected, scroll);
     let window_end = window_start + visible_count;
 
     let mut lines: Vec<Line> = vec![
@@ -185,7 +180,24 @@ pub(super) fn draw_selection_modal(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(footer));
-    draw_settings_modal(frame, theme, area, popup_width, lines);
+    let popup_area = draw_settings_modal(frame, theme, area, popup_width, lines);
+    let item_rows = Rect::new(
+        popup_area.right().saturating_sub(1),
+        popup_area.y.saturating_add(3),
+        popup_area.width.min(1),
+        visible_count as u16,
+    )
+    .intersection(popup_area);
+    draw_scrollbar(
+        frame,
+        item_rows,
+        ScrollWindow {
+            total: items.len(),
+            visible: visible_count,
+            start: window_start,
+        },
+        theme.accent(),
+    );
 }
 
 /// Compute a centered rectangle with given percentage sizes.
@@ -207,4 +219,32 @@ pub(super) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+pub(in crate::ui::layout) fn selection_visible(area: Rect, total: usize) -> usize {
+    let height = centered_rect(100, SELECTION_POPUP_MAX_HEIGHT_PERCENT, area).height;
+    total.min(height.saturating_sub(6) as usize)
+}
+
+pub(in crate::ui::layout) fn selection_window_start(
+    total: usize,
+    visible: usize,
+    selected: usize,
+    scroll: Option<usize>,
+) -> usize {
+    let max_start = total.saturating_sub(visible);
+    let Some(start) = scroll else {
+        return selected.saturating_sub(visible / 2).min(max_start);
+    };
+    let start = start.min(max_start);
+    if selected < start {
+        selected
+    } else if selected >= start.saturating_add(visible) {
+        selected
+            .saturating_add(1)
+            .saturating_sub(visible)
+            .min(max_start)
+    } else {
+        start
+    }
 }

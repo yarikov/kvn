@@ -377,11 +377,13 @@ mod tests {
         StateSnapshot {
             daemon_version: env!("CARGO_PKG_VERSION").into(),
             ipc_version: IPC_VERSION,
+            supports_viewport_scroll: true,
             tui_sessions: 0,
             restart_required: false,
             response_to: None,
             response_error: None,
             config_edit_result: None,
+            scroll_result: None,
             connection: ConnectionState::Idle,
             status: "ok".into(),
             status_is_error: false,

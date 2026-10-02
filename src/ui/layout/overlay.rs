@@ -1,7 +1,7 @@
 mod confirm_delete;
 mod confirm_disable;
 mod dns;
-mod help;
+pub(super) mod help;
 mod onboarding;
 pub(super) mod popup;
 mod restart_required;

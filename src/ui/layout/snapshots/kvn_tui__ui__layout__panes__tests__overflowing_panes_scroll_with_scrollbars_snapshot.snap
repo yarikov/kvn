@@ -1,0 +1,85 @@
+---
+source: src/ui/layout/panes.rs
+expression: buffer_to_styled_string(&buffer)
+---
+┌ Traffic ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections                                          │
+└───────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Profiles ─────────────────────────────────────────────┐┌ Logs ────────────────────────────────────────────────┐
+│ ├ Profile 2                      vless  10.0.0.2:443  ││ line 23                                              │
+│ ├ Profile 3                      vless  10.0.0.3:443  ┃│ line 24                                              │
+│ ├ Profile 4                      vless  10.0.0.4:443  ┃│ line 25                                              │
+│ ├ Profile 5                      vless  10.0.0.5:443  ┃│ line 26                                              │
+│ ├ Profile 6                      vless  10.0.0.6:443  ┃│ line 27                                              │
+│ ├ Profile 7                      vless  10.0.0.7:443  ┃│ line 28                                              │
+│ ├ Profile 8                      vless  10.0.0.8:443  ┃│ line 29                                              │
+│ ├ Profile 9                      vless  10.0.0.9:443  ┃│ line 30                                              │
+│ ├ Profile 10                     vless  10.0.0.10:443 ┃│ line 31                                              ┃
+│ ├ Profile 11                     vless  10.0.0.11:443 ┃│ line 32                                              ┃
+│ ├ Profile 12                     vless  10.0.0.12:443 ┃│ line 33                                              ┃
+│ ├ Profile 13                     vless  10.0.0.13:443 ┃│ line 34                                              ┃
+│ ├ Profile 14                     vless  10.0.0.14:443 ┃│ line 35                                              ┃
+│ ├ Profile 15                     vless  10.0.0.15:443 ┃│ line 36                                              ┃
+│ ├ Profile 16                     vless  10.0.0.16:443 ┃│ line 37                                              ┃
+│ ├ Profile 17                     vless  10.0.0.17:443 ┃│ line 38                                              ┃
+│ ├ Profile 18                     vless  10.0.0.18:443 ┃│ line 39                                              ┃
+│ ├ Profile 19                     vless  10.0.0.19:443 ┃│ line 40                                              ┃
+│ ├ Profile 20                     vless  10.0.0.20:443 ┃│ line 41                                              ┃
+│ ├ Profile 21                     vless  10.0.0.21:443 ┃│ line 42                                              │
+│ ├ Profile 22                     vless  10.0.0.22:443 ┃│ line 43                                              │
+│ ├ Profile 23                     vless  10.0.0.23:443 ┃│ line 44                                              │
+│ ├ Profile 24                     vless  10.0.0.24:443 ││ line 45                                              │
+│ ├ Profile 25                     vless  10.0.0.25:443 ││ line 46                                              │
+│ ├ Profile 26                     vless  10.0.0.26:443 ││ line 47                                              │
+│ ├ Profile 27                     vless  10.0.0.27:443 ││ line 48                                              │
+│ ├ Profile 28                     vless  10.0.0.28:443 ││ line 49                                              │
+│ ├ Profile 29                     vless  10.0.0.29:443 ││ line 50                                              │
+│ ├ Profile 30                     vless  10.0.0.30:443 ││ line 51                                              │
+└───────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
+ DISCONNECTED                                                                                         DoH  Global
+[113x35]
+--- styles ---
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+abccddddddddbbeeddddddddbbbbdddddddccddddddbbeeddddddbbbbeddddddddddddbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+eddddddddddddddddddddddddddddddddddddddddddddddddddddddbeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+eddddddddddddddddddddddddddddddddddddddddddddddddddddddbeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+eddddddddddddddddddddddddddddddddddddddddddddddddddddddbeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+eddddddddddddddddddddddddddddddddddddddddddddddddddddddbeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+eddddddddddddddddddddddddddddddddddddddddddddddddddddddbeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+eddddddddddddddddddddddddddddddddddddddddddddddddddddddbeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+eddddddddddddddddddddddddddddddddddddddddddddddddddddddbeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+eddddddddddddddddddddddddddddddddddddddddddddddddddddddbeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+edddddddddddddddddddddddddddddddddddddddddddddddddddddddeadddddddddddddddddddddddddddddddddddddddddddddddddddddda
+efffffffffffffffffffffffffffffffffffffffffffffffffffffffeaffffffffffffffffffffffffffffffffffffffffffffffffffffffa
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+gggggggggggggghhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhiiihhiiiiii
+a fg=DarkGray bg=Black
+b fg=Reset bg=Black
+c fg=Green bg=Black BOLD
+d fg=Gray bg=Black
+e fg=Cyan bg=Black BOLD
+f fg=Cyan bg=Rgb(45, 45, 85) BOLD
+g fg=Gray bg=Rgb(43, 43, 43) BOLD
+h fg=Gray bg=Rgb(14, 14, 14)
+i fg=Cyan bg=Rgb(14, 14, 14) BOLD

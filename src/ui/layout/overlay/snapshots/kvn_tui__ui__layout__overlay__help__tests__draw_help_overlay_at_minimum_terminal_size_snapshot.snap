@@ -4,8 +4,8 @@ expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ---
 ┌ Traffic ───────────────────────────────────────────────────────────┐
 │ ↑ 0.0 K┌─────────────────────────────────────────────────┐onnectio │
-└────────│ Navigation                                      │─────────┘
-┌ Profile│ Ctrl+h/←   Focus left pane                      │─────────┐
+└────────│ Navigation                                      ┃─────────┘
+┌ Profile│ Ctrl+h/←   Focus left pane                      ┃─────────┐
 │ No sour│ Ctrl+l/→   Focus right pane                     │ from    │
 │clipboar│ j/k, ↑/↓   Move or scroll                       │         │
 │        │ gg/G       Go to first / last                   │         │

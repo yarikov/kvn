@@ -1,0 +1,85 @@
+---
+source: src/ui/layout/panes.rs
+expression: buffer_to_styled_string(&buffer)
+---
+┌ Traffic ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections                                          │
+└───────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Profiles ─────────────────────────────────────────────┐┌ Logs ────────────────────────────────────────────────┐
+│ No sources. Press p to paste a profile or subscription││ 123 word124 word125 word126 word127 word128 word129  │
+│URL from clipboard.                                    ││ word130 word131 word132 word133 word134 word135 word │
+│                                                       ││ 136 word137 word138 word139 word140 word141 word142  │
+│                                                       ││ word143 word144 word145 word146 word147 word148 word │
+│                                                       ││ 149 word150 word151 word152 word153 word154 word155  │
+│                                                       ││ word156 word157 word158 word159 word160 word161 word │
+│                                                       ││ 162 word163 word164 word165 word166 word167 word168  │
+│                                                       ││ word169 word170 word171 word172 word173 word174 word │
+│                                                       ││ 175 word176 word177 word178 word179 word180 word181  │
+│                                                       ││ word182 word183 word184 word185 word186 word187 word │
+│                                                       ││ 188 word189 word190 word191 word192 word193 word194  │
+│                                                       ││ word195 word196 word197 word198 word199 word200 word ┃
+│                                                       ││ 201 word202 word203 word204 word205 word206 word207  ┃
+│                                                       ││ word208 word209 word210 word211 word212 word213 word ┃
+│                                                       ││ 214 word215 word216 word217 word218 word219 word220  ┃
+│                                                       ││ word221 word222 word223 word224 word225 word226 word ┃
+│                                                       ││ 227 word228 word229 word230 word231 word232 word233  ┃
+│                                                       ││ word234 word235 word236 word237 word238 word239 word ┃
+│                                                       ││ 240 word241 word242 word243 word244 word245 word246  ┃
+│                                                       ││ word247 word248 word249 word250 word251 word252 word ┃
+│                                                       ││ 253 word254 word255 word256 word257 word258 word259  ┃
+│                                                       ││ word260 word261 word262 word263 word264 word265 word ┃
+│                                                       ││ 266 word267 word268 word269 word270 word271 word272  ┃
+│                                                       ││ word273 word274 word275 word276 word277 word278 word ┃
+│                                                       ││ 279 word280 word281 word282 word283 word284 word285  ┃
+│                                                       ││ word286 word287 word288 word289 word290 word291 word ┃
+│                                                       ││ 292 word293 word294 word295 word296 word297 word298  ┃
+│                                                       ││ word299                                              ┃
+│                                                       ││ tail                                                 ┃
+└───────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
+ DISCONNECTED                                                                                         DoH  Global
+[113x35]
+--- styles ---
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+abccddddddddbbeeddddddddbbbbdddddddccddddddbbeeddddddbbbbeddddddddddddbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+adddddddddddddddddddddddddddddddddddddddddddddddddddddddaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+adddddddddddddddddddbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaeddddfffffffffddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbaedddddddddddddddddddddddddddddddddddddddddddddddddddddde
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+gggggggggggggghhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhiiihhiiiiii
+a fg=DarkGray bg=Black
+b fg=Reset bg=Black
+c fg=Green bg=Black BOLD
+d fg=Gray bg=Black
+e fg=Cyan bg=Black BOLD
+f fg=Cyan bg=Rgb(45, 45, 85) BOLD
+g fg=Gray bg=Rgb(43, 43, 43) BOLD
+h fg=Gray bg=Rgb(14, 14, 14)
+i fg=Cyan bg=Rgb(14, 14, 14) BOLD

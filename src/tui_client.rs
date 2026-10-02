@@ -282,6 +282,10 @@ fn snapshot_is_compatible(value: &serde_json::Value) -> bool {
         == Some(env!("CARGO_PKG_VERSION"))
         && value.get("ipc_version").and_then(serde_json::Value::as_u64)
             == Some(u64::from(crate::ipc::IPC_VERSION))
+        && value
+            .get("supports_viewport_scroll")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
 }
 
 fn apply_initial_snapshot(
@@ -456,20 +460,31 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_compatibility_requires_matching_binary_and_ipc_versions() {
+    fn snapshot_compatibility_requires_matching_versions_and_viewport_support() {
         let current = serde_json::json!({
             "daemon_version": env!("CARGO_PKG_VERSION"),
             "ipc_version": crate::ipc::IPC_VERSION,
+            "supports_viewport_scroll": true,
         });
         assert!(snapshot_is_compatible(&current));
+        let mut unsupported = current.clone();
+        unsupported
+            .as_object_mut()
+            .unwrap()
+            .remove("supports_viewport_scroll");
+        assert!(!snapshot_is_compatible(&unsupported));
+        unsupported["supports_viewport_scroll"] = serde_json::json!(false);
+        assert!(!snapshot_is_compatible(&unsupported));
         assert!(!snapshot_is_compatible(&serde_json::json!({})));
         assert!(!snapshot_is_compatible(&serde_json::json!({
             "daemon_version": "0.0.0",
             "ipc_version": crate::ipc::IPC_VERSION,
+            "supports_viewport_scroll": true,
         })));
         assert!(!snapshot_is_compatible(&serde_json::json!({
             "daemon_version": env!("CARGO_PKG_VERSION"),
             "ipc_version": crate::ipc::IPC_VERSION + 1,
+            "supports_viewport_scroll": true,
         })));
     }
 

@@ -244,6 +244,15 @@ pub enum IpcCommand {
     SelectSource {
         index: usize,
     },
+    ScrollViewport {
+        context: Overlay,
+        start: usize,
+        visible: usize,
+        delta: isize,
+    },
+    MoveSourceSelection {
+        delta: isize,
+    },
     SetMainPaneFocus {
         focus: MainPaneFocus,
     },
@@ -368,6 +377,13 @@ mod tests {
                 ctrl: false,
             },
             IpcCommand::SelectSource { index: 1 },
+            IpcCommand::MoveSourceSelection { delta: -3 },
+            IpcCommand::ScrollViewport {
+                context: Overlay::None,
+                start: 5,
+                visible: 10,
+                delta: -3,
+            },
             IpcCommand::SetMainPaneFocus {
                 focus: MainPaneFocus::Logs,
             },
@@ -459,6 +475,8 @@ pub struct StateSnapshot {
     #[serde(default)]
     pub ipc_version: u32,
     #[serde(default)]
+    pub supports_viewport_scroll: bool,
+    #[serde(default)]
     pub tui_sessions: usize,
     #[serde(default)]
     pub restart_required: bool,
@@ -468,6 +486,8 @@ pub struct StateSnapshot {
     pub response_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_edit_result: Option<ConfigEditResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scroll_result: Option<crate::app::scroll::ScrollPosition>,
     pub connection: ConnectionState,
     pub status: String,
     pub status_is_error: bool,
