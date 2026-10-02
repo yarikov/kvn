@@ -115,9 +115,9 @@ fn focus_shortcut(state: &mut ClientLoop, shortcut: PaneFocusShortcut) -> Result
 }
 
 pub(super) const DEPRECATED_PANE_FOCUS_MESSAGE: &str =
-    "h/l pane switching is deprecated; use Ctrl+h/Ctrl+l";
+    "h/l pane switching is deprecated; use Ctrl+h/← or Ctrl+l/→";
 const DEPRECATED_ARROW_PANE_FOCUS_MESSAGE: &str =
-    "←/→ pane switching is deprecated; use Ctrl+h/Ctrl+l or Ctrl+←/Ctrl+→";
+    "←/→ pane switching is deprecated; use Ctrl+h/← or Ctrl+l/→";
 
 #[derive(Debug, Default)]
 pub(super) struct GoFirstSequence {
