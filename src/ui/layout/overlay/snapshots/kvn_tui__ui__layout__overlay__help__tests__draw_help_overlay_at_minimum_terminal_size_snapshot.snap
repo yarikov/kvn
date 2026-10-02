@@ -5,14 +5,14 @@ expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ┌ Traffic ───────────────────────────────────────────────────────────┐
 │ ↑ 0.0 K┌─────────────────────────────────────────────────┐onnectio │
 └────────│ Navigation                                      │─────────┘
-┌ Profile│ Ctrl+h/l   Focus panes                          │─────────┐
-│ No sour│ j/k, ↑/↓   Move or scroll                       │ from    │
-│clipboar│ gg/G       Go to first / last                   │         │
+┌ Profile│ Ctrl+h/←   Focus left pane                      │─────────┐
+│ No sour│ Ctrl+l/→   Focus right pane                     │ from    │
+│clipboar│ j/k, ↑/↓   Move or scroll                       │         │
+│        │ gg/G       Go to first / last                   │         │
 │        │                                                 │         │
 │        │ Profiles                                        │         │
 │        │ Enter      Connect selected profile             │         │
 │        │ e          Open profiles.json in $EDITOR        │         │
-│        │ y          Yank profile or subscription         │         │
 │        │                                                 │         │
 │        │                    q/󱊷 close                    │         │
 └────────└─────────────────────────────────────────────────┘─────────┘

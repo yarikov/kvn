@@ -6,8 +6,9 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections                                          │
 └──────────────────────────────┌─────────────────────────────────────────────────┐──────────────────────────────┘
 ┌ Profiles ────────────────────│ Navigation                                      │──────────────────────────────┐
-│ No sources. Press p to paste │ Ctrl+h/l   Focus panes                          │                              │
-│URL from clipboard.           │ j/k, ↑/↓   Move or scroll                       │                              │
+│ No sources. Press p to paste │ Ctrl+h/←   Focus left pane                      │                              │
+│URL from clipboard.           │ Ctrl+l/→   Focus right pane                     │                              │
+│                              │ j/k, ↑/↓   Move or scroll                       │                              │
 │                              │ gg/G       Go to first / last                   │                              │
 │                              │                                                 │                              │
 │                              │ Profiles                                        │                              │
@@ -31,7 +32,6 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                              │ Shift+A    Toggle auto-connect                  │                              │
 │                              │ Shift+K    Toggle kill switch                   │                              │
 │                              │                                                 │                              │
-│                              │ Settings                                        │                              │
 │                              │                                                 │                              │
 │                              │                    q/󱊷 close                    │                              │
 │                              └─────────────────────────────────────────────────┘                              │

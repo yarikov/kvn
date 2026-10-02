@@ -209,8 +209,8 @@ detected problems.
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+h` | Focus the previous pane |
-| `Ctrl+l` | Focus the next pane |
+| `Ctrl+h/←` | Focus left pane |
+| `Ctrl+l/→` | Focus right pane |
 | `j` / `↓` | Move or scroll down |
 | `k` / `↑` | Move or scroll up |
 | `gg` / `G` | Go to the first / last item |

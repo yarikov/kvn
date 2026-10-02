@@ -97,7 +97,8 @@ mod tests {
         });
         let lines = crate::ui::help::rows(state.context);
         let expected = [
-            ("Ctrl+h/l", "Focus panes"),
+            ("Ctrl+h/←", "Focus left pane"),
+            ("Ctrl+l/→", "Focus right pane"),
             ("j/k, ↑/↓", "Move or scroll"),
             ("gg/G", "Go to first / last"),
             ("Enter", "Connect selected profile"),

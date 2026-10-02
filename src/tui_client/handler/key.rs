@@ -115,9 +115,9 @@ fn focus_shortcut(state: &mut ClientLoop, shortcut: PaneFocusShortcut) -> Result
 }
 
 pub(super) const DEPRECATED_PANE_FOCUS_MESSAGE: &str =
-    "h/l pane switching is deprecated; use Ctrl+h/Ctrl+l";
+    "h/l pane switching is deprecated; use Ctrl+h/← or Ctrl+l/→";
 const DEPRECATED_ARROW_PANE_FOCUS_MESSAGE: &str =
-    "←/→ pane switching is deprecated; use Ctrl+h/Ctrl+l";
+    "←/→ pane switching is deprecated; use Ctrl+h/← or Ctrl+l/→";
 
 #[derive(Debug, Default)]
 pub(super) struct GoFirstSequence {
@@ -153,6 +153,12 @@ fn pane_focus_shortcut(key: &crossterm::event::KeyEvent) -> Option<PaneFocusShor
     use crossterm::event::{KeyCode, KeyModifiers};
 
     let (focus, deprecation) = match key.code {
+        KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            (MainPaneFocus::Sources, None)
+        }
+        KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            (MainPaneFocus::Logs, None)
+        }
         KeyCode::Left => (
             MainPaneFocus::Sources,
             Some(DEPRECATED_ARROW_PANE_FOCUS_MESSAGE),
@@ -257,6 +263,20 @@ mod tests {
             Some(PaneFocusShortcut {
                 focus: MainPaneFocus::Logs,
                 deprecation: Some(DEPRECATED_ARROW_PANE_FOCUS_MESSAGE),
+            })
+        );
+        assert_eq!(
+            pane_focus_shortcut(&KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL)),
+            Some(PaneFocusShortcut {
+                focus: MainPaneFocus::Sources,
+                deprecation: None,
+            })
+        );
+        assert_eq!(
+            pane_focus_shortcut(&KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL)),
+            Some(PaneFocusShortcut {
+                focus: MainPaneFocus::Logs,
+                deprecation: None,
             })
         );
     }
