@@ -1,5 +1,6 @@
 ---
 source: src/ui/layout/overlay/theme.rs
+assertion_line: 74
 expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ---
 ┌ Traffic ───────────────────────────────────────────────────────────┐
@@ -7,8 +8,8 @@ expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 └─────────────────│       Settings › Theme        │──────────────────┘
 ┌ Profiles ───────│                               │──────────────────┐
 │ No sources. Pres│       ethereal                │ption URL from    │
-│clipboard.       │       everforest              │                  │
-│                 │       flexoki-light           │                  │
+│clipboard.       │       everforest              ┃                  │
+│                 │       flexoki-light           ┃                  │
 │                 │       gruvbox                 │                  │
 │                 │       hackerman               │                  │
 │                 │       kanagawa                │                  │

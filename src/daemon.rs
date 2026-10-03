@@ -252,6 +252,9 @@ fn run_loop(
                 response_error,
             );
             snapshot.config_edit_result = config_edit_result;
+            if response_to.is_some() {
+                snapshot.scroll_result = model.scroll_result.take();
+            }
             ipc_server.broadcast(&snapshot);
         }
     }
@@ -348,11 +351,13 @@ pub(crate) fn build_snapshot(
     StateSnapshot {
         daemon_version: env!("CARGO_PKG_VERSION").to_string(),
         ipc_version: crate::ipc::IPC_VERSION,
+        supports_viewport_scroll: true,
         tui_sessions,
         restart_required: model.restart_required,
         response_to,
         response_error,
         config_edit_result: None,
+        scroll_result: None,
         connection: model.connection,
         status: model.status_text().to_string(),
         status_is_error: model.status_is_error(),

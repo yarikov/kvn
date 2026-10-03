@@ -1,11 +1,13 @@
 mod key;
 mod mouse;
 mod pointer;
+mod scroll;
 mod toast;
+mod wheel;
 
 use std::io;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::Terminal;
@@ -23,6 +25,9 @@ use super::{TuiExit, apply_snapshot, apply_terminal_colors, input, theme_watch};
 use key::GoFirstSequence;
 use pointer::{ClickTracker, PointerShape, update_pointer_shape};
 use toast::ToastState;
+use wheel::WheelAccelerator;
+
+pub(super) const IPC_INTERACTION_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(super) enum Flow {
     Continue,
@@ -36,6 +41,7 @@ pub(super) struct ClientLoop<'a> {
     log_tailer: &'a mut LogTailer,
     event_reader_control: Arc<input::EventReaderControl>,
     pane_focus: MainPaneFocus,
+    pending_focus: Option<pointer::PendingFocus>,
     log_navigation: LogNavigation,
     log_selection: Option<LogSelection>,
     log_dragging: bool,
@@ -44,6 +50,8 @@ pub(super) struct ClientLoop<'a> {
     pointer_shape: PointerShape,
     mouse_position: Option<(u16, u16)>,
     click_tracker: ClickTracker,
+    wheel: WheelAccelerator,
+    scroll_queue: scroll::ScrollQueue,
     pending_error_status_clear: Option<u64>,
     needs_redraw: bool,
 }
@@ -65,6 +73,7 @@ impl<'a> ClientLoop<'a> {
             log_tailer,
             event_reader_control,
             pane_focus,
+            pending_focus: None,
             log_navigation: LogNavigation::default(),
             log_selection: None,
             log_dragging: false,
@@ -73,6 +82,8 @@ impl<'a> ClientLoop<'a> {
             pointer_shape: PointerShape::Default,
             mouse_position: None,
             click_tracker: ClickTracker::default(),
+            wheel: WheelAccelerator::default(),
+            scroll_queue: scroll::ScrollQueue::default(),
             pending_error_status_clear: None,
             needs_redraw: false,
         };
@@ -102,10 +113,13 @@ impl<'a> ClientLoop<'a> {
         let flow = match msg {
             Msg::Mouse(mouse) => mouse::handle(self, mouse)?,
             Msg::Paste(text) => self.paste(text)?,
-            Msg::Key(key) => key::handle(self, key)?,
+            Msg::Key(key) => {
+                self.scroll_queue.cancel();
+                key::handle(self, key)?
+            }
             Msg::StateUpdate { snapshot, .. } => self.apply_state_update(*snapshot)?,
             Msg::IpcReadFailed { message, .. } => anyhow::bail!(message),
-            Msg::Tick => self.tick(),
+            Msg::Tick => self.tick()?,
             Msg::Resize => self.resize()?,
             Msg::ThemeChanged(theme)
                 if self.model.config.settings.theme == theme_watch::OMARCHY_SENTINEL =>
@@ -132,13 +146,37 @@ impl<'a> ClientLoop<'a> {
     }
 
     fn apply_state_update(&mut self, snapshot: StateSnapshot) -> Result<Flow> {
-        self.pane_focus = snapshot.main_pane_focus;
+        self.pane_focus = pointer::reconcile_pane_focus(
+            &mut self.pending_focus,
+            snapshot.response_to,
+            snapshot.main_pane_focus,
+            Instant::now(),
+        );
         let toast_status =
             AppStatus::from_snapshot(snapshot.status.clone(), snapshot.status_is_error);
         self.pending_error_status_clear =
             self.toast
                 .observe(snapshot.status_revision, toast_status, Instant::now());
+        let old_context = crate::app::scroll::context(self.model.overlay);
+        let response_to = snapshot.response_to;
+        let scroll_result = snapshot.scroll_result;
         apply_snapshot(self.model, snapshot);
+        if old_context != crate::app::scroll::context(self.model.overlay) {
+            self.scroll_queue.cancel();
+            self.model.overlay_scroll = None;
+        }
+        if self
+            .scroll_queue
+            .acknowledge(response_to, self.model.overlay)
+            && let Some(position) = scroll_result
+        {
+            if self.model.overlay == Overlay::None {
+                self.model.sources_scroll = position.start;
+            } else {
+                self.model.overlay_scroll = Some(position.start);
+            }
+        }
+        scroll::send_next(self)?;
         if self.model.restart_required {
             self.model.overlay = Overlay::RestartRequired;
         }
@@ -151,8 +189,15 @@ impl<'a> ClientLoop<'a> {
         Ok(Flow::Continue)
     }
 
-    fn tick(&mut self) -> Flow {
+    fn tick(&mut self) -> Result<Flow> {
         let now = Instant::now();
+        if self.scroll_queue.expire(now) {
+            self.toast.show_info("Scrolling timed out; try again", now);
+        }
+        if pointer::expire_pane_focus(&mut self.pending_focus, now) {
+            self.pane_focus = self.model.main_pane_focus;
+            self.focus_sources_when_logs_hidden()?;
+        }
         self.log_navigation.expire_if_idle(now);
         self.toast.expire(now);
         let new_lines = self.log_tailer.tail();
@@ -166,10 +211,11 @@ impl<'a> ClientLoop<'a> {
             self.model.push_log(line);
         }
         self.needs_redraw = true;
-        Flow::Continue
+        Ok(Flow::Continue)
     }
 
     fn resize(&mut self) -> Result<Flow> {
+        self.scroll_queue.cancel();
         self.clear_log_selection();
         self.focus_sources_when_logs_hidden()?;
         self.refresh_pointer_shape()?;
@@ -195,6 +241,9 @@ impl<'a> ClientLoop<'a> {
     }
 
     fn draw(&mut self) -> Result<()> {
+        let area = self.terminal_area()?;
+        crate::ui::layout::sync_sources_scroll(self.model, area);
+        crate::ui::layout::sync_overlay_scroll(self.model, area);
         let model = &*self.model;
         let pane_focus = self.pane_focus;
         let log_navigation = &self.log_navigation;
@@ -218,8 +267,20 @@ impl<'a> ClientLoop<'a> {
     }
 
     fn focus_pane(&mut self, focus: MainPaneFocus) -> Result<()> {
+        if self.pane_focus == focus {
+            return Ok(());
+        }
+        let request_id = self
+            .client
+            .send_request(&IpcCommand::SetMainPaneFocus { focus })?;
+        self.pending_focus = Some(pointer::PendingFocus::new(
+            request_id,
+            focus,
+            Instant::now(),
+        ));
         self.pane_focus = focus;
-        self.client.send(&IpcCommand::SetMainPaneFocus { focus })
+        self.needs_redraw = true;
+        Ok(())
     }
 
     fn focus_sources_when_logs_hidden(&mut self) -> Result<()> {
@@ -228,13 +289,13 @@ impl<'a> ClientLoop<'a> {
         {
             return Ok(());
         }
-        self.pane_focus = MainPaneFocus::Sources;
-        if !self.model.restart_required {
-            self.client.send(&IpcCommand::SetMainPaneFocus {
-                focus: MainPaneFocus::Sources,
-            })?;
+        if self.model.restart_required {
+            self.pane_focus = MainPaneFocus::Sources;
+            self.pending_focus = None;
+            Ok(())
+        } else {
+            self.focus_pane(MainPaneFocus::Sources)
         }
-        Ok(())
     }
 
     fn clear_log_selection(&mut self) {

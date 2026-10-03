@@ -7,6 +7,7 @@ use crate::app::model::{MainPaneFocus, Overlay, SourceRow};
 use crate::app::msg::{CopiedTarget, IpcCommand};
 
 use super::pointer::PointerShape;
+use super::wheel::WheelDirection;
 use super::{ClientLoop, Flow};
 
 pub(super) fn handle(state: &mut ClientLoop, mouse: MouseEvent) -> Result<Flow> {
@@ -15,6 +16,15 @@ pub(super) fn handle(state: &mut ClientLoop, mouse: MouseEvent) -> Result<Flow> 
     }
     state.mouse_position = Some((mouse.column, mouse.row));
     let hit = state.refresh_pointer_shape()?;
+    if let Some(focus) = hover_focus(
+        state.model,
+        state.terminal_area()?,
+        state.pane_focus,
+        mouse,
+        state.log_dragging,
+    ) {
+        state.focus_pane(focus)?;
+    }
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => press(state, mouse, hit)?,
         MouseEventKind::Moved => {
@@ -26,12 +36,52 @@ pub(super) fn handle(state: &mut ClientLoop, mouse: MouseEvent) -> Result<Flow> 
             }
         }
         MouseEventKind::Up(MouseButton::Left) => release(state, mouse)?,
+        MouseEventKind::ScrollUp => return scroll(state, mouse, WheelDirection::Up),
+        MouseEventKind::ScrollDown => return scroll(state, mouse, WheelDirection::Down),
         _ => {}
     }
     Ok(Flow::Continue)
 }
 
+fn scroll(state: &mut ClientLoop, mouse: MouseEvent, direction: WheelDirection) -> Result<Flow> {
+    let area = state.terminal_area()?;
+    if state.log_dragging || !crate::ui::layout::terminal_size_supported(area) {
+        return Ok(Flow::Continue);
+    }
+    let now = Instant::now();
+    let step = state.wheel.step(direction, now);
+    let delta = match direction {
+        WheelDirection::Up => -(step as isize),
+        WheelDirection::Down => step as isize,
+    };
+    if state.model.overlay != Overlay::None {
+        super::scroll::enqueue(state, delta)?;
+        return Ok(Flow::Continue);
+    }
+    match crate::ui::layout::main_pane_at(state.model, area, mouse.column, mouse.row) {
+        Some(MainPaneFocus::Sources) => super::scroll::enqueue(state, delta)?,
+        Some(MainPaneFocus::Logs) => {
+            let delta_rows = match direction {
+                WheelDirection::Up => -(step as isize),
+                WheelDirection::Down => step as isize,
+            };
+            if crate::ui::layout::scroll_logs(
+                state.model,
+                area,
+                &mut state.log_navigation,
+                delta_rows,
+                now,
+            ) {
+                state.needs_redraw = true;
+            }
+        }
+        None => {}
+    }
+    Ok(Flow::Continue)
+}
+
 fn press(state: &mut ClientLoop, mouse: MouseEvent, hit: Option<usize>) -> Result<()> {
+    state.scroll_queue.cancel();
     state.clear_log_selection();
     let area = state.terminal_area()?;
     if let Some(selection) = crate::ui::layout::log_viewport_with_navigation(
@@ -39,10 +89,17 @@ fn press(state: &mut ClientLoop, mouse: MouseEvent, hit: Option<usize>) -> Resul
         area,
         Some(&state.log_navigation),
     )
-    .and_then(|viewport| crate::ui::layout::LogSelection::start(viewport, mouse.column, mouse.row))
-    {
+    .and_then(|viewport| {
+        state.log_navigation.select_at(
+            state.model,
+            &viewport,
+            mouse.column,
+            mouse.row,
+            Instant::now(),
+        );
+        crate::ui::layout::LogSelection::start(viewport, mouse.column, mouse.row)
+    }) {
         state.focus_pane(MainPaneFocus::Logs)?;
-        state.log_navigation.clear();
         state.click_tracker.reset();
         state.log_selection = Some(selection);
         state.log_dragging = true;
@@ -102,4 +159,145 @@ fn release(state: &mut ClientLoop, mouse: MouseEvent) -> Result<()> {
     }
     state.needs_redraw = true;
     Ok(())
+}
+
+fn hover_focus(
+    model: &crate::app::model::Model,
+    area: ratatui::layout::Rect,
+    current: MainPaneFocus,
+    mouse: MouseEvent,
+    dragging: bool,
+) -> Option<MainPaneFocus> {
+    if dragging
+        || !matches!(
+            mouse.kind,
+            MouseEventKind::Moved
+                | MouseEventKind::ScrollUp
+                | MouseEventKind::ScrollDown
+                | MouseEventKind::ScrollLeft
+                | MouseEventKind::ScrollRight
+        )
+    {
+        return None;
+    }
+    crate::ui::layout::main_pane_at(model, area, mouse.column, mouse.row)
+        .filter(|focus| *focus != current)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::{APP_WINDOW_COLS, APP_WINDOW_ROWS, model_with_subscription};
+    use crossterm::event::KeyModifiers;
+    use ratatui::layout::Rect;
+
+    fn movement(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn hover_changes_focus_only_when_entering_another_visible_pane() {
+        let model = model_with_subscription();
+        let area = Rect::new(0, 0, APP_WINDOW_COLS, APP_WINDOW_ROWS);
+        let logs = movement(MouseEventKind::Moved, 80, 10);
+        assert_eq!(
+            hover_focus(&model, area, MainPaneFocus::Sources, logs, false),
+            Some(MainPaneFocus::Logs)
+        );
+        assert_eq!(
+            hover_focus(&model, area, MainPaneFocus::Logs, logs, false),
+            None
+        );
+        assert_eq!(
+            hover_focus(
+                &model,
+                area,
+                MainPaneFocus::Logs,
+                movement(MouseEventKind::ScrollDown, 2, 10),
+                false
+            ),
+            Some(MainPaneFocus::Sources)
+        );
+        for (column, row) in [(80, 1), (80, APP_WINDOW_ROWS - 1)] {
+            assert_eq!(
+                hover_focus(
+                    &model,
+                    area,
+                    MainPaneFocus::Sources,
+                    movement(MouseEventKind::Moved, column, row),
+                    false
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn hover_ignores_overlays_dragging_hidden_logs_and_button_release() {
+        let mut model = model_with_subscription();
+        let area = Rect::new(0, 0, APP_WINDOW_COLS, APP_WINDOW_ROWS);
+        let logs = movement(MouseEventKind::Moved, 80, 10);
+        assert_eq!(
+            hover_focus(&model, area, MainPaneFocus::Sources, logs, true),
+            None
+        );
+        assert_eq!(
+            hover_focus(
+                &model,
+                Rect::new(0, 0, 89, APP_WINDOW_ROWS),
+                MainPaneFocus::Sources,
+                logs,
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            hover_focus(
+                &model,
+                area,
+                MainPaneFocus::Sources,
+                movement(MouseEventKind::Up(MouseButton::Left), 80, 10),
+                false
+            ),
+            None
+        );
+        model.overlay = Overlay::Help(Default::default());
+        assert_eq!(
+            hover_focus(&model, area, MainPaneFocus::Sources, logs, false),
+            None
+        );
+    }
+
+    #[test]
+    fn hover_focuses_empty_space_and_borders() {
+        let model = model_with_subscription();
+        let area = Rect::new(0, 0, APP_WINDOW_COLS, APP_WINDOW_ROWS);
+        for (column, row, previous, expected) in [
+            (
+                APP_WINDOW_COLS - 1,
+                10,
+                MainPaneFocus::Sources,
+                MainPaneFocus::Logs,
+            ),
+            (80, 20, MainPaneFocus::Sources, MainPaneFocus::Logs),
+            (0, 10, MainPaneFocus::Logs, MainPaneFocus::Sources),
+            (2, 20, MainPaneFocus::Logs, MainPaneFocus::Sources),
+        ] {
+            assert_eq!(
+                hover_focus(
+                    &model,
+                    area,
+                    previous,
+                    movement(MouseEventKind::Moved, column, row),
+                    false
+                ),
+                Some(expected)
+            );
+        }
+    }
 }

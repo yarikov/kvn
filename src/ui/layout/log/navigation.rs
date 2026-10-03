@@ -15,7 +15,48 @@ pub(crate) struct LogNavigation {
     pub(super) cursor: Option<usize>,
     anchor: Option<usize>,
     pub(super) scroll_top_log: Option<usize>,
+    free_scroll: Option<LogScrollAnchor>,
     last_activity: Option<Instant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LogScrollAnchor {
+    log_index: usize,
+    row_offset: usize,
+}
+
+impl LogScrollAnchor {
+    fn at(rows: &[LogDisplayRow], start: usize) -> Option<Self> {
+        let log_index = rows.get(start)?.log_index;
+        let first = record_first_row(rows, log_index)?;
+        Some(Self {
+            log_index,
+            row_offset: start - first,
+        })
+    }
+
+    fn resolve(self, rows: &[LogDisplayRow]) -> Option<usize> {
+        let first = record_first_row(rows, self.log_index)?;
+        let record_rows = rows[first..]
+            .iter()
+            .take_while(|row| row.log_index == self.log_index)
+            .count();
+        Some(first + self.row_offset.min(record_rows - 1))
+    }
+
+    fn after_oldest_evicted(self) -> Self {
+        match self.log_index.checked_sub(1) {
+            Some(log_index) => Self { log_index, ..self },
+            None => Self {
+                log_index: 0,
+                row_offset: 0,
+            },
+        }
+    }
+}
+
+fn record_first_row(rows: &[LogDisplayRow], log_index: usize) -> Option<usize> {
+    rows.iter().position(|row| row.log_index == log_index)
 }
 
 impl LogNavigation {
@@ -27,6 +68,23 @@ impl LogNavigation {
         self.anchor.is_some()
     }
 
+    pub(crate) fn select_at(
+        &mut self,
+        model: &Model,
+        viewport: &LogViewport,
+        column: u16,
+        row: u16,
+        now: Instant,
+    ) -> bool {
+        let Some(point) = viewport.point_at(column, row) else {
+            return false;
+        };
+        let selected = viewport.rows[point.row].log_index;
+        let rows = super::build_all_log_rows(model, viewport.area.width as usize);
+        self.wheel_scroll_to(&rows, viewport.first_row, selected, now);
+        true
+    }
+
     pub(crate) fn select_edge(&mut self, viewport: &LogViewport, from_top: bool, now: Instant) {
         let cursor = if from_top {
             viewport.first_log_index()
@@ -36,6 +94,7 @@ impl LogNavigation {
         if let Some(cursor) = cursor {
             self.cursor = Some(cursor);
             self.scroll_top_log = viewport.first_log_index();
+            self.free_scroll = None;
             self.last_activity = Some(now);
         }
     }
@@ -47,6 +106,7 @@ impl LogNavigation {
         let cursor = if from_top { 0 } else { log_count - 1 };
         self.cursor = Some(cursor);
         self.scroll_top_log = Some(cursor);
+        self.free_scroll = None;
         self.last_activity = Some(now);
     }
 
@@ -58,6 +118,7 @@ impl LogNavigation {
             self.clear();
             return;
         }
+        self.free_scroll = None;
         self.cursor = Some(cursor.saturating_add_signed(delta).min(log_count - 1));
         self.last_activity = Some(now);
     }
@@ -99,6 +160,8 @@ impl LogNavigation {
             .is_some_and(|last| now.saturating_duration_since(last) >= LOG_CURSOR_TIMEOUT)
         {
             self.clear();
+            self.free_scroll = None;
+            self.last_activity = None;
             true
         } else {
             false
@@ -106,11 +169,12 @@ impl LogNavigation {
     }
 
     pub(crate) fn oldest_log_evicted(&mut self) {
+        self.free_scroll = self.free_scroll.map(LogScrollAnchor::after_oldest_evicted);
         if self.cursor == Some(0) {
             self.clear();
             return;
         }
-        self.cursor = self.cursor.map(|index| index - 1);
+        self.cursor = self.cursor.map(|index| index.saturating_sub(1));
         self.anchor = self.anchor.and_then(|index| index.checked_sub(1));
         self.scroll_top_log = self
             .scroll_top_log
@@ -122,12 +186,40 @@ impl LogNavigation {
         self.cursor = None;
         self.anchor = None;
         self.scroll_top_log = None;
-        self.last_activity = None;
+        self.last_activity = self.last_activity.filter(|_| self.free_scroll.is_some());
     }
 
     pub(super) fn contains(&self, log_index: usize) -> bool {
         self.selected_range()
             .is_some_and(|range| range.contains(&log_index))
+    }
+
+    pub(in crate::ui::layout) fn pinned_start(&self, rows: &[LogDisplayRow]) -> Option<usize> {
+        if let Some(anchor) = self.free_scroll {
+            return anchor.resolve(rows);
+        }
+        if self.cursor.is_some() {
+            return record_first_row(rows, self.scroll_top_log.unwrap_or(0));
+        }
+        self.free_scroll?.resolve(rows)
+    }
+
+    pub(in crate::ui::layout) fn wheel_scroll_to(
+        &mut self,
+        rows: &[LogDisplayRow],
+        start: usize,
+        selected: usize,
+        now: Instant,
+    ) {
+        self.anchor = None;
+        self.cursor = Some(selected);
+        self.free_scroll = LogScrollAnchor::at(rows, start);
+        self.scroll_top_log = rows.get(start).map(|row| row.log_index);
+        self.last_activity = Some(now);
+    }
+
+    pub(in crate::ui::layout) fn has_wheel_anchor(&self) -> bool {
+        self.free_scroll.is_some()
     }
 
     pub(crate) fn set_scroll_top_from(&mut self, viewport: &LogViewport) {
@@ -147,6 +239,8 @@ pub(crate) struct LogPoint {
 pub(crate) struct LogViewport {
     pub(in crate::ui::layout) area: Rect,
     pub(in crate::ui::layout) rows: Vec<LogDisplayRow>,
+    pub(in crate::ui::layout) first_row: usize,
+    pub(in crate::ui::layout) total_rows: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -262,7 +356,7 @@ mod tests {
     use super::*;
     use crate::app::model::Overlay;
     use crate::test_helpers::{buffer_to_string, model_with_subscription};
-    use crate::ui::layout::log::build_log_viewport;
+    use crate::ui::layout::log::{build_log_viewport, scroll_log_viewport};
     use crate::ui::layout::panes::log_viewport;
     use crate::ui::layout::{draw, draw_with_log_selection};
     use ratatui::Terminal;
@@ -395,6 +489,176 @@ mod tests {
         let viewport = build_log_viewport(&model, Rect::new(0, 0, 20, 3), Some(&navigation));
         assert_eq!(navigation.cursor(), Some(5));
         assert_eq!(viewport.last_log_index(), Some(5));
+    }
+
+    #[test]
+    fn clicking_a_log_selects_its_record_clears_visual_range_and_refreshes_activity() {
+        let now = Instant::now();
+        let mut model = model_with_subscription();
+        for index in 0..6 {
+            model.push_log(format!("line {index}"));
+        }
+        let area = Rect::new(4, 5, 20, 3);
+        let mut navigation = LogNavigation::default();
+        navigation.select_buffer_edge(6, false, now);
+        navigation.enter_visual(now);
+        let viewport = build_log_viewport(&model, area, Some(&navigation));
+        assert!(navigation.select_at(&model, &viewport, 6, 6, now + Duration::from_secs(10)));
+        assert_eq!(navigation.selected_text(&model).as_deref(), Some("line 4"));
+        assert!(!navigation.is_visual());
+        assert!(!navigation.expire_if_idle(now + LOG_CURSOR_TIMEOUT));
+        assert!(navigation.expire_if_idle(now + Duration::from_secs(10) + LOG_CURSOR_TIMEOUT));
+    }
+
+    #[test]
+    fn clicks_on_empty_space_or_borders_do_not_select_records() {
+        let mut model = model_with_subscription();
+        model.push_log("only entry".into());
+        let mut navigation = LogNavigation::default();
+        let viewport = build_log_viewport(&model, Rect::new(4, 5, 20, 3), None);
+        for (column, row) in [(3, 5), (24, 5), (5, 4), (5, 6), (5, 8)] {
+            assert!(!navigation.select_at(&model, &viewport, column, row, Instant::now()));
+        }
+        assert_eq!(navigation.cursor(), None);
+    }
+
+    #[test]
+    fn dragging_after_a_click_copies_text_and_keeps_the_clicked_record() {
+        let now = Instant::now();
+        let mut model = model_with_subscription();
+        model.push_log("aaaa bbbb cccc dddd".into());
+        model.push_log("tail".into());
+        let mut navigation = LogNavigation::default();
+        let viewport = build_log_viewport(&model, Rect::new(0, 0, 4, 2), None);
+        assert!(navigation.select_at(&model, &viewport, 0, 0, now));
+        assert_eq!(
+            navigation.selected_text(&model).as_deref(),
+            Some("aaaa bbbb cccc dddd")
+        );
+        let mut selection = LogSelection::start(viewport, 0, 0).unwrap();
+        assert!(selection.is_empty());
+        selection.update(2, 0);
+        assert_eq!(selection.text(), "ddd");
+        drop(selection);
+        assert_eq!(navigation.cursor(), Some(0));
+    }
+
+    #[test]
+    fn wheel_scroll_creates_a_cursor_and_keeps_the_viewport_pinned_until_idle() {
+        let now = Instant::now();
+        let mut model = model_with_subscription();
+        for index in 0..6 {
+            model.push_log(format!("line {index}"));
+        }
+        let area = Rect::new(0, 0, 20, 3);
+        let mut navigation = LogNavigation::default();
+
+        scroll_log_viewport(&model, area, &mut navigation, -2, now);
+        let viewport = build_log_viewport(&model, area, Some(&navigation));
+        assert_eq!(viewport.first_log_index(), Some(1));
+        assert_eq!(navigation.cursor(), Some(3));
+
+        model.push_log("line 6".into());
+        let viewport = build_log_viewport(&model, area, Some(&navigation));
+        assert_eq!(viewport.first_log_index(), Some(1));
+
+        scroll_log_viewport(&model, area, &mut navigation, -5, now);
+        let viewport = build_log_viewport(&model, area, Some(&navigation));
+        assert_eq!(viewport.first_log_index(), Some(0));
+
+        scroll_log_viewport(&model, area, &mut navigation, 10, now);
+        model.push_log("line 7".into());
+        let viewport = build_log_viewport(&model, area, Some(&navigation));
+        assert_eq!(viewport.last_log_index(), Some(6));
+        navigation.expire_if_idle(now + LOG_CURSOR_TIMEOUT);
+        assert_eq!(navigation.cursor(), None);
+        assert_eq!(
+            build_log_viewport(&model, area, Some(&navigation)).last_log_index(),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn wheel_scroll_survives_oldest_eviction_and_hands_over_to_the_cursor() {
+        let now = Instant::now();
+        let mut model = model_with_subscription();
+        for index in 0..6 {
+            model.push_log(format!("line {index}"));
+        }
+        let area = Rect::new(0, 0, 20, 3);
+        let mut navigation = LogNavigation::default();
+        scroll_log_viewport(&model, area, &mut navigation, -2, now);
+
+        model.logs.pop_front();
+        navigation.oldest_log_evicted();
+        let viewport = build_log_viewport(&model, area, Some(&navigation));
+        assert_eq!(viewport.first_log_index(), Some(0));
+        assert_eq!(model.logs[0], "line 1");
+
+        navigation.select_edge(&viewport, true, Instant::now());
+        assert_eq!(navigation.cursor(), Some(0));
+        navigation.expire_if_idle(Instant::now() + LOG_CURSOR_TIMEOUT);
+        let viewport = build_log_viewport(&model, area, Some(&navigation));
+        assert_eq!(viewport.last_log_index(), Some(4));
+    }
+
+    #[test]
+    fn wheel_scroll_returns_to_the_tail_after_fifteen_idle_seconds() {
+        let now = Instant::now();
+        let mut model = model_with_subscription();
+        for index in 0..6 {
+            model.push_log(format!("line {index}"));
+        }
+        let area = Rect::new(0, 0, 20, 3);
+        let mut navigation = LogNavigation::default();
+        scroll_log_viewport(&model, area, &mut navigation, -2, now);
+
+        assert!(!navigation.expire_if_idle(now + LOG_CURSOR_TIMEOUT - Duration::from_secs(1)));
+        let viewport = build_log_viewport(&model, area, Some(&navigation));
+        assert_eq!(viewport.first_log_index(), Some(1));
+
+        assert!(navigation.expire_if_idle(now + LOG_CURSOR_TIMEOUT));
+        let viewport = build_log_viewport(&model, area, Some(&navigation));
+        assert_eq!(viewport.last_log_index(), Some(5));
+    }
+
+    #[test]
+    fn evicting_the_wheel_selected_record_clears_selection_but_keeps_scroll() {
+        let now = Instant::now();
+        let mut model = model_with_subscription();
+        for index in 0..6 {
+            model.push_log(format!("line {index}"));
+        }
+        let area = Rect::new(0, 0, 20, 3);
+        let mut navigation = LogNavigation::default();
+        navigation.select_buffer_edge(model.logs.len(), true, now);
+        navigation.enter_visual(now);
+        scroll_log_viewport(&model, area, &mut navigation, -1, now);
+        assert!(!navigation.is_visual());
+        assert_eq!(navigation.cursor(), Some(0));
+        model.logs.pop_front();
+        navigation.oldest_log_evicted();
+        assert_eq!(navigation.cursor(), None);
+        assert_eq!(navigation.selected_text(&model), None);
+        assert!(navigation.has_wheel_anchor());
+        navigation.oldest_log_evicted();
+        model.logs.pop_front();
+        assert_eq!(navigation.selected_text(&model), None);
+    }
+
+    #[test]
+    fn wheel_scroll_moves_through_wrapped_rows_of_one_record() {
+        let now = Instant::now();
+        let mut model = model_with_subscription();
+        model.push_log("aaaa bbbb cccc dddd".into());
+        model.push_log("tail".into());
+        let area = Rect::new(0, 0, 4, 2);
+        let mut navigation = LogNavigation::default();
+
+        scroll_log_viewport(&model, area, &mut navigation, -1, now);
+        let viewport = build_log_viewport(&model, area, Some(&navigation));
+        assert_eq!(viewport.rows[0].text, "cccc");
+        assert_eq!(viewport.last_log_index(), Some(0));
     }
 
     #[test]

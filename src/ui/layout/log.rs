@@ -1,5 +1,7 @@
 pub(crate) mod navigation;
 
+use std::time::Instant;
+
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -196,10 +198,58 @@ pub(super) fn build_log_viewport(
 ) -> LogViewport {
     let all_rows = build_all_log_rows(model, area.width as usize);
     let keep = area.height as usize;
+    let start = log_viewport_start(&all_rows, keep, navigation);
+    let total_rows = all_rows.len();
+    let rows = all_rows.into_iter().skip(start).take(keep).collect();
+    LogViewport {
+        area,
+        rows,
+        first_row: start,
+        total_rows,
+    }
+}
+
+pub(super) fn scroll_log_viewport(
+    model: &Model,
+    area: Rect,
+    navigation: &mut LogNavigation,
+    delta_rows: isize,
+    now: Instant,
+) -> bool {
+    let all_rows = build_all_log_rows(model, area.width as usize);
+    let keep = area.height as usize;
+    let start = log_viewport_start(&all_rows, keep, Some(navigation));
+    if all_rows.is_empty() || keep == 0 {
+        return false;
+    }
+    let initial_row = if delta_rows > 0 {
+        start
+    } else {
+        start + keep - 1
+    }
+    .min(all_rows.len() - 1);
+    let selected = navigation
+        .cursor()
+        .unwrap_or(all_rows[initial_row].log_index);
+    let rows: Vec<_> = all_rows.iter().map(|row| Some(row.log_index)).collect();
+    let position = crate::app::scroll::scroll(
+        &rows,
+        keep,
+        crate::app::scroll::ScrollPosition { start, selected },
+        delta_rows,
+    );
+    navigation.wheel_scroll_to(&all_rows, position.start, position.selected, now);
+    true
+}
+
+fn log_viewport_start(
+    all_rows: &[LogDisplayRow],
+    keep: usize,
+    navigation: Option<&LogNavigation>,
+) -> usize {
     let auto_start = all_rows.len().saturating_sub(keep);
     let mut start = navigation
-        .and_then(|nav| nav.cursor.map(|_| nav.scroll_top_log.unwrap_or(0)))
-        .and_then(|top_log| all_rows.iter().position(|row| row.log_index == top_log))
+        .and_then(|nav| nav.pinned_start(all_rows))
         .unwrap_or(auto_start);
 
     if let Some(cursor) = navigation.and_then(LogNavigation::cursor)
@@ -209,7 +259,13 @@ pub(super) fn build_log_viewport(
             .iter()
             .rposition(|row| row.log_index == cursor)
             .unwrap_or(first);
-        if first < start {
+        if navigation.is_some_and(LogNavigation::has_wheel_anchor) {
+            if last < start {
+                start = last;
+            } else if first >= start.saturating_add(keep) {
+                start = first.saturating_add(1).saturating_sub(keep);
+            }
+        } else if first < start {
             start = first;
         } else if last >= start.saturating_add(keep) {
             let candidate = last.saturating_add(1).saturating_sub(keep);
@@ -224,9 +280,7 @@ pub(super) fn build_log_viewport(
         }
     }
 
-    start = start.min(all_rows.len().saturating_sub(keep));
-    let rows = all_rows.into_iter().skip(start).take(keep).collect();
-    LogViewport { area, rows }
+    start.min(auto_start)
 }
 
 pub(super) fn wrap_log_line_with_offsets(line: &str, width: usize) -> Vec<(String, usize)> {
@@ -288,7 +342,8 @@ pub(super) fn log_display_line(
     } else {
         model.theme.normal()
     };
-    let row_selected = navigation.is_some_and(|nav| nav.contains(row.log_index));
+    let row_selected = selection.is_none_or(LogSelection::is_empty)
+        && navigation.is_some_and(|nav| nav.contains(row.log_index));
     let mut column = 0_u16;
     let mut spans = Vec::with_capacity(row.text.chars().count() + 2);
     spans.push(Span::styled(

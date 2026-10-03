@@ -30,6 +30,7 @@ pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
         "Settings › Routing › Mode",
         &labels,
         model.routing_selected,
+        model.overlay_scroll,
         active,
         if awaits(model, OnboardingStep::Routing) {
             overlay_footer(model, Some(APPLY_ACTION), false, false)
@@ -60,6 +61,7 @@ pub(super) fn draw_region(frame: &mut Frame, model: &Model, area: Rect) {
         "Settings › Routing › Region",
         &labels,
         model.geo_region_selected,
+        model.overlay_scroll,
         active,
         if awaits(model, OnboardingStep::Region) {
             overlay_footer(model, Some(APPLY_ACTION), false, false)

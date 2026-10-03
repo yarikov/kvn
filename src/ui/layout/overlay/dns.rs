@@ -77,6 +77,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         "Settings › DNS",
         &label_refs,
         model.dns_selected,
+        model.overlay_scroll,
         None,
         settings_overlay_footer(model),
     );

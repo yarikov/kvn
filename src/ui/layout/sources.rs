@@ -7,6 +7,7 @@ use crate::app::model::{Model, SourceRow};
 use crate::ui::icons::icons;
 
 use super::panes::panel_inner;
+use super::scrollbar::{ScrollWindow, draw_scrollbar, right_border_track};
 use super::text::{
     fit_to_visual_width, pad_to_visual_width, truncate_to_visual_width, visual_width,
 };
@@ -14,14 +15,15 @@ use super::text::{
 /// Draw the unified Sources list: standalone profiles and subscription trees.
 pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused: bool) {
     let theme = &model.theme;
+    let border_style = if focused {
+        theme.accent()
+    } else {
+        theme.border()
+    };
     let block = Block::default()
         .title(" Profiles ")
         .borders(Borders::ALL)
-        .border_style(if focused {
-            theme.accent()
-        } else {
-            theme.border()
-        });
+        .border_style(border_style);
 
     let inner_width = panel_inner(area).width as usize;
     let mut lines: Vec<Line> = Vec::new();
@@ -103,6 +105,7 @@ pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused
                 icons(model.icon_set()).refresh,
                 sub.auto_update.label()
             );
+            let header_text = truncate_to_visual_width(&header_text, inner_width);
             let header_text = if is_selected {
                 pad_to_visual_width(&header_text, inner_width)
             } else {
@@ -130,10 +133,37 @@ pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused
         }
     }
 
+    let visible = panel_inner(area).height as usize;
+    let window = ScrollWindow {
+        total: lines.len(),
+        visible,
+        start: sources_window_start(model, visible),
+    };
     let paragraph = Paragraph::new(lines)
         .block(block)
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((u16::try_from(window.start).unwrap_or(u16::MAX), 0));
     frame.render_widget(paragraph, area);
+    draw_scrollbar(frame, right_border_track(area), window, border_style);
+}
+
+pub(super) fn source_visual_rows(model: &Model) -> Vec<Option<usize>> {
+    crate::app::scroll::source_rows(model)
+}
+
+pub(super) fn sources_window_start(model: &Model, visible: usize) -> usize {
+    let visual_rows = source_visual_rows(model);
+    let start = model
+        .sources_scroll
+        .min(visual_rows.len().saturating_sub(visible));
+    match visual_rows
+        .iter()
+        .position(|row| *row == Some(model.selected))
+    {
+        Some(line) if line < start => line,
+        Some(line) if line >= start + visible => line + 1 - visible,
+        _ => start,
+    }
 }
 
 /// Width reserved for the tree prefix at the start of a profile row.

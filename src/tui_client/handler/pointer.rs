@@ -5,7 +5,7 @@ use anyhow::Result;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use crate::app::model::Model;
+use crate::app::model::{MainPaneFocus, Model};
 use crate::tui_client::{OSC_POINTER_DEFAULT, OSC_POINTER_INTERACTIVE, OSC_POINTER_TEXT};
 
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(300);
@@ -70,9 +70,101 @@ pub(super) fn update_pointer_shape(
     Ok(hit)
 }
 
+pub(super) struct PendingFocus {
+    id: uuid::Uuid,
+    focus: MainPaneFocus,
+    sent_at: Instant,
+}
+
+impl PendingFocus {
+    pub(super) fn new(id: uuid::Uuid, focus: MainPaneFocus, sent_at: Instant) -> Self {
+        Self { id, focus, sent_at }
+    }
+}
+
+pub(super) fn expire_pane_focus(pending: &mut Option<PendingFocus>, now: Instant) -> bool {
+    if pending.as_ref().is_some_and(|pending| {
+        now.saturating_duration_since(pending.sent_at) >= super::IPC_INTERACTION_TIMEOUT
+    }) {
+        *pending = None;
+        true
+    } else {
+        false
+    }
+}
+
+pub(super) fn reconcile_pane_focus(
+    pending: &mut Option<PendingFocus>,
+    response_to: Option<uuid::Uuid>,
+    snapshot_focus: MainPaneFocus,
+    now: Instant,
+) -> MainPaneFocus {
+    expire_pane_focus(pending, now);
+    if pending
+        .as_ref()
+        .is_some_and(|pending| Some(pending.id) == response_to)
+    {
+        *pending = None;
+    }
+    pending
+        .as_ref()
+        .map_or(snapshot_focus, |pending| pending.focus)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn focus_keeps_the_latest_request_until_its_own_acknowledgment() {
+        let previous = uuid::Uuid::new_v4();
+        let latest = uuid::Uuid::new_v4();
+        let now = Instant::now();
+        let mut pending = Some(PendingFocus::new(latest, MainPaneFocus::Sources, now));
+        assert_eq!(
+            reconcile_pane_focus(&mut pending, Some(previous), MainPaneFocus::Logs, now),
+            MainPaneFocus::Sources
+        );
+        assert!(pending.is_some());
+        assert_eq!(
+            reconcile_pane_focus(&mut pending, Some(latest), MainPaneFocus::Sources, now),
+            MainPaneFocus::Sources
+        );
+        assert!(pending.is_none());
+        assert_eq!(
+            reconcile_pane_focus(&mut pending, None, MainPaneFocus::Logs, now),
+            MainPaneFocus::Logs
+        );
+    }
+
+    #[test]
+    fn missing_focus_reply_stops_overriding_snapshots_after_timeout() {
+        let now = Instant::now();
+        let id = uuid::Uuid::new_v4();
+        let mut pending = Some(PendingFocus::new(id, MainPaneFocus::Logs, now));
+        assert!(!expire_pane_focus(
+            &mut pending,
+            now + super::super::IPC_INTERACTION_TIMEOUT - Duration::from_millis(1)
+        ));
+        assert_eq!(
+            reconcile_pane_focus(
+                &mut pending,
+                None,
+                MainPaneFocus::Sources,
+                now + super::super::IPC_INTERACTION_TIMEOUT
+            ),
+            MainPaneFocus::Sources
+        );
+        assert!(pending.is_none());
+        let next_id = uuid::Uuid::new_v4();
+        let later = now + super::super::IPC_INTERACTION_TIMEOUT;
+        pending = Some(PendingFocus::new(next_id, MainPaneFocus::Logs, later));
+        assert_eq!(
+            reconcile_pane_focus(&mut pending, Some(id), MainPaneFocus::Sources, later),
+            MainPaneFocus::Logs
+        );
+        assert!(pending.is_some());
+    }
 
     #[test]
     fn click_tracker_requires_same_profile_within_300ms() {
