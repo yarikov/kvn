@@ -86,7 +86,6 @@ pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused
                     show_latency,
                 ));
             }
-            lines.push(Line::from(""));
         }
 
         // Subscription groups.
@@ -106,6 +105,9 @@ pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused
                 sub.auto_update.label()
             );
             let header_text = truncate_to_visual_width(&header_text, inner_width);
+            if !lines.is_empty() {
+                lines.push(Line::from(""));
+            }
             let header_text = if is_selected {
                 pad_to_visual_width(&header_text, inner_width)
             } else {
@@ -129,7 +131,6 @@ pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused
                     show_latency,
                 ));
             }
-            lines.push(Line::from(""));
         }
     }
 
