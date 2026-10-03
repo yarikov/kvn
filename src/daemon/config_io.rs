@@ -85,13 +85,17 @@ pub(super) fn report_uncommitted_save(model: &mut Model) {
     ));
 }
 
-pub(super) fn persist_support_prompt(model: &mut Model, previous: SupportPromptState) {
+pub(super) fn persist_support_prompt(
+    model: &mut Model,
+    previous: SupportPromptState,
+    reopen_prompt: bool,
+) {
     let result = crate::paths::support_prompt_path()
         .context("Failed to determine support prompt state path")
         .and_then(|path| crate::support_prompt::save_at(&path, &model.support_prompt));
     if let Err(error) = result {
         model.support_prompt = previous;
-        if model.support_prompt.is_due(chrono::Utc::now()) {
+        if reopen_prompt && model.support_prompt.is_due(chrono::Utc::now()) {
             model.overlay = Overlay::Support;
         }
         let message = format!("Support prompt save failed: {error:#}");
@@ -162,7 +166,7 @@ fn arm_support_prompt_after_onboarding(model: &mut Model) {
     };
     let previous = model.support_prompt.clone();
     if model.support_prompt.schedule_initial(completed_at) {
-        persist_support_prompt(model, previous);
+        persist_support_prompt(model, previous, false);
     }
 }
 

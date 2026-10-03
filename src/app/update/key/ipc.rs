@@ -41,6 +41,7 @@ pub(in crate::app::update) fn handle_ipc_command(
         IpcCommand::ResolveSupportPrompt { resolution } => {
             support::resolve_prompt(model, resolution)
         }
+        IpcCommand::DismissSupportPrompt => support::dismiss_prompt(model),
         IpcCommand::Key { code, char, ctrl } => match rebuild_key_event(&code, char, ctrl) {
             Some(key) => handle_key(model, key),
             None => vec![],

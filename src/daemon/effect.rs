@@ -39,9 +39,10 @@ pub(super) fn execute_daemon_effect(
         Effect::ClearGeoRetryState { region } => geo::clear_retry_state(region),
         Effect::ResetGeoUpdateSchedules => geo::reset_update_schedules(model)?,
         Effect::SaveConfig => config_io::report_uncommitted_save(model),
-        Effect::PersistSupportPrompt { previous } => {
-            config_io::persist_support_prompt(model, previous)
-        }
+        Effect::PersistSupportPrompt {
+            previous,
+            reopen_prompt,
+        } => config_io::persist_support_prompt(model, previous, reopen_prompt),
         Effect::PersistOnboarding { previous, recovery } => {
             config_io::persist_onboarding(model, previous, recovery)
         }

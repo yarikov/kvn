@@ -291,6 +291,7 @@ pub enum IpcCommand {
     ResolveSupportPrompt {
         resolution: SupportPromptResolution,
     },
+    DismissSupportPrompt,
     Paste {
         text: String,
     },

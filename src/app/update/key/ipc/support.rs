@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{Model, Overlay};
+use crate::app::model::{HelpContext, HelpState, Model, Overlay};
 use crate::app::msg::SupportPromptResolution;
 
 pub(super) fn check_prompt(model: &mut Model) -> Vec<Effect> {
@@ -33,7 +33,30 @@ pub(super) fn resolve_prompt(
         }
     }
     model.overlay = Overlay::None;
-    vec![Effect::PersistSupportPrompt { previous }]
+    vec![Effect::PersistSupportPrompt {
+        previous,
+        reopen_prompt: true,
+    }]
+}
+
+pub(super) fn dismiss_prompt(model: &mut Model) -> Vec<Effect> {
+    let previous = model.support_prompt.clone();
+    model.support_prompt.dismiss();
+    let closed_prompt = matches!(
+        model.overlay,
+        Overlay::Support
+            | Overlay::Help(HelpState {
+                context: HelpContext::Support,
+                ..
+            })
+    );
+    if closed_prompt {
+        model.overlay = Overlay::None;
+    }
+    vec![Effect::PersistSupportPrompt {
+        previous,
+        reopen_prompt: closed_prompt,
+    }]
 }
 
 #[cfg(test)]
@@ -80,7 +103,10 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                Effect::PersistSupportPrompt { previous },
+                Effect::PersistSupportPrompt {
+                    previous,
+                    reopen_prompt: true,
+                },
                 Effect::BroadcastState
             ]
         );
@@ -98,7 +124,68 @@ mod tests {
     }
 
     #[test]
-    fn supported_prompt_is_scheduled_six_months_out() {
+    fn dismiss_command_closes_open_prompt_and_persists() {
+        let mut model = crate::test_helpers::model_with_profiles(vec![]);
+        model.overlay = Overlay::Support;
+        model.support_prompt.next_show_at = Some(chrono::Utc::now());
+        let previous = model.support_prompt.clone();
+
+        let effects = handle_ipc_command(&mut model, IpcCommand::DismissSupportPrompt);
+
+        assert_eq!(model.overlay, Overlay::None);
+        assert!(model.support_prompt.dismissed);
+        assert_eq!(
+            effects,
+            vec![
+                Effect::PersistSupportPrompt {
+                    previous,
+                    reopen_prompt: true,
+                },
+                Effect::BroadcastState
+            ]
+        );
+    }
+
+    #[test]
+    fn dismiss_command_closes_help_that_would_restore_the_prompt() {
+        let mut model = crate::test_helpers::model_with_profiles(vec![]);
+        model.overlay = Overlay::Help(HelpState {
+            context: HelpContext::Support,
+            selected: 0,
+        });
+
+        let effects = handle_ipc_command(&mut model, IpcCommand::DismissSupportPrompt);
+
+        assert_eq!(model.overlay, Overlay::None);
+        assert!(matches!(
+            effects[0],
+            Effect::PersistSupportPrompt {
+                reopen_prompt: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn dismiss_command_leaves_other_overlays_open() {
+        let mut model = crate::test_helpers::model_with_profiles(vec![]);
+        model.overlay = Overlay::DnsSettings;
+
+        let effects = handle_ipc_command(&mut model, IpcCommand::DismissSupportPrompt);
+
+        assert_eq!(model.overlay, Overlay::DnsSettings);
+        assert!(model.support_prompt.dismissed);
+        assert!(matches!(
+            effects[0],
+            Effect::PersistSupportPrompt {
+                reopen_prompt: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn supported_prompt_is_recorded_and_closed() {
         use crate::app::msg::SupportPromptResolution;
 
         let mut model = crate::test_helpers::model_with_profiles(vec![]);
@@ -111,11 +198,8 @@ mod tests {
         );
 
         assert_eq!(model.overlay, Overlay::None);
-        assert!(!model.support_prompt.dismissed);
-        assert!(
-            model.support_prompt.next_show_at
-                > Some(chrono::Utc::now() + chrono::Duration::days(179))
-        );
+        assert!(model.support_prompt.supported_at.is_some());
+        assert_eq!(model.support_prompt.next_show_at, None);
         assert!(matches!(effects[0], Effect::PersistSupportPrompt { .. }));
     }
 }
