@@ -17,6 +17,7 @@ mod migrations;
 mod net;
 mod omarchy;
 mod onboarding;
+mod pacman;
 mod paths;
 mod redaction;
 mod services;

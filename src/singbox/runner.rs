@@ -1,5 +1,7 @@
+use std::ffi::OsStr;
+use std::fs;
 use std::io::{BufRead, BufReader, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{ChildStderr, Command, Stdio};
 use std::sync::OnceLock;
 use std::thread;
@@ -20,6 +22,34 @@ static SINGBOX_BINARY: OnceLock<String> = OnceLock::new();
 /// Path to the sing-box binary. Can be overridden by SING_BOX_PATH env variable.
 fn singbox_binary() -> &'static str {
     SINGBOX_BINARY.get_or_init(resolve_singbox_binary)
+}
+
+pub fn binary_path() -> Option<PathBuf> {
+    locate_binary(singbox_binary(), std::env::var_os("PATH").as_deref())
+}
+
+fn locate_binary(binary: &str, search_path: Option<&OsStr>) -> Option<PathBuf> {
+    if binary.contains('/') {
+        return Some(PathBuf::from(binary));
+    }
+    std::env::split_paths(search_path?)
+        .map(|dir| dir.join(binary))
+        .find(|candidate| is_executable_file(candidate))
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) && process_may_execute(path)
+}
+
+fn process_may_execute(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    #[allow(unsafe_code)]
+    let result =
+        unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), libc::X_OK, libc::AT_EACCESS) };
+    result == 0
 }
 
 /// Write the generated sing-box configuration to a temporary file.
@@ -227,6 +257,42 @@ mod tests {
         unsafe { std::env::set_var("SING_BOX_PATH", "/usr/local/bin/sing-box") };
         assert_eq!(resolve_singbox_binary(), "/usr/local/bin/sing-box");
         unsafe { std::env::remove_var("SING_BOX_PATH") };
+    }
+
+    fn owner_may_not_execute_mode() -> u32 {
+        #[allow(unsafe_code)]
+        let running_as_root = unsafe { libc::geteuid() } == 0;
+        if running_as_root { 0o644 } else { 0o641 }
+    }
+
+    #[test]
+    fn locate_binary_takes_a_path_as_is_and_searches_path_for_an_executable() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        fs::write(first.path().join("sing-box"), "").unwrap();
+        fs::set_permissions(
+            first.path().join("sing-box"),
+            fs::Permissions::from_mode(owner_may_not_execute_mode()),
+        )
+        .unwrap();
+        fs::write(second.path().join("sing-box"), "").unwrap();
+        fs::set_permissions(
+            second.path().join("sing-box"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        let search_path = std::env::join_paths([first.path(), second.path()]).unwrap();
+
+        assert_eq!(
+            locate_binary("/opt/sing-box", Some(&search_path)),
+            Some(PathBuf::from("/opt/sing-box"))
+        );
+        assert_eq!(
+            locate_binary("sing-box", Some(&search_path)),
+            Some(second.path().join("sing-box"))
+        );
+        assert_eq!(locate_binary("missing", Some(&search_path)), None);
+        assert_eq!(locate_binary("sing-box", None), None);
     }
 
     #[test]

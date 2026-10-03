@@ -23,7 +23,10 @@ The package post-install hook grants `/usr/bin/sing-box` the
 `cap_net_admin,cap_net_raw+ep` capabilities required for TUN operation. It does
 not enable the daemon service automatically. An ALPM hook restores these
 capabilities whenever pacman installs or upgrades `/usr/bin/sing-box`; manually
-replaced binaries are not covered. Enable the daemon as your regular user:
+replaced binaries are not covered. That hook runs only at the end of the pacman
+transaction, so a connection started while the transaction is still upgrading
+the sing-box binary kvn launches (`SING_BOX_PATH`, or the first `sing-box` on
+`PATH`) waits for it to finish (at most five minutes) before launching it. Enable the daemon as your regular user:
 
 ```bash
 systemctl --user enable --now kvn-tui.service
@@ -51,8 +54,8 @@ Package upgrades may include ordered migration scripts installed under
 `/usr/lib/kvn/migrations/`. Updates installed through `yay` or `paru` are
 detected on the next `kvn` launch, or run them explicitly with `kvn migrate`.
 
-The runner takes `$XDG_RUNTIME_DIR/kvn/migrate.lock`, waits for any active
-pacman transaction, backs `profiles.json` up into `~/.config/kvn-tui/recovery/`,
+The runner takes `$XDG_RUNTIME_DIR/kvn/migrate.lock`, waits for an active
+pacman transaction that is updating kvn or sing-box, backs `profiles.json` up into `~/.config/kvn-tui/recovery/`,
 then runs the pending scripts in order, recording each under
 `$XDG_STATE_HOME/kvn/migrations/` as soon as it succeeds; machine-wide
 operations use `/var/lib/kvn/migrations/`. A run that fails stops there and the

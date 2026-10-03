@@ -61,6 +61,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `paths` | `src/paths.rs` | XDG directory resolution (`~/.config/kvn-tui/`), atomic path construction |
 | `atomic_write` | `src/atomic_write.rs` | Atomic file write helper (write `.tmp` + fsync + rename + parent-dir fsync) |
 | `net` | `src/net.rs` | Free loopback port allocation (bind `127.0.0.1:0`, read the OS-assigned port, drop the listener) for the Clash API control port and the profile-test SOCKS5 port |
+| `pacman` | `src/pacman.rs` | Detects a pacman transaction that has already written a given package file (its ctime is not older than `/var/lib/pacman/db.lck`) and waits for it to settle; used by the migration runner for `kvn-tui`/`sing-box` and by the daemon's connect path for the sing-box binary it launches (`singbox::runner::binary_path`: `SING_BOX_PATH` or the first `sing-box` on `PATH`), whose capabilities hook runs only at PostTransaction |
 | `systemd` | `src/systemd.rs` | The daemon's systemd user unit name and its restart helper, so a unit rename lands in one place |
 | `onboarding` | `src/onboarding.rs` | First-run tour: the ordered `OnboardingStep` cards, their handoff screen and copyable command, the persisted `OnboardingState` and the session-local `OnboardingProgress`, the `IntegrationSetup` / `SetupState` the protection cards render, plus the grandfathering load for installs that predate the tour |
 | `waybar` | `src/services/waybar.rs` | Read/write `state.json` for waybar integration and crash recovery |

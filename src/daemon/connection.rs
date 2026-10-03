@@ -1,4 +1,5 @@
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -9,9 +10,28 @@ use crate::app::msg::{IpcError, Msg};
 use crate::config::profile::{DnsConfig, Profile, Protocol, Settings};
 
 use super::DaemonShared;
-use super::process_slot::{is_current_attempt, lock_process_slot};
+use super::process_slot::{ProcessSlot, is_current_attempt, lock_process_slot};
 
 const LOG_PRUNE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+const SING_BOX_UPDATE_TIMEOUT: Duration = Duration::from_secs(300);
+
+fn wait_for_sing_box_update(slot: &Arc<Mutex<ProcessSlot>>, attempt_id: u64) {
+    let Some(binary) = crate::singbox::runner::binary_path() else {
+        return;
+    };
+    let sing_box = [binary];
+    if !crate::pacman::transaction_wrote_any(&sing_box) {
+        return;
+    }
+    tracing::info!("Waiting for the pacman transaction updating sing-box to finish");
+    let settled =
+        crate::pacman::wait_until_transaction_settles(&sing_box, SING_BOX_UPDATE_TIMEOUT, || {
+            is_current_attempt(slot, attempt_id)
+        });
+    if !settled && is_current_attempt(slot, attempt_id) {
+        tracing::warn!("The sing-box update is still running; starting sing-box anyway");
+    }
+}
 
 pub(super) fn connect(
     tx: &Sender<Msg>,
@@ -40,6 +60,10 @@ pub(super) fn connect(
     let dns = settings.dns.clone();
     thread::spawn(move || {
         let _coordinator = coordinator.lock().unwrap_or_else(|p| p.into_inner());
+        if !is_current_attempt(&slot, attempt_id) {
+            return;
+        }
+        wait_for_sing_box_update(&slot, attempt_id);
         if !is_current_attempt(&slot, attempt_id) {
             return;
         }

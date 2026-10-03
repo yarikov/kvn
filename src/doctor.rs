@@ -115,7 +115,7 @@ fn check_migration_result(
 ) -> Check {
     if package_transaction {
         return Check::failure(
-            "A pacman package transaction is active; migrations cannot run yet",
+            "A pacman transaction is updating kvn or sing-box; migrations cannot run yet",
             "Wait for pacman/AUR updates to finish, then run `kvn migrate`.",
         );
     }

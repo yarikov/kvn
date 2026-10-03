@@ -17,6 +17,8 @@ use anyhow::{Context, Result, ensure};
 
 const INSTALLED_DIR: &str = "/usr/lib/kvn/migrations";
 const BASELINE_PATH: &str = "/var/lib/kvn/migration-baseline";
+const MIGRATION_SENSITIVE_PACKAGE_FILES: [&str; 2] = ["/usr/bin/kvn-tui", "/usr/bin/sing-box"];
+const PACKAGE_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(900);
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Migration {
@@ -200,12 +202,12 @@ pub fn pending() -> Result<Vec<Migration>> {
 /// the profile schema was migrated.
 pub fn run_pending_interactive() -> Result<bool> {
     let store = Store::installed()?;
-    if store.pending()?.is_empty() && !pacman_is_running() {
+    if store.pending()?.is_empty() && !package_transaction_active() {
         return Ok(false);
     }
     ensure!(
         io::stdin().is_terminal() && io::stdout().is_terminal(),
-        "kvn migrations or a package transaction require an interactive terminal; run `kvn migrate` there"
+        "kvn migrations or a kvn/sing-box package update require an interactive terminal; run `kvn migrate` there"
     );
     run_interactive(&store)
 }
@@ -318,26 +320,23 @@ fn prompt_retry() -> Result<bool> {
 }
 
 fn wait_for_pacman() -> Result<()> {
-    let lock = Path::new("/var/lib/pacman/db.lck");
-    if !pacman_is_running() {
+    if !package_transaction_active() {
         return Ok(());
     }
-    println!("Waiting for the pacman transaction to finish before running migrations...");
-    for _ in 0..900 {
-        if !lock.exists() {
-            return Ok(());
-        }
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
-    anyhow::bail!("pacman transaction is still running; retry with `kvn migrate`")
-}
-
-fn pacman_is_running() -> bool {
-    Path::new("/var/lib/pacman/db.lck").exists()
+    println!("Waiting for the pacman transaction updating kvn or sing-box to finish...");
+    ensure!(
+        crate::pacman::wait_until_transaction_settles(
+            &MIGRATION_SENSITIVE_PACKAGE_FILES,
+            PACKAGE_TRANSACTION_TIMEOUT,
+            || true,
+        ),
+        "pacman transaction is still running; retry with `kvn migrate`"
+    );
+    Ok(())
 }
 
 pub(crate) fn package_transaction_active() -> bool {
-    pacman_is_running()
+    crate::pacman::transaction_wrote_any(&MIGRATION_SENSITIVE_PACKAGE_FILES)
 }
 
 struct MigrationLock {
@@ -413,7 +412,9 @@ fn report_pending(pending: &[Migration], package_transaction: bool) -> bool {
         println!("{}\t{}", migration.id, migration.summary);
     }
     if package_transaction {
-        println!("pacman-transaction\tWait for the active package transaction to finish");
+        println!(
+            "pacman-transaction\tWait for the package transaction updating kvn or sing-box to finish"
+        );
     }
     !pending.is_empty() || package_transaction
 }

@@ -25,7 +25,11 @@ set -euo pipefail
 ## What the runner does
 
 1. Takes `$XDG_RUNTIME_DIR/kvn/migrate.lock` so only one runner runs at a time.
-2. Waits for any active pacman transaction to finish.
+2. Waits for an active pacman transaction to finish if it has already written
+   `/usr/bin/kvn-tui` or `/usr/bin/sing-box` (a file whose ctime is not older
+   than `/var/lib/pacman/db.lck`). Until then the migration baseline may be
+   missing and the sing-box capabilities hook has not run; any other
+   transaction is not waited for.
 3. Saves `profiles.json` to `~/.config/kvn-tui/recovery/`.
 4. Runs the pending queue in order, writing a per-user marker as soon as each
    script succeeds.
@@ -53,9 +57,12 @@ the daemon to turn `kill_switch` and `auto_connect` off.
 
 While anything is pending the daemon refuses to start, so the VPN stays down
 until the queue has run. Launching `kvn` runs it automatically before the TUI
-opens; `kvn migrate` is for re-running it after a failure. An active pacman
-transaction does not block daemon startup — nothing is pending until its
-payload is installed — but the runner does wait for it.
+opens; `kvn migrate` is for re-running it after a failure. Launching `kvn`
+also waits for a pacman transaction that updates kvn or sing-box, even with
+nothing pending, so a daemon it starts does not run a sing-box whose
+capabilities are not restored yet; any other transaction does not delay the
+TUI. An active transaction does not block daemon startup — nothing is pending
+until its payload is installed.
 
 ## Daemon handoff
 
