@@ -31,6 +31,7 @@ pub enum Effect {
     SaveConfig,
     PersistSupportPrompt {
         previous: crate::support_prompt::SupportPromptState,
+        reopen_prompt: bool,
     },
     PersistOnboarding {
         previous: crate::onboarding::OnboardingProgress,

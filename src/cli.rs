@@ -138,12 +138,15 @@ enum Command {
         group(
             ArgGroup::new("targets")
                 .required(true)
-                .args(["killswitch"])
+                .args(["killswitch", "support_prompt"])
         )
     )]
     Disable {
         #[arg(long, help = "Disable the nftables-based kill switch")]
         killswitch: bool,
+
+        #[arg(long, help = "Never show the support prompt again")]
+        support_prompt: bool,
     },
 
     /// Recover or reset profiles.json while the daemon is stopped.
@@ -641,6 +644,36 @@ fn run_kill_switch(enabled: bool) -> Result<()> {
     Ok(())
 }
 
+fn run_dismiss_support_prompt() -> Result<()> {
+    if crate::ipc::is_daemon_running() {
+        let mut client = attach_client()?;
+        let before = fetch_snapshot(&mut client)?;
+        ensure_commands_available(&before)?;
+        let status_revision_before = before.status_revision;
+        let snap = send_command(&mut client, IpcCommand::DismissSupportPrompt)?;
+        ensure_support_prompt_dismissed(&snap, status_revision_before)?;
+    } else {
+        let path = crate::paths::support_prompt_path()
+            .context("Failed to determine support prompt state path")?;
+        crate::support_prompt::dismiss_at(&path)?;
+    }
+    println!("Support prompt disabled.");
+    Ok(())
+}
+
+fn ensure_support_prompt_dismissed(
+    snapshot: &StateSnapshot,
+    status_revision_before: u64,
+) -> Result<()> {
+    if let Some(error) = &snapshot.response_error {
+        anyhow::bail!(error.clone());
+    }
+    ensure_commands_available(snapshot)?;
+    let failed_now = snapshot.status_is_error && snapshot.status_revision != status_revision_before;
+    anyhow::ensure!(!failed_now, snapshot.status.clone());
+    Ok(())
+}
+
 fn complete_kill_switch_apply(
     enabled: bool,
     active_before: Option<bool>,
@@ -841,9 +874,15 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
                 return Some(run_kill_switch(true));
             }
         }
-        Some(Command::Disable { killswitch }) => {
+        Some(Command::Disable {
+            killswitch,
+            support_prompt,
+        }) => {
             if *killswitch {
                 return Some(run_kill_switch(false));
+            }
+            if *support_prompt {
+                return Some(run_dismiss_support_prompt());
             }
         }
         Some(Command::Config { command }) => {
@@ -1253,8 +1292,46 @@ esac
         let cli = Cli::parse_from(["kvn", "disable", "--killswitch"]);
         assert!(matches!(
             cli.command,
-            Some(Command::Disable { killswitch: true })
+            Some(Command::Disable {
+                killswitch: true,
+                ..
+            })
         ));
+    }
+
+    #[test]
+    fn disable_support_prompt_option_detected_and_exclusive() {
+        let cli = Cli::parse_from(["kvn", "disable", "--support-prompt"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Disable {
+                killswitch: false,
+                support_prompt: true,
+            })
+        ));
+        assert!(
+            Cli::try_parse_from(["kvn", "disable", "--support-prompt", "--killswitch"]).is_err()
+        );
+    }
+
+    #[test]
+    fn support_prompt_dismissal_fails_only_on_a_new_error_status() {
+        let mut snapshot = snapshot_with_profiles();
+        snapshot.status_is_error = true;
+        snapshot.status_revision = 4;
+        snapshot.status = "Support prompt save failed: denied".into();
+
+        assert!(ensure_support_prompt_dismissed(&snapshot, 4).is_ok());
+        let error = ensure_support_prompt_dismissed(&snapshot, 3).unwrap_err();
+        assert_eq!(error.to_string(), "Support prompt save failed: denied");
+
+        snapshot.status_is_error = false;
+        snapshot.restart_required = true;
+        assert!(ensure_support_prompt_dismissed(&snapshot, 4).is_err());
+
+        snapshot.restart_required = false;
+        snapshot.response_error = Some("daemon restarting".into());
+        assert!(ensure_support_prompt_dismissed(&snapshot, 4).is_err());
     }
 
     #[test]

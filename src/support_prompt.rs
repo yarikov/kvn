@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 pub const INITIAL_DELAY_DAYS: i64 = 14;
 pub const REMINDER_DELAY_DAYS: i64 = 30;
-pub const SUPPORTED_DELAY_DAYS: i64 = 180;
 pub const SUPPORT_URL: &str = "https://web.tribute.tg/d/QUv";
 
 /// Small, non-config UX state. Keeping it outside profiles.json avoids making
@@ -19,11 +18,13 @@ pub struct SupportPromptState {
     pub next_show_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub dismissed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supported_at: Option<DateTime<Utc>>,
 }
 
 impl SupportPromptState {
     pub fn schedule_initial(&mut self, now: DateTime<Utc>) -> bool {
-        if self.dismissed || self.next_show_at.is_some() {
+        if self.is_closed() || self.next_show_at.is_some() {
             return false;
         }
         self.next_show_at = Some(now + Duration::days(INITIAL_DELAY_DAYS));
@@ -31,7 +32,7 @@ impl SupportPromptState {
     }
 
     pub fn is_due(&self, now: DateTime<Utc>) -> bool {
-        !self.dismissed && self.next_show_at.is_some_and(|deadline| now >= deadline)
+        !self.is_closed() && self.next_show_at.is_some_and(|deadline| now >= deadline)
     }
 
     pub fn remind_later(&mut self, now: DateTime<Utc>) {
@@ -40,13 +41,17 @@ impl SupportPromptState {
     }
 
     pub fn supported(&mut self, now: DateTime<Utc>) {
-        self.dismissed = false;
-        self.next_show_at = Some(now + Duration::days(SUPPORTED_DELAY_DAYS));
+        self.supported_at = Some(now);
+        self.next_show_at = None;
     }
 
     pub fn dismiss(&mut self) {
         self.dismissed = true;
         self.next_show_at = None;
+    }
+
+    fn is_closed(&self) -> bool {
+        self.dismissed || self.supported_at.is_some()
     }
 }
 
@@ -69,6 +74,17 @@ pub fn save_at(path: &Path, state: &SupportPromptState) -> Result<()> {
         .with_context(|| format!("Failed to create support prompt directory {parent:?}"))?;
     let json = serde_json::to_string_pretty(state)?;
     crate::atomic_write::write(path, json.as_bytes())
+}
+
+pub fn dismiss_at(path: &Path) -> Result<()> {
+    let mut state = load_at(path)
+        .unwrap_or_else(|error| {
+            tracing::warn!("Replacing invalid support prompt state: {error:#}");
+            None
+        })
+        .unwrap_or_default();
+    state.dismiss();
+    save_at(path, &state)
 }
 
 // NOTE: this start-up path only recovers a daemon that died between the
@@ -126,12 +142,15 @@ mod tests {
     }
 
     #[test]
-    fn support_moves_deadline_six_months() {
+    fn support_is_recorded_and_permanent() {
         let now = now();
         let mut state = SupportPromptState::default();
+        state.schedule_initial(now);
         state.supported(now);
-        assert!(!state.is_due(now + Duration::days(180) - Duration::seconds(1)));
-        assert!(state.is_due(now + Duration::days(180)));
+        assert_eq!(state.supported_at, Some(now));
+        assert!(!state.dismissed);
+        assert!(!state.is_due(now + Duration::days(3650)));
+        assert!(!state.schedule_initial(now));
     }
 
     #[test]
@@ -169,6 +188,24 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn dismiss_at_keeps_support_record_and_replaces_corrupt_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state/support-prompt.json");
+        let mut supported = SupportPromptState::default();
+        supported.supported(now());
+        save_at(&path, &supported).unwrap();
+
+        dismiss_at(&path).unwrap();
+        let state = load_at(&path).unwrap().unwrap();
+        assert!(state.dismissed);
+        assert_eq!(state.supported_at, Some(now()));
+
+        fs::write(&path, "not json").unwrap();
+        dismiss_at(&path).unwrap();
+        assert!(load_at(&path).unwrap().unwrap().dismissed);
     }
 
     #[test]
