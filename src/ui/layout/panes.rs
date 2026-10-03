@@ -455,13 +455,13 @@ mod tests {
         sync_sources_scroll(&mut model, area);
         assert_eq!(model.sources_scroll, 2);
 
-        model.sources_scroll = 12;
+        model.sources_scroll = 11;
         for _ in 0..2 {
             let clicked = source_hit_test(&model, area, 2, 4).unwrap();
-            assert_eq!(clicked, 12);
+            assert_eq!(clicked, 11);
             model.selected = clicked;
             sync_sources_scroll(&mut model, area);
-            assert_eq!(model.sources_scroll, 12);
+            assert_eq!(model.sources_scroll, 11);
         }
 
         model.selected = 0;

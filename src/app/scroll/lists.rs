@@ -27,9 +27,6 @@ pub(crate) fn source_rows(model: &Model) -> Vec<Option<usize>> {
         visual.push(Some(index));
         previous_group = group;
     }
-    if !visual.is_empty() {
-        visual.push(None);
-    }
     visual
 }
 
