@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use super::subscription::validate_hwid;
-use super::{GeoAutoUpdate, Profile, Settings, Subscription};
+use super::{ConfigDiagnostic, GeoAutoUpdate, Profile, Settings, Subscription, into_result};
 
 /// Current schema version for `profiles.json`. Bumped on every breaking
 /// change to the persisted shape; new migrations go in `Config::migrate`.
@@ -76,30 +76,37 @@ impl Config {
     ///   `dns.rules[*].server` reference an existing tag; when `fakeip_enabled`
     ///   at least one server is of type `fakeip`.
     pub fn validate(&self) -> anyhow::Result<()> {
+        into_result(self.diagnostics())
+    }
+
+    pub fn diagnostics(&self) -> Vec<ConfigDiagnostic> {
+        let mut diagnostics = Vec::new();
         let mut profile_ids = HashSet::with_capacity(self.profiles.len());
         for (idx, profile) in self.profiles.iter().enumerate() {
-            let num = idx + 1;
+            let pointer = format!("/profiles/{idx}");
+            let label = format!("Profile {}", idx + 1);
             if !profile_ids.insert(profile.id) {
-                anyhow::bail!("Profile {num}: duplicate id {}", profile.id);
+                diagnostics.push(ConfigDiagnostic::new(
+                    format!("{pointer}/id"),
+                    format!("{label}: duplicate id {}", profile.id),
+                ));
             }
-            if profile.name.trim().is_empty() {
-                anyhow::bail!("Profile {num}: name must not be empty");
-            }
-            if profile.address.trim().is_empty() {
-                anyhow::bail!("Profile {num}: address must not be empty");
-            }
-            if let Err(e) = profile.config.validate() {
-                anyhow::bail!("Profile {num}: {e}");
-            }
-            if let Err(e) = profile.validate_semantic() {
-                anyhow::bail!("Profile {num}: {e}");
-            }
+            diagnostics.extend(
+                profile
+                    .diagnostics()
+                    .into_iter()
+                    .map(|d| d.within(&pointer).labelled(&label)),
+            );
         }
 
         let mut subscription_ids = HashSet::with_capacity(self.subscriptions.len());
         for (idx, subscription) in self.subscriptions.iter().enumerate() {
+            let pointer = format!("/subscriptions/{idx}");
             if !subscription_ids.insert(subscription.id) {
-                anyhow::bail!("Subscription {}: duplicate id {}", idx + 1, subscription.id);
+                diagnostics.push(ConfigDiagnostic::new(
+                    format!("{pointer}/id"),
+                    format!("Subscription {}: duplicate id {}", idx + 1, subscription.id),
+                ));
             }
             if !subscription.send_hwid {
                 continue;
@@ -109,11 +116,18 @@ impl Config {
                 .effective_hwid(&self.settings)
                 .unwrap_or_default();
             if let Err(error) = validate_hwid(hwid) {
-                anyhow::bail!(
-                    "Subscription {} ({:?}): invalid HWID: {error}",
-                    idx + 1,
-                    subscription.name
-                );
+                let hwid_pointer = match subscription.hwid {
+                    Some(_) => format!("{pointer}/hwid"),
+                    None => "/settings/hwid".to_string(),
+                };
+                diagnostics.push(ConfigDiagnostic::new(
+                    hwid_pointer,
+                    format!(
+                        "Subscription {} ({:?}): invalid HWID: {error}",
+                        idx + 1,
+                        subscription.name
+                    ),
+                ));
             }
         }
 
@@ -121,23 +135,40 @@ impl Config {
             if let Some(id) = profile.subscription_id
                 && !subscription_ids.contains(&id)
             {
-                anyhow::bail!(
-                    "Profile {}: subscription_id ({id}) references a non-existent subscription",
-                    idx + 1
-                );
+                diagnostics.push(ConfigDiagnostic::new(
+                    format!("/profiles/{idx}/subscription_id"),
+                    format!(
+                        "Profile {}: subscription_id ({id}) references a non-existent subscription",
+                        idx + 1
+                    ),
+                ));
             }
         }
 
         if let Some(id) = self.settings.default_profile
             && !self.profiles.iter().any(|p| p.id == id)
         {
-            anyhow::bail!("settings.default_profile ({id}) references a non-existent profile");
+            diagnostics.push(ConfigDiagnostic::new(
+                "/settings/default_profile",
+                format!("settings.default_profile ({id}) references a non-existent profile"),
+            ));
         }
 
-        self.settings.validate()?;
-        self.settings.dns.validate()?;
+        diagnostics.extend(
+            self.settings
+                .diagnostics()
+                .into_iter()
+                .map(|d| d.within("/settings")),
+        );
+        diagnostics.extend(
+            self.settings
+                .dns
+                .diagnostics()
+                .into_iter()
+                .map(|d| d.within("/settings/dns")),
+        );
 
-        Ok(())
+        diagnostics
     }
 }
 
@@ -262,6 +293,38 @@ mod tests {
         let json = r#"{"unknown_field": 42}"#;
         let result: Result<Config, _> = serde_json::from_str(json);
         assert!(result.is_err(), "Should reject unknown top-level field");
+    }
+
+    #[test]
+    fn config_diagnostics_collects_every_problem_under_its_document_pointer() {
+        let mut config = Config::default();
+        let mut profile = Profile::new_vless(
+            "".into(),
+            "1.2.3.4".into(),
+            0,
+            crate::test_helpers::TEST_UUID.into(),
+        );
+        profile.subscription_id = Some(uuid::Uuid::nil());
+        config.profiles.push(profile);
+        config.settings.tun_interface = "tun0".into();
+        config.settings.dns.final_server = "missing".into();
+        let pointers: Vec<_> = config
+            .diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.pointer)
+            .collect();
+        assert_eq!(
+            pointers,
+            [
+                "/profiles/0/name",
+                "/profiles/0/port",
+                "/profiles/0/subscription_id",
+                "/settings/tun_interface",
+                "/settings/dns/final_server",
+            ]
+        );
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.starts_with("Profile 1: name must not be empty; Profile 1: port"));
     }
 
     #[test]

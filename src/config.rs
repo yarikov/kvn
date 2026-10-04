@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+pub(crate) mod json_pointer;
 pub(crate) mod merge;
 pub mod profile;
 pub(crate) mod recovery;

@@ -142,9 +142,10 @@ mod tests {
         config
             .subscriptions
             .push(subscription_with_hwid(true, None));
-        let error = config.validate().unwrap_err().to_string();
-        assert!(error.contains("Subscription 1"), "got: {error}");
-        assert!(error.contains("must not be empty"), "got: {error}");
+        let diagnostic = crate::test_helpers::single_diagnostic(config.diagnostics());
+        assert_eq!(diagnostic.pointer, "/settings/hwid");
+        assert!(diagnostic.message.contains("Subscription 1"));
+        assert!(diagnostic.message.contains("must not be empty"));
     }
 
     #[test]
@@ -154,8 +155,9 @@ mod tests {
         config
             .subscriptions
             .push(subscription_with_hwid(true, Some("")));
-        let error = config.validate().unwrap_err().to_string();
-        assert!(error.contains("must not be empty"), "got: {error}");
+        let diagnostic = crate::test_helpers::single_diagnostic(config.diagnostics());
+        assert_eq!(diagnostic.pointer, "/subscriptions/0/hwid");
+        assert!(diagnostic.message.contains("must not be empty"));
     }
 
     #[test]

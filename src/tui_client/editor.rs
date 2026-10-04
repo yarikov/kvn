@@ -8,7 +8,8 @@ use anyhow::{Context, Result};
 
 use crate::app::model::SourceRow;
 use crate::app::msg::{ConfigEditResult, IpcCommand};
-use crate::config::profile::Config;
+use crate::config::json_pointer::JsonIndex;
+use crate::config::profile::{Config, ConfigDiagnostic};
 
 mod retry;
 
@@ -62,81 +63,13 @@ fn split_editor(editor: &str) -> (String, Vec<String>) {
     (program, parts.collect())
 }
 
-/// Determine the 1-based line number of an object in a top-level JSON array.
-fn find_array_item_line(path: &Path, array_name: &str, item_index: usize) -> Option<usize> {
-    let content = fs::read_to_string(path).ok()?;
-
-    enum State {
-        Normal,
-        InString,
-        InStringEscape,
-    }
-
-    let array_prefix = format!("\"{array_name}\"");
-    let mut in_array = false;
-    let mut depth = 0;
-    let mut item_count = 0;
-    let mut state = State::Normal;
-
-    for (line_num, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-
-        if !in_array {
-            if trimmed.starts_with(&array_prefix) {
-                in_array = true;
-            } else {
-                continue;
-            }
-        }
-
-        for c in line.chars() {
-            match state {
-                State::Normal => match c {
-                    '"' => state = State::InString,
-                    '[' if in_array => {
-                        depth += 1;
-                    }
-                    ']' if in_array && depth > 0 => {
-                        depth -= 1;
-                        if depth == 0 {
-                            return None;
-                        }
-                    }
-                    '{' if in_array && depth == 1 => {
-                        if item_count == item_index {
-                            return Some(line_num + 1);
-                        }
-                        item_count += 1;
-                        depth += 1;
-                    }
-                    '{' if in_array => {
-                        depth += 1;
-                    }
-                    '}' if in_array && depth > 0 => {
-                        depth -= 1;
-                    }
-                    _ => {}
-                },
-                State::InString => {
-                    if c == '\\' {
-                        state = State::InStringEscape;
-                    } else if c == '"' {
-                        state = State::Normal;
-                    }
-                }
-                State::InStringEscape => state = State::InString,
-            }
-        }
-    }
-
-    None
-}
-
 fn find_target_line(path: &Path, target: EditorTarget) -> Option<usize> {
-    match target {
-        EditorTarget::Profile(idx) => find_array_item_line(path, "profiles", idx),
-        EditorTarget::Subscription(idx) => find_array_item_line(path, "subscriptions", idx),
-    }
+    let content = fs::read_to_string(path).ok()?;
+    let pointer = match target {
+        EditorTarget::Profile(idx) => format!("/profiles/{idx}"),
+        EditorTarget::Subscription(idx) => format!("/subscriptions/{idx}"),
+    };
+    JsonIndex::new(&content).line(&pointer)
 }
 
 /// Build editor command-line arguments that jump to `line` in `path`.
@@ -322,19 +255,46 @@ fn check_edit(contents: &str, path: &Path) -> Result<Config, EditIssue> {
             line: Some(line),
         });
     }
-    crate::config::load_config_bytes_read_only(contents.as_bytes(), path)
-        .and_then(|config| {
-            config.validate()?;
-            Ok(config)
+    let config =
+        crate::config::load_config_bytes_read_only(contents.as_bytes(), path).map_err(|error| {
+            EditIssue {
+                line: error.chain().find_map(|cause| {
+                    cause
+                        .downcast_ref::<serde_json::Error>()
+                        .map(|error| error.line().max(1))
+                }),
+                message: format!("{error:#}"),
+            }
+        })?;
+    let diagnostics = config.diagnostics();
+    if diagnostics.is_empty() {
+        return Ok(config);
+    }
+    Err(diagnostics_issue(contents, diagnostics))
+}
+
+fn diagnostics_issue(contents: &str, diagnostics: Vec<ConfigDiagnostic>) -> EditIssue {
+    let index = JsonIndex::new(contents);
+    let mut located: Vec<_> = diagnostics
+        .into_iter()
+        .map(|diagnostic| (index.nearest_line(&diagnostic.pointer), diagnostic.message))
+        .collect();
+    located.sort_by_key(|(line, _)| line.unwrap_or(usize::MAX));
+    let count = match located.len() {
+        1 => "1 problem".to_string(),
+        count => format!("{count} problems"),
+    };
+    let problems: Vec<_> = located
+        .iter()
+        .map(|(line, message)| match line {
+            Some(line) => format!("• line {line}: {message}"),
+            None => format!("• {message}"),
         })
-        .map_err(|error| EditIssue {
-            line: error.chain().find_map(|cause| {
-                cause
-                    .downcast_ref::<serde_json::Error>()
-                    .map(|error| error.line().max(1))
-            }),
-            message: format!("{error:#}"),
-        })
+        .collect();
+    EditIssue {
+        line: located.first().and_then(|(line, _)| *line),
+        message: format!("The configuration has {count}:\n\n{}", problems.join("\n")),
+    }
 }
 
 fn submit_edit(base: &Config, edited: &Config) -> Result<ConfigEditResult> {
@@ -353,6 +313,7 @@ fn submit_edit(base: &Config, edited: &Config) -> Result<ConfigEditResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::profile::Settings;
     use tempfile::TempDir;
 
     #[test]
@@ -366,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn validation_error_keeps_the_edit_available_for_correction() {
+    fn validation_lists_every_problem_and_points_at_the_first() {
         let mut config = Config::default();
         let profile = crate::config::profile::Profile::new_vless(
             "A".into(),
@@ -375,11 +336,30 @@ mod tests {
             uuid::Uuid::new_v4().to_string(),
         );
         config.profiles = vec![profile.clone(), profile];
+        config.settings.theme = "missing-theme".into();
         let path = Path::new("snapshot.json");
-        let issue = check_edit(&serde_json::to_string(&config).unwrap(), path).unwrap_err();
-        assert!(issue.message.contains("duplicate id"));
-        assert_eq!(issue.line, None);
+        let contents = serde_json::to_string_pretty(&config).unwrap();
+        let lines: Vec<_> = contents.lines().collect();
+        let issue = check_edit(&contents, path).unwrap_err();
+        let duplicate_line = issue.line.unwrap();
+        assert!(lines[duplicate_line - 1].contains("\"id\""));
+        let theme_line = lines
+            .iter()
+            .position(|line| line.contains("\"theme\""))
+            .unwrap()
+            + 1;
+        assert_eq!(
+            issue.message,
+            format!(
+                "The configuration has 2 problems:\n\n\
+                 • line {duplicate_line}: Profile 2: duplicate id {}\n\
+                 • line {theme_line}: {}",
+                config.profiles[0].id,
+                config.settings.diagnostics()[0].message,
+            )
+        );
         config.profiles.pop();
+        config.settings.theme = Settings::default().theme;
         assert!(check_edit(&serde_json::to_string(&config).unwrap(), path).is_ok());
     }
 

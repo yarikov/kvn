@@ -11,8 +11,10 @@ This is the default location; `XDG_CONFIG_HOME` is respected when set.
 Press `e` in the TUI to edit a private copy with `$VISUAL` or `$EDITOR`.
 After the editor exits, kvn validates the copy and waits for the daemon to
 confirm saving it. For JSON or validation errors, a temporary screen shows the
-current reason, replacing any previous error: press Enter to reopen the same
-file, or press `q` or Esc to cancel immediately, without Enter. Scroll long
+current problems, replacing any previous error. A JSON syntax error is reported
+alone; validation lists every problem with its line number, in file order.
+Press Enter to reopen the same file at the first reported line, or press `q`
+or Esc to cancel immediately, without Enter. Scroll long
 messages with `j`/`k`, Up/Down, or `g`/`G` (start/end). The action
 keys remain visible while scrolling.
 

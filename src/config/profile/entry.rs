@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Protocol, ProtocolConfig, Security, VlessConfig};
+use super::{ConfigDiagnostic, Protocol, ProtocolConfig, Security, VlessConfig};
 
 /// Single VPN profile. The `protocol` discriminant and protocol-specific
 /// fields are flattened into [`ProtocolConfig`].
@@ -48,36 +48,41 @@ impl Profile {
         self.protocol().ui_label()
     }
 
-    /// Deeper semantic validation on top of the per-field non-empty checks
-    /// enforced by `Config::validate`. Verifies:
-    /// - `port != 0`
-    /// - `address` parses as an IPv4/IPv6 literal or a valid hostname
-    /// - protocol UUIDs (VLESS/VMess/TUIC) parse as [`Uuid`]
-    /// - `security=Reality` requires a populated `reality` block
-    pub fn validate_semantic(&self) -> anyhow::Result<()> {
-        if self.port == 0 {
-            anyhow::bail!("port must not be 0");
+    pub fn diagnostics(&self) -> Vec<ConfigDiagnostic> {
+        let mut diagnostics = Vec::new();
+        if self.name.trim().is_empty() {
+            diagnostics.push(ConfigDiagnostic::new("/name", "name must not be empty"));
         }
-        validate_host(&self.address)?;
-        match &self.config {
-            ProtocolConfig::Vless(cfg) => {
-                Uuid::parse_str(cfg.uuid.trim()).map_err(|e| {
-                    anyhow::anyhow!("vless.uuid {:?} is not a valid UUID: {e}", cfg.uuid)
-                })?;
-                if cfg.security == Some(Security::Reality) && cfg.tls.reality.is_none() {
-                    anyhow::bail!("vless.security=reality requires a `reality` block");
-                }
-            }
-            ProtocolConfig::Vmess(cfg) => {
-                Uuid::parse_str(cfg.uuid.trim()).map_err(|e| {
-                    anyhow::anyhow!("vmess.uuid {:?} is not a valid UUID: {e}", cfg.uuid)
-                })?;
-            }
-            ProtocolConfig::Tuic(cfg) => {
-                Uuid::parse_str(cfg.uuid.trim()).map_err(|e| {
-                    anyhow::anyhow!("tuic.uuid {:?} is not a valid UUID: {e}", cfg.uuid)
-                })?;
-            }
+        if self.address.trim().is_empty() {
+            diagnostics.push(ConfigDiagnostic::new(
+                "/address",
+                "address must not be empty",
+            ));
+        } else if let Err(error) = validate_host(&self.address) {
+            diagnostics.push(ConfigDiagnostic::new("/address", error.to_string()));
+        }
+        if self.port == 0 {
+            diagnostics.push(ConfigDiagnostic::new("/port", "port must not be 0"));
+        }
+        diagnostics.extend(self.config.diagnostics());
+        diagnostics.extend(self.protocol_uuid_diagnostic());
+        if let ProtocolConfig::Vless(cfg) = &self.config
+            && cfg.security == Some(Security::Reality)
+            && cfg.tls.reality.is_none()
+        {
+            diagnostics.push(ConfigDiagnostic::new(
+                "/security",
+                "vless.security=reality requires a `reality` block",
+            ));
+        }
+        diagnostics
+    }
+
+    fn protocol_uuid_diagnostic(&self) -> Option<ConfigDiagnostic> {
+        let (protocol, uuid) = match &self.config {
+            ProtocolConfig::Vless(cfg) => ("vless", &cfg.uuid),
+            ProtocolConfig::Vmess(cfg) => ("vmess", &cfg.uuid),
+            ProtocolConfig::Tuic(cfg) => ("tuic", &cfg.uuid),
             ProtocolConfig::Trojan(_)
             | ProtocolConfig::Shadowsocks(_)
             | ProtocolConfig::Hysteria2(_)
@@ -85,9 +90,18 @@ impl Profile {
             | ProtocolConfig::Anytls(_)
             | ProtocolConfig::Socks(_)
             | ProtocolConfig::Http(_)
-            | ProtocolConfig::Ssh(_) => {}
+            | ProtocolConfig::Ssh(_) => return None,
+        };
+        let uuid = uuid.trim();
+        if uuid.is_empty() {
+            return None;
         }
-        Ok(())
+        Uuid::parse_str(uuid).err().map(|error| {
+            ConfigDiagnostic::new(
+                "/uuid",
+                format!("{protocol}.uuid {uuid:?} is not a valid UUID: {error}"),
+            )
+        })
     }
 
     /// Stable key identifying the credentials behind this profile,
@@ -194,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_semantic_rejects_port_zero() {
+    fn diagnostics_rejects_port_zero() {
         let mut p = Profile::new_vless(
             "P".to_string(),
             "1.2.3.4".to_string(),
@@ -202,57 +216,59 @@ mod tests {
             crate::test_helpers::TEST_UUID.to_string(),
         );
         p.port = 0;
-        let err = p.validate_semantic().unwrap_err().to_string();
-        assert!(err.contains("port"), "Error was: {}", err);
+        let diagnostic = crate::test_helpers::single_diagnostic(p.diagnostics());
+        assert_eq!(diagnostic.pointer, "/port");
     }
 
     #[test]
-    fn validate_semantic_rejects_garbage_uuid() {
+    fn diagnostics_rejects_garbage_uuid() {
         let p = Profile::new_vless(
             "P".to_string(),
             "1.2.3.4".to_string(),
             443,
             "not-a-uuid".to_string(),
         );
-        let err = p.validate_semantic().unwrap_err().to_string();
-        assert!(err.contains("vless.uuid"), "Error was: {}", err);
+        let diagnostic = crate::test_helpers::single_diagnostic(p.diagnostics());
+        assert_eq!(diagnostic.pointer, "/uuid");
+        assert!(diagnostic.message.contains("vless.uuid"));
     }
 
     #[test]
-    fn validate_semantic_accepts_ipv6_literal() {
+    fn diagnostics_accepts_ipv6_literal() {
         let p = Profile::new_vless(
             "P".to_string(),
             "2001:db8::1".to_string(),
             443,
             crate::test_helpers::TEST_UUID.to_string(),
         );
-        p.validate_semantic().unwrap();
+        assert_eq!(p.diagnostics(), []);
     }
 
     #[test]
-    fn validate_semantic_accepts_hostname() {
+    fn diagnostics_accepts_hostname() {
         let p = Profile::new_vless(
             "P".to_string(),
             "vpn.example.com".to_string(),
             443,
             crate::test_helpers::TEST_UUID.to_string(),
         );
-        p.validate_semantic().unwrap();
+        assert_eq!(p.diagnostics(), []);
     }
 
     #[test]
-    fn validate_semantic_rejects_address_with_spaces() {
+    fn diagnostics_rejects_address_with_spaces() {
         let p = Profile::new_vless(
             "P".to_string(),
             "bad host name".to_string(),
             443,
             crate::test_helpers::TEST_UUID.to_string(),
         );
-        assert!(p.validate_semantic().is_err());
+        let diagnostic = crate::test_helpers::single_diagnostic(p.diagnostics());
+        assert_eq!(diagnostic.pointer, "/address");
     }
 
     #[test]
-    fn validate_semantic_rejects_reality_without_block() {
+    fn diagnostics_rejects_reality_without_block() {
         let mut p = Profile::new_vless(
             "P".to_string(),
             "1.2.3.4".to_string(),
@@ -263,16 +279,13 @@ mod tests {
             cfg.security = Some(Security::Reality);
             cfg.tls.reality = None;
         }
-        let err = p.validate_semantic().unwrap_err().to_string();
-        assert!(
-            err.contains("reality") && err.contains("block"),
-            "Error was: {}",
-            err
-        );
+        let diagnostic = crate::test_helpers::single_diagnostic(p.diagnostics());
+        assert_eq!(diagnostic.pointer, "/security");
+        assert!(diagnostic.message.contains("requires a `reality` block"));
     }
 
     #[test]
-    fn validate_semantic_accepts_reality_with_block() {
+    fn diagnostics_accepts_reality_with_block() {
         let mut p = Profile::new_vless(
             "P".to_string(),
             "1.2.3.4".to_string(),
@@ -283,7 +296,7 @@ mod tests {
             cfg.security = Some(Security::Reality);
             cfg.tls.reality = Some(RealitySettings::default());
         }
-        p.validate_semantic().unwrap();
+        assert_eq!(p.diagnostics(), []);
     }
 
     #[test]

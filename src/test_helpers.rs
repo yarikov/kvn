@@ -12,7 +12,8 @@ use uuid::Uuid;
 use crate::app::effect::Effect;
 use crate::app::model::{ConnectionState, Model};
 use crate::config::profile::{
-    Config, Profile, ProtocolConfig, Subscription, SubscriptionAutoUpdate, VlessConfig,
+    Config, ConfigDiagnostic, Profile, ProtocolConfig, Subscription, SubscriptionAutoUpdate,
+    VlessConfig,
 };
 
 /// Mutex that recovers after a test panics while holding the lock.
@@ -293,4 +294,10 @@ pub fn subscription_with_hwid(send_hwid: bool, hwid: Option<&str>) -> Subscripti
         send_hwid,
         hwid: hwid.map(str::to_string),
     }
+}
+
+pub fn single_diagnostic(diagnostics: Vec<ConfigDiagnostic>) -> ConfigDiagnostic {
+    let [diagnostic] = <[ConfigDiagnostic; 1]>::try_from(diagnostics)
+        .unwrap_or_else(|diagnostics| panic!("expected one diagnostic, got {diagnostics:?}"));
+    diagnostic
 }
