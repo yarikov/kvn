@@ -1,10 +1,11 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{ConfigDiagnostic, DnsConfig, DnsStrategy, GeoRouting};
 
 /// Per-file on-disk log line limits.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LineRetention {
     #[serde(default = "default_app_line_retention")]
@@ -22,7 +23,7 @@ impl Default for LineRetention {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LogsConfig {
     #[serde(default = "default_log_level")]
@@ -41,7 +42,7 @@ impl Default for LogsConfig {
 }
 
 /// Endpoint used only by manual profile latency tests (`t` / `T`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectivityProbeConfig {
     #[serde(default)]
@@ -60,7 +61,7 @@ impl Default for ConnectivityProbeConfig {
 }
 
 /// Application settings stored alongside profiles.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -108,7 +109,7 @@ pub struct Settings {
     pub icons: IconSet,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IconSet {
     #[default]

@@ -1,6 +1,7 @@
 mod diagnostic;
 mod dns;
 mod entry;
+mod json_schema;
 mod migrate;
 mod protocol;
 mod protocol_config;
@@ -17,6 +18,7 @@ pub use diagnostic::ConfigDiagnostic;
 pub(crate) use diagnostic::into_result;
 pub use dns::{DnsConfig, DnsPreset, DnsRule, DnsServer, DnsStrategy};
 pub use entry::Profile;
+pub use json_schema::{config_json_schema, schema_diagnostics};
 pub use protocol::Protocol;
 pub use protocol_config::{
     AnytlsConfig, HttpConfig, Hysteria2Config, ProtocolConfig, ShadowsocksConfig, ShadowtlsConfig,

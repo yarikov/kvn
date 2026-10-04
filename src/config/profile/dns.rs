@@ -6,12 +6,13 @@
 //! by the v0 → v1 schema migration (see `Config::migrate`) for backward
 //! compatibility.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::ConfigDiagnostic;
 
 // (body appended by sed)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub enum DnsStrategy {
     #[default]
     #[serde(rename = "prefer_ipv4")]
@@ -182,7 +183,7 @@ impl DnsPreset {
 }
 
 /// A single sing-box DNS server. Variants map 1:1 onto sing-box 1.12 server types.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DnsServer {
     Local {
@@ -257,7 +258,7 @@ impl DnsServer {
 }
 
 /// A per-domain DNS routing rule. Maps onto sing-box `dns.rules[*]`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DnsRule {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -277,7 +278,7 @@ pub struct DnsRule {
 }
 
 /// User-controlled DNS configuration. Replaces the hard-coded DNS section.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DnsConfig {
     #[serde(default = "default_dns_servers")]

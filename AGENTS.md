@@ -55,7 +55,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `ui::layout` submodules | `src/ui/layout.rs` + `src/ui/layout/` | `src/ui/layout.rs` is the facade: frame split, the `draw*` entry points, and the `pub(crate)` re-exports the TUI client calls. Each concern lives in one submodule — `text.rs` (Unicode width helpers), `log.rs` + `log/navigation.rs` (log formatting; cursor, viewport and selection state), `panes.rs` (pane geometry, mouse hit-testing, main/traffic/status rows), `sources.rs` (the Profiles list and its viewport), `scrollbar.rs` (the right-border scrollbar shared by the panes, Help and the pickers), and `overlay.rs` (dispatch on `Model.overlay` + the shared footer wording) over `overlay/` — `popup.rs` (popup geometry and the three modal renderers), `settings_row.rs` (the shared `Label ‹ value ›` row), and one file per overlay: `help`, `settings_menu`, `confirm_delete`, `confirm_disable`, `restart_required`, `routing`, `dns`, `theme`, `support`, `onboarding` |
 | `palette` | `src/ui/palette.rs`, `themes/*.toml`, `build.rs` | 22 vendored Omarchy palettes; `build.rs` compiles `themes/*.toml` into a `BUNDLED` static at compile time (no runtime TOML parsing) |
 | `config` | `src/config.rs`, `src/config/profile.rs`, `src/config/subscription.rs`, `src/config/json_pointer.rs` | JSON config I/O, profile and subscription struct definitions, subscription fetcher; `json_pointer::JsonIndex` indexes every RFC 6901 pointer of a JSON text in one pass and answers its line (exact, or the nearest present ancestor) |
-| `config::profile` submodules | `src/config/profile/{diagnostic,protocol,protocol_options,protocol_config,tls,entry,schedule,subscription,routing,settings,schema,migrate,dns}.rs`, `src/config/profile/share_link{.rs,/parse.rs,/encode.rs}` | `src/config/profile.rs` is a facade of `pub use` re-exports; each persisted type lives in one submodule — `ConfigDiagnostic` (a validation problem: JSON pointer + message), protocol discriminant, per-protocol options and configs, shared TLS/transport blocks, `Profile`, auto-update schedules, `Subscription`, geo routing, `Settings`, the root `Config`, the ordered schema migrations, DNS, and share-link URI parsing/encoding |
+| `config::profile` submodules | `src/config/profile/{diagnostic,json_schema,protocol,protocol_options,protocol_config,tls,entry,schedule,subscription,routing,settings,schema,migrate,dns}.rs`, `src/config/profile/share_link{.rs,/parse.rs,/encode.rs}` | `src/config/profile.rs` is a facade of `pub use` re-exports; each persisted type lives in one submodule — `ConfigDiagnostic` (a validation problem: JSON pointer + message), the draft-07 JSON Schema generated from the types with `schemars` and the in-house validator for exactly the keywords it emits, plus the `uuid` / `date` / `date-time` formats (`config_json_schema`, `schema_diagnostics`), protocol discriminant, per-protocol options and configs, shared TLS/transport blocks, `Profile`, auto-update schedules, `Subscription`, geo routing, `Settings`, the root `Config`, the ordered schema migrations, DNS, and share-link URI parsing/encoding |
 | `singbox` | `src/singbox.rs`, `src/singbox/config.rs`, `src/singbox/runner.rs`, `src/singbox/clash_api.rs`, `src/singbox/process_handle.rs` | Process lifecycle: allocate a free Clash API port, write temp config, run `sing-box check`, spawn `sing-box run`, retry a lost port race, kill on disconnect; Clash API client for live traffic stats; `Child` wrapper carrying the process's Clash API port |
 | `geo` | `src/geo.rs` | Download and cache geoip/geosite rule-sets for sing-box routing |
 | `paths` | `src/paths.rs` | XDG directory resolution (`~/.config/kvn-tui/`), atomic path construction |
@@ -80,7 +80,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 
 - **Rust**: edition 2024, minimum version 1.88
 - **External binary**: `sing-box` must be installed separately and available on `$PATH` (or via `SING_BOX_PATH` env var)
-- **Key crates**: `ratatui` + `crossterm` (TUI), `serde` + `serde_json` (config), `zbus` (D-Bus), `ureq` (HTTP), `tracing` (logs), `anyhow` + `thiserror` (errors)
+- **Key crates**: `ratatui` + `crossterm` (TUI), `serde` + `serde_json` (config), `schemars` (config JSON Schema), `zbus` (D-Bus), `ureq` (HTTP), `tracing` (logs), `anyhow` + `thiserror` (errors)
 
 Build release:
 
@@ -350,6 +350,31 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
   them). The editor maps pointers to lines through one `config::json_pointer::JsonIndex` per document, lists
   the problems in file order and reopens at the first one. `Config::validate`
   stays the `anyhow` boundary for every other caller and joins all messages.
+  serde stops at the first parse error, so `check_edit` first validates the
+  raw JSON against the generated schema and lists every structural problem
+  (messages never quote the document's values, so passwords are never
+  echoed); serde and `Config::diagnostics` run only once the schema passes.
+  The schema pins `schema_version` as required and equal to
+  `CURRENT_SCHEMA_VERSION` (`json_schema::pin_current_schema_version`): serde
+  defaults a missing version to 0, and loading would then silently re-run every
+  migration over current data — v4→v5 alone resets the TUN name and the
+  connectivity probe and re-enables HTTP subscriptions. Every config type derives `JsonSchema`;
+  `ShadowtlsVersion` and `RoutingMode` have hand-written serde, so they
+  implement it by hand from the same values. `#[serde(flatten)]` drops
+  `additionalProperties: false` from the protocol configs that deny unknown
+  fields (SOCKS, SSH, Shadowsocks), so `json_schema::keep_strict_protocol_fields`
+  restores it on those `Profile` branches, listing the shared profile fields as
+  allowed; the other protocols stay lenient, as serde is. `json_schema` tests pin that a
+  document with every protocol and settings shape passes both serde and the
+  schema, and fail when the generated schema starts using a keyword the
+  validator does not implement. The snapshot carries `"$schema"` (`Config::json_schema`) pointing at
+  `$XDG_RUNTIME_DIR/kvn/profiles.schema.json`, rewritten on every editor open.
+  The editor session keeps the reference and writes it into a generated
+  conflict document too (`editor::conflict_document`), so a resolution pass
+  keeps completion and checking.
+  Only `config::save_editor_snapshot_at` writes it; every `profiles.json` save
+  drops it, because older builds reject the unknown key — `kvn config recover`
+  on a preserved edit would otherwise make the file unreadable to them.
   Concurrent conflicts show their paths and offer to reopen with `YOUR EDIT` /
   `CURRENT` markers, generated by
   `config::merge::resolution` using the existing UUID-aware three-way merge.
@@ -645,6 +670,7 @@ behavior changes, update the corresponding documentation in the same change.
 | Applied migration markers | `$XDG_STATE_HOME/kvn/migrations/` |
 | Migration backups | `~/.config/kvn-tui/recovery/profiles.json.before-migration-*` |
 | Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |
+| Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
 
 ---
 
