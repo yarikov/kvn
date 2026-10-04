@@ -12,11 +12,20 @@ Press `e` in the TUI to edit a private copy with `$VISUAL` or `$EDITOR`.
 After the editor exits, kvn validates the copy and waits for the daemon to
 confirm saving it. For JSON or validation errors, a temporary screen shows the
 current problems, replacing any previous error. A JSON syntax error is reported
-alone; validation lists every problem with its line number, in file order.
+alone; every other problem — a missing field, a wrong type, an unknown key, an
+invalid value — is listed with its line number, in file order.
 Press Enter to reopen the same file at the first reported line, or press `q`
 or Esc to cancel immediately, without Enter. Scroll long
 messages with `j`/`k`, Up/Down, or `g`/`G` (start/end). The action
 keys remain visible while scrolling.
+
+The copy starts with a `"$schema"` reference to
+`$XDG_RUNTIME_DIR/kvn/profiles.schema.json`, which kvn writes each time the
+editor opens. Editors with a JSON language server (VS Code, Zed, Helix, Neovim
+with `jsonls`) use it to complete fields and values and to flag mistakes while
+you type. The reference is not saved into `profiles.json`. Leave
+`schema_version` as it is: kvn manages it, and an edit that removes or changes
+it is rejected.
 
 Independent changes made while the editor was open are merged automatically.
 If the same values changed on both sides, kvn shows the conflicting fields and
@@ -245,6 +254,7 @@ not supported by older `kvn` releases.
 | IPC socket | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
 | Generated sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
 | Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |
+| Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
 
 The application-owned runtime directory is created with mode `0700`; generated
 sing-box configs and the IPC socket use mode `0600`. No secret-bearing config is

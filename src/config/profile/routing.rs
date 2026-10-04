@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::GeoAutoUpdate;
 
 /// Selected geo region for rule-set downloads and routing mode availability.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum GeoRegion {
     Global,
@@ -92,6 +93,26 @@ impl Serialize for RoutingMode {
     }
 }
 
+impl JsonSchema for RoutingMode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "RoutingMode".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let mut modes = Vec::new();
+        for mode in GeoRegion::ALL
+            .iter()
+            .flat_map(|region| RoutingMode::available(Some(*region)))
+        {
+            let value = serde_json::to_value(mode).expect("RoutingMode serializes to a string");
+            if !modes.contains(&value) {
+                modes.push(value);
+            }
+        }
+        schemars::json_schema!({ "type": "string", "enum": modes })
+    }
+}
+
 impl<'de> Deserialize<'de> for RoutingMode {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         use serde::de::Error;
@@ -118,7 +139,7 @@ impl<'de> Deserialize<'de> for RoutingMode {
 
 /// Routing override for one well-known service, applied ahead of the
 /// regional geo rules so it wins in every routing mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceRoute {
     /// No override — the service follows the regional routing mode.
@@ -162,7 +183,7 @@ impl ServiceRoute {
 /// Services with predefined rule-sets that can be routed individually (see
 /// [`ServiceRoute`]). Adding a service = a variant here, an `ALL` entry, and
 /// a descriptor arm in `geo::service_assets`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutedService {
     Steam,
@@ -184,7 +205,7 @@ impl RoutedService {
 }
 
 /// Geo-region and routing-mode preferences.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct GeoRouting {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_region: Option<GeoRegion>,

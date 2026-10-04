@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -5,9 +6,11 @@ use super::{ConfigDiagnostic, Protocol, ProtocolConfig, Security, VlessConfig};
 
 /// Single VPN profile. The `protocol` discriminant and protocol-specific
 /// fields are flattened into [`ProtocolConfig`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[schemars(transform = super::json_schema::keep_strict_protocol_fields)]
 pub struct Profile {
     #[serde(default = "Uuid::new_v4")]
+    #[schemars(transform = super::json_schema::without_default)]
     pub id: Uuid,
     pub name: String,
     pub address: String,

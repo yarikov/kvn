@@ -1,4 +1,5 @@
 use chrono::{DateTime, Local, NaiveDate};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,10 +11,11 @@ fn is_false(value: &bool) -> bool {
 }
 
 /// A subscription URL that can be refreshed to import a set of profiles.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Subscription {
     #[serde(default = "Uuid::new_v4")]
+    #[schemars(transform = super::json_schema::without_default)]
     pub id: Uuid,
     pub name: String,
     pub url: String,
@@ -38,7 +40,7 @@ pub struct Subscription {
 }
 
 /// Persisted retry metadata for an auto-updating subscription.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SubscriptionRetryState {
     pub consecutive_failures: u32,

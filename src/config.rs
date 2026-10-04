@@ -112,8 +112,23 @@ pub fn save_config_at(path: &Path, config: &Config) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn save_editor_snapshot_at(
+    path: &Path,
+    config: &Config,
+    json_schema: Option<String>,
+) -> Result<()> {
+    let json = serialized_config_with_schema(config, json_schema)?;
+    crate::atomic_write::write(path, json.as_bytes())?;
+    Ok(())
+}
+
 fn serialized_config(config: &Config) -> Result<String> {
+    serialized_config_with_schema(config, None)
+}
+
+fn serialized_config_with_schema(config: &Config, json_schema: Option<String>) -> Result<String> {
     let mut serializable = config.clone();
+    serializable.json_schema = json_schema;
     serializable.normalize();
     serializable
         .validate()
@@ -198,6 +213,29 @@ mod tests {
     use std::io::Write;
     use std::path::PathBuf;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn schema_reference_reaches_only_editor_snapshots() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config {
+            json_schema: Some("file:///run/user/1000/kvn/profiles.schema.json".into()),
+            ..Config::default()
+        };
+        let profiles = dir.path().join("profiles.json");
+        save_config_at(&profiles, &config).unwrap();
+        assert!(
+            !std::fs::read_to_string(&profiles)
+                .unwrap()
+                .contains("$schema")
+        );
+        let snapshot = dir.path().join("snapshot.json");
+        save_editor_snapshot_at(&snapshot, &Config::default(), config.json_schema.clone()).unwrap();
+        assert!(
+            std::fs::read_to_string(&snapshot).unwrap().starts_with(
+                "{\n  \"$schema\": \"file:///run/user/1000/kvn/profiles.schema.json\","
+            )
+        );
+    }
 
     #[test]
     fn config_dir_matches_paths_module() {

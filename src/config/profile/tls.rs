@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::ConfigDiagnostic;
 
 /// REALITY security settings for XTLS Vision.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RealitySettings {
     #[serde(rename = "public_key")]
@@ -18,7 +19,7 @@ pub struct RealitySettings {
     pub spider_x: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Security {
     #[default]
@@ -27,7 +28,7 @@ pub enum Security {
     Tls,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportType {
     Grpc,
@@ -35,7 +36,7 @@ pub enum TransportType {
     Http,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub enum Flow {
     #[default]
     None,
@@ -48,7 +49,7 @@ pub enum Flow {
 /// Maps onto sing-box's `tls.ech` block. When `config` is empty, sing-box
 /// fetches the `ECHConfigList` from DNS HTTPS RR for the target server.
 /// Mutually exclusive with REALITY (validated by [`Config::validate`](crate::config::profile::Config::validate)).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EchSettings {
     pub enabled: bool,
@@ -61,7 +62,7 @@ pub struct EchSettings {
 ///
 /// VLESS keeps its TLS-related fields flat on [`VlessConfig`](crate::config::profile::VlessConfig) for
 /// backward compatibility with existing `profiles.json` files.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct TlsCommon {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_name: Option<String>,
@@ -92,7 +93,7 @@ impl TlsCommon {
 }
 
 /// Transport layer configuration (ws / grpc / http / httpupgrade).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TransportConfig {
     #[serde(rename = "type")]

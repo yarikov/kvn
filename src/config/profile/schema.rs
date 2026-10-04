@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::subscription::validate_hwid;
@@ -16,9 +17,12 @@ fn default_schema_version() -> u32 {
 }
 
 /// Root configuration file structure.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(transform = super::json_schema::pin_current_schema_version)]
 pub struct Config {
+    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
+    pub json_schema: Option<String>,
     /// Schema version of the persisted file. See [`CURRENT_SCHEMA_VERSION`].
     /// Absent in pre-versioned files; defaults to 0 for the explicit package
     /// migration path.
@@ -35,6 +39,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            json_schema: None,
             schema_version: CURRENT_SCHEMA_VERSION,
             profiles: Vec::new(),
             subscriptions: Vec::new(),

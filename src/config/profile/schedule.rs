@@ -1,8 +1,9 @@
 use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Auto-update schedule for a subscription.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionAutoUpdate {
     #[default]
@@ -61,7 +62,7 @@ fn auto_update_label(interval: &str) -> String {
 }
 
 /// Background update schedule for geo rule-sets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GeoAutoUpdate {
     #[default]

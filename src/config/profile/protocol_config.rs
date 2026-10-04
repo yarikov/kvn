@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -13,7 +14,7 @@ use super::{
 /// deserialize directly into `tls.reality` / `tls.ech` (same wire shape).
 /// The pre-v2 top-level `fingerprint` key needs explicit migration into
 /// `tls.utls_fingerprint`; see [`Config::migrate`](crate::config::profile::Config::migrate) (`migrate_v1_to_v2`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct VlessConfig {
     pub uuid: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -33,7 +34,7 @@ pub struct VlessConfig {
     pub tls: TlsCommon,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct VmessConfig {
     pub uuid: String,
     #[serde(default)]
@@ -48,7 +49,7 @@ pub struct VmessConfig {
     pub transport: Option<TransportConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct TrojanConfig {
     pub password: String,
     #[serde(default, flatten)]
@@ -57,14 +58,14 @@ pub struct TrojanConfig {
     pub transport: Option<TransportConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ShadowsocksConfig {
     pub method: ShadowsocksCipher,
     pub password: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct Hysteria2Config {
     pub password: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -77,7 +78,7 @@ pub struct Hysteria2Config {
     pub tls: TlsCommon,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct TuicConfig {
     pub uuid: String,
     pub password: String,
@@ -96,7 +97,7 @@ pub struct TuicConfig {
 /// its own; an inner Shadowsocks outbound chained via `detour` carries the
 /// actual data. We model both halves in one profile so the user supplies
 /// the ShadowTLS password (v3) plus the inner SS method/password once.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct ShadowtlsConfig {
     #[serde(default)]
     pub version: ShadowtlsVersion,
@@ -112,7 +113,7 @@ pub struct ShadowtlsConfig {
     pub tls: TlsCommon,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct AnytlsConfig {
     pub password: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -123,7 +124,7 @@ pub struct AnytlsConfig {
     pub tls: TlsCommon,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SocksConfig {
     #[serde(default)]
@@ -134,7 +135,7 @@ pub struct SocksConfig {
     pub password: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct HttpConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
@@ -144,7 +145,7 @@ pub struct HttpConfig {
     pub tls: TlsCommon,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SshConfig {
     pub user: String,
@@ -174,7 +175,7 @@ pub struct SshConfig {
 /// can no longer tell which fields "belong" to the parent versus the flattened
 /// child. Typos inside those variants therefore still deserialize as `None`.
 /// Structs without a flattened tls block do enforce `deny_unknown_fields`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(tag = "protocol", rename_all = "lowercase")]
 pub enum ProtocolConfig {
     Vless(VlessConfig),

@@ -1,8 +1,9 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// VMess encryption cipher. Sing-box 1.12 still accepts `auto`; we forbid
 /// the legacy stream cipher `aes-128-cfb`.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum VmessSecurity {
     #[default]
@@ -29,7 +30,7 @@ impl VmessSecurity {
 
 /// Shadowsocks AEAD-2022 + AEAD ciphers supported by sing-box 1.12.
 /// Legacy stream ciphers (e.g. `aes-128-cfb`) are intentionally excluded.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ShadowsocksCipher {
     #[default]
@@ -64,7 +65,7 @@ impl ShadowsocksCipher {
 
 /// Hysteria2 obfuscation. Sing-box 1.12+ supports the `salamander` type
 /// (legacy top-level `obfs_password` is rejected).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Hysteria2Obfs {
     #[serde(rename = "type")]
@@ -72,7 +73,7 @@ pub struct Hysteria2Obfs {
     pub password: String,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Hysteria2ObfsType {
     #[default]
@@ -80,7 +81,7 @@ pub enum Hysteria2ObfsType {
 }
 
 /// TUIC v5 congestion control algorithm.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TuicCongestion {
     #[default]
@@ -100,7 +101,7 @@ impl TuicCongestion {
 }
 
 /// TUIC v5 UDP relay mode.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TuicUdpRelayMode {
     #[default]
@@ -136,6 +137,17 @@ impl ShadowtlsVersion {
     }
 }
 
+impl JsonSchema for ShadowtlsVersion {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ShadowtlsVersion".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let versions = [Self::V1, Self::V2, Self::V3].map(Self::as_u8);
+        schemars::json_schema!({ "type": "integer", "enum": versions })
+    }
+}
+
 impl Serialize for ShadowtlsVersion {
     fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
         ser.serialize_u8(self.as_u8())
@@ -158,7 +170,7 @@ impl<'de> Deserialize<'de> for ShadowtlsVersion {
 }
 
 /// SOCKS proxy version.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum SocksVersion {
     #[serde(rename = "4")]
