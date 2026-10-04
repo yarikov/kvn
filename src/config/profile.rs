@@ -1,3 +1,4 @@
+mod diagnostic;
 mod dns;
 mod entry;
 mod migrate;
@@ -12,6 +13,8 @@ mod share_link;
 mod subscription;
 mod tls;
 
+pub use diagnostic::ConfigDiagnostic;
+pub(crate) use diagnostic::into_result;
 pub use dns::{DnsConfig, DnsPreset, DnsRule, DnsServer, DnsStrategy};
 pub use entry::Profile;
 pub use protocol::Protocol;

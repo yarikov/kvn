@@ -8,6 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::ConfigDiagnostic;
+
 // (body appended by sed)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum DnsStrategy {
@@ -333,42 +335,51 @@ fn default_dns_servers() -> Vec<DnsServer> {
     ]
 }
 impl DnsConfig {
-    /// Validate that server tags are unique and rule/final references point at
-    /// existing tags. Called from [`Config::validate`].
-    pub fn validate(&self) -> anyhow::Result<()> {
+    pub fn diagnostics(&self) -> Vec<ConfigDiagnostic> {
+        let mut diagnostics = Vec::new();
         let mut tags: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        for server in &self.servers {
+        for (idx, server) in self.servers.iter().enumerate() {
             let tag = server.tag();
+            let pointer = format!("/servers/{idx}/tag");
             if tag.trim().is_empty() {
-                anyhow::bail!("dns.servers: server tag must not be empty");
-            }
-            if !tags.insert(tag) {
-                anyhow::bail!("dns.servers: duplicate server tag {:?}", tag);
+                diagnostics.push(ConfigDiagnostic::new(
+                    pointer,
+                    "dns.servers: server tag must not be empty",
+                ));
+            } else if !tags.insert(tag) {
+                diagnostics.push(ConfigDiagnostic::new(
+                    pointer,
+                    format!("dns.servers: duplicate server tag {tag:?}"),
+                ));
             }
         }
         if !tags.contains(self.final_server.as_str()) {
-            anyhow::bail!(
-                "dns.final_server {:?} does not match any server tag",
-                self.final_server
-            );
+            diagnostics.push(ConfigDiagnostic::new(
+                "/final_server",
+                format!(
+                    "dns.final_server {:?} does not match any server tag",
+                    self.final_server
+                ),
+            ));
         }
         for (idx, rule) in self.rules.iter().enumerate() {
             if !tags.contains(rule.server.as_str()) {
-                anyhow::bail!(
-                    "dns.rules[{idx}].server {:?} does not match any server tag",
-                    rule.server
-                );
+                diagnostics.push(ConfigDiagnostic::new(
+                    format!("/rules/{idx}/server"),
+                    format!(
+                        "dns.rules[{idx}].server {:?} does not match any server tag",
+                        rule.server
+                    ),
+                ));
             }
         }
-        if self.fakeip_enabled
-            && !self
-                .servers
-                .iter()
-                .any(|s| matches!(s, DnsServer::FakeIp { .. }))
-        {
-            anyhow::bail!("dns.fakeip_enabled = true but no fakeip server is defined");
+        if self.fakeip_enabled && self.fakeip_server().is_none() {
+            diagnostics.push(ConfigDiagnostic::new(
+                "/fakeip_enabled",
+                "dns.fakeip_enabled = true but no fakeip server is defined",
+            ));
         }
-        Ok(())
+        diagnostics
     }
 
     /// Return the first `fakeip` server, if any.
@@ -570,61 +581,63 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_empty_tag() {
+    fn diagnostics_rejects_empty_tag() {
         let mut cfg = DnsConfig::default();
         cfg.servers.push(DnsServer::Local { tag: "  ".into() });
-        let err = cfg.validate().unwrap_err().to_string();
+        let err = crate::test_helpers::single_diagnostic(cfg.diagnostics()).message;
         assert!(err.contains("must not be empty"));
     }
 
     #[test]
-    fn validate_rejects_duplicate_tags() {
+    fn diagnostics_rejects_duplicate_tags() {
         let mut cfg = DnsConfig::default();
         cfg.servers.push(DnsServer::Local {
             tag: "remote".into(),
         });
-        let err = cfg.validate().unwrap_err().to_string();
-        assert!(err.contains("duplicate"));
+        let diagnostic = crate::test_helpers::single_diagnostic(cfg.diagnostics());
+        assert_eq!(diagnostic.pointer, "/servers/2/tag");
+        assert!(diagnostic.message.contains("duplicate"));
     }
 
     #[test]
-    fn validate_rejects_unknown_final_server() {
+    fn diagnostics_rejects_unknown_final_server() {
         let cfg = DnsConfig {
             final_server: "nope".into(),
             ..DnsConfig::default()
         };
-        let err = cfg.validate().unwrap_err().to_string();
+        let err = crate::test_helpers::single_diagnostic(cfg.diagnostics()).message;
         assert!(err.contains("final_server"));
     }
 
     #[test]
-    fn validate_rejects_unknown_rule_server() {
+    fn diagnostics_rejects_unknown_rule_server() {
         let mut cfg = DnsConfig::default();
         cfg.rules.push(DnsRule {
             server: "missing".into(),
             ..Default::default()
         });
-        let err = cfg.validate().unwrap_err().to_string();
-        assert!(err.contains("rules"));
+        let diagnostic = crate::test_helpers::single_diagnostic(cfg.diagnostics());
+        assert_eq!(diagnostic.pointer, "/rules/0/server");
+        assert!(diagnostic.message.contains("rules"));
     }
 
     #[test]
-    fn validate_rejects_fakeip_enabled_without_server() {
+    fn diagnostics_rejects_fakeip_enabled_without_server() {
         let cfg = DnsConfig {
             fakeip_enabled: true,
             ..DnsConfig::default()
         };
-        let err = cfg.validate().unwrap_err().to_string();
+        let err = crate::test_helpers::single_diagnostic(cfg.diagnostics()).message;
         assert!(err.contains("fakeip"));
     }
 
     #[test]
-    fn validate_accepts_default() {
-        DnsConfig::default().validate().unwrap();
+    fn diagnostics_accepts_default() {
+        assert_eq!(DnsConfig::default().diagnostics(), []);
     }
 
     #[test]
-    fn validate_accepts_fakeip_when_server_present() {
+    fn diagnostics_accepts_fakeip_when_server_present() {
         let mut cfg = DnsConfig {
             fakeip_enabled: true,
             ..DnsConfig::default()
@@ -634,7 +647,7 @@ mod tests {
             inet4_range: "198.18.0.0/15".into(),
             inet6_range: "fc00::/18".into(),
         });
-        cfg.validate().unwrap();
+        assert_eq!(cfg.diagnostics(), []);
     }
 
     #[test]

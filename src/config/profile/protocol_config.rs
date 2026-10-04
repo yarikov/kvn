@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Flow, Hysteria2Obfs, Protocol, Security, ShadowsocksCipher, ShadowtlsVersion, SocksVersion,
-    TlsCommon, TransportConfig, TransportType, TuicCongestion, TuicUdpRelayMode, VmessSecurity,
+    ConfigDiagnostic, Flow, Hysteria2Obfs, Protocol, Security, ShadowsocksCipher, ShadowtlsVersion,
+    SocksVersion, TlsCommon, TransportConfig, TransportType, TuicCongestion, TuicUdpRelayMode,
+    VmessSecurity,
 };
 
 /// VLESS-specific profile configuration.
@@ -223,70 +224,96 @@ impl ProtocolConfig {
         }
     }
 
-    pub(super) fn validate(&self) -> anyhow::Result<()> {
+    pub(super) fn diagnostics(&self) -> Vec<ConfigDiagnostic> {
+        let mut diagnostics = Vec::new();
+        let mut require = |missing: bool, field: &str, message: &str| {
+            if missing {
+                diagnostics.push(ConfigDiagnostic::new(format!("/{field}"), message));
+            }
+        };
         match self {
             ProtocolConfig::Vless(c) => {
-                if c.uuid.trim().is_empty() {
-                    anyhow::bail!("vless.uuid must not be empty");
-                }
-                c.tls
-                    .validate()
-                    .map_err(|e| anyhow::anyhow!("vless: {e}"))?;
+                require(
+                    c.uuid.trim().is_empty(),
+                    "uuid",
+                    "vless.uuid must not be empty",
+                );
             }
             ProtocolConfig::Vmess(c) => {
-                if c.uuid.trim().is_empty() {
-                    anyhow::bail!("vmess.uuid must not be empty");
-                }
+                require(
+                    c.uuid.trim().is_empty(),
+                    "uuid",
+                    "vmess.uuid must not be empty",
+                );
             }
             ProtocolConfig::Trojan(c) => {
-                if c.password.is_empty() {
-                    anyhow::bail!("trojan.password must not be empty");
-                }
+                require(
+                    c.password.is_empty(),
+                    "password",
+                    "trojan.password must not be empty",
+                );
             }
             ProtocolConfig::Shadowsocks(c) => {
-                if c.password.is_empty() {
-                    anyhow::bail!("shadowsocks.password must not be empty");
-                }
+                require(
+                    c.password.is_empty(),
+                    "password",
+                    "shadowsocks.password must not be empty",
+                );
             }
             ProtocolConfig::Hysteria2(c) => {
-                if c.password.is_empty() {
-                    anyhow::bail!("hysteria2.password must not be empty");
-                }
+                require(
+                    c.password.is_empty(),
+                    "password",
+                    "hysteria2.password must not be empty",
+                );
             }
             ProtocolConfig::Tuic(c) => {
-                if c.uuid.trim().is_empty() {
-                    anyhow::bail!("tuic.uuid must not be empty");
-                }
-                if c.password.is_empty() {
-                    anyhow::bail!("tuic.password must not be empty");
-                }
+                require(
+                    c.uuid.trim().is_empty(),
+                    "uuid",
+                    "tuic.uuid must not be empty",
+                );
+                require(
+                    c.password.is_empty(),
+                    "password",
+                    "tuic.password must not be empty",
+                );
             }
             ProtocolConfig::Shadowtls(c) => {
-                if c.version == ShadowtlsVersion::V3 && c.password.is_empty() {
-                    anyhow::bail!("shadowtls.password must not be empty for v3");
-                }
-                if c.ss_password.is_empty() {
-                    anyhow::bail!(
-                        "shadowtls.ss_password must not be empty (inner Shadowsocks detour)"
-                    );
-                }
+                require(
+                    c.version == ShadowtlsVersion::V3 && c.password.is_empty(),
+                    "password",
+                    "shadowtls.password must not be empty for v3",
+                );
+                require(
+                    c.ss_password.is_empty(),
+                    "ss_password",
+                    "shadowtls.ss_password must not be empty (inner Shadowsocks detour)",
+                );
             }
             ProtocolConfig::Anytls(c) => {
-                if c.password.is_empty() {
-                    anyhow::bail!("anytls.password must not be empty");
-                }
+                require(
+                    c.password.is_empty(),
+                    "password",
+                    "anytls.password must not be empty",
+                );
             }
             ProtocolConfig::Socks(_) | ProtocolConfig::Http(_) => {}
             ProtocolConfig::Ssh(c) => {
-                if c.user.trim().is_empty() {
-                    anyhow::bail!("ssh.user must not be empty");
-                }
+                require(
+                    c.user.trim().is_empty(),
+                    "user",
+                    "ssh.user must not be empty",
+                );
             }
         }
-        if let Some(tls) = self.tls_common() {
-            tls.validate()?;
+        if let ProtocolConfig::Vless(c) = self {
+            diagnostics.extend(c.tls.diagnostics().into_iter().map(|d| d.labelled("vless")));
         }
-        Ok(())
+        if let Some(tls) = self.tls_common() {
+            diagnostics.extend(tls.diagnostics());
+        }
+        diagnostics
     }
 }
 

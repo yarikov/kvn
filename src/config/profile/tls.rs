@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::ConfigDiagnostic;
+
 /// REALITY security settings for XTLS Vision.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -78,11 +80,14 @@ pub struct TlsCommon {
 impl TlsCommon {
     /// REALITY and ECH cannot be enabled simultaneously — REALITY uses its
     /// own SNI-cloaking mechanism that conflicts with ECH's `ECHConfigList`.
-    pub fn validate(&self) -> anyhow::Result<()> {
+    pub fn diagnostics(&self) -> Vec<ConfigDiagnostic> {
         if self.reality.is_some() && self.ech.as_ref().is_some_and(|e| e.enabled) {
-            anyhow::bail!("tls.reality and tls.ech are mutually exclusive");
+            return vec![ConfigDiagnostic::new(
+                "/ech",
+                "tls.reality and tls.ech are mutually exclusive",
+            )];
         }
-        Ok(())
+        Vec::new()
     }
 }
 
@@ -106,11 +111,11 @@ pub struct TransportConfig {
 mod tests {
     use super::*;
 
-    // ---- TlsCommon::validate ----
+    // ---- TlsCommon::diagnostics ----
 
     #[test]
     fn tls_common_validate_accepts_plain() {
-        TlsCommon::default().validate().unwrap();
+        assert_eq!(TlsCommon::default().diagnostics(), []);
     }
 
     #[test]
@@ -124,7 +129,7 @@ mod tests {
             }),
             ..TlsCommon::default()
         };
-        tls.validate().unwrap();
+        assert_eq!(tls.diagnostics(), []);
     }
 
     #[test]
@@ -136,7 +141,7 @@ mod tests {
             }),
             ..TlsCommon::default()
         };
-        tls.validate().unwrap();
+        assert_eq!(tls.diagnostics(), []);
     }
 
     #[test]
@@ -155,7 +160,7 @@ mod tests {
             }),
             ..TlsCommon::default()
         };
-        tls.validate().unwrap();
+        assert_eq!(tls.diagnostics(), []);
     }
 
     #[test]
@@ -173,7 +178,8 @@ mod tests {
             }),
             ..TlsCommon::default()
         };
-        let err = tls.validate().unwrap_err().to_string();
-        assert!(err.contains("mutually exclusive"));
+        let diagnostic = crate::test_helpers::single_diagnostic(tls.diagnostics());
+        assert_eq!(diagnostic.pointer, "/ech");
+        assert!(diagnostic.message.contains("mutually exclusive"));
     }
 }

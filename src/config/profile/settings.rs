@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{DnsConfig, DnsStrategy, GeoRouting};
+use super::{ConfigDiagnostic, DnsConfig, DnsStrategy, GeoRouting};
 
 /// Per-file on-disk log line limits.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -190,7 +190,7 @@ pub fn default_singbox_line_retention() -> u32 {
 
 /// Canonical log-level values accepted by both `tracing_subscriber::EnvFilter`
 /// and sing-box's `log.level`. Also used as the allow-list by
-/// [`Settings::validate`].
+/// [`Settings::diagnostics`].
 pub const LOG_LEVELS: &[&str] = &["trace", "debug", "info", "warn", "error"];
 
 const MIN_LOG_LINES: u32 = 1_000;
@@ -214,7 +214,7 @@ include!(concat!(env!("OUT_DIR"), "/bundled_theme_names.rs"));
 ///
 /// This fallback remains a runtime safety net for env-injected values; values
 /// coming from `profiles.json` are additionally rejected by
-/// [`Settings::validate`] before they reach this function.
+/// [`Settings::diagnostics`] before they reach this function.
 pub fn normalized_log_level(level: &str) -> &'static str {
     match level {
         "trace" => "trace",
@@ -231,67 +231,90 @@ fn is_safe_slug_char(c: char) -> bool {
 }
 
 impl Settings {
-    /// Reject settings values that would either fail immediately at sing-box
-    /// startup or fall back silently at runtime. Called from
-    /// [`Config::validate`](crate::config::profile::Config::validate).
-    pub fn validate(&self) -> anyhow::Result<()> {
-        let tun = self.tun_interface.trim();
-        if tun.is_empty() {
-            anyhow::bail!("settings.tun_interface must not be empty");
-        }
-        if tun.len() > MAX_TUN_INTERFACE_LEN {
-            anyhow::bail!(
-                "settings.tun_interface {:?} exceeds Linux IFNAMSIZ limit ({} chars)",
-                self.tun_interface,
-                MAX_TUN_INTERFACE_LEN,
-            );
-        }
-        if !tun.chars().all(is_safe_slug_char) {
-            anyhow::bail!(
-                "settings.tun_interface {:?} contains disallowed characters (allowed: a-z, A-Z, 0-9, `-`, `_`)",
-                self.tun_interface,
-            );
-        }
-        if !tun.starts_with("kvn") {
-            anyhow::bail!("settings.tun_interface must start with \"kvn\"");
-        }
+    pub fn diagnostics(&self) -> Vec<ConfigDiagnostic> {
+        let mut diagnostics = Vec::new();
+        diagnostics.extend(
+            self.tun_interface_problem()
+                .map(|message| ConfigDiagnostic::new("/tun_interface", message)),
+        );
 
         if self.theme != OMARCHY_THEME_SENTINEL
             && !BUNDLED_THEME_NAMES.contains(&self.theme.as_str())
         {
-            anyhow::bail!(
-                "settings.theme {:?} is not a bundled palette slug (expected {:?} or one of {} bundled themes)",
-                self.theme,
-                OMARCHY_THEME_SENTINEL,
-                BUNDLED_THEME_NAMES.len(),
-            );
+            diagnostics.push(ConfigDiagnostic::new(
+                "/theme",
+                format!(
+                    "settings.theme {:?} is not a bundled palette slug (expected {:?} or one of {} bundled themes)",
+                    self.theme,
+                    OMARCHY_THEME_SENTINEL,
+                    BUNDLED_THEME_NAMES.len(),
+                ),
+            ));
         }
 
         if !LOG_LEVELS.contains(&self.logs.level.as_str()) {
-            anyhow::bail!(
-                "settings.logs.level {:?} is not one of {:?}",
-                self.logs.level,
-                LOG_LEVELS,
-            );
+            diagnostics.push(ConfigDiagnostic::new(
+                "/logs/level",
+                format!(
+                    "settings.logs.level {:?} is not one of {:?}",
+                    self.logs.level, LOG_LEVELS,
+                ),
+            ));
         }
 
-        if self.logs.line_retention.app < MIN_LOG_LINES {
-            anyhow::bail!("settings.logs.line_retention.app must be at least {MIN_LOG_LINES}");
-        }
-        if self.logs.line_retention.singbox < MIN_LOG_LINES {
-            anyhow::bail!("settings.logs.line_retention.singbox must be at least {MIN_LOG_LINES}");
+        for (field, lines) in [
+            ("app", self.logs.line_retention.app),
+            ("singbox", self.logs.line_retention.singbox),
+        ] {
+            if lines < MIN_LOG_LINES {
+                diagnostics.push(ConfigDiagnostic::new(
+                    format!("/logs/line_retention/{field}"),
+                    format!(
+                        "settings.logs.line_retention.{field} must be at least {MIN_LOG_LINES}"
+                    ),
+                ));
+            }
         }
 
         if self.connectivity_probe.enabled {
-            let url = self.connectivity_probe.url.as_deref().ok_or_else(|| {
-                anyhow::anyhow!(
+            let problem = match self.connectivity_probe.url.as_deref() {
+                None => Some(
                     "settings.connectivity_probe.url is required when connectivity probing is enabled"
-                )
-            })?;
-            parse_connectivity_probe_url(url)?;
+                        .to_string(),
+                ),
+                Some(url) => parse_connectivity_probe_url(url)
+                    .err()
+                    .map(|error| error.to_string()),
+            };
+            diagnostics.extend(
+                problem.map(|message| ConfigDiagnostic::new("/connectivity_probe/url", message)),
+            );
         }
 
-        Ok(())
+        diagnostics
+    }
+
+    fn tun_interface_problem(&self) -> Option<String> {
+        let tun = self.tun_interface.trim();
+        if tun.is_empty() {
+            return Some("settings.tun_interface must not be empty".into());
+        }
+        if tun.len() > MAX_TUN_INTERFACE_LEN {
+            return Some(format!(
+                "settings.tun_interface {:?} exceeds Linux IFNAMSIZ limit ({} chars)",
+                self.tun_interface, MAX_TUN_INTERFACE_LEN,
+            ));
+        }
+        if !tun.chars().all(is_safe_slug_char) {
+            return Some(format!(
+                "settings.tun_interface {:?} contains disallowed characters (allowed: a-z, A-Z, 0-9, `-`, `_`)",
+                self.tun_interface,
+            ));
+        }
+        if !tun.starts_with("kvn") {
+            return Some("settings.tun_interface must start with \"kvn\"".into());
+        }
+        None
     }
 }
 
@@ -425,11 +448,11 @@ mod tests {
         assert!(!s.kill_switch);
     }
 
-    // ---- Settings::validate ----
+    // ---- Settings::diagnostics ----
 
     #[test]
-    fn settings_validate_default_ok() {
-        Settings::default().validate().unwrap();
+    fn settings_diagnostics_default_ok() {
+        assert_eq!(Settings::default().diagnostics(), []);
     }
 
     #[test]
@@ -464,7 +487,7 @@ mod tests {
             settings.connectivity_probe.url.as_deref(),
             Some("not a URL")
         );
-        settings.validate().unwrap();
+        assert_eq!(settings.diagnostics(), []);
         assert!(
             serde_json::to_string(&settings)
                 .unwrap()
@@ -476,7 +499,7 @@ mod tests {
     fn connectivity_probe_enabled_requires_url() {
         let settings: Settings =
             serde_json::from_str(r#"{"connectivity_probe":{"enabled":true}}"#).unwrap();
-        let error = settings.validate().unwrap_err().to_string();
+        let error = crate::test_helpers::single_diagnostic(settings.diagnostics()).message;
         assert!(error.contains("url is required"), "got: {error}");
     }
 
@@ -507,145 +530,151 @@ mod tests {
     }
 
     #[test]
-    fn settings_validate_rejects_empty_tun_interface() {
+    fn settings_diagnostics_rejects_empty_tun_interface() {
         let s = Settings {
             tun_interface: "   ".into(),
             ..Settings::default()
         };
-        let err = s.validate().unwrap_err().to_string();
+        let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("tun_interface"), "Error was: {}", err);
     }
 
     #[test]
-    fn settings_validate_rejects_overlong_tun_interface() {
+    fn settings_diagnostics_rejects_overlong_tun_interface() {
         // IFNAMSIZ − 1 = 15; 16 chars must be rejected.
         let s = Settings {
             tun_interface: "a".repeat(16),
             ..Settings::default()
         };
-        let err = s.validate().unwrap_err().to_string();
+        let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("IFNAMSIZ"), "Error was: {}", err);
     }
 
     #[test]
-    fn settings_validate_rejects_tun_interface_with_bad_chars() {
+    fn settings_diagnostics_rejects_tun_interface_with_bad_chars() {
         let s = Settings {
             tun_interface: "tun 0".into(),
             ..Settings::default()
         };
-        let err = s.validate().unwrap_err().to_string();
+        let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("disallowed"), "Error was: {}", err);
     }
 
     #[test]
-    fn settings_validate_accepts_tun_interfaces_with_kvn_prefix() {
+    fn settings_diagnostics_accepts_tun_interfaces_with_kvn_prefix() {
         for tun_interface in ["kvn", "kvn0", "kvn-work"] {
             let s = Settings {
                 tun_interface: tun_interface.into(),
                 ..Settings::default()
             };
-            s.validate().unwrap();
+            assert_eq!(s.diagnostics(), []);
         }
     }
 
     #[test]
-    fn settings_validate_rejects_tun_interface_without_kvn_prefix() {
+    fn settings_diagnostics_rejects_tun_interface_without_kvn_prefix() {
         let s = Settings {
             tun_interface: "tun0".into(),
             ..Settings::default()
         };
-        let err = s.validate().unwrap_err().to_string();
+        let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("must start with \"kvn\""), "Error was: {err}");
     }
 
     #[test]
-    fn settings_validate_accepts_omarchy_sentinel() {
+    fn settings_diagnostics_accepts_omarchy_sentinel() {
         let s = Settings {
             theme: OMARCHY_THEME_SENTINEL.into(),
             ..Settings::default()
         };
-        s.validate().unwrap();
+        assert_eq!(s.diagnostics(), []);
     }
 
     #[test]
-    fn settings_validate_accepts_bundled_theme() {
+    fn settings_diagnostics_accepts_bundled_theme() {
         // "tokyo-night" ships in themes/, so it must be in BUNDLED_THEME_NAMES.
         let s = Settings {
             theme: "tokyo-night".into(),
             ..Settings::default()
         };
-        s.validate().unwrap();
+        assert_eq!(s.diagnostics(), []);
     }
 
     #[test]
-    fn settings_validate_rejects_unknown_theme() {
+    fn settings_diagnostics_rejects_unknown_theme() {
         let s = Settings {
             theme: "not-a-bundled-slug".into(),
             ..Settings::default()
         };
-        let err = s.validate().unwrap_err().to_string();
+        let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("theme"), "Error was: {}", err);
     }
 
     #[test]
-    fn settings_validate_rejects_empty_theme() {
+    fn settings_diagnostics_rejects_empty_theme() {
         let s = Settings {
             theme: String::new(),
             ..Settings::default()
         };
-        assert!(s.validate().is_err());
+        assert_eq!(
+            crate::test_helpers::single_diagnostic(s.diagnostics()).pointer,
+            "/theme"
+        );
     }
 
     #[test]
-    fn settings_validate_accepts_every_canonical_log_level() {
+    fn settings_diagnostics_accepts_every_canonical_log_level() {
         for level in LOG_LEVELS {
             let mut s = Settings::default();
             s.logs.level = (*level).to_string();
-            s.validate().unwrap();
+            assert_eq!(s.diagnostics(), []);
         }
     }
 
     #[test]
-    fn settings_validate_rejects_unknown_log_level() {
+    fn settings_diagnostics_rejects_unknown_log_level() {
         let mut s = Settings::default();
         s.logs.level = "verbose".into();
-        let err = s.validate().unwrap_err().to_string();
+        let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("logs.level"), "Error was: {}", err);
     }
 
     #[test]
-    fn settings_validate_rejects_log_line_limits_below_minimum() {
+    fn settings_diagnostics_rejects_log_line_limits_below_minimum() {
         for value in [0, 1, 999] {
             let mut app = Settings::default();
             app.logs.line_retention.app = value;
-            assert!(app.validate().unwrap_err().to_string().contains(".app"));
+            assert_eq!(
+                crate::test_helpers::single_diagnostic(app.diagnostics()).pointer,
+                "/logs/line_retention/app"
+            );
 
             let mut singbox = Settings::default();
             singbox.logs.line_retention.singbox = value;
-            assert!(
-                singbox
-                    .validate()
-                    .unwrap_err()
-                    .to_string()
-                    .contains(".singbox")
+            assert_eq!(
+                crate::test_helpers::single_diagnostic(singbox.diagnostics()).pointer,
+                "/logs/line_retention/singbox"
             );
         }
     }
 
     #[test]
-    fn settings_validate_accepts_minimum_log_line_limits() {
+    fn settings_diagnostics_accepts_minimum_log_line_limits() {
         let mut settings = Settings::default();
         settings.logs.line_retention.app = MIN_LOG_LINES;
         settings.logs.line_retention.singbox = MIN_LOG_LINES;
-        settings.validate().unwrap();
+        assert_eq!(settings.diagnostics(), []);
     }
 
     #[test]
-    fn settings_validate_rejects_uppercased_log_level() {
+    fn settings_diagnostics_rejects_uppercased_log_level() {
         // normalized_log_level lowercases at runtime, but on-disk config is
         // validated case-sensitively so the JSON does not silently drift.
         let mut s = Settings::default();
         s.logs.level = "INFO".into();
-        assert!(s.validate().is_err());
+        assert_eq!(
+            crate::test_helpers::single_diagnostic(s.diagnostics()).pointer,
+            "/logs/level"
+        );
     }
 }
