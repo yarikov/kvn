@@ -16,6 +16,7 @@ use super::{
 /// `tls.utls_fingerprint`; see [`Config::migrate`](crate::config::profile::Config::migrate) (`migrate_v1_to_v2`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct VlessConfig {
+    #[schemars(length(min = 1))]
     pub uuid: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow: Option<Flow>,
@@ -36,6 +37,7 @@ pub struct VlessConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct VmessConfig {
+    #[schemars(length(min = 1))]
     pub uuid: String,
     #[serde(default)]
     pub alter_id: u32,
@@ -51,6 +53,7 @@ pub struct VmessConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct TrojanConfig {
+    #[schemars(length(min = 1))]
     pub password: String,
     #[serde(default, flatten)]
     pub tls: TlsCommon,
@@ -62,11 +65,13 @@ pub struct TrojanConfig {
 #[serde(deny_unknown_fields)]
 pub struct ShadowsocksConfig {
     pub method: ShadowsocksCipher,
+    #[schemars(length(min = 1))]
     pub password: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct Hysteria2Config {
+    #[schemars(length(min = 1))]
     pub password: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub up_mbps: Option<u32>,
@@ -80,7 +85,9 @@ pub struct Hysteria2Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct TuicConfig {
+    #[schemars(length(min = 1))]
     pub uuid: String,
+    #[schemars(length(min = 1))]
     pub password: String,
     #[serde(default)]
     pub congestion_control: TuicCongestion,
@@ -108,6 +115,7 @@ pub struct ShadowtlsConfig {
     pub method: ShadowsocksCipher,
     /// Inner Shadowsocks password used by the detour outbound.
     #[serde(default)]
+    #[schemars(length(min = 1))]
     pub ss_password: String,
     #[serde(default, flatten)]
     pub tls: TlsCommon,
@@ -115,6 +123,7 @@ pub struct ShadowtlsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct AnytlsConfig {
+    #[schemars(length(min = 1))]
     pub password: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_session_check_interval: Option<String>,
@@ -148,6 +157,7 @@ pub struct HttpConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SshConfig {
+    #[schemars(length(min = 1))]
     pub user: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,

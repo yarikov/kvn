@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,7 +10,9 @@ use anyhow::{Context, Result};
 use crate::app::model::SourceRow;
 use crate::app::msg::{ConfigEditResult, IpcCommand};
 use crate::config::json_pointer::JsonIndex;
-use crate::config::profile::{Config, ConfigDiagnostic, config_json_schema, schema_diagnostics};
+use crate::config::profile::{
+    CURRENT_SCHEMA_VERSION, Config, ConfigDiagnostic, config_json_schema, schema_diagnostics,
+};
 
 mod retry;
 
@@ -298,20 +301,38 @@ fn check_edit(contents: &str, path: &Path) -> Result<Config, EditIssue> {
             line: Some(line),
         });
     }
-    if let Ok(document) = serde_json::from_str::<serde_json::Value>(contents) {
-        let structural = schema_diagnostics(&document);
-        if !structural.is_empty() {
-            return Err(diagnostics_issue(contents, structural));
-        }
+    let document = serde_json::from_str::<serde_json::Value>(contents).ok();
+    let mut diagnostics = document
+        .as_ref()
+        .map(schema_diagnostics)
+        .unwrap_or_default();
+    if document.is_some_and(|document| !has_current_schema_version(&document)) {
+        return Err(diagnostics_issue(contents, diagnostics));
     }
-    let mut config = crate::config::load_config_bytes_read_only(contents.as_bytes(), path)
-        .map_err(load_issue)?;
+    let mut config = match crate::config::load_config_bytes_read_only(contents.as_bytes(), path) {
+        Ok(config) => config,
+        Err(error) if diagnostics.is_empty() => return Err(load_issue(error)),
+        Err(_) => return Err(diagnostics_issue(contents, diagnostics)),
+    };
     config.json_schema = None;
-    let diagnostics = config.diagnostics();
+    let reported: HashSet<String> = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.pointer.clone())
+        .collect();
+    diagnostics.extend(
+        config
+            .diagnostics()
+            .into_iter()
+            .filter(|diagnostic| !reported.contains(&diagnostic.pointer)),
+    );
     if diagnostics.is_empty() {
         return Ok(config);
     }
     Err(diagnostics_issue(contents, diagnostics))
+}
+
+fn has_current_schema_version(document: &serde_json::Value) -> bool {
+    document.get("schema_version") == Some(&CURRENT_SCHEMA_VERSION.into())
 }
 
 fn load_issue(error: anyhow::Error) -> EditIssue {
@@ -365,7 +386,7 @@ fn submit_edit(base: &Config, edited: &Config) -> Result<ConfigEditResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::profile::{CURRENT_SCHEMA_VERSION, Settings};
+    use crate::config::profile::Settings;
     use tempfile::TempDir;
 
     #[test]
@@ -389,29 +410,41 @@ mod tests {
         );
         config.profiles = vec![profile.clone(), profile];
         config.settings.theme = "missing-theme".into();
+        config.profiles[0].port = 0;
         let path = Path::new("snapshot.json");
         let contents = serde_json::to_string_pretty(&config).unwrap();
         let lines: Vec<_> = contents.lines().collect();
         let issue = check_edit(&contents, path).unwrap_err();
-        let duplicate_line = issue.line.unwrap();
-        assert!(lines[duplicate_line - 1].contains("\"id\""));
-        let theme_line = lines
+        let line_of = |key: &str| lines.iter().position(|line| line.contains(key)).unwrap() + 1;
+        let port_line = line_of("\"port\": 0");
+        let theme_line = line_of("\"theme\"");
+        let duplicate_line = lines
             .iter()
-            .position(|line| line.contains("\"theme\""))
+            .enumerate()
+            .filter(|(_, line)| line.contains("\"id\""))
+            .nth(1)
             .unwrap()
+            .0
             + 1;
+        assert_eq!(issue.line, Some(port_line));
+        let theme_problem = schema_diagnostics(&serde_json::from_str(&contents).unwrap())
+            .into_iter()
+            .find(|diagnostic| diagnostic.pointer == "/settings/theme")
+            .unwrap()
+            .message;
         assert_eq!(
             issue.message,
             format!(
-                "The configuration has 2 problems:\n\n\
+                "The configuration has 3 problems:\n\n\
+                 • line {port_line}: /profiles/0/port: value is less than the minimum of 1\n\
                  • line {duplicate_line}: Profile 2: duplicate id {}\n\
-                 • line {theme_line}: {}",
+                 • line {theme_line}: {theme_problem}",
                 config.profiles[0].id,
-                config.settings.diagnostics()[0].message,
             )
         );
         config.profiles.pop();
         config.settings.theme = Settings::default().theme;
+        config.profiles[0].port = 443;
         assert!(check_edit(&serde_json::to_string(&config).unwrap(), path).is_ok());
     }
 

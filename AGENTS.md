@@ -353,8 +353,11 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
   serde stops at the first parse error, so `check_edit` first validates the
   raw JSON against the generated schema and lists every structural problem
   (messages never quote the document's values, so passwords are never
-  echoed); serde and `Config::diagnostics` run only once the schema passes.
-  The schema pins `schema_version` as required and equal to
+  echoed). When `schema_version` is current and the document deserializes,
+  `Config::diagnostics` runs as well and its problems are added, skipping any
+  at a pointer the schema already reported, so a schema error never hides a
+  duplicate id or a broken reference. A wrong `schema_version` stops the check
+  before deserializing: the schema pins it as required and equal to
   `CURRENT_SCHEMA_VERSION` (`json_schema::pin_current_schema_version`): serde
   defaults a missing version to 0, and loading would then silently re-run every
   migration over current data — v4→v5 alone resets the TUN name and the
@@ -364,7 +367,16 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
   `additionalProperties: false` from the protocol configs that deny unknown
   fields (SOCKS, SSH, Shadowsocks), so `json_schema::keep_strict_protocol_fields`
   restores it on those `Profile` branches, listing the shared profile fields as
-  allowed; the other protocols stay lenient, as serde is. `json_schema` tests pin that a
+  allowed; the other protocols stay lenient, as serde is. Value constraints
+  that `Config::diagnostics` also enforces are mirrored in the schema with
+  `#[schemars(...)]` field attributes so a JSON language server flags them
+  while typing — `minLength: 1` on the profile and protocol fields that must
+  not be empty, `minimum` on `port` and `logs.line_retention`, and `enum` for
+  `settings.theme` and `logs.level`, built from the same constants. A schema
+  problem blocks saving like any other, so such a constraint must never be
+  stricter than the semantic check it mirrors (the ShadowTLS `password`, which
+  only v3 requires, therefore carries none); `value_constraints_match_the_semantic_checks`
+  pins both directions. `json_schema` tests pin that a
   document with every protocol and settings shape passes both serde and the
   schema, and fail when the generated schema starts using a keyword the
   validator does not implement. The snapshot carries `"$schema"` (`Config::json_schema`) pointing at

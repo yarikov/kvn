@@ -158,6 +158,7 @@ impl Validator<'_> {
             ));
         }
         check_number_bounds(schema, value, pointer, out);
+        check_min_length(schema, value, pointer, out);
         check_format(schema, value, pointer, out);
         if let Some(object) = value.as_object() {
             self.check_object(schema, object, pointer, out);
@@ -368,6 +369,29 @@ fn check_number_bounds(
         out.push(Problem::new(
             pointer,
             format!("value is greater than the maximum of {maximum}"),
+        ));
+    }
+}
+
+fn check_min_length(
+    schema: &Map<String, Value>,
+    value: &Value,
+    pointer: &str,
+    out: &mut Vec<Problem>,
+) {
+    let (Some(minimum), Some(text)) = (
+        schema.get("minLength").and_then(Value::as_u64),
+        value.as_str(),
+    ) else {
+        return;
+    };
+    if (text.chars().count() as u64) < minimum {
+        out.push(Problem::new(
+            pointer,
+            match minimum {
+                1 => "must not be empty".to_string(),
+                _ => format!("must be at least {minimum} characters long"),
+            },
         ));
     }
 }
@@ -640,6 +664,56 @@ mod tests {
     }
 
     #[test]
+    fn value_constraints_match_the_semantic_checks() {
+        let document = json!({
+            "schema_version": CURRENT_SCHEMA_VERSION,
+            "profiles": [
+                { "protocol": "trojan", "name": "", "address": "", "port": 0, "password": "" },
+                {
+                    "protocol": "shadowtls", "name": "s", "address": "a", "port": 1,
+                    "version": 3, "password": "p", "ss_password": ""
+                }
+            ],
+            "settings": {
+                "theme": "missing",
+                "logs": { "level": "verbose", "line_retention": { "app": 999 } }
+            }
+        });
+        let mut messages: Vec<_> = pointers(document)
+            .into_iter()
+            .map(|(_, message)| message)
+            .collect();
+        let theme = messages.pop().unwrap();
+        assert!(theme.starts_with("/settings/theme: must be one of \"omarchy\", "));
+        assert_eq!(
+            messages,
+            [
+                "/profiles/0/address: must not be empty",
+                "/profiles/0/name: must not be empty",
+                "/profiles/0/port: value is less than the minimum of 1",
+                "/profiles/0/password: must not be empty",
+                "/profiles/1/ss_password: must not be empty",
+                "/settings/logs/level: must be one of \"trace\", \"debug\", \"info\", \"warn\", \"error\"",
+                "/settings/logs/line_retention/app: value is less than the minimum of 1000",
+            ]
+        );
+        let themes = std::iter::once(super::super::OMARCHY_THEME_SENTINEL)
+            .chain(super::super::settings::BUNDLED_THEME_NAMES.iter().copied());
+        let levels = super::super::settings::LOG_LEVELS.iter().copied();
+        for (theme, level) in themes.zip(levels.cycle()) {
+            let settings = json!({
+                "theme": theme,
+                "logs": { "level": level, "line_retention": { "app": 1_000, "singbox": 1_000 } }
+            });
+            let document =
+                json!({ "schema_version": CURRENT_SCHEMA_VERSION, "settings": settings });
+            assert_eq!(pointers(document), [], "{theme} {level}");
+            let parsed: super::super::Settings = serde_json::from_value(settings).unwrap();
+            assert_eq!(parsed.diagnostics(), []);
+        }
+    }
+
+    #[test]
     fn schema_version_must_stay_the_current_one() {
         assert_eq!(
             pointers(json!({})),
@@ -669,6 +743,7 @@ mod tests {
             "format",
             "items",
             "maximum",
+            "minLength",
             "minimum",
             "oneOf",
             "properties",

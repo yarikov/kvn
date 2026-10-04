@@ -12,8 +12,11 @@ pub struct Profile {
     #[serde(default = "Uuid::new_v4")]
     #[schemars(transform = super::json_schema::without_default)]
     pub id: Uuid,
+    #[schemars(length(min = 1))]
     pub name: String,
+    #[schemars(length(min = 1))]
     pub address: String,
+    #[schemars(range(min = 1))]
     pub port: u16,
     #[serde(flatten)]
     pub config: ProtocolConfig,

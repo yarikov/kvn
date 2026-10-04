@@ -9,8 +9,10 @@ use super::{ConfigDiagnostic, DnsConfig, DnsStrategy, GeoRouting};
 #[serde(deny_unknown_fields)]
 pub struct LineRetention {
     #[serde(default = "default_app_line_retention")]
+    #[schemars(range(min = MIN_LOG_LINES))]
     pub app: u32,
     #[serde(default = "default_singbox_line_retention")]
+    #[schemars(range(min = MIN_LOG_LINES))]
     pub singbox: u32,
 }
 
@@ -27,6 +29,7 @@ impl Default for LineRetention {
 #[serde(deny_unknown_fields)]
 pub struct LogsConfig {
     #[serde(default = "default_log_level")]
+    #[schemars(extend("enum" = LOG_LEVELS))]
     pub level: String,
     #[serde(default)]
     pub line_retention: LineRetention,
@@ -87,6 +90,7 @@ pub struct Settings {
     /// means "follow Omarchy's active XDG state theme.name"; any other value
     /// names a bundled palette (see `src/ui/palette.rs`).
     #[serde(default = "default_theme")]
+    #[schemars(extend("enum" = theme_slugs()))]
     pub theme: String,
     #[serde(default)]
     pub logs: LogsConfig,
@@ -225,6 +229,12 @@ pub fn normalized_log_level(level: &str) -> &'static str {
         "error" => "error",
         _ => "info",
     }
+}
+
+fn theme_slugs() -> Vec<&'static str> {
+    std::iter::once(OMARCHY_THEME_SENTINEL)
+        .chain(BUNDLED_THEME_NAMES.iter().copied())
+        .collect()
 }
 
 fn is_safe_slug_char(c: char) -> bool {
