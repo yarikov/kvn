@@ -336,7 +336,7 @@ mod tests {
     use crate::app::update::tick::handle_tick;
     use crate::app::update::update;
     use crate::config::profile::{
-        DnsPreset, DnsStrategy, GeoAutoUpdate, Profile, RoutedService, RoutingMode, Subscription,
+        DnsStrategy, GeoAutoUpdate, Profile, RoutedService, RoutingMode, Subscription,
     };
     use crate::test_helpers::*;
     use chrono::Local;
@@ -976,8 +976,8 @@ mod tests {
     fn sources_capital_d_opens_dns_settings_and_resets_draft() {
         let mut model = model_with_profiles(vec![]);
         model.dns_selected = 4;
-        model.dns_preset_draft = Some(DnsPreset::GoogleDot);
-        model.dns_strategy_draft = Some(DnsStrategy::OnlyIpv6);
+        model.dns_preset_draft = Some("google_dot".to_string());
+        model.dns_strategy_draft = Some(DnsStrategy::OnlyIpv4);
         model.dns_fakeip_draft = Some(true);
         let effects = handle_sources(&mut model, key('D'));
         assert!(effects.is_empty());

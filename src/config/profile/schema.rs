@@ -8,7 +8,7 @@ use super::{ConfigDiagnostic, GeoAutoUpdate, Profile, Settings, Subscription, in
 
 /// Current schema version for `profiles.json`. Bumped on every breaking
 /// change to the persisted shape; new migrations go in `Config::migrate`.
-pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 
 fn default_schema_version() -> u32 {
     // Files written before the version was introduced are treated as v0 by
@@ -77,9 +77,9 @@ impl Config {
     /// - Subscription-owned profiles reference an existing subscription.
     /// - Each profile has non-empty `name`, `address`, and `uuid`.
     /// - `settings.default_profile` references an existing profile if set.
-    /// - DNS server tags are non-empty and unique; `dns.final_server` and every
-    ///   `dns.rules[*].server` reference an existing tag; when `fakeip_enabled`
-    ///   at least one server is of type `fakeip`.
+    /// - `dns.current_preset` names a built-in or custom preset; custom preset
+    ///   names are unique, and within each preset server tags are unique and
+    ///   `final_server` and every `rules[*].server` reference one of them.
     pub fn validate(&self) -> anyhow::Result<()> {
         into_result(self.diagnostics())
     }
@@ -312,7 +312,7 @@ mod tests {
         profile.subscription_id = Some(uuid::Uuid::nil());
         config.profiles.push(profile);
         config.settings.tun_interface = "tun0".into();
-        config.settings.dns.final_server = "missing".into();
+        config.settings.dns.current_preset = "missing".into();
         let pointers: Vec<_> = config
             .diagnostics()
             .into_iter()
@@ -325,7 +325,7 @@ mod tests {
                 "/profiles/0/port",
                 "/profiles/0/subscription_id",
                 "/settings/tun_interface",
-                "/settings/dns/final_server",
+                "/settings/dns/current_preset",
             ]
         );
         let error = config.validate().unwrap_err().to_string();

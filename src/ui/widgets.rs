@@ -211,8 +211,12 @@ impl<'a> Widget for StatusBar<'a> {
         let dns_label = if dns.fakeip_enabled {
             "fakeip".to_string()
         } else {
-            dns.final_server_entry()
-                .map(|s| s.kind_label().to_string())
+            dns.active()
+                .and_then(|active| {
+                    active
+                        .final_server_entry()
+                        .map(|s| s.kind_label().to_string())
+                })
                 .unwrap_or_else(|| "?".to_string())
         };
 

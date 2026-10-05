@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use crate::app::model::{AppStatus, ConnectionState, Model, Overlay, TrafficStats};
 use crate::app::msg::{IpcError, Msg};
-use crate::config::profile::{DnsConfig, Profile, Protocol, Settings};
+use crate::config::profile::{Profile, Protocol, Settings};
 
 use super::DaemonShared;
 use super::process_slot::{ProcessSlot, is_current_attempt, lock_process_slot};
@@ -57,7 +57,6 @@ pub(super) fn connect(
     let coordinator = shared.connect_coordinator.clone();
     let log_pruned_at = shared.singbox_log_pruned_at.clone();
     let kill_switch = model.config.settings.kill_switch;
-    let dns = settings.dns.clone();
     thread::spawn(move || {
         let _coordinator = coordinator.lock().unwrap_or_else(|p| p.into_inner());
         if !is_current_attempt(&slot, attempt_id) {
@@ -79,7 +78,7 @@ pub(super) fn connect(
             if !is_current_attempt(&slot, attempt_id) {
                 return;
             }
-            if let Err(e) = open_handshake_window(&profile, &dns) {
+            if let Err(e) = open_handshake_window(&profile) {
                 if let Err(cleanup_err) = crate::services::killswitch::revoke() {
                     tracing::warn!(
                         "Failed to clean up kill switch exceptions after handshake error: {}",
@@ -230,29 +229,18 @@ pub(super) fn check_auto_connect_polkit(tx: &Sender<Msg>) {
 }
 
 /// Pre-resolve the VPN endpoint and open a temporary nft exception so the
-/// initial handshake can pass through the kill switch. Also allowlists every
-/// non-`local`, non-`fakeip` DNS upstream the user has configured so sing-box
-/// can resolve the VPN server hostname (see `src/singbox/config.rs`).
+/// initial handshake can pass through the kill switch.
 ///
 /// Set elements are deduplicated by nftables and remain until disconnect, so
 /// repeated calls are idempotent and safe across reconnects.
-fn open_handshake_window(profile: &Profile, dns: &DnsConfig) -> Result<()> {
+fn open_handshake_window(profile: &Profile) -> Result<()> {
+    // NOTE: sing-box dials DNS servers through its default dialer, which
+    // applies route.default_mark (common/dialer/default.go), so the kill
+    // switch already admits them via `meta mark 0x29a`; they need no exception.
     let endpoints = crate::services::killswitch::resolve_endpoints(&profile.address, profile.port)?;
     for addr in &endpoints {
         for protocol in handshake_protocols(profile.protocol()) {
             crate::services::killswitch::allow_endpoint(addr, protocol)?;
-        }
-    }
-    for (host, port, proto) in dns_bootstrap_endpoints(dns) {
-        match crate::services::killswitch::resolve_endpoints(&host, port) {
-            Ok(addrs) => {
-                for addr in &addrs {
-                    crate::services::killswitch::allow_endpoint(addr, proto)?;
-                }
-            }
-            Err(e) => {
-                tracing::warn!("DNS upstream {host}:{port} resolution failed: {e}");
-            }
         }
     }
     Ok(())
@@ -273,44 +261,6 @@ fn handshake_protocols(protocol: Protocol) -> &'static [&'static str] {
         | Protocol::Http
         | Protocol::Ssh => &["tcp"],
     }
-}
-
-/// Return `(host, port, proto)` triples for every DNS server that needs an
-/// outbound network allowlist before the tun interface is up. `local` and
-/// `fakeip` servers are skipped — they never leave the host.
-fn dns_bootstrap_endpoints(dns: &DnsConfig) -> Vec<(String, u16, &'static str)> {
-    use crate::config::profile::DnsServer;
-    dns.servers
-        .iter()
-        .filter_map(|s| match s {
-            DnsServer::Local { .. } | DnsServer::FakeIp { .. } => None,
-            DnsServer::Udp {
-                server,
-                server_port,
-                ..
-            } => Some((server.clone(), server_port.unwrap_or(53), "udp")),
-            DnsServer::Tcp {
-                server,
-                server_port,
-                ..
-            } => Some((server.clone(), server_port.unwrap_or(53), "tcp")),
-            DnsServer::Tls {
-                server,
-                server_port,
-                ..
-            } => Some((server.clone(), server_port.unwrap_or(853), "tcp")),
-            DnsServer::Https {
-                server,
-                server_port,
-                ..
-            } => Some((server.clone(), server_port.unwrap_or(443), "tcp")),
-            DnsServer::Quic {
-                server,
-                server_port,
-                ..
-            } => Some((server.clone(), server_port.unwrap_or(853), "udp")),
-        })
-        .collect()
 }
 
 fn log_prune_due(last_pruned: Option<Instant>, now: Instant) -> bool {

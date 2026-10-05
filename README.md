@@ -27,6 +27,7 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
 - [Diagnostics](#diagnostics)
 - [Default Key Bindings](#default-key-bindings)
 - [Configuration](#configuration)
+- [What kvn protects](docs/privacy.md)
 - [Theme Gallery](docs/themes.md)
 - [Architecture](#architecture)
 - [Platform Support](#platform-support)
@@ -42,6 +43,7 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
 - **Profiles & subscriptions** — manage profiles and keep subscriptions automatically up to date
 - **Geo & service routing** — choose country-based routing modes and ready-made overrides for selected services
 - **Kill switch** — block outbound traffic if the VPN connection drops
+- **IPv4 tunnel** — IPv6 is blocked rather than leaked while connected; see [what kvn protects](docs/privacy.md#ipv4-only)
 - **DNS controls** — built-in DoH, DoT, system resolver, strategy, and fake-IP settings
 - **Auto-connect & resume** — restore the last connection on startup and after system resume
 - **Persistent daemon** — keep the VPN and background services running after detaching the TUI
@@ -125,7 +127,8 @@ After setup and a reboot, toggle it with `Shift+A`.
 > ```
 
 The kill switch prevents new internet connections from going outside the VPN
-if the tunnel goes down. Set it up:
+if the tunnel goes down. See [what kvn protects](docs/privacy.md) for what it
+does and does not block. Set it up:
 
 ```bash
 sudo pacman -S --needed nftables \
@@ -162,7 +165,7 @@ This removes only the backups and leaves the active integration unchanged.
 
 ### Build from source
 
-Requires Rust 1.88+, sing-box 1.12+, `base-devel`, `dbus`, and a clipboard tool
+Requires Rust 1.88+, sing-box 1.14+, `base-devel`, `dbus`, and a clipboard tool
 (`wl-clipboard` on Wayland or `xclip` / `xsel` on X11).
 
 ```bash

@@ -1,16 +1,18 @@
+use anyhow::{Context, bail};
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
 use crate::config::profile::{
-    DnsConfig, DnsServer, GeoRegion, Profile, ProtocolConfig, RoutedService, RoutingMode,
-    ServiceRoute, Settings,
+    ActiveDns, DnsRule, DnsServer, DnsStrategy, FakeIpServer, GeoRegion, Profile, ProtocolConfig,
+    RoutedService, RoutingMode, ServiceRoute, Settings,
 };
 use crate::singbox::outbound::{
     build_anytls_outbound, build_http_outbound, build_hysteria2_outbound,
     build_shadowsocks_outbound, build_shadowtls_outbounds, build_socks_outbound,
     build_ssh_outbound, build_trojan_outbound, build_tuic_outbound, build_vless_outbound,
-    build_vmess_outbound,
+    build_vmess_outbound, proxy_carries_udp,
 };
 
 /// Availability of local geoip/geosite rule-sets used when building routes.
@@ -80,7 +82,7 @@ pub fn generate_test_config(profile: &Profile, socks_port: u16) -> anyhow::Resul
 }
 
 /// Generate a complete sing-box JSON configuration from a profile.
-/// Uses the modern sing-box 1.12+ format.
+/// Uses the sing-box 1.14+ format.
 pub fn generate_config(
     profile: &Profile,
     settings: &Settings,
@@ -89,16 +91,38 @@ pub fn generate_config(
 ) -> anyhow::Result<Value> {
     let mut proxy_outbounds = build_outbound(profile)?;
     proxy_outbounds.push(json!({ "type": "direct", "tag": "direct" }));
+    let routing_mode = settings.geo_routing.mode();
+    let active_dns = settings.dns.active().with_context(|| {
+        format!(
+            "dns.current_preset {:?} does not name a DNS preset",
+            settings.dns.current_preset
+        )
+    })?;
+    let upstreams = DnsUpstreams::new(active_dns, &routing_mode, profile)?;
+    let bootstrap = upstreams.bootstrap();
+    let domain_resolver = json!({
+        "server": bootstrap.tag,
+        "strategy": settings.dns.strategy.as_str(),
+    });
     let (route, rule_sets) = build_route(
-        &settings.geo_routing.mode(),
-        &settings.dns,
+        &routing_mode,
+        domain_resolver,
         geo,
         &settings.geo_routing.service_routes,
     );
-    let dns = build_dns(&settings.dns);
+    let available_rule_sets: HashSet<&str> = rule_sets
+        .iter()
+        .filter_map(|rule_set| rule_set["tag"].as_str())
+        .collect();
+    let dns = build_dns(
+        &upstreams,
+        bootstrap,
+        &settings.dns.strategy,
+        &available_rule_sets,
+    )?;
 
     let mut cache_file = json!({ "enabled": true });
-    if settings.dns.fakeip_enabled && settings.dns.fakeip_server().is_some() {
+    if upstreams.active.fakeip_catch_all {
         cache_file["store_fakeip"] = json!(true);
     }
 
@@ -140,46 +164,220 @@ pub fn generate_config(
     Ok(config)
 }
 
-/// Build the `dns` section from user configuration. Maps onto sing-box 1.12's
-/// `dns` schema: server entries carry their own fake-IP ranges (no legacy
-/// top-level `dns.fakeip` block), and when the user toggles fake-IP on we
-/// auto-prepend an `A`/`AAAA`-routing rule and flip `independent_cache` so the
-/// fake-IP server actually receives queries and its mappings stay separate
-/// from upstream caches.
-fn build_dns(dns: &DnsConfig) -> Value {
-    let servers: Vec<Value> = dns.servers.iter().map(build_dns_server).collect();
+/// Build the `dns` section from the active DNS preset. Maps onto sing-box
+/// 1.14's `dns` schema: the fake-IP server carries its own ranges (no legacy
+/// top-level `dns.fakeip` block), and when fake-IP is on we append an
+/// `A`/`AAAA`-routing rule so the fake-IP server actually receives queries.
+fn build_dns(
+    upstreams: &DnsUpstreams,
+    bootstrap: BootstrapResolver,
+    strategy: &DnsStrategy,
+    available_rule_sets: &HashSet<&str>,
+) -> anyhow::Result<Value> {
+    let active = &upstreams.active;
+    let mut servers: Vec<Value> = active
+        .servers
+        .iter()
+        .map(|server| {
+            build_dns_server(
+                server,
+                upstreams.hostname_resolver(server, &bootstrap),
+                upstreams.is_tunnelled(server),
+            )
+        })
+        .collect();
+    servers.extend(active.fakeip.as_ref().map(fakeip_server_value));
+    servers.extend(bootstrap.server);
     let mut block = Map::new();
     block.insert("servers".to_string(), Value::Array(servers));
 
-    let mut rules: Vec<Value> = dns.rules.iter().map(build_dns_rule).collect();
-    if dns.fakeip_enabled
-        && let Some(server) = dns.fakeip_server()
-    {
-        let tag = server.tag().to_string();
-        let already_routed = dns.rules.iter().any(|r| r.server == tag);
-        if !already_routed {
-            rules.insert(
-                0,
-                json!({
-                    "query_type": ["A", "AAAA"],
-                    "server": tag,
-                }),
-            );
-        }
-    }
+    let active_rules = active_dns_rules(active, available_rule_sets);
+    let mut rules: Vec<Value> = active_rules
+        .iter()
+        .map(|(_, rule)| build_dns_rule(rule))
+        .collect();
+    rules.extend(fakeip_catch_all_rule(active, &active_rules)?);
     if !rules.is_empty() {
         block.insert("rules".to_string(), Value::Array(rules));
     }
 
-    block.insert("final".to_string(), json!(dns.final_server));
-    block.insert("strategy".to_string(), json!(dns.strategy.as_str()));
-    if dns.fakeip_enabled && dns.fakeip_server().is_some() {
-        block.insert("independent_cache".to_string(), json!(true));
-    }
-    Value::Object(block)
+    block.insert("final".to_string(), json!(active.final_server));
+    block.insert("strategy".to_string(), json!(strategy.as_str()));
+    Ok(Value::Object(block))
 }
 
-fn build_dns_server(server: &DnsServer) -> Value {
+fn active_dns_rules<'a>(
+    active: &'a ActiveDns,
+    available_rule_sets: &HashSet<&str>,
+) -> Vec<(usize, &'a DnsRule)> {
+    active
+        .rules
+        .iter()
+        .enumerate()
+        .filter(|(_, rule)| {
+            rule.rule_set
+                .iter()
+                .all(|tag| available_rule_sets.contains(tag.as_str()))
+        })
+        .collect()
+}
+
+fn fakeip_catch_all_rule(
+    active: &ActiveDns,
+    active_rules: &[(usize, &DnsRule)],
+) -> anyhow::Result<Option<Value>> {
+    let Some(fakeip) = active.fakeip.as_ref().filter(|_| active.fakeip_catch_all) else {
+        return Ok(None);
+    };
+    let fakeip_tag = fakeip.tag.as_str();
+    if active_rules
+        .iter()
+        .any(|(_, rule)| rule.server == fakeip_tag)
+    {
+        return Ok(None);
+    }
+    // TODO: translate IP rule-set DNS rules to `evaluate` + `match_response`
+    // before supporting sing-box 1.16, which removes legacy address filters.
+    let ip_rule_set = active_rules.iter().find_map(|(idx, rule)| {
+        rule.rule_set
+            .iter()
+            .find(|tag| crate::geo::is_ip_rule_set_tag(tag))
+            .map(|tag| (idx, tag))
+    });
+    if let Some((idx, tag)) = ip_rule_set {
+        bail!(
+            "rules[{idx}] of the active DNS preset uses the IP rule-set {tag:?}, which sing-box cannot combine with the automatic fake-IP rule; add a rule with \"server\": {fakeip_tag:?} to that preset, or remove {tag:?} from the rule"
+        );
+    }
+    Ok(Some(json!({
+        "query_type": ["A", "AAAA"],
+        "server": fakeip_tag,
+    })))
+}
+
+struct DnsUpstreams {
+    active: ActiveDns,
+    through_proxy: bool,
+}
+
+struct BootstrapResolver {
+    tag: String,
+    server: Option<Value>,
+}
+
+impl DnsUpstreams {
+    fn new(
+        active: ActiveDns,
+        routing_mode: &RoutingMode,
+        profile: &Profile,
+    ) -> anyhow::Result<Self> {
+        let upstreams = Self {
+            active,
+            through_proxy: final_outbound(routing_mode) == "proxy",
+        };
+        if !proxy_carries_udp(&profile.config)
+            && let Some(server) = upstreams.udp_servers_to_tunnel().next()
+        {
+            bail!(
+                "DNS server {:?} of the active preset is a {} server, but the {} profile {:?} cannot carry UDP through the tunnel, so its DNS queries would bypass the VPN; use an https, tls or tcp DNS server instead",
+                server.tag(),
+                server.kind_label(),
+                profile.protocol(),
+                profile.name,
+            );
+        }
+        Ok(upstreams)
+    }
+
+    fn udp_servers_to_tunnel(&self) -> impl Iterator<Item = &DnsServer> {
+        self.active.servers.iter().filter(|server| {
+            matches!(server, DnsServer::Udp { .. } | DnsServer::Quic { .. })
+                && self.is_tunnelled(server)
+        })
+    }
+
+    fn is_tunnelled(&self, server: &DnsServer) -> bool {
+        server
+            .address()
+            .is_some_and(|address| self.through_proxy && !is_local_address(address))
+    }
+
+    fn bootstrap(&self) -> BootstrapResolver {
+        match self.active.final_server_entry() {
+            Some(final_server) if self.is_tunnelled(final_server) => {
+                let tag = self.active.unused_tag("bootstrap");
+                let mut server = dns_server_value(final_server);
+                server["tag"] = json!(tag);
+                if final_server.hostname().is_some()
+                    && let Some(local) = self.active.local_server_tag()
+                {
+                    server["domain_resolver"] = json!(local);
+                }
+                BootstrapResolver {
+                    tag,
+                    server: Some(server),
+                }
+            }
+            _ => BootstrapResolver {
+                tag: self.active.final_server.clone(),
+                server: None,
+            },
+        }
+    }
+
+    fn hostname_resolver<'b>(
+        &'b self,
+        server: &DnsServer,
+        bootstrap: &'b BootstrapResolver,
+    ) -> Option<&'b str> {
+        if server.tag() == bootstrap.tag {
+            self.active.local_server_tag()
+        } else {
+            Some(&bootstrap.tag)
+        }
+    }
+}
+
+fn is_local_address(address: &str) -> bool {
+    match address.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => {
+            ip.is_loopback() || ip.is_private() || ip.is_link_local() || is_cgnat(ip)
+        }
+        Ok(IpAddr::V6(ip)) => {
+            ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local()
+        }
+        Err(_) => false,
+    }
+}
+
+fn is_cgnat(ip: Ipv4Addr) -> bool {
+    let [first, second, ..] = ip.octets();
+    first == 100 && (64..=127).contains(&second)
+}
+
+fn build_dns_server(server: &DnsServer, hostname_resolver: Option<&str>, tunnelled: bool) -> Value {
+    let mut value = dns_server_value(server);
+    if server.hostname().is_some()
+        && let Some(resolver) = hostname_resolver
+    {
+        value["domain_resolver"] = json!(resolver);
+    }
+    if tunnelled {
+        value["detour"] = json!("proxy");
+    }
+    value
+}
+
+fn fakeip_server_value(fakeip: &FakeIpServer) -> Value {
+    json!({
+        "tag": fakeip.tag,
+        "type": "fakeip",
+        "inet4_range": fakeip.ranges.inet4_range,
+        "inet6_range": fakeip.ranges.inet6_range,
+    })
+}
+
+fn dns_server_value(server: &DnsServer) -> Value {
     match server {
         DnsServer::Local { tag } => json!({ "tag": tag, "type": "local" }),
         DnsServer::Udp {
@@ -208,16 +406,6 @@ fn build_dns_server(server: &DnsServer) -> Value {
             server,
             server_port,
         } => server_with_port("quic", tag, server, *server_port, None),
-        DnsServer::FakeIp {
-            tag,
-            inet4_range,
-            inet6_range,
-        } => json!({
-            "tag": tag,
-            "type": "fakeip",
-            "inet4_range": inet4_range,
-            "inet6_range": inet6_range,
-        }),
     }
 }
 
@@ -241,7 +429,7 @@ fn server_with_port(
     Value::Object(obj)
 }
 
-fn build_dns_rule(rule: &crate::config::profile::DnsRule) -> Value {
+fn build_dns_rule(rule: &DnsRule) -> Value {
     let mut obj = Map::new();
     if !rule.domain.is_empty() {
         obj.insert("domain".to_string(), json!(rule.domain));
@@ -269,7 +457,7 @@ fn build_dns_rule(rule: &crate::config::profile::DnsRule) -> Value {
 /// Returns (route_value, rule_sets_vec).
 fn build_route(
     routing_mode: &RoutingMode,
-    dns: &DnsConfig,
+    domain_resolver: Value,
     geo: &GeoAvailability,
     service_routes: &HashMap<RoutedService, ServiceRoute>,
 ) -> (Value, Vec<Value>) {
@@ -364,27 +552,26 @@ fn build_route(
         RoutingMode::Bypass(_) | RoutingMode::Only(_) => {}
     }
 
-    let final_outbound = match routing_mode {
-        RoutingMode::Only(_) => "direct",
-        _ => "proxy",
-    };
-
     // `default_mark` tags every packet sing-box sends to the network with a
     // Linux fwmark. The kvn-tui kill switch's nft ruleset allowlists this mark,
     // so traffic from sing-box's `direct` outbound (used by Bypass/Only routing
     // modes) can reach the physical interface while everything else is dropped.
     let route = json!({
-        "default_domain_resolver": {
-            "server": dns.final_server,
-            "strategy": dns.strategy.as_str(),
-        },
+        "default_domain_resolver": domain_resolver,
         "rules": rules,
         "auto_detect_interface": true,
         "default_mark": 666,
-        "final": final_outbound
+        "final": final_outbound(routing_mode)
     });
 
     (route, rule_sets)
+}
+
+fn final_outbound(routing_mode: &RoutingMode) -> &'static str {
+    match routing_mode {
+        RoutingMode::Only(_) => "direct",
+        _ => "proxy",
+    }
 }
 
 /// Build the proxy outbound list for a profile. Most protocols return a
@@ -411,8 +598,8 @@ fn build_outbound(profile: &Profile) -> anyhow::Result<Vec<Value>> {
 mod tests {
     use super::*;
     use crate::config::profile::{
-        DnsRule, DnsStrategy, GeoRegion, Profile, ProtocolConfig, RealitySettings,
-        ShadowtlsVersion, TransportType, VlessConfig,
+        CustomDnsPreset, DnsConfig, DnsRule, DnsStrategy, GeoRegion, Profile, ProtocolConfig,
+        RealitySettings, ShadowtlsVersion, TransportType, VlessConfig,
     };
 
     const TEST_CLASH_PORT: u16 = 41390;
@@ -1005,15 +1192,123 @@ mod tests {
         assert!(outbounds.iter().any(|o| o["tag"] == "proxy"));
     }
 
-    fn dns_default() -> DnsConfig {
-        DnsConfig::default()
+    fn default_resolver() -> Value {
+        json!({ "server": "remote", "strategy": "prefer_ipv4" })
+    }
+
+    fn rule_set_rule(tag: &str, server: &str) -> DnsRule {
+        DnsRule {
+            rule_set: vec![tag.to_string()],
+            server: server.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn udp(tag: &str, server: &str) -> DnsServer {
+        DnsServer::Udp {
+            tag: tag.to_string(),
+            server: server.to_string(),
+            server_port: None,
+        }
+    }
+
+    fn doh(tag: &str, server: &str) -> DnsServer {
+        DnsServer::Https {
+            tag: tag.to_string(),
+            server: server.to_string(),
+            server_port: None,
+            path: "/dns-query".to_string(),
+        }
+    }
+
+    fn http_profile() -> Profile {
+        Profile {
+            config: ProtocolConfig::Http(Default::default()),
+            ..test_profile()
+        }
+    }
+
+    fn local() -> DnsServer {
+        DnsServer::Local {
+            tag: "local".to_string(),
+        }
+    }
+
+    fn active(servers: Vec<DnsServer>, final_server: &str) -> ActiveDns {
+        ActiveDns {
+            servers,
+            rules: Vec::new(),
+            final_server: final_server.to_string(),
+            fakeip: None,
+            fakeip_catch_all: false,
+        }
+    }
+
+    fn default_active() -> ActiveDns {
+        DnsConfig::default().active().unwrap()
+    }
+
+    fn with_fakeip(mut dns: ActiveDns, rules: Vec<DnsRule>) -> ActiveDns {
+        dns.rules = rules;
+        dns.fakeip = Some(FakeIpServer {
+            tag: "fakeip".to_string(),
+            ranges: Default::default(),
+        });
+        dns.fakeip_catch_all = true;
+        dns
+    }
+
+    fn direct(active: ActiveDns) -> DnsUpstreams {
+        DnsUpstreams {
+            active,
+            through_proxy: false,
+        }
+    }
+
+    fn through_proxy(active: ActiveDns) -> DnsUpstreams {
+        DnsUpstreams {
+            active,
+            through_proxy: true,
+        }
+    }
+
+    fn build(
+        upstreams: &DnsUpstreams,
+        available_rule_sets: &HashSet<&str>,
+    ) -> anyhow::Result<Value> {
+        build_dns(
+            upstreams,
+            upstreams.bootstrap(),
+            &DnsStrategy::PreferIpv4,
+            available_rule_sets,
+        )
+    }
+
+    fn settings_with_preset(preset: CustomDnsPreset) -> Settings {
+        let mut settings = Settings::default();
+        settings.dns.current_preset = preset.name.clone();
+        settings.dns.custom_presets = vec![preset];
+        settings
+    }
+
+    fn custom_preset(
+        servers: Vec<DnsServer>,
+        rules: Vec<DnsRule>,
+        final_server: &str,
+    ) -> CustomDnsPreset {
+        CustomDnsPreset {
+            name: "home".to_string(),
+            servers,
+            rules,
+            final_server: final_server.to_string(),
+        }
     }
 
     #[test]
     fn route_has_default_mark_for_killswitch() {
         let (route, _) = build_route(
             &RoutingMode::Global,
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &no_services(),
         );
@@ -1026,11 +1321,9 @@ mod tests {
 
     #[test]
     fn build_route_global_has_basic_rules() {
-        let mut dns = dns_default();
-        dns.strategy = DnsStrategy::OnlyIpv4;
         let (route, rule_sets) = build_route(
             &RoutingMode::Global,
-            &dns,
+            default_resolver(),
             &GeoAvailability::all(),
             &no_services(),
         );
@@ -1038,15 +1331,14 @@ mod tests {
         let rules = route["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 3); // ipv6 reject, dns hijack, direct cidr
         assert_eq!(route["final"], "proxy");
-        assert_eq!(route["default_domain_resolver"]["strategy"], "ipv4_only");
-        assert_eq!(route["default_domain_resolver"]["server"], "remote");
+        assert_eq!(route["default_domain_resolver"], default_resolver());
     }
 
     #[test]
     fn build_route_only_ru_has_private_rule_and_final_direct() {
         let (route, _rule_sets) = build_route(
             &RoutingMode::Only(GeoRegion::Ru),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &no_services(),
         );
@@ -1059,7 +1351,7 @@ mod tests {
     fn build_route_bypass_cn_has_private_rule() {
         let (route, _rule_sets) = build_route(
             &RoutingMode::Bypass(GeoRegion::Cn),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &no_services(),
         );
@@ -1072,7 +1364,7 @@ mod tests {
     fn build_route_only_cn_has_private_rule_and_final_direct() {
         let (route, _rule_sets) = build_route(
             &RoutingMode::Only(GeoRegion::Cn),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &no_services(),
         );
@@ -1083,7 +1375,7 @@ mod tests {
 
     #[test]
     fn default_dns_block_matches_legacy_layout() {
-        let dns = build_dns(&dns_default());
+        let dns = build(&direct(default_active()), &HashSet::new()).unwrap();
         let servers = dns["servers"].as_array().unwrap();
         assert_eq!(servers.len(), 2);
         assert_eq!(servers[0]["tag"], "local");
@@ -1101,23 +1393,18 @@ mod tests {
 
     #[test]
     fn build_dns_emits_dot_server_with_port() {
-        let dns = DnsConfig {
-            servers: vec![
-                DnsServer::Local {
-                    tag: "local".to_string(),
-                },
+        let dns = active(
+            vec![
+                local(),
                 DnsServer::Tls {
                     tag: "google-dot".to_string(),
                     server: "8.8.8.8".to_string(),
                     server_port: Some(853),
                 },
             ],
-            rules: Vec::new(),
-            final_server: "google-dot".to_string(),
-            strategy: DnsStrategy::PreferIpv4,
-            fakeip_enabled: false,
-        };
-        let block = build_dns(&dns);
+            "google-dot",
+        );
+        let block = build(&direct(dns), &HashSet::new()).unwrap();
         let s = &block["servers"].as_array().unwrap()[1];
         assert_eq!(s["type"], "tls");
         assert_eq!(s["server"], "8.8.8.8");
@@ -1127,23 +1414,13 @@ mod tests {
 
     #[test]
     fn build_dns_emits_fakeip_server_and_auto_rule_when_enabled() {
-        let dns = DnsConfig {
-            servers: vec![
-                DnsServer::Local {
-                    tag: "local".to_string(),
-                },
-                DnsServer::FakeIp {
-                    tag: "fake".to_string(),
-                    inet4_range: "198.18.0.0/15".to_string(),
-                    inet6_range: "fc00::/18".to_string(),
-                },
-            ],
-            rules: Vec::new(),
-            final_server: "local".to_string(),
-            strategy: DnsStrategy::PreferIpv4,
-            fakeip_enabled: true,
+        let lan_rule = DnsRule {
+            domain_suffix: vec!["lan".to_string()],
+            server: "local".to_string(),
+            ..Default::default()
         };
-        let block = build_dns(&dns);
+        let dns = with_fakeip(active(vec![local()], "local"), vec![lan_rule]);
+        let block = build(&direct(dns), &HashSet::new()).unwrap();
         // Sing-box 1.12 no longer accepts the top-level `dns.fakeip` block;
         // the ranges live inside the server entry instead.
         assert!(block.get("fakeip").is_none());
@@ -1153,76 +1430,324 @@ mod tests {
             .iter()
             .find(|s| s["type"] == "fakeip")
             .unwrap();
-        assert_eq!(fake_server["tag"], "fake");
+        assert_eq!(fake_server["tag"], "fakeip");
         assert_eq!(fake_server["inet4_range"], "198.18.0.0/15");
         assert_eq!(fake_server["inet6_range"], "fc00::/18");
 
         let rules = block["rules"].as_array().unwrap();
         assert_eq!(
             rules.len(),
-            1,
-            "auto-rule must be injected when fakeip is on"
+            2,
+            "auto-rule must be appended after user rules when fakeip is on"
         );
-        assert_eq!(rules[0]["server"], "fake");
-        assert_eq!(rules[0]["query_type"][0], "A");
-        assert_eq!(rules[0]["query_type"][1], "AAAA");
-
-        assert_eq!(block["independent_cache"], true);
+        assert_eq!(rules[0]["server"], "local");
+        assert_eq!(rules[1]["server"], "fakeip");
+        assert_eq!(rules[1]["query_type"][0], "A");
+        assert_eq!(rules[1]["query_type"][1], "AAAA");
+        assert!(block.get("independent_cache").is_none());
     }
 
     #[test]
     fn build_dns_does_not_duplicate_fakeip_rule_when_user_added_one() {
-        let dns = DnsConfig {
-            servers: vec![
-                DnsServer::Local {
-                    tag: "local".to_string(),
-                },
-                DnsServer::FakeIp {
-                    tag: "fake".to_string(),
-                    inet4_range: "198.18.0.0/15".to_string(),
-                    inet6_range: "fc00::/18".to_string(),
-                },
-            ],
-            rules: vec![DnsRule {
-                domain_suffix: vec!["example.com".to_string()],
-                server: "fake".to_string(),
-                ..Default::default()
-            }],
-            final_server: "local".to_string(),
-            strategy: DnsStrategy::PreferIpv4,
-            fakeip_enabled: true,
+        let user_rule = DnsRule {
+            domain_suffix: vec!["example.com".to_string()],
+            server: "fakeip".to_string(),
+            ..Default::default()
         };
-        let block = build_dns(&dns);
+        let dns = with_fakeip(active(vec![local()], "local"), vec![user_rule]);
+        let block = build(&direct(dns), &HashSet::new()).unwrap();
         let rules = block["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["domain_suffix"][0], "example.com");
-        assert_eq!(rules[0]["server"], "fake");
+        assert_eq!(rules[0]["server"], "fakeip");
+    }
+
+    #[test]
+    fn build_dns_keeps_explicit_fakeip_rules_without_the_catch_all() {
+        let user_rule = DnsRule {
+            domain_suffix: vec!["example.com".to_string()],
+            server: "fakeip".to_string(),
+            ..Default::default()
+        };
+        let mut dns = with_fakeip(active(vec![local()], "local"), vec![user_rule]);
+        dns.fakeip_catch_all = false;
+        let block = build(&direct(dns), &HashSet::new()).unwrap();
+        let servers = block["servers"].as_array().unwrap();
+        assert!(servers.iter().any(|server| server["type"] == "fakeip"));
+        let rules = block["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0]["server"], "fakeip");
+    }
+
+    #[test]
+    fn build_dns_drops_rules_whose_rule_set_is_not_routed() {
+        let mut dns = default_active();
+        dns.rules = vec![
+            rule_set_rule("geosite-category-ru", "local"),
+            DnsRule {
+                domain_suffix: vec!["lan".to_string()],
+                server: "local".to_string(),
+                ..Default::default()
+            },
+        ];
+        let upstreams = direct(dns);
+
+        let block = build(&upstreams, &HashSet::new()).unwrap();
+        let rules = block["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0]["domain_suffix"][0], "lan");
+
+        let block = build(&upstreams, &HashSet::from(["geosite-category-ru"])).unwrap();
+        assert_eq!(block["rules"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn build_dns_emits_fakeip_rule_when_the_user_fakeip_rule_is_not_routed() {
+        let dns = with_fakeip(
+            active(vec![local()], "local"),
+            vec![rule_set_rule("geosite-category-ru", "fakeip")],
+        );
+        let block = build(&direct(dns), &HashSet::new()).unwrap();
+        let rules = block["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0]["query_type"][0], "A");
+        assert_eq!(rules[0]["server"], "fakeip");
+    }
+
+    #[test]
+    fn build_dns_rejects_ip_rule_set_alongside_the_automatic_fakeip_rule() {
+        let dns = with_fakeip(
+            active(vec![local()], "local"),
+            vec![rule_set_rule("geoip-ru", "local")],
+        );
+        let error = build(&direct(dns), &HashSet::from(["geoip-ru"])).unwrap_err();
+        assert!(error.to_string().contains("rules[0]"));
+        assert!(error.to_string().contains("geoip-ru"));
+    }
+
+    #[test]
+    fn build_dns_accepts_rule_sets_that_cannot_conflict_with_fakeip() {
+        let explicit_fakeip_rule = DnsRule {
+            domain_suffix: vec!["example.com".to_string()],
+            server: "fakeip".to_string(),
+            ..Default::default()
+        };
+        for rules in [
+            vec![rule_set_rule("geoip-ru", "local"), explicit_fakeip_rule],
+            vec![rule_set_rule("geosite-category-ru", "local")],
+        ] {
+            let available = HashSet::from(["geoip-ru", "geosite-category-ru"]);
+            let dns = with_fakeip(active(vec![local()], "local"), rules);
+            assert!(build(&direct(dns), &available).is_ok());
+        }
+    }
+
+    #[test]
+    fn build_dns_emits_rules_with_domain_suffix() {
+        let mut dns = default_active();
+        dns.rules = vec![DnsRule {
+            domain_suffix: vec!["example.com".to_string()],
+            server: "local".to_string(),
+            ..Default::default()
+        }];
+        let block = build(&direct(dns), &HashSet::new()).unwrap();
+        let rules = block["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0]["domain_suffix"][0], "example.com");
+        assert_eq!(rules[0]["server"], "local");
+        assert!(rules[0].get("disable_cache").is_none());
+    }
+
+    #[test]
+    fn dns_upstreams_tunnel_only_public_servers() {
+        let udp_proxy = through_proxy(default_active());
+        let no_proxy = direct(default_active());
+        let cases = [
+            (&udp_proxy, doh("doh", "1.1.1.1"), true),
+            (&udp_proxy, doh("doh", "dns.google"), true),
+            (&udp_proxy, udp("udp", "8.8.8.8"), true),
+            (&udp_proxy, udp("router", "192.168.1.1"), false),
+            (&udp_proxy, udp("loopback", "127.0.0.1"), false),
+            (&udp_proxy, udp("cgnat", "100.64.0.1"), false),
+            (&udp_proxy, udp("link-local", "169.254.1.1"), false),
+            (&udp_proxy, udp("ula", "fd00::1"), false),
+            (&udp_proxy, udp("v6-link-local", "fe80::1"), false),
+            (
+                &udp_proxy,
+                DnsServer::Local {
+                    tag: "local".into(),
+                },
+                false,
+            ),
+            (&no_proxy, doh("doh", "1.1.1.1"), false),
+        ];
+        for (upstreams, server, tunnelled) in cases {
+            assert_eq!(upstreams.is_tunnelled(&server), tunnelled, "{server:?}");
+        }
+    }
+
+    #[test]
+    fn dns_upstreams_refuse_public_udp_servers_on_a_profile_without_udp() {
+        let doq = DnsServer::Quic {
+            tag: "doq".into(),
+            server: "94.140.14.14".into(),
+            server_port: None,
+        };
+        for server in [udp("plain", "8.8.8.8"), doq] {
+            let tag = server.tag().to_string();
+            let dns = active(vec![doh("remote", "1.1.1.1"), server], "remote");
+            let error = DnsUpstreams::new(dns, &RoutingMode::Global, &http_profile())
+                .err()
+                .unwrap();
+            assert!(error.to_string().contains(&format!("{tag:?}")), "{error}");
+            assert!(error.to_string().contains("http"), "{error}");
+        }
+    }
+
+    #[test]
+    fn dns_upstreams_accept_udp_servers_that_stay_direct_or_can_be_carried() {
+        let lan = active(vec![udp("router", "192.168.1.1")], "router");
+        let public = active(vec![udp("plain", "8.8.8.8")], "plain");
+        for (dns, mode, profile) in [
+            (lan, RoutingMode::Global, http_profile()),
+            (
+                public.clone(),
+                RoutingMode::Only(GeoRegion::Ru),
+                http_profile(),
+            ),
+            (public, RoutingMode::Global, test_profile()),
+        ] {
+            assert!(DnsUpstreams::new(dns, &mode, &profile).is_ok());
+        }
+    }
+
+    #[test]
+    fn bootstrap_is_a_direct_copy_of_a_tunnelled_final_server() {
+        let without_local = active(vec![doh("remote", "1.1.1.1")], "remote");
+        let bootstrap = through_proxy(without_local).bootstrap();
+        assert_eq!(bootstrap.tag, "bootstrap");
+        let server = bootstrap.server.unwrap();
+        assert_eq!(server["server"], "1.1.1.1");
+        assert!(server.get("detour").is_none());
+
+        let hostname = active(vec![local(), doh("remote", "dns.google")], "remote");
+        let server = through_proxy(hostname).bootstrap().server.unwrap();
+        assert_eq!(server["domain_resolver"], "local");
+
+        let taken = active(
+            vec![doh("remote", "1.1.1.1"), udp("bootstrap", "9.9.9.9")],
+            "remote",
+        );
+        assert_eq!(through_proxy(taken).bootstrap().tag, "bootstrap-2");
+    }
+
+    #[test]
+    fn bootstrap_is_the_final_server_itself_when_it_stays_direct() {
+        for dns in [
+            active(vec![local()], "local"),
+            active(vec![udp("router", "192.168.1.1")], "router"),
+        ] {
+            let final_server = dns.final_server.clone();
+            let bootstrap = through_proxy(dns).bootstrap();
+            assert_eq!(bootstrap.tag, final_server);
+            assert!(bootstrap.server.is_none());
+        }
+    }
+
+    #[test]
+    fn build_dns_tunnels_upstreams_and_resolves_hostnames_through_the_bootstrap() {
+        let dns = active(
+            vec![
+                local(),
+                doh("remote", "dns.google"),
+                udp("router", "192.168.1.1"),
+            ],
+            "remote",
+        );
+        let block = build(&through_proxy(dns), &HashSet::new()).unwrap();
+        let servers = block["servers"].as_array().unwrap();
+        let tags: Vec<&str> = servers.iter().map(|s| s["tag"].as_str().unwrap()).collect();
+        assert_eq!(tags, ["local", "remote", "router", "bootstrap"]);
+        assert_eq!(servers[1]["detour"], "proxy");
+        assert_eq!(servers[1]["domain_resolver"], "bootstrap");
+        assert!(servers[2].get("detour").is_none());
+        assert_eq!(servers[3]["domain_resolver"], "local");
+    }
+
+    #[test]
+    fn build_dns_resolves_a_direct_hostname_final_server_through_local() {
+        let dns = active(
+            vec![
+                local(),
+                doh("remote", "dns.google"),
+                doh("other", "dns.quad9.net"),
+            ],
+            "remote",
+        );
+        let block = build(&direct(dns), &HashSet::new()).unwrap();
+        let servers = block["servers"].as_array().unwrap();
+        assert_eq!(servers.len(), 3);
+        assert_eq!(servers[1]["domain_resolver"], "local");
+        assert_eq!(servers[2]["domain_resolver"], "remote");
+    }
+
+    #[test]
+    fn build_dns_server_resolves_hostnames_through_the_given_server() {
+        let hostname = DnsServer::Https {
+            tag: "remote".to_string(),
+            server: "dns.google".to_string(),
+            server_port: None,
+            path: "/dns-query".to_string(),
+        };
+        assert_eq!(
+            build_dns_server(&hostname, Some("local"), false)["domain_resolver"],
+            "local"
+        );
+        let ip = DnsServer::Https {
+            tag: "remote".to_string(),
+            server: "1.1.1.1".to_string(),
+            server_port: None,
+            path: "/dns-query".to_string(),
+        };
+        assert!(
+            build_dns_server(&ip, Some("local"), false)
+                .get("domain_resolver")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn generated_config_routes_dns_rules_only_with_their_rule_sets() {
+        let mut settings = settings_with_preset(custom_preset(
+            vec![local(), doh("remote", "1.1.1.1")],
+            vec![rule_set_rule("geosite-category-ru", "local")],
+            "remote",
+        ));
+        let mut rules_in = |mode: RoutingMode| {
+            settings.geo_routing.current_region = Some(GeoRegion::Ru);
+            settings
+                .geo_routing
+                .selected_region_modes
+                .insert(GeoRegion::Ru, mode);
+            let config = generate_config(
+                &test_profile(),
+                &settings,
+                &GeoAvailability::all(),
+                TEST_CLASH_PORT,
+            )
+            .unwrap();
+            config["dns"].get("rules").is_some()
+        };
+        assert!(rules_in(RoutingMode::Bypass(GeoRegion::Ru)));
+        assert!(!rules_in(RoutingMode::Global));
     }
 
     #[test]
     fn generated_config_sets_store_fakeip_when_enabled() {
-        let profile = test_profile();
-        let settings = Settings {
-            dns: DnsConfig {
-                servers: vec![
-                    DnsServer::Local {
-                        tag: "local".to_string(),
-                    },
-                    DnsServer::FakeIp {
-                        tag: "fake".to_string(),
-                        inet4_range: "198.18.0.0/15".to_string(),
-                        inet6_range: "fc00::/18".to_string(),
-                    },
-                ],
-                rules: Vec::new(),
-                final_server: "local".to_string(),
-                strategy: DnsStrategy::PreferIpv4,
-                fakeip_enabled: true,
-            },
-            ..Settings::default()
-        };
+        let mut settings = Settings::default();
+        settings.dns.fakeip_enabled = true;
         let config = generate_config(
-            &profile,
+            &test_profile(),
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
@@ -1253,70 +1778,52 @@ mod tests {
     }
 
     #[test]
-    fn build_dns_emits_rules_with_domain_suffix() {
-        let dns = DnsConfig {
-            servers: vec![
-                DnsServer::Local {
-                    tag: "local".to_string(),
-                },
-                DnsServer::Https {
-                    tag: "remote".to_string(),
-                    server: "1.1.1.1".to_string(),
-                    server_port: None,
-                    path: "/dns-query".to_string(),
-                },
-            ],
-            rules: vec![DnsRule {
-                domain_suffix: vec!["example.com".to_string()],
-                server: "local".to_string(),
-                ..Default::default()
-            }],
-            final_server: "remote".to_string(),
-            strategy: DnsStrategy::PreferIpv4,
-            fakeip_enabled: false,
-        };
-        let block = build_dns(&dns);
-        let rules = block["rules"].as_array().unwrap();
-        assert_eq!(rules.len(), 1);
-        assert_eq!(rules[0]["domain_suffix"][0], "example.com");
-        assert_eq!(rules[0]["server"], "local");
-        assert!(rules[0].get("disable_cache").is_none());
-    }
-
-    #[test]
-    fn generated_config_uses_custom_final_server() {
-        let profile = test_profile();
-        let settings = Settings {
-            dns: DnsConfig {
-                servers: vec![
-                    DnsServer::Local {
-                        tag: "local".to_string(),
-                    },
-                    DnsServer::Https {
-                        tag: "quad9".to_string(),
-                        server: "9.9.9.9".to_string(),
-                        server_port: None,
-                        path: "/dns-query".to_string(),
-                    },
-                ],
-                rules: Vec::new(),
-                final_server: "quad9".to_string(),
-                strategy: DnsStrategy::PreferIpv4,
-                fakeip_enabled: false,
-            },
-            ..Settings::default()
-        };
+    fn generated_config_uses_the_active_custom_preset() {
+        let settings = settings_with_preset(custom_preset(
+            vec![local(), doh("quad9", "9.9.9.9")],
+            Vec::new(),
+            "quad9",
+        ));
         let config = generate_config(
-            &profile,
+            &test_profile(),
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
         )
         .unwrap();
         assert_eq!(config["dns"]["final"], "quad9");
+        let servers = config["dns"]["servers"].as_array().unwrap();
+        assert_eq!(servers[1]["detour"], "proxy");
         assert_eq!(
             config["route"]["default_domain_resolver"]["server"],
-            "quad9"
+            "bootstrap"
+        );
+        assert_eq!(servers[2]["tag"], "bootstrap");
+        assert_eq!(servers[2]["server"], "9.9.9.9");
+        assert!(servers[2].get("detour").is_none());
+    }
+
+    #[test]
+    fn generated_config_keeps_dns_direct_when_only_matching_traffic_is_tunnelled() {
+        let mut settings = Settings::default();
+        settings.geo_routing.current_region = Some(GeoRegion::Ru);
+        settings
+            .geo_routing
+            .selected_region_modes
+            .insert(GeoRegion::Ru, RoutingMode::Only(GeoRegion::Ru));
+        let config = generate_config(
+            &test_profile(),
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
+        let servers = config["dns"]["servers"].as_array().unwrap();
+        assert_eq!(servers.len(), 2);
+        assert!(servers.iter().all(|server| server.get("detour").is_none()));
+        assert_eq!(
+            config["route"]["default_domain_resolver"]["server"],
+            "remote"
         );
     }
 
@@ -1326,7 +1833,7 @@ mod tests {
     fn build_route_bypass_ir_has_private_rule_and_final_proxy() {
         let (route, rule_sets) = build_route(
             &RoutingMode::Bypass(GeoRegion::Ir),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &no_services(),
         );
@@ -1346,7 +1853,7 @@ mod tests {
     fn build_route_only_ir_has_private_rule_and_final_direct() {
         let (route, rule_sets) = build_route(
             &RoutingMode::Only(GeoRegion::Ir),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &no_services(),
         );
@@ -1361,7 +1868,7 @@ mod tests {
         // Only the OnlyRu variant was tested explicitly; Bypass had no direct test.
         let (route, rule_sets) = build_route(
             &RoutingMode::Bypass(GeoRegion::Ru),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &no_services(),
         );
@@ -1375,7 +1882,7 @@ mod tests {
     fn build_route_bypass_ru_without_geo_emits_no_rule_sets() {
         let (_route, rule_sets) = build_route(
             &RoutingMode::Bypass(GeoRegion::Ru),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::default(),
             &no_services(),
         );
@@ -1386,7 +1893,7 @@ mod tests {
     fn build_route_only_cn_without_geo_emits_no_rule_sets() {
         let (_route, rule_sets) = build_route(
             &RoutingMode::Only(GeoRegion::Cn),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::default(),
             &no_services(),
         );
@@ -1397,7 +1904,7 @@ mod tests {
     fn build_route_bypass_ir_without_geo_emits_no_rule_sets() {
         let (_route, rule_sets) = build_route(
             &RoutingMode::Bypass(GeoRegion::Ir),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::default(),
             &no_services(),
         );
@@ -1408,7 +1915,7 @@ mod tests {
     fn build_route_only_ir_without_geo_emits_no_rule_sets() {
         let (_route, rule_sets) = build_route(
             &RoutingMode::Only(GeoRegion::Ir),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::default(),
             &no_services(),
         );
@@ -1429,7 +1936,7 @@ mod tests {
     fn build_route_service_direct_adds_rule_and_rule_sets_in_global() {
         let (route, rule_sets) = build_route(
             &RoutingMode::Global,
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &routes(&[(RoutedService::Steam, ServiceRoute::Direct)]),
         );
@@ -1452,7 +1959,7 @@ mod tests {
     fn build_route_service_proxy_uses_proxy_outbound() {
         let (route, rule_sets) = build_route(
             &RoutingMode::Bypass(GeoRegion::Ru),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &routes(&[(RoutedService::Telegram, ServiceRoute::Proxy)]),
         );
@@ -1470,7 +1977,7 @@ mod tests {
     fn build_route_service_rules_precede_geo_rules_under_only() {
         let (route, rule_sets) = build_route(
             &RoutingMode::Only(GeoRegion::Ru),
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &routes(&[(RoutedService::Steam, ServiceRoute::Direct)]),
         );
@@ -1496,7 +2003,7 @@ mod tests {
         // HashMap internals — services appear in RoutedService::ALL order.
         let (route, _) = build_route(
             &RoutingMode::Global,
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &routes(&[
                 (RoutedService::Telegram, ServiceRoute::Direct),
@@ -1523,7 +2030,7 @@ mod tests {
     fn build_route_disabled_services_emit_no_entries() {
         let (route, rule_sets) = build_route(
             &RoutingMode::Global,
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::all(),
             &routes(&[(RoutedService::Steam, ServiceRoute::Disabled)]),
         );
@@ -1541,7 +2048,7 @@ mod tests {
     fn build_route_service_enabled_without_files_is_noop() {
         let (_route, rule_sets) = build_route(
             &RoutingMode::Global,
-            &dns_default(),
+            default_resolver(),
             &GeoAvailability::default(),
             &routes(&[(RoutedService::Steam, ServiceRoute::Direct)]),
         );
@@ -1587,11 +2094,11 @@ mod tests {
         assert!(config["route"].get("rule_set").is_none());
     }
 
-    // ---- build_dns_server for every variant ----
+    // ---- dns_server_value for every variant ----
 
     #[test]
-    fn build_dns_server_emits_local_shape() {
-        let v = build_dns_server(&DnsServer::Local {
+    fn dns_server_value_emits_local_shape() {
+        let v = dns_server_value(&DnsServer::Local {
             tag: "loc".to_string(),
         });
         assert_eq!(v["tag"], "loc");
@@ -1599,22 +2106,22 @@ mod tests {
     }
 
     #[test]
-    fn build_dns_server_emits_udp_and_tcp_with_optional_port() {
-        let udp = build_dns_server(&DnsServer::Udp {
+    fn dns_server_value_emits_udp_and_tcp_with_optional_port() {
+        let udp = dns_server_value(&DnsServer::Udp {
             tag: "u".to_string(),
             server: "1.1.1.1".to_string(),
             server_port: Some(53),
         });
         assert_eq!(udp["type"], "udp");
         assert_eq!(udp["server_port"], 53);
-        let udp_no_port = build_dns_server(&DnsServer::Udp {
+        let udp_no_port = dns_server_value(&DnsServer::Udp {
             tag: "u".to_string(),
             server: "1.1.1.1".to_string(),
             server_port: None,
         });
         assert!(udp_no_port.get("server_port").is_none());
 
-        let tcp = build_dns_server(&DnsServer::Tcp {
+        let tcp = dns_server_value(&DnsServer::Tcp {
             tag: "t".to_string(),
             server: "1.1.1.1".to_string(),
             server_port: None,
@@ -1623,8 +2130,8 @@ mod tests {
     }
 
     #[test]
-    fn build_dns_server_emits_quic_shape() {
-        let v = build_dns_server(&DnsServer::Quic {
+    fn dns_server_value_emits_quic_shape() {
+        let v = dns_server_value(&DnsServer::Quic {
             tag: "q".to_string(),
             server: "9.9.9.9".to_string(),
             server_port: Some(853),
@@ -1634,11 +2141,10 @@ mod tests {
     }
 
     #[test]
-    fn build_dns_server_emits_fakeip_with_inet_ranges() {
-        let v = build_dns_server(&DnsServer::FakeIp {
+    fn fakeip_server_value_emits_inet_ranges() {
+        let v = fakeip_server_value(&FakeIpServer {
             tag: "fakeip".to_string(),
-            inet4_range: "198.18.0.0/15".to_string(),
-            inet6_range: "fc00::/18".to_string(),
+            ranges: Default::default(),
         });
         assert_eq!(v["type"], "fakeip");
         assert_eq!(v["inet4_range"], "198.18.0.0/15");

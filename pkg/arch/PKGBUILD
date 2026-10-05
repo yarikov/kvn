@@ -7,7 +7,7 @@ arch=('x86_64')
 url="https://github.com/yarikov/kvn"
 license=('MIT')
 install=kvn-tui.install
-depends=('gcc-libs' 'dbus' 'libcap' 'sing-box')
+depends=('gcc-libs' 'dbus' 'libcap' 'sing-box>=1.14')
 optdepends=(
     'xdg-utils: open the project support page from the TUI'
     'wl-clipboard: clipboard integration on Wayland'
@@ -15,7 +15,7 @@ optdepends=(
     'xsel: clipboard integration on X11 (alternative)'
 )
 makedepends=('cargo' 'rust')
-# sing-box >= 1.12 required for valid config generation
+# sing-box >= 1.14 required for valid config generation
 source=()
 options=('!lto')
 sha256sums=()

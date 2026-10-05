@@ -12,9 +12,9 @@
 use serde_json::{Map, Value, json};
 
 use crate::config::profile::{
-    AnytlsConfig, HttpConfig, Hysteria2Config, Profile, ShadowsocksConfig, ShadowtlsConfig,
-    ShadowtlsVersion, SocksConfig, SshConfig, TlsCommon, TransportConfig, TransportType,
-    TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
+    AnytlsConfig, HttpConfig, Hysteria2Config, Profile, ProtocolConfig, ShadowsocksConfig,
+    ShadowtlsConfig, ShadowtlsVersion, SocksConfig, SocksVersion, SshConfig, TlsCommon,
+    TransportConfig, TransportType, TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
 };
 
 /// Render the sing-box 1.12 `tls` block from [`TlsCommon`].
@@ -386,4 +386,55 @@ pub(super) fn build_ssh_outbound(profile: &Profile, cfg: &SshConfig) -> anyhow::
         outbound["host_key_algorithms"] = json!(cfg.host_key_algorithms);
     }
     Ok(outbound)
+}
+
+pub(super) fn proxy_carries_udp(config: &ProtocolConfig) -> bool {
+    match config {
+        ProtocolConfig::Http(_) | ProtocolConfig::Ssh(_) | ProtocolConfig::Shadowtls(_) => false,
+        ProtocolConfig::Socks(cfg) => cfg.version == SocksVersion::V5,
+        ProtocolConfig::Vless(_)
+        | ProtocolConfig::Vmess(_)
+        | ProtocolConfig::Trojan(_)
+        | ProtocolConfig::Shadowsocks(_)
+        | ProtocolConfig::Hysteria2(_)
+        | ProtocolConfig::Tuic(_)
+        | ProtocolConfig::Anytls(_) => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn socks(version: SocksVersion) -> ProtocolConfig {
+        ProtocolConfig::Socks(SocksConfig {
+            version,
+            ..SocksConfig::default()
+        })
+    }
+
+    #[test]
+    fn proxy_carries_udp_only_where_the_generated_outbound_relays_it() {
+        let cases = [
+            (ProtocolConfig::Vless(VlessConfig::default()), true),
+            (ProtocolConfig::Vmess(VmessConfig::default()), true),
+            (ProtocolConfig::Trojan(TrojanConfig::default()), true),
+            (
+                ProtocolConfig::Shadowsocks(ShadowsocksConfig::default()),
+                true,
+            ),
+            (ProtocolConfig::Hysteria2(Hysteria2Config::default()), true),
+            (ProtocolConfig::Tuic(TuicConfig::default()), true),
+            (ProtocolConfig::Anytls(AnytlsConfig::default()), true),
+            (socks(SocksVersion::V5), true),
+            (socks(SocksVersion::V4), false),
+            (socks(SocksVersion::V4a), false),
+            (ProtocolConfig::Http(HttpConfig::default()), false),
+            (ProtocolConfig::Ssh(SshConfig::default()), false),
+            (ProtocolConfig::Shadowtls(ShadowtlsConfig::default()), false),
+        ];
+        for (config, carries_udp) in cases {
+            assert_eq!(proxy_carries_udp(&config), carries_udp, "{config:?}");
+        }
+    }
 }

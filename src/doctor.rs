@@ -10,7 +10,7 @@ use anyhow::Result;
 
 use crate::onboarding::{IntegrationSetup, SetupState};
 
-const MIN_SINGBOX_VERSION: (u64, u64, u64) = (1, 12, 0);
+const MIN_SINGBOX_VERSION: (u64, u64, u64) = (1, 14, 0);
 const POLKIT_DNS_ACTIONS: [&str; 3] = [
     "org.freedesktop.resolve1.set-dns-servers",
     "org.freedesktop.resolve1.set-domains",
@@ -214,8 +214,9 @@ fn check_singbox_version(path: &Path) -> Check {
         )),
         Some(version) => Check::failure(
             format!(
-                "sing-box {} is too old; version 1.12.0 or newer is required",
-                format_version(version)
+                "sing-box {} is too old; version {} or newer is required",
+                format_version(version),
+                format_version(MIN_SINGBOX_VERSION)
             ),
             "Upgrade it with `sudo pacman -Syu sing-box`.",
         ),
@@ -839,8 +840,8 @@ mod tests {
 
     #[test]
     fn version_comparison_rejects_old_releases() {
-        assert!((1, 11, 9) < MIN_SINGBOX_VERSION);
-        assert!((1, 12, 0) >= MIN_SINGBOX_VERSION);
+        assert!((1, 13, 99) < MIN_SINGBOX_VERSION);
+        assert!((1, 14, 0) >= MIN_SINGBOX_VERSION);
     }
 
     #[test]
@@ -886,10 +887,10 @@ mod tests {
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
 
-        let current = executable(dir.path(), "current", "echo 'sing-box version 1.13.2'");
+        let current = executable(dir.path(), "current", "echo 'sing-box version 1.14.0'");
         assert_eq!(check_singbox_version(&current).level, Level::Pass);
 
-        let old = executable(dir.path(), "old", "echo 'sing-box version 1.11.9'");
+        let old = executable(dir.path(), "old", "echo 'sing-box version 1.13.2'");
         assert_eq!(check_singbox_version(&old).level, Level::Failure);
 
         let unknown = executable(dir.path(), "unknown", "echo 'development build'");
@@ -1417,7 +1418,7 @@ mod tests {
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let bin = tempfile::tempdir().unwrap();
         let config = tempfile::tempdir().unwrap();
-        executable(bin.path(), "sing-box", "echo 'sing-box version 1.13.2'");
+        executable(bin.path(), "sing-box", "echo 'sing-box version 1.14.0'");
         executable(
             bin.path(),
             "getcap",
