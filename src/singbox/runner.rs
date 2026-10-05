@@ -62,6 +62,10 @@ fn write_config(
     let config = generate_config(profile, settings, geo, clash_api_port)
         .context("Failed to generate sing-box config")?;
     crate::paths::ensure_runtime_dir()?;
+    if let Some(state_dir) = crate::paths::state_dir() {
+        fs::create_dir_all(&state_dir)
+            .with_context(|| format!("Failed to create state directory {:?}", state_dir))?;
+    }
     let path = crate::paths::temp_singbox_config_path()?;
 
     crate::atomic_write::write(&path, serde_json::to_string_pretty(&config)?.as_bytes())

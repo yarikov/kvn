@@ -346,6 +346,7 @@ not supported by older `kvn` releases.
 | Applied migration markers | `$XDG_STATE_HOME/kvn/migrations/` |
 | First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
+| sing-box cache (fake-IP map) | `$XDG_STATE_HOME/kvn/singbox-cache.db` |
 | IPC socket | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
 | Generated sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
 | Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |

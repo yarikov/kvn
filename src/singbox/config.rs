@@ -122,6 +122,9 @@ pub fn generate_config(
     )?;
 
     let mut cache_file = json!({ "enabled": true });
+    if let Some(path) = crate::paths::singbox_cache_path() {
+        cache_file["path"] = json!(path.to_string_lossy());
+    }
     if upstreams.active.fakeip_catch_all {
         cache_file["store_fakeip"] = json!(true);
     }
@@ -1756,6 +1759,28 @@ mod tests {
         assert_eq!(
             config["experimental"]["cache_file"]["store_fakeip"], true,
             "store_fakeip must persist the v4/v6→domain map across restarts"
+        );
+    }
+
+    #[test]
+    fn generated_config_keeps_the_cache_file_in_the_kvn_state_directory() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", state.path());
+        let config = generate_config(
+            &test_profile(),
+            &Settings::default(),
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
+        assert_eq!(
+            config["experimental"]["cache_file"]["path"],
+            state
+                .path()
+                .join("kvn/singbox-cache.db")
+                .to_string_lossy()
+                .as_ref()
         );
     }
 

@@ -68,6 +68,10 @@ pub fn onboarding_path() -> Option<PathBuf> {
     state_dir().map(|d| d.join("onboarding.json"))
 }
 
+pub fn singbox_cache_path() -> Option<PathBuf> {
+    state_dir().map(|d| d.join("singbox-cache.db"))
+}
+
 /// Return the path to `profiles.json`.
 pub fn profiles_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("profiles.json"))
