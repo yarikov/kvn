@@ -24,6 +24,13 @@ The routing mode decides which traffic uses the tunnel. Change it in
 | Bypass (`bypass_ru`, …) | All IPv4 traffic except the region's sites | The region's sites and IP addresses, and your local network |
 | Only (`only_ru`, …) | Only the region's sites | Everything else, including your local network |
 
+A connection belongs to the region when its site name is on the region's list
+or its address is in the region's address list. kvn reads the name from the
+connection itself, so this works with fake-IP on or off; a site matched by
+neither uses the tunnel in Bypass and goes directly in Only. To compare an
+address with the list, kvn may look the name up again through your main DNS
+server, along the same path as your other DNS questions.
+
 The tunnel carries IPv4 only; IPv6 is blocked in every mode, see
 [IPv4 only](#ipv4-only).
 
