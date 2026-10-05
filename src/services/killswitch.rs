@@ -3,14 +3,14 @@
 //! (`kvn-tui-killswitch.service`) that runs a wrapped `nft -f` at boot. This
 //! module shells out to a helper script installed at
 //! `/usr/lib/kvn-tui/killswitch-helper.sh` (via `sudo -n`, NOPASSWD for the
-//! dedicated `kvn-tui` group) to enable/disable the unit and add/remove handshake
-//! exceptions while sing-box is establishing the VPN tunnel.
+//! dedicated `kvn-tui` group) to enable/disable the unit and to flush handshake
+//! exceptions left by older daemons; sing-box's own traffic is marked and needs
+//! none.
 //!
 //! See `contrib/setup-killswitch.sh` for the one-time setup that the user
 //! runs as `sudo kvn setup --killswitch`.
 
 use anyhow::{Context, Result, bail};
-use std::net::{SocketAddr, ToSocketAddrs};
 use std::process::Command;
 
 const HELPER: &str = crate::integration_files::KILLSWITCH_HELPER_PATH;
@@ -115,30 +115,9 @@ fn group_list_includes_integration_group(output: &[u8]) -> bool {
         .any(|group| group == INTEGRATION_GROUP)
 }
 
-/// Add a temporary exception so sing-box can reach the given endpoint during
-/// the TLS/REALITY handshake (before the tun interface is up). Idempotent at
-/// the nft layer (set elements dedupe).
-pub fn allow_endpoint(addr: &SocketAddr, proto: &str) -> Result<()> {
-    let ip = addr.ip().to_string();
-    let port = addr.port().to_string();
-    run_helper(&["allow", &ip, proto, &port])
-}
-
 /// Flush the dynamic handshake set. Called on disconnect.
 pub fn revoke() -> Result<()> {
     run_helper(&["revoke"])
-}
-
-/// Resolve a `host:port` to one or more socket addresses (blocking).
-pub fn resolve_endpoints(host: &str, port: u16) -> Result<Vec<SocketAddr>> {
-    let addrs: Vec<SocketAddr> = (host, port)
-        .to_socket_addrs()
-        .with_context(|| format!("DNS lookup failed for {}:{}", host, port))?
-        .collect();
-    if addrs.is_empty() {
-        bail!("no addresses resolved for {}:{}", host, port);
-    }
-    Ok(addrs)
 }
 
 /// Query systemd for the actual unit state. Used at daemon startup to

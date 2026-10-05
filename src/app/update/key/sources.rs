@@ -91,8 +91,12 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
         KeyCode::Char('o') => {
             open_geo_region(model, None);
         }
-        KeyCode::Char('r') if model.connection == ConnectionState::Connected => {
-            if let Some(profile) = model.active_profile_id.and_then(|id| {
+        KeyCode::Char('r') if model.connection != ConnectionState::Idle => {
+            let restarted_profile = match model.connection {
+                ConnectionState::Connected => model.active_profile_id,
+                _ => model.connecting_profile_id,
+            };
+            if let Some(profile) = restarted_profile.and_then(|id| {
                 model
                     .config
                     .profiles
@@ -112,7 +116,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 queue_connect(model, profile_id);
             }
         }
-        KeyCode::Char('s') if model.connection == ConnectionState::Connected => {
+        KeyCode::Char('s') if model.connection != ConnectionState::Idle => {
             return vec![Effect::Disconnect];
         }
         KeyCode::Char('A') | KeyCode::Char('a') => {
@@ -547,12 +551,18 @@ mod tests {
     }
 
     #[test]
-    fn connected_mode_s_disconnects() {
-        let mut model = model_with_profiles(vec![]);
-        model.connection = ConnectionState::Connected;
-        model.overlay = Overlay::None;
-        let effects = handle_key(&mut model, key('s'));
-        assert_eq!(effects, vec![Effect::Disconnect]);
+    fn s_disconnects_while_connected_or_connecting() {
+        for connection in [
+            ConnectionState::Connected,
+            ConnectionState::Connecting,
+            ConnectionState::ConnectPending,
+        ] {
+            let mut model = model_with_profiles(vec![]);
+            model.connection = connection;
+            model.overlay = Overlay::None;
+            let effects = handle_key(&mut model, key('s'));
+            assert_eq!(effects, vec![Effect::Disconnect], "{connection:?}");
+        }
     }
 
     #[test]
@@ -633,6 +643,20 @@ mod tests {
         assert_eq!(effects, vec![app_log_info("Reconnecting to A…")]);
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, Some(a_id));
+    }
+
+    #[test]
+    fn r_restarts_a_pending_connection_attempt() {
+        let a = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        let a_id = a.id;
+        let mut model = model_with_profiles(vec![a]);
+        model.connection = ConnectionState::ConnectPending;
+        model.connecting_profile_id = Some(a_id);
+        let attempt = model.connect_attempt_id;
+        let effects = handle_key(&mut model, key('r'));
+        assert_eq!(effects, vec![app_log_info("Reconnecting to A…")]);
+        assert_eq!(model.connection, ConnectionState::Connecting);
+        assert_eq!(model.connect_attempt_id, attempt.wrapping_add(1));
     }
 
     #[test]
