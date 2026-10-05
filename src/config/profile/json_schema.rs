@@ -519,17 +519,22 @@ mod tests {
                     "service_routes": { "steam": "direct", "telegram": "proxy" }
                 },
                 "dns": {
-                    "servers": [
-                        { "type": "local", "tag": "local" },
-                        { "type": "udp", "tag": "udp", "server": "1.1.1.1", "server_port": 53 },
-                        { "type": "tcp", "tag": "tcp", "server": "1.1.1.1" },
-                        { "type": "tls", "tag": "tls", "server": "8.8.8.8" },
-                        { "type": "https", "tag": "https", "server": "1.1.1.1", "path": "/dns-query" },
-                        { "type": "quic", "tag": "quic", "server": "9.9.9.9" },
-                        { "type": "fake_ip", "tag": "fake", "inet4_range": "198.18.0.0/15" }
-                    ],
-                    "rules": [{ "server": "local", "domain_suffix": ["lan"], "disable_cache": true }],
-                    "final_server": "https", "strategy": "ipv4_only", "fakeip_enabled": true
+                    "current_preset": "home",
+                    "custom_presets": [{
+                        "name": "home",
+                        "servers": [
+                            { "type": "local", "tag": "local" },
+                            { "type": "udp", "tag": "udp", "server": "1.1.1.1", "server_port": 53 },
+                            { "type": "tcp", "tag": "tcp", "server": "1.1.1.1" },
+                            { "type": "tls", "tag": "tls", "server": "8.8.8.8" },
+                            { "type": "https", "tag": "https", "server": "1.1.1.1", "path": "/dns-query" },
+                            { "type": "quic", "tag": "quic", "server": "9.9.9.9" }
+                        ],
+                        "rules": [{ "server": "local", "domain_suffix": ["lan"], "disable_cache": true }],
+                        "final_server": "https"
+                    }],
+                    "strategy": "ipv4_only", "fakeip_enabled": true,
+                    "fakeip_ranges": { "inet4_range": "198.19.0.0/16", "inet6_range": "fc00::/18" }
                 }
             }
         })
@@ -593,7 +598,10 @@ mod tests {
                 "port": 70000, "uuid": "u", "reality": { "public_key": "k" }, "ech": 5
             }],
             "subscriptions": [{ "name": "s", "url": "u", "last_updated": "yesterday" }],
-            "settings": { "dns": { "servers": [{ "type": "udp", "tag": "t" }] }, "icons": "emoji" }
+            "settings": {
+                "dns": { "custom_presets": [{ "name": "p", "servers": [{ "type": "udp", "tag": "t" }], "final_server": "t" }] },
+                "icons": "emoji"
+            }
         });
         assert_eq!(
             pointers(document)
@@ -607,7 +615,7 @@ mod tests {
                 "/profiles/0/reality: \"short_id\" is a required property",
                 "/profiles/0/reality: \"server_name\" is a required property",
                 "/profiles/0/reality: \"spider_x\" is a required property",
-                "/settings/dns/servers/0: \"server\" is a required property",
+                "/settings/dns/custom_presets/0/servers/0: \"server\" is a required property",
                 "/settings/icons: must be one of \"nerd\", \"unicode\"",
                 "/subscriptions/0/last_updated: value is not a valid date-time",
             ]
@@ -636,7 +644,9 @@ mod tests {
                 profile("shadowsocks", json!({ "method": "aes-256-gcm", "password": "p" })),
                 profile("vless", json!({ "uuid": crate::test_helpers::TEST_UUID }))
             ],
-            "settings": { "dns": { "servers": [{ "type": "local", "tag": "l", "typo": 1 }] } }
+            "settings": {
+                "dns": { "custom_presets": [{ "name": "p", "servers": [{ "type": "local", "tag": "l", "typo": 1 }], "final_server": "l" }] }
+            }
         });
         let found: Vec<_> = pointers(document)
             .into_iter()
@@ -651,7 +661,7 @@ mod tests {
                 "/profiles/1/typo_two",
                 "/profiles/2/typo_one",
                 "/profiles/2/typo_two",
-                "/settings/dns/servers/0/typo",
+                "/settings/dns/custom_presets/0/servers/0/typo",
             ]
         );
         let lenient: Result<Config, _> = serde_json::from_value(json!({
@@ -676,7 +686,13 @@ mod tests {
             ],
             "settings": {
                 "theme": "missing",
-                "logs": { "level": "verbose", "line_retention": { "app": 999 } }
+                "logs": { "level": "verbose", "line_retention": { "app": 999 } },
+                "dns": {
+                    "custom_presets": [
+                        { "name": "", "servers": [{ "type": "local", "tag": "l" }], "final_server": "l" }
+                    ],
+                    "strategy": "ipv6_only"
+                }
             }
         });
         let mut messages: Vec<_> = pointers(document)
@@ -693,6 +709,8 @@ mod tests {
                 "/profiles/0/port: value is less than the minimum of 1",
                 "/profiles/0/password: must not be empty",
                 "/profiles/1/ss_password: must not be empty",
+                "/settings/dns/custom_presets/0/name: must not be empty",
+                "/settings/dns/strategy: must be one of \"prefer_ipv4\", \"ipv4_only\"",
                 "/settings/logs/level: must be one of \"trace\", \"debug\", \"info\", \"warn\", \"error\"",
                 "/settings/logs/line_retention/app: value is less than the minimum of 1000",
             ]
@@ -711,6 +729,26 @@ mod tests {
             let parsed: super::super::Settings = serde_json::from_value(settings).unwrap();
             assert_eq!(parsed.diagnostics(), []);
         }
+    }
+
+    #[test]
+    fn legacy_dns_fields_are_not_part_of_the_current_schema() {
+        let document = json!({
+            "schema_version": CURRENT_SCHEMA_VERSION,
+            "settings": { "dns": { "servers": [], "rules": [], "final_server": "remote" } }
+        });
+        let found: Vec<_> = pointers(document)
+            .into_iter()
+            .map(|(pointer, _)| pointer)
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "/settings/dns/final_server",
+                "/settings/dns/rules",
+                "/settings/dns/servers",
+            ]
+        );
     }
 
     #[test]

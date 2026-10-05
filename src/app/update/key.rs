@@ -159,7 +159,7 @@ mod tests {
 
     use super::*;
     use crate::app::model::ConnectionState;
-    use crate::config::profile::{DnsPreset, DnsStrategy, Profile};
+    use crate::config::profile::{DnsStrategy, Profile};
     use crate::test_helpers::*;
 
     #[test]
@@ -261,8 +261,8 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::DnsSettings;
         model.dns_selected = 1;
-        model.dns_preset_draft = Some(DnsPreset::GoogleDot);
-        model.dns_strategy_draft = Some(DnsStrategy::PreferIpv6);
+        model.dns_preset_draft = Some("google_dot".to_string());
+        model.dns_strategy_draft = Some(DnsStrategy::OnlyIpv4);
 
         handle_key(&mut model, key('?'));
         handle_key(&mut model, KeyEvent::from(KeyCode::Tab));
@@ -285,7 +285,7 @@ mod tests {
         handle_key(&mut model, key('?'));
         assert_eq!(model.overlay, Overlay::DnsSettings);
         assert_eq!(model.dns_selected, 1);
-        assert_eq!(model.dns_preset_draft, Some(DnsPreset::GoogleDot));
-        assert_eq!(model.dns_strategy_draft, Some(DnsStrategy::PreferIpv6));
+        assert_eq!(model.dns_preset_draft, Some("google_dot".to_string()));
+        assert_eq!(model.dns_strategy_draft, Some(DnsStrategy::OnlyIpv4));
     }
 }

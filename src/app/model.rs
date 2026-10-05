@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::config::load_config;
 use crate::config::profile::{
-    Config, DnsPreset, DnsStrategy, GeoRegion, Profile, RoutedService, ServiceRoute,
+    Config, DnsStrategy, GeoRegion, Profile, RoutedService, ServiceRoute,
 };
 use crate::ui::styles::Theme;
 use chrono::{DateTime, Local};
@@ -317,7 +317,7 @@ pub struct Model {
     pub dns_selected: usize,
     /// Pending built-in DNS preset preview while the DNS overlay is open.
     /// `None` means the persisted DNS configuration is being displayed.
-    pub dns_preset_draft: Option<DnsPreset>,
+    pub dns_preset_draft: Option<String>,
     /// Pending DNS strategy preview while the DNS overlay is open. Set by
     /// `h`/`l` on the Strategy row, committed by Enter, discarded by Esc.
     pub dns_strategy_draft: Option<DnsStrategy>,

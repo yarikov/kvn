@@ -409,7 +409,7 @@ mod tests {
     use crate::app::update::key::sources::handle_sources;
     use crate::app::update::update;
     use crate::config::profile::{
-        DnsPreset, DnsStrategy, IconSet, Profile, RoutedService, RoutingMode, ServiceRoute,
+        DnsStrategy, IconSet, Profile, RoutedService, RoutingMode, ServiceRoute,
     };
     use crate::test_helpers::*;
 
@@ -678,7 +678,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         model.dns_selected = 2;
-        model.dns_preset_draft = Some(DnsPreset::GoogleDot);
+        model.dns_preset_draft = Some("google_dot".to_string());
         model.dns_strategy_draft = Some(DnsStrategy::OnlyIpv4);
         model.dns_fakeip_draft = Some(true);
 
@@ -802,7 +802,7 @@ mod tests {
         let mut dns = model_with_profiles(vec![]);
         dns.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         handle_key(&mut dns, key('d'));
-        dns.dns_preset_draft = Some(DnsPreset::GoogleDot);
+        dns.dns_preset_draft = Some("google_dot".to_string());
         dns.dns_strategy_draft = Some(DnsStrategy::OnlyIpv4);
         dns.dns_fakeip_draft = Some(true);
         handle_key(&mut dns, KeyEvent::from(KeyCode::Backspace));
@@ -883,13 +883,10 @@ mod tests {
         let mut dns = model_with_profiles(vec![]);
         dns.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         handle_key(&mut dns, key('d'));
-        dns.dns_preset_draft = Some(DnsPreset::GoogleDot);
+        dns.dns_preset_draft = Some("google_dot".to_string());
         let effects = handle_key(&mut dns, KeyEvent::from(KeyCode::Enter));
         assert_eq!(dns.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
-        assert_eq!(
-            DnsPreset::detect(&dns.config.settings.dns),
-            Some(DnsPreset::GoogleDot)
-        );
+        assert_eq!(dns.config.settings.dns.current_preset, "google_dot");
         assert!(effects.contains(&Effect::SaveConfig));
         assert_eq!(dns.settings_menu_return, None);
 

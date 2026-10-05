@@ -16,7 +16,9 @@ mod tls;
 
 pub use diagnostic::ConfigDiagnostic;
 pub(crate) use diagnostic::into_result;
-pub use dns::{DnsConfig, DnsPreset, DnsRule, DnsServer, DnsStrategy};
+#[cfg(test)]
+pub use dns::CustomDnsPreset;
+pub use dns::{ActiveDns, DnsConfig, DnsPreset, DnsRule, DnsServer, DnsStrategy, FakeIpServer};
 pub use entry::Profile;
 pub use json_schema::{config_json_schema, schema_diagnostics};
 pub use protocol::Protocol;

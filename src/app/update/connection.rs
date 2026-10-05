@@ -227,6 +227,15 @@ pub(in crate::app::update) fn queue_connect(model: &mut Model, profile_id: Uuid)
     }
 }
 
+pub(in crate::app::update) fn reconnect_with_new_settings(model: &mut Model) -> bool {
+    let profile_id = match model.connection {
+        ConnectionState::Connected => model.active_profile_id,
+        ConnectionState::ConnectPending => model.connecting_profile_id,
+        ConnectionState::Connecting | ConnectionState::Idle => None,
+    };
+    profile_id.is_some_and(|id| queue_connect(model, id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,6 +248,36 @@ mod tests {
     use crate::config::profile::Profile;
     use crate::test_helpers::*;
     use std::time::Instant;
+
+    #[test]
+    fn reconnect_with_new_settings_restarts_only_a_live_or_pending_connection() {
+        let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        let profile_id = profile.id;
+        for (state, restarts) in [
+            (ConnectionState::Connected, true),
+            (ConnectionState::ConnectPending, true),
+            (ConnectionState::Connecting, false),
+            (ConnectionState::Idle, false),
+        ] {
+            let mut model = model_with_profiles(vec![profile.clone()]);
+            model.connection = state;
+            model.active_profile_id = Some(profile_id);
+            model.connecting_profile_id = Some(profile_id);
+            let attempt = model.connect_attempt_id;
+
+            assert_eq!(
+                reconnect_with_new_settings(&mut model),
+                restarts,
+                "{state:?}"
+            );
+            let expected_attempt = if restarts {
+                attempt.wrapping_add(1)
+            } else {
+                attempt
+            };
+            assert_eq!(model.connect_attempt_id, expected_attempt, "{state:?}");
+        }
+    }
 
     #[test]
     fn connect_failed_sets_status_error() {

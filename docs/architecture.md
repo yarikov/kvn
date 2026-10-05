@@ -7,7 +7,7 @@
 | Component | Library / Tool | Purpose |
 |-----------|--------------|---------|
 | Terminal UI | [ratatui](https://ratatui.rs/) + [crossterm](https://github.com/crossterm-rs/crossterm) | Rendering, keyboard input, and terminal lifecycle |
-| VPN backend | [sing-box](https://sing-box.sagernet.org/) 1.12+ | TUN, protocols, DNS, and traffic routing |
+| VPN backend | [sing-box](https://sing-box.sagernet.org/) 1.14+ | TUN, protocols, DNS, and traffic routing |
 | Data formats | [serde](https://serde.rs/), `serde_json`, `toml` | Configuration, IPC messages, and bundled palettes |
 | Networking | [ureq](https://github.com/algesten/ureq) with rustls | Subscriptions, rule-sets, and Clash API statistics |
 | Linux integration | [zbus](https://docs.rs/zbus/latest/zbus/), `notify`, `signal-hook` | Suspend/resume, theme watching, and Unix signals |

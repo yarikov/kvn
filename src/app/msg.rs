@@ -3,7 +3,7 @@ use crate::app::model::{
     TrafficStats,
 };
 use crate::config::profile::{
-    DnsPreset, DnsStrategy, GeoRegion, Profile, RoutedService, RoutingMode, Settings, Subscription,
+    DnsStrategy, GeoRegion, Profile, RoutedService, RoutingMode, Settings, Subscription,
 };
 use crate::ui::styles::Theme;
 use chrono::{DateTime, Local};
@@ -503,7 +503,7 @@ pub struct StateSnapshot {
     pub geo_region_selected: usize,
     pub dns_selected: usize,
     #[serde(default)]
-    pub dns_preset_draft: Option<DnsPreset>,
+    pub dns_preset_draft: Option<String>,
     #[serde(default)]
     pub dns_strategy_draft: Option<DnsStrategy>,
     #[serde(default)]

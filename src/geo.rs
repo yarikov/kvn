@@ -131,6 +131,18 @@ pub(crate) fn service_assets(service: RoutedService) -> ServiceAssets {
     }
 }
 
+pub(crate) fn is_ip_rule_set_tag(tag: &str) -> bool {
+    let region_tags = GeoRegion::ALL
+        .into_iter()
+        .filter_map(region_assets)
+        .map(|assets| assets.geoip.tag());
+    let service_tags = RoutedService::ALL
+        .into_iter()
+        .filter_map(|service| service_assets(service).geoip)
+        .map(|asset| asset.tag());
+    region_tags.chain(service_tags).any(|ip_tag| ip_tag == tag)
+}
+
 /// Metadata tracking ETags and update time for geo rule-sets.
 #[derive(Debug, Clone, Default, Serialize)]
 struct GeoMetadata {
@@ -848,6 +860,22 @@ mod tests {
         let a = region_assets(GeoRegion::Ru).unwrap();
         assert_eq!(a.geoip.tag(), "geoip-ru");
         assert_eq!(a.geosite.tag(), "geosite-category-ru");
+    }
+
+    #[test]
+    fn ip_rule_set_tags_are_the_geoip_assets() {
+        for tag in [
+            "geoip-ru",
+            "geoip-cn",
+            "geoip-ir",
+            "geoip-steam",
+            "geoip-telegram",
+        ] {
+            assert!(is_ip_rule_set_tag(tag), "{tag}");
+        }
+        for tag in ["geosite-category-ru", "geosite-steam", "geoip-unknown"] {
+            assert!(!is_ip_rule_set_tag(tag), "{tag}");
+        }
     }
 
     #[test]

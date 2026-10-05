@@ -3,7 +3,7 @@ use crate::app::model::{AppStatus, ConnectionState, Model};
 use crate::config::profile::Profile;
 use uuid::Uuid;
 
-use crate::app::update::connection::queue_connect;
+use crate::app::update::connection::reconnect_with_new_settings;
 use crate::app::update::status::push_status;
 
 pub(crate) fn handle_config_reloaded(
@@ -61,15 +61,8 @@ pub(crate) fn handle_config_reloaded(
                             model.pending_service_reconnect = true;
                             effects.push(Effect::DownloadServiceRuleSetsIfMissing);
                         }
-                        ConnectionState::Connected => {
-                            if let Some(id) = model.active_profile_id {
-                                queue_connect(model, id);
-                            }
-                        }
-                        ConnectionState::ConnectPending => {
-                            if let Some(id) = model.connecting_profile_id {
-                                queue_connect(model, id);
-                            }
+                        ConnectionState::Connected | ConnectionState::ConnectPending => {
+                            reconnect_with_new_settings(model);
                         }
                         // A queued attempt has not captured its Profile and
                         // Settings yet; the next Tick reads the new config.
@@ -146,6 +139,7 @@ fn connection_settings_changed(
 mod tests {
     use super::*;
     use crate::app::msg::Msg;
+    use crate::app::update::connection::queue_connect;
     use crate::app::update::tick::handle_tick;
     use crate::app::update::update;
     use crate::config::profile::GeoRegion;
@@ -350,7 +344,7 @@ mod tests {
 
         let original = crate::config::profile::Settings::default();
         let mut changed = original.clone();
-        changed.dns.strategy = DnsStrategy::OnlyIpv6;
+        changed.dns.strategy = DnsStrategy::OnlyIpv4;
         assert!(connection_settings_changed(&original, &changed));
 
         let mut changed = original.clone();
