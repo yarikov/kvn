@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{ChildStderr, Command, Stdio};
+use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
@@ -71,20 +71,55 @@ fn write_config(
 }
 
 /// Validate the sing-box configuration by running `sing-box check`.
-fn check_config(path: &PathBuf) -> Result<()> {
-    let output = Command::new(singbox_binary())
-        .arg("check")
-        .arg("-c")
-        .arg(path)
-        .output()
+fn check_config(path: &PathBuf, cancelled: &dyn Fn() -> bool) -> Result<()> {
+    let mut command = Command::new(singbox_binary());
+    command.arg("check").arg("-c").arg(path);
+    let (status, stderr) = run_until_exit(command, cancelled)
         .with_context(|| format!("Failed to run {} check", singbox_binary()))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if !status.success() {
         anyhow::bail!("sing-box config validation failed: {}", stderr);
     }
 
     Ok(())
+}
+
+fn run_until_exit(
+    mut command: Command,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(ExitStatus, String)> {
+    let mut child = command
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let stderr = child.stderr.take().map(|mut stderr| {
+        thread::spawn(move || {
+            let mut text = String::new();
+            let _ = stderr.read_to_string(&mut text);
+            text
+        })
+    });
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if cancelled() {
+            stop_child(&mut child);
+            anyhow::bail!(START_CANCELLED);
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let stderr = stderr
+        .and_then(|reader| reader.join().ok())
+        .unwrap_or_default();
+    Ok((status, stderr))
+}
+
+const START_CANCELLED: &str = "sing-box start was cancelled";
+
+fn stop_child(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn collect_geo_availability() -> GeoAvailability {
@@ -113,7 +148,11 @@ const CLASH_API_START_ATTEMPTS: usize = 3;
 
 /// Start the sing-box process with the given profile.
 /// Validates config first, then spawns the process and verifies it stays alive.
-pub fn start(profile: &Profile, settings: &Settings) -> Result<ProcessHandle> {
+pub fn start(
+    profile: &Profile,
+    settings: &Settings,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<ProcessHandle> {
     let geo = collect_geo_availability();
     let mut config_validated = false;
     start_with(
@@ -122,10 +161,13 @@ pub fn start(profile: &Profile, settings: &Settings) -> Result<ProcessHandle> {
         |clash_api_port| {
             let config_path = write_config(profile, settings, &geo, clash_api_port)?;
             if !config_validated {
-                check_config(&config_path)?;
+                check_config(&config_path, cancelled)?;
                 config_validated = true;
             }
-            spawn_and_wait(&config_path, clash_api_port)
+            if cancelled() {
+                anyhow::bail!(START_CANCELLED);
+            }
+            spawn_and_wait(&config_path, clash_api_port, cancelled)
         },
     )
 }
@@ -167,7 +209,11 @@ fn mentions_exact_loopback_port(error: &str, port: u16) -> bool {
         .any(|(start, _)| !error[start + address.len()..].starts_with(|c: char| c.is_ascii_digit()))
 }
 
-fn spawn_and_wait(config_path: &PathBuf, clash_api_port: u16) -> Result<ProcessHandle> {
+fn spawn_and_wait(
+    config_path: &PathBuf,
+    clash_api_port: u16,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<ProcessHandle> {
     // We don't consume sing-box stdout; drop it to /dev/null so a verbose
     // logger can't fill the pipe buffer (~64K) and wedge the child on write.
     // stderr stays piped — on immediate exit we read it for diagnostics, and
@@ -203,6 +249,10 @@ fn spawn_and_wait(config_path: &PathBuf, clash_api_port: u16) -> Result<ProcessH
                 );
             }
             Ok(None) => {
+                if cancelled() {
+                    stop_child(&mut child);
+                    anyhow::bail!(START_CANCELLED);
+                }
                 if std::time::Instant::now() >= deadline {
                     // Process survived the readiness window — drain stderr so
                     // the child doesn't block on a full pipe buffer, then hand
@@ -446,8 +496,29 @@ mod tests {
             TEST_CLASH_PORT,
         )
         .unwrap();
-        check_config(&path).expect("sing-box rejected a minimal vless profile");
+        check_config(&path, &|| false).expect("sing-box rejected a minimal vless profile");
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn run_until_exit_stops_a_cancelled_process() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let mut command = Command::new("sleep");
+        command.arg("5");
+        let started = std::time::Instant::now();
+        let error = run_until_exit(command, &|| true).unwrap_err();
+        assert_eq!(error.to_string(), START_CANCELLED);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn run_until_exit_returns_the_status_and_stderr() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let mut command = Command::new("sh");
+        command.args(["-c", "echo rejected >&2; exit 3"]);
+        let (status, stderr) = run_until_exit(command, &|| false).unwrap();
+        assert_eq!(status.code(), Some(3));
+        assert_eq!(stderr.trim(), "rejected");
     }
 
     fn conflict_stderr(port: impl std::fmt::Display) -> anyhow::Error {

@@ -3,11 +3,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
-
 use crate::app::model::{AppStatus, ConnectionState, Model, Overlay, TrafficStats};
 use crate::app::msg::{IpcError, Msg};
-use crate::config::profile::{Profile, Protocol, Settings};
+use crate::config::profile::{Profile, Settings};
 
 use super::DaemonShared;
 use super::process_slot::{ProcessSlot, is_current_attempt, lock_process_slot};
@@ -56,7 +54,6 @@ pub(super) fn connect(
     let slot = shared.process_slot.clone();
     let coordinator = shared.connect_coordinator.clone();
     let log_pruned_at = shared.singbox_log_pruned_at.clone();
-    let kill_switch = model.config.settings.kill_switch;
     thread::spawn(move || {
         let _coordinator = coordinator.lock().unwrap_or_else(|p| p.into_inner());
         if !is_current_attempt(&slot, attempt_id) {
@@ -65,33 +62,6 @@ pub(super) fn connect(
         wait_for_sing_box_update(&slot, attempt_id);
         if !is_current_attempt(&slot, attempt_id) {
             return;
-        }
-        if kill_switch {
-            if let Err(e) = crate::services::killswitch::revoke() {
-                let err = IpcError::from(e.context("failed to clear stale kill switch exceptions"));
-                let _ = tx.send(Msg::ConnectFailed {
-                    attempt_id,
-                    error: err,
-                });
-                return;
-            }
-            if !is_current_attempt(&slot, attempt_id) {
-                return;
-            }
-            if let Err(e) = open_handshake_window(&profile) {
-                if let Err(cleanup_err) = crate::services::killswitch::revoke() {
-                    tracing::warn!(
-                        "Failed to clean up kill switch exceptions after handshake error: {}",
-                        cleanup_err
-                    );
-                }
-                let err = IpcError::from(e.context("kill switch handshake setup failed"));
-                let _ = tx.send(Msg::ConnectFailed {
-                    attempt_id,
-                    error: err,
-                });
-                return;
-            }
         }
         if !is_current_attempt(&slot, attempt_id) {
             return;
@@ -113,7 +83,8 @@ pub(super) fn connect(
             }
         }
         drop(last_pruned);
-        match crate::singbox::runner::start(&profile, &settings) {
+        let cancelled = || !is_current_attempt(&slot, attempt_id);
+        match crate::singbox::runner::start(&profile, &settings, &cancelled) {
             Ok(handle) => {
                 let pid = handle.pid;
                 let stale_handle = {
@@ -135,13 +106,8 @@ pub(super) fn connect(
                     attempt_id,
                 });
             }
+            Err(_) if cancelled() => {}
             Err(e) => {
-                if kill_switch && let Err(cleanup_err) = crate::services::killswitch::revoke() {
-                    tracing::warn!(
-                        "Failed to clean up kill switch exceptions after connect failure: {}",
-                        cleanup_err
-                    );
-                }
                 let _ = tx.send(Msg::ConnectFailed {
                     attempt_id,
                     error: IpcError::from(e),
@@ -157,12 +123,6 @@ pub(super) fn disconnect(model: &mut Model, shared: &DaemonShared) {
         let mut slot = lock_process_slot(&shared.process_slot);
         slot.attempt_id = model.connect_attempt_id;
     }
-    // Wait for an in-flight setup to observe invalidation and stop
-    // before flushing its temporary kill-switch exceptions.
-    let _coordinator = shared
-        .connect_coordinator
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
     let previous = {
         let mut slot = lock_process_slot(&shared.process_slot);
         slot.handle.take()
@@ -228,49 +188,13 @@ pub(super) fn check_auto_connect_polkit(tx: &Sender<Msg>) {
     });
 }
 
-/// Pre-resolve the VPN endpoint and open a temporary nft exception so the
-/// initial handshake can pass through the kill switch.
-///
-/// Set elements are deduplicated by nftables and remain until disconnect, so
-/// repeated calls are idempotent and safe across reconnects.
-fn open_handshake_window(profile: &Profile) -> Result<()> {
-    // NOTE: sing-box dials DNS servers through its default dialer, which
-    // applies route.default_mark (common/dialer/default.go), so the kill
-    // switch already admits them via `meta mark 0x29a`; they need no exception.
-    let endpoints = crate::services::killswitch::resolve_endpoints(&profile.address, profile.port)?;
-    for addr in &endpoints {
-        for protocol in handshake_protocols(profile.protocol()) {
-            crate::services::killswitch::allow_endpoint(addr, protocol)?;
-        }
-    }
-    Ok(())
-}
-
-/// Network protocols that must be allowed to reach a VPN endpoint before the
-/// tunnel is established. QUIC-based outbounds use UDP, while SOCKS and
-/// Shadowsocks may carry traffic over either transport.
-fn handshake_protocols(protocol: Protocol) -> &'static [&'static str] {
-    match protocol {
-        Protocol::Hysteria2 | Protocol::Tuic => &["udp"],
-        Protocol::Shadowsocks | Protocol::Socks => &["tcp", "udp"],
-        Protocol::Vless
-        | Protocol::Vmess
-        | Protocol::Trojan
-        | Protocol::Shadowtls
-        | Protocol::Anytls
-        | Protocol::Http
-        | Protocol::Ssh => &["tcp"],
-    }
-}
-
 fn log_prune_due(last_pruned: Option<Instant>, now: Instant) -> bool {
     last_pruned.is_none_or(|last| now.duration_since(last) >= LOG_PRUNE_INTERVAL)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{handshake_protocols, log_prune_due};
-    use crate::config::profile::Protocol;
+    use super::log_prune_due;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -285,28 +209,5 @@ mod tests {
             Some(start),
             start + Duration::from_secs(24 * 60 * 60)
         ));
-    }
-
-    #[test]
-    fn handshake_protocols_match_outbound_transports() {
-        for protocol in [Protocol::Hysteria2, Protocol::Tuic] {
-            assert_eq!(handshake_protocols(protocol), &["udp"]);
-        }
-
-        for protocol in [Protocol::Shadowsocks, Protocol::Socks] {
-            assert_eq!(handshake_protocols(protocol), &["tcp", "udp"]);
-        }
-
-        for protocol in [
-            Protocol::Vless,
-            Protocol::Vmess,
-            Protocol::Trojan,
-            Protocol::Shadowtls,
-            Protocol::Anytls,
-            Protocol::Http,
-            Protocol::Ssh,
-        ] {
-            assert_eq!(handshake_protocols(protocol), &["tcp"]);
-        }
     }
 }

@@ -88,9 +88,7 @@ Exactly what the kill switch lets through, besides the tunnel interface
 - the local network: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
   `fc00::/7` and `fe80::/10`;
 - all ICMP and ICMPv6 (ping, path MTU discovery, IPv6 neighbor discovery);
-- DHCP and DHCPv6, so the network connection itself keeps working;
-- the VPN server's address and port, opened for the handshake when connecting
-  and closed on disconnect.
+- DHCP and DHCPv6, so the network connection itself keeps working.
 
 ## IPv4 only
 
