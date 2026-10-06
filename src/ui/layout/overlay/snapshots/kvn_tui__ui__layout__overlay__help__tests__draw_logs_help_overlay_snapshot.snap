@@ -14,14 +14,16 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                              │ Logs                                            ┃                              │
 │                              │ y          Yank selected log(s)                 ┃                              │
 │                              │ Shift+V    Select multiple logs                 ┃                              │
+│                              │ j/k        Extend selection by one log          ┃                              │
+│                              │ gg/G       Extend selection to first / last     ┃                              │
 │                              │ Esc        Cancel log selection                 ┃                              │
 │                              │                                                 ┃                              │
 │                              │ Profiles                                        ┃                              │
 │                              │ Enter      Connect selected profile             ┃                              │
 │                              │ e          Open profiles.json in $EDITOR        ┃                              │
-│                              │ y          Yank profile or subscription         ┃                              │
-│                              │ p          Paste profile or subscription        ┃                              │
-│                              │ d          Delete profile or subscription       ┃                              │
+│                              │ y          Yank profile or subscription         │                              │
+│                              │ p          Paste profile or subscription        │                              │
+│                              │ d          Delete profile or subscription       │                              │
 │                              │ u/U        Update subscription / geo            │                              │
 │                              │ i/I        Cycle subscription / geo auto-update │                              │
 │                              │ t/T        Test selected / all profiles         │                              │
@@ -30,8 +32,6 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                              │ r          Reconnect                            │                              │
 │                              │ s          Disconnect                           │                              │
 │                              │ Shift+A    Toggle auto-connect                  │                              │
-│                              │ Shift+K    Toggle kill switch                   │                              │
-│                              │                                                 │                              │
 │                              │                                                 │                              │
 │                              │                    q/󱊷 close                    │                              │
 │                              └─────────────────────────────────────────────────┘                              │

@@ -57,6 +57,8 @@ const SOURCES: &[(&str, &str)] = &[
 const LOGS: &[(&str, &str)] = &[
     ("y", "Yank selected log(s)"),
     ("Shift+V", "Select multiple logs"),
+    ("j/k", "Extend selection by one log"),
+    ("gg/G", "Extend selection to first / last"),
     ("Esc", "Cancel log selection"),
 ];
 
