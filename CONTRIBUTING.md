@@ -6,7 +6,9 @@ the generated changelog useful to users.
 ## Before You Start
 
 - Open an issue before beginning a large feature or architectural change.
-- Base your work on the latest `develop` branch.
+- Base your work on the latest `develop` branch. Pull requests target
+  `develop`; `master` receives `develop` when a release is made. CI runs on
+  every pull request, on pushes to `master`, and on release tags.
 - Keep each pull request focused on one logical change. Unrelated refactors,
   parsers, dependency changes, and behavior changes belong in separate pull
   requests.
@@ -91,7 +93,9 @@ infer important behavior from the diff.
 - Keep `app::update::update` free of I/O, threads, and system calls. Declare
   side effects as `Effect` values and execute them in the daemon.
 - Use atomic writes for configuration and persistent state.
-- Use `tracing` for logging; do not use `println!`.
+- Use `tracing` for logging in the daemon and the TUI; do not use `println!`
+  there. One-shot CLI commands print their output with `println!` /
+  `eprintln!`.
 - Support Arch Linux unless an issue explicitly expands the platform scope.
 - Use the existing `src/foo.rs` plus `src/foo/bar.rs` module layout; do not add
   `mod.rs` files.
@@ -111,11 +115,15 @@ pull request, run:
 cargo fmt --check \
   && cargo clippy --all-targets --all-features -- -D warnings \
   && cargo test --locked \
-  && cargo llvm-cov --locked --summary-only
+  && cargo insta test --check --unreferenced=reject \
+  && cargo llvm-cov --locked --summary-only \
+  && cargo deny check all
 ```
 
-The last command requires `cargo-llvm-cov`. CI runs the same formatting,
-linting, test, and coverage gates.
+`cargo insta test` fails on snapshots that changed or that no test references
+any more; `cargo deny` checks dependency licenses, advisories, and sources
+against `deny.toml`. They require `cargo-insta`, `cargo-llvm-cov`, and
+`cargo-deny`. CI runs the same gates.
 
 ### Documentation-Only Pull Requests
 

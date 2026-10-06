@@ -57,7 +57,7 @@ Examples:
 - correcting a broken test expectation → `test`, not `fix`
 - updating a GitHub Actions workflow → `ci`, not `fix`
 - changing compiler or bundler configuration → `build`, not `feat`
-- updating dependencies as routine maintenance → `build` or the repository's established dependency type, not `feat`
+- updating dependencies as routine maintenance → `chore(deps)` in this repository (`cliff.toml` lists it under Improvements), not `feat`
 - reorganizing implementation without changing behavior → `refactor`, not `feat`
 - formatting or lint-only cleanup → `style`, not `fix`
 - making an existing algorithm faster without changing its contract → `perf`, not `feat`

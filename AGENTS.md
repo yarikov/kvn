@@ -23,9 +23,14 @@ cargo test ui::layout          # run a single module's tests
 INSTA_UPDATE=always cargo test # run tests and auto-accept snapshot changes
 cargo insta test --check --unreferenced=reject  # what CI checks: snapshots match, none orphaned
 cargo fmt                      # format (required before committing)
-cargo clippy --all-targets --all-features  # lint (fix warnings before committing)
+cargo clippy --all-targets --all-features -- -D warnings  # lint; CI fails on any warning
 cargo llvm-cov --summary-only  # coverage report; both region & line totals must stay ≥ 85 % (CI gate)
+cargo deny check all           # dependency licenses, advisories, bans, sources (CI gate, deny.toml)
 ```
+
+CI runs `cargo test --locked` and `cargo llvm-cov --locked`, so commit an updated
+`Cargo.lock` together with any dependency change. The toolchain is pinned to
+`stable` with `rustfmt` and `clippy` by `rust-toolchain.toml`.
 
 The rules behind each gate live in § Testing Patterns, § Coverage Policy, and § Formatting & Linting.
 
@@ -35,7 +40,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 
 | Module | Path | Responsibility |
 |--------|------|----------------|
-| `cli` | `src/cli.rs`, `src/cli/clean_all.rs` | CLI argument parsing: `--daemon`, `--waybar-status`, `--version`; `status`/`connect`/`disconnect`/`reconnect`/`toggle` one-shot IPC clients; `enable`/`disable --killswitch`; `disable --support-prompt` (through the daemon's `DismissSupportPrompt` when it runs, otherwise straight into `support-prompt.json`); `doctor`, `migrate`, `config {migrate,reset,recover}`; `setup` and `clean` for the `--omarchy` / `--polkit` / `--killswitch` integrations (`clean --omarchy` reverts the whole Omarchy integration through `contrib/remove-omarchy.sh`, `clean --omarchy-backups` deletes only its backups); `sudo kvn clean --all` (`clean_all.rs`) stops the invoking user's daemon, runs every integration cleanup, reverts the Omarchy integration as that user through `contrib/remove-omarchy.sh`, and deletes that user's config, state and runtime files |
+| `cli` | `src/cli.rs`, `src/cli/clean_all.rs` | CLI argument parsing: `--daemon`, `--waybar-status`, `--version`; `status`/`connect`/`disconnect`/`reconnect`/`toggle` one-shot IPC clients; `enable`/`disable --killswitch`; `disable --support-prompt` (through the daemon's `DismissSupportPrompt` when it runs, otherwise straight into `support-prompt.json`); `doctor`, `migrate [--pending]`, `config {reset,recover}`; `setup` and `clean` for the `--omarchy` / `--polkit` / `--killswitch` integrations (`clean --omarchy` reverts the whole Omarchy integration through `contrib/remove-omarchy.sh`, `clean --omarchy-backups` deletes only its backups); `sudo kvn clean --all` (`clean_all.rs`) stops the invoking user's daemon, runs every integration cleanup, reverts the Omarchy integration as that user through `contrib/remove-omarchy.sh`, and deletes that user's config, state and runtime files |
 | `app` | `src/app.rs`, `src/app/model.rs`, `src/app/msg.rs`, `src/app/update.rs`, `src/app/effect.rs` | TEA core: Model, Msg, Update, Effect — pure data, messages, business logic, side-effect declarations |
 | `model` | `src/app/model.rs` | Application state (`Model`), overlay + connection state + subscription state, input state — pure data, no side effects |
 | `msg` | `src/app/msg.rs` | Message enum (`Msg`) — all external events (keys, ticks, logs, geo, resume, etc.) |
@@ -47,18 +52,23 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `daemon` | `src/daemon.rs` | Headless daemon: owns sing-box process, config, mpsc channel, IPC server, background services; `run` / `run_loop`, `DaemonShared`, `build_snapshot`, and the startup reconciliation of kill-switch and auto-connect state |
 | `daemon` submodules | `src/daemon/{effect,connection,geo,config_io,subscription,traffic,profile_test,process_slot}.rs` | Effect execution, mirroring the `app/update/` handler split: `effect.rs` is the `execute_daemon_effect` dispatcher only; `connection.rs` owns connect/disconnect, the polkit check and the tour's integration probe; `geo.rs` the seven geo/service rule-set effects plus the shared refresh and result-finalizing helpers; `config_io.rs` the revision-checked `profiles.json` commit, the support-prompt and onboarding-progress writes (including the failed-write recovery in § First-Run Onboarding) and config reload; `subscription.rs`, `traffic.rs` and `profile_test.rs` one effect each (the last owns the temporary sing-box SOCKS5 latency probe); `process_slot.rs` the sing-box process slot, its poisoned-lock-safe accessors, the 250 ms ticker and exit polling |
 | `tui_client` | `src/tui_client.rs` | TUI client orchestration: `run`, the daemon handshake (`connect_to_current_daemon`), terminal setup (`TerminalSession`, OSC colors), snapshot application, and the `run_loop` skeleton that feeds every `Msg` to the handler tree |
-| `tui_client` submodules | `src/tui_client/handler.rs` + `src/tui_client/handler/`, `src/tui_client/docs_preview.rs` | `handler.rs` owns `ClientLoop` (the loop's terminal/pane/log/toast/pointer state) and dispatches each `Msg`; the short branches (paste, snapshot, tick, resize, theme) stay there, while `mouse.rs` handles clicks, drags, wheel scrolling and log selection, `wheel.rs` the wheel step (one row per event, growing while events arrive in quick succession), `pointer.rs` the pointer shape plus double-click tracking, and `toast.rs` the client-local status toast lifetime. `handler/key.rs` routes by `Model.overlay` to `key/{support,log_pane,clipboard,editor,quit}.rs` — the client-local half of `app/update/key/`. `docs_preview.rs` builds the fixed state used for documentation captures |
+| `tui_client` submodules | `src/tui_client/handler.rs` + `src/tui_client/handler/`, `src/tui_client/docs_preview.rs` | `handler.rs` owns `ClientLoop` (the loop's terminal/pane/log/toast/pointer state) and dispatches each `Msg`; the short branches (paste, snapshot, tick, resize, theme) stay there, while `mouse.rs` handles clicks, drags, wheel scrolling and log selection, `wheel.rs` the wheel step (one row per event, growing while events arrive in quick succession), `pointer.rs` the pointer shape plus double-click tracking, `scroll.rs` the queue of `ScrollViewport` requests (one in flight), and `toast.rs` the client-local status toast lifetime. `handler/key.rs` routes by `Model.overlay` to `key/{support,log_pane,clipboard,editor,quit,onboarding}.rs` — the client-local half of `app/update/key/`. `docs_preview.rs` builds the fixed state used for documentation captures |
 | `ipc` | `src/ipc.rs` | NDJSON protocol over Unix domain socket for daemon ↔ TUI client communication |
 | `migrations` | `src/migrations.rs`, `contrib/migrations/*.sh` | Ordered package migrations: root-owned script discovery, per-user/machine markers written per script, runner lock, `profiles.json` backup, end-of-run daemon restart handoff |
-| `test_helpers` | `src/test_helpers.rs` | Shared test utilities (e.g. `model_with_profiles`)
-| `ui` | `src/ui.rs`, `src/ui/layout.rs`, `src/ui/widgets.rs`, `src/ui/styles.rs`, `src/ui/palette.rs`, `src/ui/icons.rs`, `src/ui/nav.rs` | ratatui rendering (used by TUI client only), layout splits, widget definitions, palette-driven `Theme`, Nerd Font / Unicode icon sets selected by `settings.icons`, navigation helpers |
+| `test_helpers` | `src/test_helpers.rs` | Shared test utilities (e.g. `model_with_profiles`) |
+| `doctor` | `src/doctor.rs` | `kvn doctor` read-only diagnostics, plus the polkit and integration probes the daemon reuses (`polkit_readiness`, `polkit_authorization_denied`, `integration_setup`) |
+| `omarchy` | `src/omarchy.rs` | Omarchy detection: active theme name, current-theme paths, Omarchy version, and whether the `yarikov.omakvn` plugin is installed |
+| `support_prompt` | `src/support_prompt.rs` | The support prompt's persisted schedule (`support-prompt.json`), outside the versioned config |
+| `redaction` | `src/redaction.rs` | Strips credentials, path tokens, queries and fragments from URLs and share links before they are logged |
+| `main` | `src/main.rs` | Entry point: legacy-name warning, CLI dispatch, pending-migration gate, logging setup, daemon start (`start_daemon` / `start_current_daemon`) |
+| `ui` | `src/ui.rs`, `src/ui/layout.rs`, `src/ui/widgets.rs`, `src/ui/styles.rs`, `src/ui/palette.rs`, `src/ui/icons.rs`, `src/ui/nav.rs`, `src/ui/help.rs` | ratatui rendering (used by TUI client only), layout splits, widget definitions, palette-driven `Theme`, Nerd Font / Unicode icon sets selected by `settings.icons`, navigation helpers, and the Help overlay's rows per `HelpContext` |
 | `ui::layout` submodules | `src/ui/layout.rs` + `src/ui/layout/` | `src/ui/layout.rs` is the facade: frame split, the `draw*` entry points, and the `pub(crate)` re-exports the TUI client calls. Each concern lives in one submodule — `text.rs` (Unicode width helpers), `log.rs` + `log/navigation.rs` (log formatting; cursor, viewport and selection state), `panes.rs` (pane geometry, mouse hit-testing, main/traffic/status rows), `sources.rs` (the Profiles list and its viewport), `scrollbar.rs` (the right-border scrollbar shared by the panes, Help and the pickers), and `overlay.rs` (dispatch on `Model.overlay` + the shared footer wording) over `overlay/` — `popup.rs` (popup geometry and the three modal renderers), `settings_row.rs` (the shared `Label ‹ value ›` row), and one file per overlay: `help`, `settings_menu`, `confirm_delete`, `confirm_disable`, `restart_required`, `routing`, `dns`, `theme`, `support`, `onboarding` |
 | `palette` | `src/ui/palette.rs`, `themes/*.toml`, `build.rs` | 22 vendored Omarchy palettes; `build.rs` compiles `themes/*.toml` into a `BUNDLED` static at compile time (no runtime TOML parsing) |
-| `config` | `src/config.rs`, `src/config/profile.rs`, `src/config/subscription.rs`, `src/config/json_pointer.rs` | JSON config I/O, profile and subscription struct definitions, subscription fetcher; `json_pointer::JsonIndex` indexes every RFC 6901 pointer of a JSON text in one pass and answers its line (exact, or the nearest present ancestor) |
+| `config` | `src/config.rs`, `src/config/profile.rs`, `src/config/subscription.rs`, `src/config/json_pointer.rs`, `src/config/merge.rs` + `src/config/merge/resolution.rs`, `src/config/recovery.rs` | JSON config I/O, profile and subscription struct definitions, subscription fetcher; `merge` is the UUID-aware three-way merge and `merge::resolution` builds the `YOUR EDIT` / `CURRENT` conflict document; `recovery` preserves and rotates copies in `recovery/` (three per kind); `json_pointer::JsonIndex` indexes every RFC 6901 pointer of a JSON text in one pass and answers its line (exact, or the nearest present ancestor) |
 | `config::profile` submodules | `src/config/profile/{diagnostic,json_schema,protocol,protocol_options,protocol_config,tls,entry,schedule,subscription,routing,settings,schema,migrate,dns}.rs`, `src/config/profile/share_link{.rs,/parse.rs,/encode.rs}` | `src/config/profile.rs` is a facade of `pub use` re-exports; each persisted type lives in one submodule — `ConfigDiagnostic` (a validation problem: JSON pointer + message), the draft-07 JSON Schema generated from the types with `schemars` and the in-house validator for exactly the keywords it emits, plus the `uuid` / `date` / `date-time` formats (`config_json_schema`, `schema_diagnostics`), protocol discriminant, per-protocol options and configs, shared TLS/transport blocks, `Profile`, auto-update schedules, `Subscription`, geo routing, `Settings`, the root `Config`, the ordered schema migrations, DNS, and share-link URI parsing/encoding |
-| `singbox` | `src/singbox.rs`, `src/singbox/config.rs`, `src/singbox/runner.rs`, `src/singbox/clash_api.rs`, `src/singbox/process_handle.rs` | Process lifecycle: allocate a free Clash API port, write temp config, run `sing-box check`, spawn `sing-box run`, retry a lost port race, kill on disconnect; Clash API client for live traffic stats; `Child` wrapper carrying the process's Clash API port |
+| `singbox` | `src/singbox.rs`, `src/singbox/config.rs`, `src/singbox/outbound.rs`, `src/singbox/runner.rs`, `src/singbox/clash_api.rs`, `src/singbox/process_handle.rs` | Process lifecycle: allocate a free Clash API port, write temp config, run `sing-box check`, spawn `sing-box run`, retry a lost port race, kill on disconnect; Clash API client for live traffic stats; `Child` wrapper carrying the process's Clash API port |
 | `geo` | `src/geo.rs` | Download and cache geoip/geosite rule-sets for sing-box routing |
-| `paths` | `src/paths.rs` | XDG directory resolution (`~/.config/kvn-tui/`), atomic path construction |
+| `paths` | `src/paths.rs` | Every file path kvn uses: config (`~/.config/kvn-tui/`), state (`$XDG_STATE_HOME/kvn/`) and both runtime namespaces (`$XDG_RUNTIME_DIR/kvn-tui/`, `$XDG_RUNTIME_DIR/kvn/`) |
 | `atomic_write` | `src/atomic_write.rs` | Atomic file write helper (write `.tmp` + fsync + rename + parent-dir fsync) |
 | `net` | `src/net.rs` | Free loopback port allocation (bind `127.0.0.1:0`, read the OS-assigned port, drop the listener) for the Clash API control port and the profile-test SOCKS5 port |
 | `pacman` | `src/pacman.rs` | Detects a pacman transaction that has already written a given package file (its ctime is not older than `/var/lib/pacman/db.lck`) and waits for it to settle; used by the migration runner for `kvn-tui`/`sing-box` and by the daemon's connect path for the sing-box binary it launches (`singbox::runner::binary_path`: `SING_BOX_PATH` or the first `sing-box` on `PATH`), whose capabilities hook runs only at PostTransaction |
@@ -66,13 +76,16 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `onboarding` | `src/onboarding.rs` | First-run tour: the ordered `OnboardingStep` cards, their handoff screen and copyable command, the persisted `OnboardingState` and the session-local `OnboardingProgress`, the `IntegrationSetup` / `SetupState` the protection cards render, plus the grandfathering load for installs that predate the tour |
 | `waybar` | `src/services/waybar.rs` | Read/write `state.json` for waybar integration and crash recovery |
 | `suspend` | `src/services/suspend.rs` | D-Bus listener for `systemd-logind` `PrepareForSleep` signals (zbus) |
-| `integration_files` | `src/integration_files.rs`, `contrib/killswitch.nft`, `contrib/kvn-tui-killswitch.{service,sudoers}`, `contrib/49-kvn-tui.rules` | Embedded kill-switch/polkit payloads passed to the setup scripts; detects outdated installed files and SHA-256 stamps in `/var/lib/kvn/integrations/` for `kvn doctor` |
+| `integration_files` | `src/integration_files.rs`, `contrib/killswitch.nft`, `contrib/killswitch-helper.sh`, `contrib/kvn-tui-killswitch.{service,sudoers}`, `contrib/49-kvn-tui.rules` | Embedded kill-switch/polkit payloads passed to the setup scripts; detects outdated installed files and SHA-256 stamps in `/var/lib/kvn/integrations/` for `kvn doctor` |
 | `killswitch` | `src/services/killswitch.rs` | nftables helper integration: enable/disable systemd unit, flush handshake exceptions left by older daemons, reconcile state on startup |
-| `services` | `src/services.rs`, `src/services/log_tailer.rs`, `src/services/waybar.rs`, `src/services/suspend.rs` | Background services: log tailer, waybar state I/O, suspend watcher (all run inside the daemon) |
-| `clipboard` | `src/tui_client/clipboard.rs` | System clipboard integration; auto-detects Wayland (`wl-paste` / `wl-copy`) or X11 (`xclip`, falls back to `xsel`); reads clipboard content and passes it to `parse_share_link` or the subscription fetcher |
-| `editor` | `src/tui_client/editor.rs` | Launch `$EDITOR` / `$VISUAL` on `profiles.json`, temporarily restore terminal |
+| `services` | `src/services.rs`, `src/services/log_tailer.rs`, `src/services/waybar.rs`, `src/services/suspend.rs` | Background services: waybar state I/O and the suspend watcher (daemon), the log tailer (TUI client), and the app-log writer |
+| `clipboard` | `src/tui_client/clipboard.rs` | System clipboard integration; auto-detects Wayland (`wl-paste` / `wl-copy`) or X11 (`xclip`, falls back to `xsel`); reads the clipboard for `p` and sends it to the daemon as `IpcCommand::Paste` (parsed in `update/paste.rs`), and writes it for `y` |
+| `editor` | `src/tui_client/editor.rs`, `src/tui_client/editor/retry.rs` | Launch `$EDITOR` / `$VISUAL` on a private snapshot (`$XDG_RUNTIME_DIR/kvn-tui/profiles-edit-<pid>.json`), temporarily restore the terminal; `retry` is the error screen that offers another pass or cancellation |
+| `input` | `src/tui_client/input.rs` | Terminal input: Kitty keyboard protocol for layout-independent shortcuts, mouse capture, unbuffered reads |
+| `browser` | `src/tui_client/browser.rs` | Opens the project support page with `xdg-open` |
 | `theme_watch` | `src/tui_client/theme_watch.rs` | Resolves `settings.theme` slug to a `Theme` (with `"omarchy"` sentinel falling back to `tokyo-night`); watches Omarchy's XDG state current-theme directory and emits `Msg::ThemeChanged`; no-op when Omarchy isn't installed |
-| `omarchy plugin` | `https://github.com/yarikov/omakvn` | Standalone Quickshell bar plugin (`yarikov.omakvn`), required by the Omarchy integration. `setup --omarchy` requires Omarchy 4+ and installs or updates its Git checkout in `~/.config/omarchy/plugins/yarikov.omakvn/`, aborting and rolling back when the plugin cannot be installed; the main project owns the semantic IPC API. |
+
+The Omarchy bar widget is not in this repository: it is the standalone [omakvn](https://github.com/yarikov/omakvn) Quickshell plugin (`yarikov.omakvn`), required by the Omarchy integration. `setup --omarchy` requires Omarchy 4+ and installs or updates its Git checkout in `~/.config/omarchy/plugins/yarikov.omakvn/`, aborting and rolling back when the plugin cannot be installed; the main project owns the semantic IPC API.
 
 ---
 
@@ -80,24 +93,15 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 
 - **Rust**: edition 2024, minimum version 1.88
 - **External binary**: `sing-box` must be installed separately and available on `$PATH` (or via `SING_BOX_PATH` env var)
-- **Key crates**: `ratatui` + `crossterm` (TUI), `serde` + `serde_json` (config), `schemars` (config JSON Schema), `zbus` (D-Bus), `ureq` (HTTP), `tracing` (logs), `anyhow` + `thiserror` (errors)
+- **Key crates**: `ratatui` + `crossterm` (TUI), `serde` + `serde_json` (config), `schemars` (config JSON Schema), `zbus` (D-Bus), `ureq` (HTTP), `tracing` (logs), `anyhow` (errors)
 
-Build release:
-
-```bash
-cargo build --release
-```
-
-Run (no root required when sing-box has capabilities):
+Run a release build (no root required when sing-box has capabilities). The
+binary is `kvn-tui`; the package installs `kvn` as a symlink to it, and
+`kvn-tui <command>` prints a deprecation warning, so prefer `kvn` in docs:
 
 ```bash
 ./target/release/kvn-tui
-```
-
-Install polkit rule (avoids authentication dialogs on connect):
-
-```bash
-sudo ./target/release/kvn-tui setup --polkit
+sudo ./target/release/kvn-tui setup --polkit   # avoids authentication dialogs on connect
 ```
 
 ---
@@ -161,15 +165,15 @@ Rules of thumb:
 
 ### Error Handling
 - Use `anyhow::Result<T>` for fallible functions at the application / UI boundary.
-- Use `thiserror` only if you need structured error enums (rare in this codebase).
+- The crate has no `thiserror` dependency; when a structured error is genuinely needed, discuss adding it rather than hand-rolling `Error` impls.
 - Prefer `.context("...")` and `.with_context(|| format!("..."))` to add descriptive messages.
 
 ### File I/O
-- **Atomic writes are mandatory** for config files. Pattern: write to `.tmp`, then `fs::rename`.
-- See `config::save_config_at` and `geo::GeoManager::write_atomic` for the canonical implementation.
+- **Atomic writes are mandatory** for config files. Pattern: write to `.tmp`, fsync, `fs::rename`, fsync the parent directory.
+- Use `atomic_write::write`, the canonical implementation; `config::save_config_at` and `geo::GeoManager::write_atomic` delegate to it.
 
 ### Logging
-- Use `tracing::info!`, `tracing::warn!`, `tracing::error!` — not `println!`.
+- In the daemon and the TUI, use `tracing::info!`, `tracing::warn!`, `tracing::error!` — not `println!`. One-shot CLI commands (`cli.rs`, `cli/`, the migration runner) print their user-facing output with `println!` / `eprintln!`.
 - The subscriber is initialized in `main.rs` with `EnvFilter` and `fmt::layer().without_time()`.
 
 ### Serialization
@@ -196,7 +200,7 @@ Rules of thumb:
 
 ## Testing Patterns
 
-- Tests are co-located in `#[cfg(test)] mod tests` blocks at the bottom of each source file.
+- Unit tests are co-located in `#[cfg(test)] mod tests` blocks at the bottom of each source file. `tests/cli_invocation.rs` holds the integration tests that run the built binary.
 - `src/test_helpers.rs` provides shared test utilities (e.g., `model_with_profiles`).
 - Tests should not depend on external network or the `sing-box` binary unless explicitly marked `#[ignore]` (or guarded by a `command -v sing-box` runtime check).
 - Use `tempfile` for file-system tests; use `NamedTempFile` / `tempdir()` for isolation.
@@ -239,9 +243,9 @@ The application follows **The Elm Architecture (TEA)**:
 2. **Messages** (`app/msg.rs`) represent every external event — keyboard input, timer ticks, log lines, geo updates, system resume.
 3. **Update** (`app/update.rs` and its `app/update/` submodules) is a pure function `update(model, msg) -> Vec<Effect>`: no I/O, no threads, no system calls. All business logic lives here; `update.rs` itself only dispatches each `Msg` to a submodule handler.
 4. **Effects** (`app/effect.rs`) are declarative descriptions of side effects (`Connect`, `DownloadGeo`, `SaveConfig`, `Quit`, etc.).
-5. **Daemon** (`daemon.rs` + `daemon/`) owns the canonical `Model`, the `mpsc` channel, the sing-box `process_slot`, and all background services (ticker, suspend watcher, log tailer, IPC server). It exposes a Unix domain socket IPC server (`ipc.rs`) that accepts NDJSON commands from TUI clients.
+5. **Daemon** (`daemon.rs` + `daemon/`) owns the canonical `Model`, the `mpsc` channel, the sing-box `process_slot`, and all background services (ticker, suspend watcher, signal handler, IPC server). It exposes a Unix domain socket IPC server (`ipc.rs`) that accepts NDJSON commands from TUI clients.
 6. **TUI Client** (`tui_client.rs`) connects to the daemon socket, enters the alternate screen, renders the UI using ratatui, and forwards keyboard input (plus clipboard/editor actions) as IPC commands. It has its own local `Model` that is kept in sync via `StateSnapshot` broadcasts from the daemon.
-7. **IPC Protocol** (`ipc.rs`) uses newline-delimited JSON over a Unix socket. Commands: `Attach`, `Detach`, `Key`, `SelectSource`, `MoveSourceSelection` (legacy relative selection), `ScrollViewport` (wheel navigation with a correlated viewport result), `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `CheckOnboarding`, `CheckSupportPrompt`, `ResolveSupportPrompt`, `DismissSupportPrompt`, `Paste`, `Copied`, `ReloadConfig`, `Quit`, `ClientError`. Responses: `StateSnapshot` pushed by the daemon after every state change. The semantic commands (`ConnectProfile` through `SetAutoConnect`) exist for non-TUI clients — the Omarchy Quickshell module and the `kvn status/connect/disconnect/reconnect/toggle` CLI subcommands. Overlay commits (routing mode, geo region) are shared between the key handlers and IPC via `commit_routing_mode` / `commit_geo_region` in `update/routing.rs` so both paths run identical logic.
+7. **IPC Protocol** (`ipc.rs`; the `IpcCommand` enum lives in `app/msg.rs`) uses newline-delimited JSON over a Unix socket. Commands: `Attach`, `AttachSession`, `Detach`, `ClearErrorStatus`, `Key`, `SelectSource`, `MoveSourceSelection` (legacy relative selection), `ScrollViewport` (wheel navigation with a correlated viewport result), `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `Toggle`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `CheckOnboarding`, `CheckSupportPrompt`, `ResolveSupportPrompt`, `DismissSupportPrompt`, `Paste`, `Copied`, `ReloadConfig`, `ApplyEditedConfig` (correlated), `RestartRequired`, `Quit`, `ClientError`. Responses: `StateSnapshot` pushed by the daemon after every state change. The semantic commands (`ConnectProfile` through `SetAutoConnect`) exist for non-TUI clients — the Omarchy Quickshell module and the `kvn status/connect/disconnect/reconnect/toggle` CLI subcommands. Overlay commits (routing mode, geo region) are shared between the key handlers and IPC via `commit_routing_mode` / `commit_geo_region` in `update/routing.rs` so both paths run identical logic.
 
 This separation makes the update tree fully synchronous and trivial to unit-test.
 
@@ -249,14 +253,15 @@ This separation makes the update tree fully synchronous and trivial to unit-test
 Background work is executed in dedicated threads spawned by the **daemon** (`daemon.rs`):
 - **Ticker** — sends `Msg::Tick` every 250 ms to drive connection state machines.
 - **Suspend watcher** — `services/suspend.rs` runs a blocking zbus listener that sends `Msg::SystemResumed`; the daemon auto-reconnects on resume even when no TUI is attached.
-- **IPC server** — `ipc.rs` accepts Unix socket connections from TUI clients, parses NDJSON commands, and forwards them as `Msg::IpcCommand` into the daemon's mpsc channel.
-- **Effects** — `Connect`, `DownloadGeo`, and `PasteClipboard` (via `IpcCommand`) each spawn a short-lived thread that sends the result back via the daemon's channel.
-- **Log tailer** — `LogTailer` (`services/log_tailer.rs`) reads new lines from the shared log file on every `Tick` inside the daemon. App status messages are also written to the same file (with an `[app]` prefix) so both sing-box and app logs are visible in the TUI log panel.
+- **IPC server** — `ipc.rs` accepts Unix socket connections from clients, parses NDJSON commands, and forwards them into the daemon's mpsc channel as `Msg::IpcCommand`, or as `Msg::IpcRequest` when the command carries a request id for a correlated reply.
+- **Signal handler** — turns `SIGTERM` / `SIGINT` into `Quit`, so the daemon cleans up sing-box and the socket.
+- **Effects** — slow effects run on a short-lived thread that sends its result back through the daemon's channel: `Connect`, the geo effects (`DownloadGeo`, `DownloadGeoIfMissing`, `DownloadServiceRuleSetsIfMissing`, `RetryServiceRuleSets`, `RefreshGeoLastUpdated`), `UpdateSubscription`, `TestProfile`, `FetchTrafficStats`, `ApplyKillSwitch`, `CheckAutoConnectPolkit`, `CheckIntegrationSetup`, and `ReloadConfig`.
+- **App log** — app status messages are appended to the app log with an `[app]` prefix (`Effect::AppendAppLog`), next to the sing-box log, so both are visible in the TUI log panel.
 - **State I/O** — `services/waybar.rs` writes `state.json` on connect/disconnect for waybar integration.
 
 The **TUI client** (`tui_client.rs`) additionally spawns:
-- **Event reader** — polls `crossterm` events and sends `Msg::Key` / `Msg::Resize` to the local TUI channel. Reading can be paused while `$EDITOR` is open.
-- **Ticker** — sends `Msg::Tick` every 250 ms to drive the local log tailer.
+- **Event reader** — reads terminal input (`tui_client/input.rs`) and sends `Msg::Key`, `Msg::Mouse`, `Msg::Paste` and `Msg::Resize` to the local TUI channel. Reading can be paused while `$EDITOR` is open.
+- **Ticker** — sends `Msg::Tick` every 250 ms; on each tick `LogTailer` (`services/log_tailer.rs`) reads the new lines of both log files for the log pane.
 - **IPC reader** — reads NDJSON state snapshots from the daemon socket and forwards them as `Msg::StateUpdate`.
 
 ### sing-box Config Generation
@@ -268,15 +273,14 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 - Shared helpers: `build_tls_block` (TLS + ECH + REALITY), `build_transport_block` (WebSocket / gRPC / HTTP upgrade). No deprecated sing-box fields (no `obfs_password`, no `aes-128-cfb`, no top-level `dns.fakeip`, no WireGuard outbound).
 
 ### Routing Modes
+- `RoutingMode` is `Global | Bypass(GeoRegion) | Only(GeoRegion)`, serialized as `global`, `bypass_<region>`, `only_<region>` (hand-written serde).
 - `RoutingMode::Global` — all traffic through VPN.
-- `RoutingMode::BypassRu` — RU IPs/domains bypass VPN (direct).
-- `RoutingMode::OnlyRu` — only RU IPs/domains go through VPN; everything else is direct.
-- `RoutingMode::BypassCn` — CN IPs/domains bypass VPN (direct).
-- `RoutingMode::OnlyCn` — only CN IPs/domains go through VPN; everything else is direct.
+- `RoutingMode::Bypass(region)` — the region's IPs/domains bypass the VPN (direct).
+- `RoutingMode::Only(region)` — only the region's IPs/domains go through the VPN; everything else is direct.
 - The available routing modes depend on the selected **geo region** (`Ru`, `Cn`, `Ir`, or `Global`). `RoutingMode::available(region)` returns the list dynamically.
 - Geo-region and routing-mode preferences are grouped under `settings.geo_routing: GeoRouting`. It stores `current_region: Option<GeoRegion>` and `selected_region_modes: HashMap<GeoRegion, RoutingMode>`. The active mode is derived from `selected_region_modes[current_region]` and falls back to `Global`. Switching back to a previously used region restores its last routing mode.
 - Rule-sets are local `.srs` binary files downloaded to `~/.config/kvn-tui/geo/`.
-- **Service routing overrides** (`geo_routing.service_routes: HashMap<RoutedService, ServiceRoute>`, absent = `Disabled` / opt-in): orthogonal to the routing mode — each of the predefined services (`Steam`, `Telegram`) can be forced to `Direct` (real network location; e.g. Steam CDN downloads) or `Proxy` (always through the tunnel, even under `Bypass`). `build_route` emits one `rule_set → outbound` rule per rule-set file, every service rule ahead of the geo rules so an override wins in every mode, in the order `sniff` → service domain rules → `resolve` → service IP rules → `ip_is_private` → region geosite → `resolve` (when no service IP rule took it) → region geoip. A TUN connection carries only an IP, so domain rule-sets match only after `sniff`, which runs only while the destination has no name (`domain_regex: ["."]` + `invert`): sing-box matches a sniffed name ahead of the fake-IP name, so an SNI that differs from the queried name (ECH, domain fronting) would otherwise move the connection to another rule; with fake-IP the destination is a domain, so IP rule-sets match only after `resolve`, which queries the active preset's final server (tunnelled where DNS is) — never the direct `bootstrap` copy, and never the fake-IP server. Each action is emitted only when a rule of its kind follows, so Global without service overrides keeps the three base rules. Services iterate `RoutedService::ALL` (never the map — HashMap order is nondeterministic). Assets are declared in `geo::service_assets()` as a `ServiceAssets { geoip: Option<GeoAsset>, geosite: Option<GeoAsset> }` descriptor per service, all sourced from MetaCubeX/meta-rules-dat (one provider, one branch layout). They are fetched *through the tunnel* (`Effect::DownloadServiceRuleSetsIfMissing`) — never pre-connect, where the kill switch or ISP blocks would stall the fetch — and refreshed with the periodic geo updates. Two triggers: after `Msg::Connected` (backstop), and on a service-routing commit while connected, where the reconnect is DEFERRED until the download pass reports back (`Model::pending_service_reconnect` → `Msg::ServiceRuleSetsReady`) so a first-enabled service's rules are live on the very next connection rather than requiring a second reconnect. Missing files degrade to "no rule for that service", never a failed connection. Edited via the `S` overlay (draft map in `Model::service_routing_draft`; cycling a route back to `Disabled` removes its entry — absent = Disabled — so a full cycle commits as a no-op; committed atomically on Enter).
+- **Service routing overrides** (`geo_routing.service_routes: HashMap<RoutedService, ServiceRoute>`, absent = `Disabled` / opt-in): orthogonal to the routing mode — each of the predefined services (`Steam`, `Telegram`) can be forced to `Direct` (real network location; e.g. Steam CDN downloads) or `Proxy` (always through the tunnel, even under `Bypass`). `build_route` emits one `rule_set → outbound` rule per rule-set file, every service rule ahead of the geo rules so an override wins in every mode, in the order `sniff` → service domain rules → `resolve` → service IP rules → `ip_is_private` → region geosite → `resolve` (when no service IP rule took it) → region geoip. A TUN connection carries only an IP, so domain rule-sets match only after `sniff`, which runs only while the destination has no name (`domain_regex: ["."]` + `invert`): sing-box matches a sniffed name ahead of the fake-IP name, so an SNI that differs from the queried name (ECH, domain fronting) would otherwise move the connection to another rule; with fake-IP the destination is a domain, so IP rule-sets match only after `resolve`, which queries the active preset's final server (tunnelled where DNS is) — never the direct `bootstrap` copy, and never the fake-IP server. Each action is emitted only when a rule of its kind follows, so Global without service overrides keeps the three base rules. Services iterate `RoutedService::ALL` (never the map — HashMap order is nondeterministic). Assets are declared in `geo::service_assets()` as a `ServiceAssets { geoip: Option<GeoAsset>, geosite: Option<GeoAsset> }` descriptor per service, all sourced from MetaCubeX/meta-rules-dat (one provider, one branch layout). They are fetched *through the tunnel* (`Effect::DownloadServiceRuleSetsIfMissing`) — never pre-connect, where the kill switch or ISP blocks would stall the fetch — and refreshed with the periodic geo updates. Two triggers: after `Msg::Connected` (backstop), and on a service-routing commit while connected, where the reconnect is DEFERRED until the download pass reports back (`Model::pending_service_reconnect` → `Msg::ServiceRuleSetsReady`) so a first-enabled service's rules are live on the very next connection rather than requiring a second reconnect. Missing files degrade to "no rule for that service", never a failed connection. Edited on Settings › Routing (`Space r`; the deprecated `S` still opens `Overlay::ServiceRouting`) (draft map in `Model::service_routing_draft`; cycling a route back to `Disabled` removes its entry — absent = Disabled — so a full cycle commits as a no-op; committed atomically on Enter).
 
 ### Share-Link Parsing
 - Entry point: `config::profile::parse_share_link(uri)` dispatches on the URI scheme.
@@ -319,10 +323,10 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 - **Status bar**: a `[DNS: <kind>]` badge derives its label from the active preset's final server `kind_label` (`DoH` / `DoT` / `DoQ` / `UDP` / `TCP` / `local`) or `fakeip` when `fakeip_enabled` is true.
 
 ### Theme System
-- **Data**: every UI style is derived from a `Palette` (16 ANSI colors + 6 semantic colors: accent, cursor, foreground, background, selection_foreground, selection_background). `Theme` holds a `Palette` and exposes `&self` methods (`accent`, `normal`, `status`, `error`, `success`, `border`, `selected`, `selected_connected`, `popup_bg`, `background`).
-- **Bundling**: `themes/*.toml` contains all 22 Omarchy 4 semantic palettes, vendored from `/usr/share/omarchy/themes/<name>/colors.toml`. `build.rs` derives the ANSI and UI fields and compiles them into `OUT_DIR/bundled_palettes.rs` (build-dep `toml`). No runtime TOML parsing — `Palette::lookup(slug)` is a static array scan.
-- **Active theme resolution**: `tui_client::theme_watch::resolve_active(slug)` is the single source of truth, called both at startup and on `Msg::ThemeChanged`. The reserved slug `"omarchy"` reads `$XDG_STATE_HOME/omarchy/current/theme.name`; any other slug looks up a bundled palette (with `Theme::legacy()` as the fallback for unknown names).
-- **In-TUI picker** (`Overlay::ThemeSettings`, key `C`): mirrors the DNS overlay draft pattern. `j`/`k` update `Model.theme_selected` and `Model.theme_draft`; the TUI client recomputes `model.theme` from the draft on every snapshot apply (live preview). Enter persists `settings.theme = <slug>` and emits `Effect::SaveConfig`. Esc clears the draft and reverts. The Auto-entry (slug `"omarchy"`) is shown only when `detect_omarchy_theme()` returns `Some` — non-Omarchy users see only the 22 bundled palettes.
+- **Data**: every UI style is derived from a `Palette` (16 ANSI colors + 6 semantic colors: accent, cursor, foreground, background, selection_foreground, selection_background). `Theme` holds a `Palette` and exposes one `&self` style method per UI role (`accent`, `normal`, `muted`, `error`, `success`, `status_bar`, the connection and rule-set badges, the toasts, `border`, `selected`, `selected_connected`, `popup_bg`, `background`, …; see `ui/styles.rs`).
+- **Bundling**: `themes/*.toml` contains all 22 Omarchy 4 semantic palettes, vendored from `/usr/share/omarchy/themes/<name>/colors.toml`. `build.rs` derives the ANSI and UI fields and compiles them into `OUT_DIR/bundled_palettes.rs` (build-dep `toml`). Bundled palettes need no runtime TOML parsing — `Palette::lookup(slug)` is a static array scan. The one runtime parse is `Palette::from_omarchy_toml`, for the `"omarchy"` slug below.
+- **Active theme resolution**: `tui_client::theme_watch::resolve_active(slug)` is the single source of truth, called both at startup and on `Msg::ThemeChanged`. The reserved slug `"omarchy"` parses the active Omarchy theme's `colors.toml` (`omarchy::theme_colors_path`), falling back to the bundled palette named by `current/theme.name` and then to `tokyo-night`; any other slug looks up a bundled palette (with `Theme::legacy()` as the fallback for unknown names).
+- **List picker** (`Overlay::ThemeSettings`, reached by the deprecated `C`; Settings › Interface below is the primary path): mirrors the DNS overlay draft pattern. `j`/`k` update `Model.theme_selected` and `Model.theme_draft`; the TUI client recomputes `model.theme` from the draft on every snapshot apply (live preview). Enter persists `settings.theme = <slug>` and emits `Effect::SaveConfig`. Esc clears the draft and reverts. The Auto-entry (slug `"omarchy"`) is shown only when `detect_omarchy_theme()` returns `Some` — non-Omarchy users see only the 22 bundled palettes.
 - **Settings › Interface** (`Space i`): the Theme row cycles the same `theme_picker_slugs()` with `h`/`l` into `Model.theme_draft`, so the live preview path is shared with the `C` picker; the Icons row drafts `settings.icons` into `Model.interface_settings_draft`, which `Model::icon_set()` prefers while rendering. Enter commits both with one `Effect::SaveConfig`; Esc/Backspace discard both drafts.
 - **Watcher**: spawned only when the Omarchy `current/` state directory exists. It watches that directory because theme updates replace files and subtrees within it atomically. Emits `Msg::ThemeChanged(Theme)` to the TUI channel. The update reducer applies it only when `settings.theme == "omarchy"`; manual picker overrides win.
 - **Frame background**: `draw()` paints the whole `frame.area()` with `theme.background()` before any other widget so cells with `Style::default()` (no explicit `bg`) inherit the palette color instead of falling through to the terminal default. Popups continue to use the same color via `theme.popup_bg()`; border-only blocks only set `fg`, so the fill survives.
@@ -334,8 +338,8 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 
 ### Daemon + TUI Client Architecture
 - **Daemon** (`kvn --daemon`) runs headless. It owns the sing-box process, config, geo updates, suspend/resume handling, and log tailing. It binds a Unix domain socket for IPC.
-- **TUI Client** (`kvn`) connects to the daemon socket, requests a state snapshot (`Attach`), enters the alternate screen, and renders the UI. Keyboard input is forwarded to the daemon as `IpcCommand::Key` (except `p` and `e`, which are handled locally because they need terminal/clipboard access). Bracketed paste (`\x1b[?2004h`) is enabled so a terminal paste arrives as a single `Msg::Paste` and is sent as `IpcCommand::Paste` instead of being decoded as shortcut keys.
-- Pressing `q` (or `Esc`) when no overlay is shown sends `Detach` to the daemon, leaves the alternate screen, disables raw mode, and **exits the TUI process**. The daemon and sing-box keep running. Shell regains the prompt immediately because the foreground TUI process actually exits. If an overlay is open (Help, ConfirmDelete, RoutingMode, GeoRegions, Error), `q`/`Esc` is forwarded to the daemon as a normal key, which closes the overlay. `Overlay::RestartRequired` is the exception: it is modal, ignores `q`/`Esc`, and takes only `Enter` (exit and `systemctl --user restart kvn-tui.service`) or `Ctrl+C` (stop the daemon).
+- **TUI Client** (`kvn`) connects to the daemon socket, requests a state snapshot (`Attach`), enters the alternate screen, and renders the UI. Keyboard input is forwarded to the daemon as `IpcCommand::Key`, except what needs the terminal, the clipboard or client-local state: `p` / `Ctrl+V` (paste), `y` (copy), `e` (editor), `gg` (sent as `GoFirst`), pane focus, `q` / `Esc` detach, `Ctrl+C`, the log-pane cursor and selection keys, and the onboarding cards' `y` / `p`. Bracketed paste (`\x1b[?2004h`) is enabled so a terminal paste arrives as a single `Msg::Paste` and is sent as `IpcCommand::Paste` instead of being decoded as shortcut keys.
+- Pressing `q` (or `Esc`) when no overlay is shown sends `Detach` to the daemon, leaves the alternate screen, disables raw mode, and **exits the TUI process**. The daemon and sing-box keep running. Shell regains the prompt immediately because the foreground TUI process actually exits. If an overlay is open (Help, SettingsMenu, ConfirmDelete, ConfirmDisable, RoutingMode, GeoRegions, DnsSettings, ThemeSettings, ServiceRouting), `q`/`Esc` is forwarded to the daemon as a normal key, which closes the overlay — except where a step refuses it (the region picker without a region, and the pickers the tour is waiting on). `Overlay::Onboarding` is modal and ignores `q`/`Esc` (see § First-Run Onboarding). `Overlay::RestartRequired` is modal as well: ignores `q`/`Esc`, and takes only `Enter` (exit and `systemctl --user restart kvn-tui.service`) or `Ctrl+C` (stop the daemon).
 - Pressing `Ctrl+C` sends `Quit` to the daemon. The daemon stops sing-box, cleans up the Unix socket, and exits. The TUI waits briefly (300 ms) for cleanup to complete before exiting.
 - Running `kvn` again connects to the same daemon and re-attaches, restoring the TUI instantly without restarting sing-box.
 - The IPC protocol is NDJSON over a Unix socket. The daemon pushes a full `StateSnapshot` after every state change. The snapshot includes the complete config (`profiles` and `settings`) so the TUI client always renders the current data.
@@ -427,11 +431,10 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 
 ### Geo Region Selection
 - `settings.geo_routing.current_region` (`Option<GeoRegion>`) controls which country rule-sets are downloaded and which routing modes are shown.
-- `GeoRegion::Ru` — download RU geoip/geosite, enable `Global` / `BypassRu` / `OnlyRu`.
-- `GeoRegion::Cn` — download CN geoip/geosite, enable `Global` / `BypassCn` / `OnlyCn`.
+- `GeoRegion::Ru` / `Cn` / `Ir` — download that country's geoip/geosite, enable `Global` / `Bypass(region)` / `Only(region)`.
 - `GeoRegion::Global` — skip geo downloads, only `Global` mode is available.
 - A region is mandatory: while `geo_routing.current_region` is `None` the region picker refuses `q`/`Esc`, so the main UI stays unreachable. On a brand-new install the first-run tour (see § First-Run Onboarding) owns that first choice and hands off to the same picker; the bare picker is still forced directly once the tour is complete but no region was chosen.
-- The region can be changed at runtime with the `o` keybinding. When the region changes, the previous region's mode is saved into `geo_routing.selected_region_modes` and the new region's previously stored mode is restored (falling back to `Global`).
+- The region can be changed at runtime on Settings › Routing (`Space r`; the deprecated `o` still opens the picker). When the region changes, the previous region's mode is saved into `geo_routing.selected_region_modes` and the new region's previously stored mode is restored (falling back to `Global`).
 
 ### First-Run Onboarding
 
@@ -540,7 +543,7 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
   `Effect::BroadcastState` **only when the value changed** so the poll does not
   push a snapshot per tick. Three triggers: `daemon::probe_integration_setup`
   synchronously at startup while the tour is unfinished (so a card's first paint
-  is already right), and `onboarding::probe_visible_card` — called by `advance` /
+  is already right), and `app::update::onboarding::probe_visible_card` (not `src/onboarding.rs`) — called by `advance` /
   `resume` / `open_when_idle` right after they set `Overlay::Onboarding`, and by
   the 250 ms tick. That one function owns both the rule (only `Omarchy`,
   `AutoConnect` and `KillSwitch` report an integration) and the gate: the 2 s
@@ -653,6 +656,18 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 - The user can toggle `auto_connect` at runtime with the `Shift+A` keybinding (the legacy `a` still works and shows a deprecation toast from `tui_client::handler::key::deprecated_settings_shortcut_message`), the Connection settings overlay, or IPC `SetAutoConnect`. Disabling saves immediately. Enabling first emits `Effect::CheckAutoConnectPolkit` (with `Model::auto_connect_pending` set): the daemon runs `doctor::polkit_readiness()` and replies with `Msg::AutoConnectPolkitChecked`. The flag is flipped and saved only when passwordless polkit is set up and the `kvn-tui` group is active in the daemon's session; otherwise auto-connect stays off and the reason is shown as an error toast and written to the app log.
 - `sudo kvn clean --polkit` / `--killswitch` connect to the invoking user's daemon (`/run/user/$SUDO_UID/kvn-tui.sock`) and send `SetAutoConnect`/`SetKillSwitch { enabled: false }`, so the daemon saves the config as the user. If the daemon is not running, startup reconciliation handles it: `reconcile_kill_switch_state` for the kill switch, and `reconcile_auto_connect_state` turns auto-connect off (before the first tick connects) when `doctor::polkit_authorization_denied()`.
 
+### Mouse Wheel Viewports
+
+- `app/scroll.rs` owns pure viewport and selection movement. Wheel scrolling preserves the selected item until it reaches the first visible row (down) or last visible row (up), skipping nonselectable separators toward the inside. At an exhausted viewport edge the remaining steps move selection. Wrapped log rows share a record index.
+- `app/scroll/lists.rs` maps selectable Profiles and dialog rows. The TUI keeps viewport offsets locally; `ScrollViewport` carries the normalized overlay context, offset, visible height and signed step. The daemon returns `scroll_result` only with the matching `response_to`, and rejects a changed context. `handler/scroll.rs` queues wheel events and allows one request in flight. Keyboard input, clicks, resize and overlay changes cancel queued work; late replies do not restore cancelled offsets. Cancellation releases the pending slot immediately. Scroll and focus requests expire after two seconds; uncertain scroll requests are discarded without replay. The TUI handshake requires `supports_viewport_scroll` in the snapshot so an older daemon with the same version is restarted through the existing compatibility path.
+- Keyboard navigation retains the overlay viewport after wheel scrolling and shifts it only to keep selection visible. The adjusted offset is saved before drawing; changing overlay context clears it.
+- Logs use the same calculation locally, create a cursor on the first wheel event, clear visual ranges, and return to following the tail after 15 idle seconds. Wheel acceleration remains shared across panes and dialogs. Mouse selection drags suppress wheel events. Evicting the selected log record clears its cursor and selection while retaining the wheel viewport.
+
+### Pointer Focus and Log Clicks
+
+- Moving or scrolling the pointer over Profiles or Logs focuses that pane, including its border and empty space. Hover leaves selection and viewport intact, is ignored during log dragging or overlays, and sends `SetMainPaneFocus` only when the pane changes. A stationary pointer does not override keyboard focus.
+- A left press on a visible log row selects its record through `LogNavigation::select_at`, preserving the viewport's exact wrapped-row offset. Release keeps that cursor; dragging still copies the selected text. Clicking empty space or borders does not select a record. Clicks refresh the 15-second activity timer.
+
 ---
 
 ## Side-effect-free Boundaries
@@ -660,7 +675,7 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 The TEA update function (`app::update::update`) must remain free of I/O, threads, and system calls. Side effects are declared as `Effect` values and executed by the daemon runtime.
 
 Rules of thumb:
-- `app::update::update(model, msg) -> Vec<Effect>` must not call functions from `services`, `geo`, `paths`, `atomic_write`, `config::load_config`, `config::subscription`, `singbox::clash_api`, `singbox::runner`, `tui_client::clipboard`, `tui_client::editor`, or perform any file/network/process I/O. **Documented exceptions**: `theme_picker_slugs()` (used by the `C` key handler and `handle_theme_picker`) calls `theme_watch::detect_omarchy_theme()`, which does a single small `fs::read_to_string` of the Omarchy state theme path to decide whether to show the Auto entry; `model::show_omarchy_card()` adds `omarchy::omakvn_plugin_installed()`, one more small read of the plugin manifest, while the model is constructed. Cheap, deterministic, and scoped to a key press; promoted to "OK" because the alternative (caching in `Model`) costs more clarity than it saves. The full `Theme` resolution stays out of `update`: the picker handler only mutates `theme_draft`/`settings.theme`, and the TUI client recomputes `model.theme` via `resolve_active` on snapshot apply. `geo::is_ip_rule_set_tag` (used by the DNS overlay's fake-IP warning) is a pure lookup in the static rule-set asset table and does no I/O.
+- `app::update::update(model, msg) -> Vec<Effect>` must not call functions from `services`, `geo`, `paths`, `atomic_write`, `config::load_config`, `config::subscription`, `singbox::clash_api`, `singbox::runner`, `tui_client::clipboard`, `tui_client::editor`, or perform any file/network/process I/O. **Documented exceptions**: `theme_picker_slugs()` (`update/key/theme.rs`, used by the theme picker and the Interface page's Theme row) calls `omarchy::detect_omarchy_theme()`, which does a single small `fs::read_to_string` of the Omarchy state theme path to decide whether to show the Auto entry; `model::show_omarchy_card()` adds `omarchy::omakvn_plugin_installed()`, one more small read of the plugin manifest, while the model is constructed. Cheap, deterministic, and scoped to a key press; promoted to "OK" because the alternative (caching in `Model`) costs more clarity than it saves. The full `Theme` resolution stays out of `update`: the picker handler only mutates `theme_draft`/`settings.theme`, and the TUI client recomputes `model.theme` via `resolve_active` on snapshot apply. `geo::is_ip_rule_set_tag` (used by the DNS overlay's fake-IP warning) is a pure lookup in the static rule-set asset table and does no I/O.
 - `Model::set_status` is pure (mutates only in-memory state). Any message that should also be persisted to the application log must return `Effect::AppendAppLog`.
 - `Model::new` is allowed to perform initialization I/O (load config, read `state.json`, etc.).
 - `singbox::config::generate_config` is pure: it receives geo file availability (`GeoAvailability`) from the caller and does not touch the file system.
@@ -687,37 +702,32 @@ Any added, removed, or changed CLI command, option, or output updates
 |----------|------|
 | Profiles & settings | `~/.config/kvn-tui/profiles.json` |
 | Geo rule-sets | `~/.config/kvn-tui/geo/` |
-| sing-box logs | `~/.config/kvn-tui/logs/sing-box.log` |
+| sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |
+| App log | `~/.config/kvn-tui/logs/app.log` |
 | Temp sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
+| Latency-test configs | `$XDG_RUNTIME_DIR/kvn-tui/test-<uuid>.json` |
+| Editor snapshot | `$XDG_RUNTIME_DIR/kvn-tui/profiles-edit-<pid>.json` |
 | Runtime state (waybar) | `~/.config/kvn-tui/state.json` |
 | IPC socket (daemon ↔ TUI) | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
 | First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
 | sing-box cache (fake-IP map) | `$XDG_STATE_HOME/kvn/singbox-cache.db` |
 | Applied migration markers | `$XDG_STATE_HOME/kvn/migrations/` |
-| Migration backups | `~/.config/kvn-tui/recovery/profiles.json.before-migration-*` |
+| Recovery copies (3 per kind) | `~/.config/kvn-tui/recovery/profiles.json.{before-migration,invalid,conflict,conflict-invalid}-*` |
 | Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |
 | Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
+| Migration baseline, machine-wide markers | `/var/lib/kvn/migration-baseline`, `/var/lib/kvn/migrations/` |
+| Integration stamps | `/var/lib/kvn/integrations/{polkit,killswitch-sudoers}.sha256` |
 
 ---
 
 ## Agent Checklist Before Editing
 
 1. Are you preserving atomic file writes for any new config files?
-2. Are you using `anyhow::Result` and `tracing` instead of `println!` / `eprintln!`?
+2. Are you using `anyhow::Result`, and `tracing` instead of `println!` / `eprintln!` outside CLI output?
 3. Are tests added for new public functions, and does `cargo llvm-cov --summary-only` still report **≥ 85 %** region and line coverage?
 4. Are you respecting the Arch-only constraint (no support for other distros or BSDs added silently)?
 5. Does the sing-box config generation remain valid for sing-box 1.14+?
-6. Have you run `cargo fmt` and `cargo clippy --all-targets --all-features` and fixed any warnings?
+6. Have you run `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, and (after a dependency change) `cargo deny check all`, and fixed what they report?
 7. Do all new files and directories use `kvn` rather than the legacy `kvn-tui` path namespace?
 8. Does the documentation match every changed path, file, command, configuration field, and user-visible behavior?
-
-### Mouse Wheel Viewports
-
-- `app/scroll.rs` owns pure viewport and selection movement. Wheel scrolling preserves the selected item until it reaches the first visible row (down) or last visible row (up), skipping nonselectable separators toward the inside. At an exhausted viewport edge the remaining steps move selection. Wrapped log rows share a record index.
-- `app/scroll/lists.rs` maps selectable Profiles and dialog rows. The TUI keeps viewport offsets locally; `ScrollViewport` carries the normalized overlay context, offset, visible height and signed step. The daemon returns `scroll_result` only with the matching `response_to`, and rejects a changed context. `handler/scroll.rs` queues wheel events and allows one request in flight. Keyboard input, clicks, resize and overlay changes cancel queued work; late replies do not restore cancelled offsets. Cancellation releases the pending slot immediately. Scroll and focus requests expire after two seconds; uncertain scroll requests are discarded without replay. The TUI handshake requires `supports_viewport_scroll` in the snapshot so an older daemon with the same version is restarted through the existing compatibility path.
-- Keyboard navigation retains the overlay viewport after wheel scrolling and shifts it only to keep selection visible. The adjusted offset is saved before drawing; changing overlay context clears it.
-- Logs use the same calculation locally, create a cursor on the first wheel event, clear visual ranges, and return to following the tail after 15 idle seconds. Wheel acceleration remains shared across panes and dialogs. Mouse selection drags suppress wheel events. Evicting the selected log record clears its cursor and selection while retaining the wheel viewport.
-
-- Moving or scrolling the pointer over Profiles or Logs focuses that pane, including its border and empty space. Hover leaves selection and viewport intact, is ignored during log dragging or overlays, and sends `SetMainPaneFocus` only when the pane changes. A stationary pointer does not override keyboard focus.
-- A left press on a visible log row selects its record through `LogNavigation::select_at`, preserving the viewport's exact wrapped-row offset. Release keeps that cursor; dragging still copies the selected text. Clicking empty space or borders does not select a record. Clicks refresh the 15-second activity timer.
