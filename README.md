@@ -5,6 +5,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/yarikov/kvn?logo=github&label=release)](https://github.com/yarikov/kvn/releases/latest)
 [![Rust Version](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/github/license/yarikov/kvn)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-read-blue)](docs/README.md)
 
 Keyboard-first TUI for managing VPN connections. It provides a fast, minimal interface for configuring profiles, connecting via [sing-box](https://sing-box.sagernet.org/) and routing traffic.
 
@@ -23,13 +24,9 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
   - [Kill switch setup](#kill-switch-setup-optional)
   - [Omarchy integration](#omarchy-integration-optional)
   - [Build from source](#build-from-source)
-- [Upgrading](docs/upgrading.md)
 - [Diagnostics](#diagnostics)
-- [Command-line interface](docs/cli.md)
 - [Default Key Bindings](#default-key-bindings)
 - [Configuration](#configuration)
-- [What kvn protects](docs/privacy.md)
-- [Theme Gallery](docs/themes.md)
 - [Architecture](#architecture)
 - [Platform Support](#platform-support)
 - [Contributing](#contributing)
@@ -119,7 +116,8 @@ sudo pacman -S --needed polkit \
   && sudo kvn setup --polkit
 ```
 
-After setup and a reboot, toggle it with `Shift+A`.
+After setup and a reboot, toggle it with `Shift+A`. See
+[Polkit setup](docs/system-integration.md#polkit-setup) for what it installs.
 
 ### Kill switch setup (optional)
 
@@ -139,7 +137,9 @@ sudo pacman -S --needed nftables \
   && sudo kvn setup --killswitch
 ```
 
-After setup and a reboot, toggle it with `Shift+K`.
+After setup and a reboot, toggle it with `Shift+K`. See
+[Kill switch setup](docs/system-integration.md#kill-switch-setup) for what it
+installs and how to remove it.
 
 ### Omarchy integration (optional)
 
@@ -165,7 +165,9 @@ Remove them after verification with:
 kvn clean --omarchy-backups
 ```
 
-This removes only the backups and leaves the active integration unchanged.
+This removes only the backups and leaves the active integration unchanged. See
+[Omarchy setup](docs/system-integration.md#omarchy-setup) for every file it
+changes and how to remove the integration.
 
 ### Build from source
 
@@ -276,7 +278,7 @@ See the [command-line reference](docs/cli.md) for every other command.
 | `y` / `n` | Confirm / cancel the action |
 | `q` / `Esc` | Cancel dialog |
 
-**Application**
+**General**
 
 | Key | Action |
 |-----|--------|
