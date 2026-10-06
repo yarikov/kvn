@@ -1,6 +1,6 @@
 ---
 name: create-pull-request
-description: Create a GitHub pull request for kvn-tui after validating the branch, diff, repository rules, and required Rust quality gates. Use when asked to open, create, or publish a PR; do not use for merely drafting PR text or reviewing an existing PR.
+description: Create a GitHub pull request for kvn-tui after validating the branch, diff, repository rules, and the quality gates the user did not skip. Use when asked to open, create, or publish a PR; do not use for merely drafting PR text or reviewing an existing PR.
 ---
 
 # Create Pull Request
@@ -45,7 +45,11 @@ Review `origin/develop...HEAD`, including the changed file list, full diff, and 
 
 ## Run the quality gates
 
-Run every required check from the repository root and stop on any failure:
+First classify the diff. It is documentation-only when every file in `git diff --name-only origin/develop...HEAD` is a Markdown file or an image under `assets/` (see "Documentation-Only Pull Requests" in `CONTRIBUTING.md`).
+
+For a documentation-only PR, skip the Rust gates by default: tell the user they will be skipped and ask whether any should run anyway; run only the ones the user asks for. For any other PR, run the Rust gates by default: before starting, list them and ask whether any may be skipped, run every check the user does not explicitly skip, and before honoring a skip warn that `CONTRIBUTING.md` requires the gates and CI enforces them. Never report a skipped check as passed.
+
+Run the Rust gates from the repository root and stop on any failure:
 
 ```bash
 cargo fmt --check
@@ -56,19 +60,21 @@ cargo llvm-cov --locked --summary-only
 
 For coverage, inspect the `TOTAL` row and require both region and line coverage to be at least 85%. If `cargo-llvm-cov` or required LLVM tooling is unavailable, report the missing prerequisite and stop; do not claim the coverage checkbox passes.
 
+For a documentation-only PR, additionally require that `git diff --check` passes (already run above), that every relative link and anchor added or changed in the diff resolves (use `lychee --offline --include-fragments` on the changed files when it is installed, otherwise check each one by hand), and that each changed claim about behavior, commands, paths, or configuration matches the current source. These checks are never skipped.
+
 Do not edit code, regenerate snapshots, run a formatter that rewrites files, or otherwise fix failures within this workflow. Report the failing command and a concise diagnosis so the user can address it separately.
 
 ## Prepare the PR
 
-Create an English title and description after all gates pass.
+Create an English title and description after all gates that were run pass.
 
 - Format the title as `type(scope): imperative description` according to the conventional-commit skill and make it suitable for generated release notes.
-- Populate the repository PR template with the user-visible motivation, complete scope, important design or security decisions, and exact commands run.
-- Mark a checklist item complete only when it was actually verified. Leave conditional items unchecked when they do not apply or cannot be established.
+- Fill the template's required Summary and Changes sections with the user-visible motivation, complete scope, and important design or security decisions.
+- Include the optional Testing section and contribution checklist by default. In Testing, list the exact commands run and name every skipped check as skipped. Mark a checklist item complete only when it was actually verified; leave conditional items unchecked when they do not apply or cannot be established.
 - Include related issues only when the user or repository history provides a real issue reference.
 - Recheck that title and body describe the complete diff rather than only the latest commit.
 
-Show the user the base branch, head branch, draft/ready status, proposed title, and complete body. Obtain explicit confirmation immediately before pushing or calling the GitHub API. Treat edits requested at this point as changes to the proposal and reconfirm the final version.
+Show the user the base branch, head branch, draft/ready status, proposed title, and complete body, and ask whether the Testing section and the contribution checklist should be removed. Obtain explicit confirmation immediately before pushing or calling the GitHub API. Treat edits requested at this point as changes to the proposal and reconfirm the final version.
 
 ## Publish
 
