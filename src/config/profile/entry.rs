@@ -7,7 +7,8 @@ use super::{ConfigDiagnostic, Protocol, ProtocolConfig, Security, VlessConfig};
 /// Single VPN profile. The `protocol` discriminant and protocol-specific
 /// fields are flattened into [`ProtocolConfig`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
-#[schemars(transform = super::json_schema::keep_strict_protocol_fields)]
+#[schemars(transform = super::json_schema::share_profile_fields_with_protocol_branches)]
+#[schemars(transform = super::json_schema::check_branches_only_for_known_protocols)]
 pub struct Profile {
     #[serde(default = "Uuid::new_v4")]
     #[schemars(transform = super::json_schema::without_default)]

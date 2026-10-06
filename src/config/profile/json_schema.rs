@@ -31,7 +31,7 @@ pub(super) fn pin_current_schema_version(schema: &mut schemars::Schema) {
     }
 }
 
-pub(super) fn keep_strict_protocol_fields(schema: &mut schemars::Schema) {
+pub(super) fn share_profile_fields_with_protocol_branches(schema: &mut schemars::Schema) {
     let strict_protocols = strict_protocols();
     let Some(profile) = schema.as_object_mut() else {
         return;
@@ -48,17 +48,43 @@ pub(super) fn keep_strict_protocol_fields(schema: &mut schemars::Schema) {
         .flatten()
         .filter_map(Value::as_object_mut);
     for branch in branches {
-        let protocol = &branch["properties"]["protocol"]["const"];
-        if !strict_protocols.contains(protocol) {
-            continue;
-        }
         if let Some(properties) = branch.get_mut("properties").and_then(Value::as_object_mut) {
             for field in &shared_fields {
                 properties.entry(field.clone()).or_insert(Value::Bool(true));
             }
         }
-        branch.insert("additionalProperties".into(), Value::Bool(false));
+        if strict_protocols.contains(&branch["properties"]["protocol"]["const"]) {
+            branch.insert("additionalProperties".into(), Value::Bool(false));
+        }
     }
+}
+
+pub(super) fn check_branches_only_for_known_protocols(schema: &mut schemars::Schema) {
+    let Some(profile) = schema.as_object_mut() else {
+        return;
+    };
+    let Some(branches) = profile.remove("oneOf") else {
+        return;
+    };
+    let protocols: Vec<Value> = branches
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|branch| branch["properties"]["protocol"]["const"].clone())
+        .collect();
+    let known_protocol = serde_json::json!({ "enum": protocols });
+    if let Some(properties) = profile
+        .entry("properties")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+    {
+        properties.insert("protocol".into(), known_protocol.clone());
+    }
+    profile.insert(
+        "if".into(),
+        serde_json::json!({ "properties": { "protocol": known_protocol } }),
+    );
+    profile.insert("then".into(), serde_json::json!({ "oneOf": branches }));
 }
 
 fn strict_protocols() -> Vec<Value> {
@@ -181,6 +207,17 @@ impl Validator<'_> {
                 self.check_alternatives(branches, value, pointer, out);
             }
         }
+        if let (Some(condition), Some(consequence)) = (schema.get("if"), schema.get("then"))
+            && self.accepts(condition, value)
+        {
+            self.check(consequence, value, pointer, out);
+        }
+    }
+
+    fn accepts(&self, schema: &Value, value: &Value) -> bool {
+        let mut problems = Vec::new();
+        self.check(schema, value, "", &mut problems);
+        problems.is_empty()
     }
 
     fn resolve(&self, reference: &str) -> Option<&Value> {
@@ -554,6 +591,42 @@ mod tests {
     }
 
     #[test]
+    fn profile_checks_the_protocol_branches_only_for_a_known_protocol() {
+        let profile = &config_json_schema()["definitions"]["Profile"];
+        let branch_protocols: Vec<&Value> = profile["then"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|branch| &branch["properties"]["protocol"]["const"])
+            .collect();
+        let listed: Vec<&Value> = profile["properties"]["protocol"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .collect();
+        assert_eq!(listed.len(), 11);
+        assert_eq!(listed, branch_protocols);
+        assert_eq!(
+            profile["if"]["properties"]["protocol"],
+            profile["properties"]["protocol"]
+        );
+    }
+
+    #[test]
+    fn every_protocol_branch_lists_the_shared_profile_fields() {
+        let profile = &config_json_schema()["definitions"]["Profile"];
+        for branch in profile["then"]["oneOf"].as_array().unwrap() {
+            for field in ["id", "name", "address", "port", "tags", "subscription_id"] {
+                assert!(
+                    branch["properties"].get(field).is_some(),
+                    "{} lacks {field}",
+                    branch["properties"]["protocol"]["const"]
+                );
+            }
+        }
+    }
+
+    #[test]
     fn reports_every_structural_problem_with_its_pointer() {
         let document = json!({
             "schema_version": CURRENT_SCHEMA_VERSION,
@@ -779,6 +852,7 @@ mod tests {
             "const",
             "enum",
             "format",
+            "if",
             "items",
             "maximum",
             "minLength",
@@ -786,6 +860,7 @@ mod tests {
             "oneOf",
             "properties",
             "required",
+            "then",
             "type",
         ];
         const ANNOTATIONS: &[&str] = &[
@@ -817,7 +892,7 @@ mod tests {
                             .flatten()
                             .for_each(|s| walk(s, found));
                     }
-                    "items" | "additionalProperties" => walk(value, found),
+                    "items" | "additionalProperties" | "if" | "then" => walk(value, found),
                     _ => {}
                 }
             }

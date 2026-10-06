@@ -368,9 +368,18 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
   `ShadowtlsVersion` and `RoutingMode` have hand-written serde, so they
   implement it by hand from the same values. `#[serde(flatten)]` drops
   `additionalProperties: false` from the protocol configs that deny unknown
-  fields (SOCKS, SSH, Shadowsocks), so `json_schema::keep_strict_protocol_fields`
-  restores it on those `Profile` branches, listing the shared profile fields as
-  allowed; the other protocols stay lenient, as serde is. Value constraints
+  fields (SOCKS, SSH, Shadowsocks), so
+  `json_schema::share_profile_fields_with_protocol_branches` restores it on
+  those `Profile` branches; the other protocols stay lenient, as serde is. It
+  lists the shared profile fields in every branch, not only the strict ones: a
+  JSON language server reports an unmatched `oneOf` through the branch that
+  matches the most properties, and fields listed only in the strict branches
+  made it report an unknown `protocol` as `must be "shadowsocks"`.
+  `json_schema::check_branches_only_for_known_protocols` then moves the
+  branches under `if`/`then`, checked only when `protocol` is one of their
+  values, and adds a `Profile`-level `protocol` `enum` of those values, so an
+  unknown protocol reports that list instead of a guessed branch's errors.
+  The validator implements `if`/`then` for it. Value constraints
   that `Config::diagnostics` also enforces are mirrored in the schema with
   `#[schemars(...)]` field attributes so a JSON language server flags them
   while typing — `minLength: 1` on the profile and protocol fields that must
