@@ -11,7 +11,7 @@ Open a reviewable GitHub pull request from the current branch into `develop`. De
 
 Before deriving the PR title, description, or checks, read:
 
-- `AGENTS.md` for architecture and project constraints;
+- `AGENTS.md` for architecture and project constraints, and the nested `src/*/AGENTS.md` guide of every subsystem the diff touches;
 - `CONTRIBUTING.md` for branch, commit, PR, and validation requirements;
 - `.github/pull_request_template.md` for the required description structure;
 - `.agents/skills/conventional-commit/SKILL.md` for title formatting.
