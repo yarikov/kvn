@@ -85,7 +85,7 @@ schedule at any time.
 | `kill_switch` | `false` | Persisted kill-switch state |
 | `last_connected_profile` | `null` | Last connected profile; maintained by the application |
 | `theme` | `tokyo-night` | Bundled palette slug or `omarchy` |
-| `icons` | `nerd` | `nerd` for Nerd Font glyphs, or `unicode` for terminals without a Nerd Font |
+| `icons` | `nerd` on Omarchy, `unicode` elsewhere | `nerd` for Nerd Font glyphs, or `unicode` for terminals without a Nerd Font |
 | `allow_insecure_http_subscriptions` | `false` (`true` after migration from v4) | Temporarily allow deprecated HTTP subscription URLs for backward compatibility |
 | `connectivity_probe.enabled` | `true` | Enable the HTTP(S) endpoint used only by manual `t` / `T` latency tests |
 | `connectivity_probe.url` | `https://connectivitycheck.gstatic.com/generate_204` | Probe endpoint; required and validated only when the probe is enabled |
@@ -309,6 +309,11 @@ the 22 palettes bundled from [`themes/`](../themes/).
 See the [theme gallery](themes.md) for a full UI preview of every bundled palette.
 The special `omarchy` value follows the active Omarchy theme. Fresh non-Omarchy
 installations use `tokyo-night`.
+
+The **Icons** row on the same screen switches between Nerd Font glyphs and
+plain Unicode symbols. A new installation, or a config without the `icons`
+field or the whole `settings` section, uses `nerd` on Omarchy, which ships a
+Nerd Font, and `unicode` elsewhere.
 
 `logs.level` controls both application and generated sing-box logging. Accepted
 values are `trace`, `debug`, `info`, `warn`, and `error`; `RUST_LOG` takes

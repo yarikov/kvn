@@ -109,19 +109,27 @@ pub struct Settings {
     pub allow_insecure_http_subscriptions: bool,
     #[serde(default)]
     pub connectivity_probe: ConnectivityProbeConfig,
-    #[serde(default)]
+    #[serde(default = "IconSet::for_this_desktop")]
+    #[schemars(transform = super::json_schema::without_default)]
     pub icons: IconSet,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IconSet {
-    #[default]
     Nerd,
     Unicode,
 }
 
 impl IconSet {
+    pub fn for_this_desktop() -> Self {
+        if crate::omarchy::detect_omarchy_theme().is_some() {
+            Self::Nerd
+        } else {
+            Self::Unicode
+        }
+    }
+
     pub fn next(self) -> Self {
         match self {
             Self::Nerd => Self::Unicode,
@@ -242,6 +250,13 @@ fn is_safe_slug_char(c: char) -> bool {
 }
 
 impl Settings {
+    pub fn for_this_desktop() -> Self {
+        Self {
+            icons: IconSet::for_this_desktop(),
+            ..Self::default()
+        }
+    }
+
     pub fn diagnostics(&self) -> Vec<ConfigDiagnostic> {
         let mut diagnostics = Vec::new();
         diagnostics.extend(
@@ -346,7 +361,7 @@ impl Default for Settings {
             hwid: String::new(),
             allow_insecure_http_subscriptions: false,
             connectivity_probe: ConnectivityProbeConfig::default(),
-            icons: IconSet::default(),
+            icons: IconSet::Nerd,
         }
     }
 }
@@ -414,7 +429,6 @@ mod tests {
         assert_eq!(s.logs.line_retention.app, 1_000);
         assert_eq!(s.logs.line_retention.singbox, 100_000);
         assert_eq!(s.geo_routing.auto_update, GeoAutoUpdate::Off);
-        assert_eq!(s.icons, IconSet::Nerd);
     }
 
     #[test]
