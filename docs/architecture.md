@@ -41,11 +41,18 @@ runs `sing-box` as a child process and shows its state in a terminal UI.
               └───────────────────────────────┘
 ```
 
-**The daemon** (`kvn --daemon`, started by the `kvn-tui.service` user unit)
-controls the running VPN: while it runs, every change goes through it. It owns
+**The daemon** (`kvn --daemon`, started by the `kvn-tui.service` user unit, or
+on demand by `kvn`, `kvn connect` and `kvn toggle`, which fall back to spawning
+it directly when the unit cannot be started) controls the running VPN: while it runs, every change goes through it. It owns
 the canonical application state, `profiles.json`, the sing-box process, geo rule-set downloads, suspend
 and resume handling and the kill switch. It runs headless, so the VPN does not
 depend on a terminal being open.
+
+At startup the daemon refuses to run while a package migration is pending. It
+then reconciles settings with the system: `settings.kill_switch` follows
+whether the kill-switch unit is actually active, and auto-connect is turned off
+before the first connect when polkit denies the DNS actions it needs. On exit
+it stops sing-box and flushes kill-switch exceptions an older kvn left behind.
 
 **Clients** connect to the daemon's Unix socket and never touch sing-box
 directly:
@@ -185,19 +192,29 @@ Clients talk to the daemon in newline-delimited JSON over
 - **StateSnapshot**: after every state change the daemon pushes a full
   snapshot, including the complete config, to every attached client. There are
   no diffs to get out of sync.
-- **Correlated requests**: saving an edited config (`ApplyEditedConfig`) and
-  wheel scrolling (`ScrollViewport`) carry a request id. Only the matching
-  reply carries their result.
+- **Correlated requests**: saving an edited config (`ApplyEditedConfig`),
+  wheel scrolling (`ScrollViewport`), pane focus (`SetMainPaneFocus`) and every
+  one-shot CLI command carry a request id. Only the matching reply carries
+  their result or error.
+- **Restart required**: after package migrations finish while a TUI is
+  attached, the daemon enters a frozen state until it is restarted. It ignores
+  every command except `Quit`, answers connection requests with an error, and
+  pauses scheduled downloads.
 
-The first snapshot includes the daemon's version and `IPC_VERSION`. When a
-package upgrade leaves an older daemon running, the TUI restarts the daemon
-unit and attaches to the new one.
+Every snapshot carries the daemon's version and `IPC_VERSION`. When a package
+upgrade leaves an older daemon running, the TUI sends it `Quit`, waits up to
+five seconds for it to exit, starts the new daemon (through the unit for the
+packaged binary, directly for other builds), and reconnects the profile that
+was connected. One-shot CLI commands do not restart it; they fail and ask the
+user to restart the daemon.
 
 ## Logs
 
 Logs do not go through IPC, and `StateSnapshot` carries no log lines. sing-box
-writes its log file and the daemon appends its own `[app]` messages to the app
-log. The daemon also trims both files to the configured line limits. The TUI
+writes its log file, and the daemon (and, for editor results, the TUI) appends
+`[app]` messages to the app log. The daemon trims both files to the configured
+line limits when it starts, and the sing-box log also at most once every 24
+hours when connecting. The TUI
 reads the two files itself: on its own 250 ms tick, its `LogTailer` reads the
 new lines and shows them in the log pane.
 
@@ -270,8 +287,9 @@ Neither the daemon nor the TUI runs as root.
 - **sing-box** gets `cap_net_admin,cap_net_raw` as file capabilities from the
   package, which is enough to create the TUN interface.
 - **DNS**: sing-box sets the tunnel's DNS through systemd-resolved. The
-  optional polkit rule (`sudo kvn setup --polkit`) allows exactly those three
-  resolved actions for members of the `kvn-tui` group, so connecting does not
+  optional polkit rule (`sudo kvn setup --polkit`) allows exactly the three
+  resolved actions it uses — `set-dns-servers`, `set-domains` and
+  `set-default-route` — for members of the `kvn-tui` group, so connecting does not
   ask for a password.
 - **Kill switch**: an nftables ruleset loaded by a systemd unit, toggled
   through one helper script that the `kvn-tui` group may run with sudo

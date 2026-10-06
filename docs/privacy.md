@@ -9,6 +9,7 @@ the tunnel, which deliberately does not, and what the network can still see.
 - [Kill switch](#kill-switch)
 - [IPv4 only](#ipv4-only)
 - [What the network still sees](#what-the-network-still-sees)
+- [Requests kvn makes itself](#requests-kvn-makes-itself)
 - [Known limitations](#known-limitations)
 - [Checking it yourself](#checking-it-yourself)
 
@@ -31,6 +32,12 @@ neither uses the tunnel in Bypass and goes directly in Only. To compare an
 address with the list, kvn may look the name up again through your main DNS
 server, along the same path as your other DNS questions.
 
+The region's lists are files kvn downloads. Until they are on disk, a
+connection still starts but without the region's rules: the local network
+still goes directly in Bypass and Only, and service overrides whose files are
+present still apply, but everything else follows the mode's default — the
+tunnel in Bypass, and directly in Only, including the region's own sites.
+
 The tunnel carries IPv4 only; IPv6 is blocked in every mode, see
 [IPv4 only](#ipv4-only).
 
@@ -41,7 +48,11 @@ services that refuse foreign IP addresses while everything else stays direct.
 
 The Steam and Telegram rows of the same screen override the mode for those
 services. A service set to `direct` always skips the tunnel; one set to
-`proxy` always uses it.
+`proxy` always uses it. An override needs its own rule-set files, which kvn
+downloads through the tunnel. Until they are downloaded and kvn has
+reconnected, the service follows the routing mode. Turning an override on
+while connected does both automatically; files that were missing when a
+connection started apply only from the next connection.
 
 ## DNS
 
@@ -56,9 +67,13 @@ selected DNS preset (see the [configuration guide](configuration.md#dns)):
   tunnel. Your provider does not see them.
 - **Only:** every DNS question is sent directly, like the rest of the traffic
   outside the region.
-- **Local DNS servers** — a router such as `192.168.1.1` or a resolver on
-  `127.0.0.1` — are always queried directly, because they are only reachable
-  on your own network.
+- **Local DNS servers** — a router such as `192.168.1.1`, a resolver on
+  `127.0.0.1`, or a link-local or `100.64.0.0/10` address — are always queried
+  directly, because they are only reachable on your own network.
+- **The System local preset** asks your system's resolver, which is always
+  queried directly, in every mode. Where it forwards the questions — often your
+  router or your provider — is outside kvn's control, so use another preset if
+  your provider must not see them.
 - **The VPN server's own name** is looked up directly, through a copy of your
   main DNS server, because the tunnel does not exist yet when it is needed.
 
@@ -97,6 +112,17 @@ Exactly what the kill switch lets through, besides the tunnel interface
 - all ICMP and ICMPv6 (ping, path MTU discovery, IPv6 neighbor discovery);
 - DHCP and DHCPv6, so the network connection itself keeps working.
 
+Everything else leaving the computer is dropped when it starts a new
+connection — for example a connection to a `169.254.0.0/16` link-local
+address, multicast and broadcast traffic such as mDNS and SSDP, or a
+`100.64.0.0/10` address used by Tailscale. Traffic the computer forwards for
+containers and virtual machines may leave only through the tunnel, apart from
+connections that are already established.
+
+Latency tests (`t` / `T`) start a separate sing-box whose packets carry the
+same mark, so they reach each tested VPN server directly even with the kill
+switch on.
+
 ## IPv4 only
 
 The tunnel carries IPv4 only. While kvn is connected:
@@ -130,6 +156,26 @@ Even in Global mode, your provider can see:
 
 The VPN server's operator sees the traffic that leaves the tunnel, as any VPN
 provider does.
+
+## Requests kvn makes itself
+
+kvn's own downloads are ordinary traffic: while connected they go through the
+tunnel (or directly, as your routing mode decides), and while disconnected
+they go directly. With the kill switch on, kvn makes them only while the tunnel
+is up.
+
+- **Rule-sets** for the selected region and for Steam and Telegram overrides
+  are downloaded from `raw.githubusercontent.com` (SagerNet and MetaCubeX
+  repositories), on first use and on the `geo_routing.auto_update` schedule.
+  The first download of a service's rule-sets waits for the tunnel; scheduled
+  refreshes run like the others.
+- **Subscriptions** are fetched from their URL with
+  `User-Agent: kvn-tui/<version>`. A subscription with `send_hwid` also sends
+  an installation identifier, the kernel version, and the system locale; see
+  [Subscriptions](configuration.md#subscriptions).
+- **Latency tests** request `settings.connectivity_probe.url`
+  (`https://connectivitycheck.gstatic.com/generate_204` by default) through
+  each tested VPN server, only when you press `t` or `T`.
 
 ## Known limitations
 
