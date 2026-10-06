@@ -89,7 +89,8 @@ infer important behavior from the diff.
 
 ## Code and Architecture
 
-- Follow the architecture and project conventions in `AGENTS.md`.
+- Follow the architecture and project conventions in `AGENTS.md` and in the
+  subsystem guide (`src/*/AGENTS.md`) for the code you change.
 - Keep `app::update::update` free of I/O, threads, and system calls. Declare
   side effects as `Effect` values and execute them in the daemon.
 - Use atomic writes for configuration and persistent state.

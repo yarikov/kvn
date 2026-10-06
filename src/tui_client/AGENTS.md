@@ -1,0 +1,7 @@
+# Agent Guide: TUI client
+
+This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply here too. It covers `src/tui_client/`: the client loop, its message handlers, and the keys handled without the daemon. Read it before changing that code.
+
+## Module Layout
+
+- **`tui_client` submodules** (`src/tui_client/handler.rs` + `src/tui_client/handler/`, `src/tui_client/docs_preview.rs`): `handler.rs` owns `ClientLoop` (the loop's terminal/pane/log/toast/pointer state) and dispatches each `Msg`; the short branches (paste, snapshot, tick, resize, theme) stay there, while `mouse.rs` handles clicks, drags, wheel scrolling and log selection, `wheel.rs` the wheel step (one row per event, growing while events arrive in quick succession), `pointer.rs` the pointer shape plus double-click tracking, `scroll.rs` the queue of `ScrollViewport` requests (one in flight), and `toast.rs` the client-local status toast lifetime. `handler/key.rs` routes by `Model.overlay` to `key/{support,log_pane,clipboard,editor,quit,onboarding}.rs` — the client-local half of `app/update/key/`. `docs_preview.rs` builds the fixed state used for documentation captures
