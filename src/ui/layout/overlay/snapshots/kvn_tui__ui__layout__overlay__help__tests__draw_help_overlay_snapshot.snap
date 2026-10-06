@@ -21,17 +21,17 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                              │ i/I        Cycle subscription / geo auto-update ┃                              │
 │                              │ t/T        Test selected / all profiles         ┃                              │
 │                              │                                                 ┃                              │
-│                              │ Logs                                            ┃                              │
+│                              │ Logs                                            │                              │
 │                              │ y          Yank selected log(s)                 │                              │
 │                              │ Shift+V    Select multiple logs                 │                              │
+│                              │ j/k        Extend selection by one log          │                              │
+│                              │ gg/G       Extend selection to first / last     │                              │
 │                              │ Esc        Cancel log selection                 │                              │
 │                              │                                                 │                              │
 │                              │ Connection                                      │                              │
 │                              │ r          Reconnect                            │                              │
 │                              │ s          Disconnect                           │                              │
 │                              │ Shift+A    Toggle auto-connect                  │                              │
-│                              │ Shift+K    Toggle kill switch                   │                              │
-│                              │                                                 │                              │
 │                              │                                                 │                              │
 │                              │                    q/󱊷 close                    │                              │
 │                              └─────────────────────────────────────────────────┘                              │
