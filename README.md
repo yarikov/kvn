@@ -25,6 +25,7 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
   - [Build from source](#build-from-source)
 - [Upgrading](docs/upgrading.md)
 - [Diagnostics](#diagnostics)
+- [Command-line interface](docs/cli.md)
 - [Default Key Bindings](#default-key-bindings)
 - [Configuration](#configuration)
 - [What kvn protects](docs/privacy.md)
@@ -203,6 +204,8 @@ kvn doctor
 Runs a read-only check of sing-box, configuration, pending package migrations,
 the daemon, clipboard, and optional integrations, with remediation hints for
 detected problems.
+
+See the [command-line reference](docs/cli.md) for every other command.
 
 ---
 

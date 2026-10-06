@@ -680,6 +680,8 @@ filesystem resources under the legacy `kvn-tui` namespace.
 Keep documentation synchronized with code changes. When a filesystem path,
 persistent file, runtime file, command, configuration field, or user-visible
 behavior changes, update the corresponding documentation in the same change.
+Any added, removed, or changed CLI command, option, or output updates
+`docs/cli.md`.
 
 | Resource | Path |
 |----------|------|
