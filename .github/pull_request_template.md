@@ -8,7 +8,8 @@
 
 ## Testing
 
-<!-- List the automated tests added and the commands run. -->
+<!-- Optional: list the automated tests added and the commands run, or delete
+this section. The checks in CONTRIBUTING.md apply either way. -->
 
 - [ ] I added or updated tests for every behavior change and regression.
 - [ ] `cargo fmt --check` passes.
@@ -17,6 +18,8 @@
 - [ ] Region and line coverage remain at or above 85%.
 
 ## Contribution checklist
+
+<!-- Optional: delete this section if you prefer. -->
 
 - [ ] This PR is based on the latest `develop` branch.
 - [ ] This PR contains one logical change.

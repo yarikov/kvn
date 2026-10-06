@@ -75,8 +75,12 @@ The description must explain:
 - the user-visible problem or motivation;
 - what the pull request changes;
 - important design and security decisions;
-- how the change was tested;
 - related issues, when applicable.
+
+Only the **Summary** and **Changes** sections of the template are required.
+The **Testing** section and the contribution checklist are optional for every
+pull request; leaving them out does not waive the checks in
+[Tests and Quality Checks](#tests-and-quality-checks).
 
 Update the pull request when its scope changes. Reviewers should not have to
 infer important behavior from the diff.
@@ -113,6 +117,22 @@ cargo fmt --check \
 The last command requires `cargo-llvm-cov`. CI runs the same formatting,
 linting, test, and coverage gates.
 
+### Documentation-Only Pull Requests
+
+A pull request is documentation-only when every changed file is a Markdown
+file (`*.md`, including `AGENTS.md`, `.agents/skills/` and
+`.github/pull_request_template.md`) or an image under `assets/`. Any other
+file — source, tests, snapshots, scripts, `contrib/`, `pkg/`, workflows —
+makes it a regular pull request with every gate above.
+
+A documentation-only pull request may skip the Rust gates; it always requires:
+
+- `git diff --check origin/develop...HEAD` passes;
+- every relative link and `#anchor` added or changed in the diff resolves
+  (`lychee --offline --include-fragments <files>` when available);
+- every claim it adds or changes about behavior, commands, paths, or
+  configuration was checked against the current source.
+
 ## Review Checklist
 
 - The branch starts from the current `develop` branch.
@@ -120,6 +140,7 @@ linting, test, and coverage gates.
 - The title follows Conventional Commits and is suitable for release notes.
 - The title and description are in English.
 - Tests cover all new behavior and regressions.
-- Formatting, Clippy, tests, and coverage pass without warnings.
+- Formatting, Clippy, tests, and coverage pass without warnings, or the pull
+  request is documentation-only and passes its own checks.
 - No secrets or real subscription data are included.
 - User-facing documentation is updated when behavior or configuration changes.
