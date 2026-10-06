@@ -55,10 +55,12 @@ Run the Rust gates from the repository root and stop on any failure:
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --locked
+cargo insta test --check --unreferenced=reject
 cargo llvm-cov --locked --summary-only
+cargo deny check all
 ```
 
-For coverage, inspect the `TOTAL` row and require both region and line coverage to be at least 85%. If `cargo-llvm-cov` or required LLVM tooling is unavailable, report the missing prerequisite and stop; do not claim the coverage checkbox passes.
+For coverage, inspect the `TOTAL` row and require both region and line coverage to be at least 85%. If `cargo-llvm-cov`, its LLVM tooling, `cargo-insta`, or `cargo-deny` is unavailable, report the missing prerequisite and stop; do not claim the coverage checkbox passes.
 
 For a documentation-only PR, additionally require that `git diff --check` passes (already run above), that every relative link and anchor added or changed in the diff resolves (use `lychee --offline --include-fragments` on the changed files when it is installed, otherwise check each one by hand), and that each changed claim about behavior, commands, paths, or configuration matches the current source. These checks are never skipped.
 

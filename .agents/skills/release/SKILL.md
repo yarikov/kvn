@@ -15,6 +15,7 @@ Activate this skill when the user says any of the following:
 
 **Follow these steps exactly:**
 
+0. **Check preconditions.** Stop if the working tree is dirty. Confirm with the user which branch to release from before changing anything.
 1. **Read current version** from `Cargo.toml` (`version = "X.Y.Z"`).
 2. **Determine new version:**
    - If user said **"patch"** → increment patch (`0.6.2` → `0.6.3`)
@@ -23,11 +24,12 @@ Activate this skill when the user says any of the following:
    - If user provided an **explicit version** (e.g. "release 0.7.1") → use that version
 3. **Update files** (replace the old version with the new one):
    - `Cargo.toml` — `version = "X.Y.Z"`
-   - `pkg/arch/PKGBUILD` — `pkgver=X.Y.Z`
+   - `pkg/arch/PKGBUILD` — `pkgver=X.Y.Z`, and reset `pkgrel=1`
+   - `pkg/aur/PKGBUILD.bin` — reset `pkgrel=1` if it was raised (its `pkgver` is set by the AUR workflow)
 4. **Regenerate `Cargo.lock`** by running `cargo check`.
 5. **Stage changes:**
    ```bash
-   git add Cargo.toml Cargo.lock pkg/arch/PKGBUILD
+   git add Cargo.toml Cargo.lock pkg/arch/PKGBUILD pkg/aur/PKGBUILD.bin
    ```
 6. **Commit:**
    ```bash
@@ -41,9 +43,9 @@ Activate this skill when the user says any of the following:
    ```bash
    git push && git push origin vX.Y.Z
    ```
+   The tag push runs CI; when CI succeeds on the tag, `release.yml` builds and publishes the GitHub release, and `aur.yml` then updates the AUR package.
 
 ### Validation
 
 - Ensure the version string follows semantic versioning (`MAJOR.MINOR.PATCH`).
-- Do not create a release tag if the working tree is dirty (uncommitted changes exist).
 - Always run `cargo check` so `Cargo.lock` is updated and the build is validated.

@@ -22,6 +22,17 @@ Every script must start with an interpreter and summary:
 set -euo pipefail
 ```
 
+`kvn:summary` is the line `kvn migrate --pending` prints. `kvn:introduced` is
+the first package version that ships the script.
+
+The package's install scriptlet writes `/var/lib/kvn/migration-baseline` once,
+and the runner never runs a script listed there. A fresh installation lists
+every shipped script: a new user has nothing to migrate from. The first upgrade
+into a package that has the baseline lists only the scripts whose
+`kvn:introduced` is not newer than the version being upgraded from, so the new
+ones still run. An existing baseline is never rewritten; it is removed with the
+package.
+
 ## What the runner does
 
 1. Takes `$XDG_RUNTIME_DIR/kvn/migrate.lock` so only one runner runs at a time.

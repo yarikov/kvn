@@ -15,6 +15,8 @@ this section. The checks in CONTRIBUTING.md apply either way. -->
 - [ ] `cargo fmt --check` passes.
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings` passes.
 - [ ] `cargo test --locked` passes.
+- [ ] `cargo insta test --check --unreferenced=reject` passes.
+- [ ] `cargo deny check all` passes.
 - [ ] Region and line coverage remain at or above 85%.
 
 ## Contribution checklist
