@@ -26,7 +26,7 @@ standalone `yarikov.omakvn` bar plugin.
 ## v0.22.0 on Omarchy
 
 Follow the [v0.22.0 migration guide](migrations/v0.22.0.md) to refresh the
-Omarchy 3/4 desktop integration.
+Omarchy desktop integration. Omarchy 3 is no longer supported since v0.32.0.
 
 ## v0.20.0
 

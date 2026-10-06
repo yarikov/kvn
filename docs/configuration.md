@@ -68,10 +68,12 @@ the `protocol` discriminator. See the
 types and share-link schemes.
 
 A subscription contains `id`, `name`, `url`, `auto_update`, and an optional
-`last_updated` timestamp. Valid update schedules are `off`, `every_1h`,
-`every_12h`, `every_1d`, and `every_7d`. An imported subscription starts at
-`every_1d`; existing subscriptions keep whatever they store, and `i` changes the
-schedule at any time.
+`last_updated` timestamp. Valid update schedules are `off`, `every1d`,
+`every3d`, and `every7d` — written without an underscore, unlike the geo
+schedules below. An imported subscription starts at `every1d`; existing
+subscriptions keep whatever they store, and `i` changes the schedule at any
+time. The legacy values `every1h` and `every12h` behave as `every1d`, and the
+schema migration rewrites them.
 
 ## Settings
 
@@ -289,8 +291,9 @@ The following snippet belongs inside `settings`:
 ```
 
 Routing modes are serialized as `global`, `bypass_<region>`, or
-`only_<region>`. Geo update schedules are `off`, `every_12h`, `every_1d`,
-`every_3d`, and `every_7d`.
+`only_<region>`. Geo update schedules are `off`, `every_1d`, `every_3d`, and
+`every_7d`. The legacy value `every_12h` behaves as `every_1d`, and the schema
+migration rewrites it.
 
 The Steam and Telegram rows of Settings › Routing set the predefined service
 overrides. `proxy` always uses the
