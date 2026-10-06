@@ -50,11 +50,11 @@ replace a valid configuration with a partial file.
 
 ## File structure
 
-The current schema version is 5. A minimal configuration is:
+The current schema version is 6. A minimal configuration is:
 
 ```json
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "profiles": [],
   "subscriptions": [],
   "settings": {}
