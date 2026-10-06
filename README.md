@@ -299,8 +299,9 @@ advanced DNS and routing, validation, migrations, and runtime file locations.
 ## Architecture
 
 `kvn` is built with Rust 2024 on top of sing-box, with a persistent daemon and a
-TEA-style core. See the [architecture overview](docs/architecture.md) for the
-technology stack and design highlights.
+TEA-style core. See the [architecture overview](docs/architecture.md) for how
+the daemon, its clients and sing-box fit together, the IPC protocol, privileges,
+and the source layout.
 
 ---
 
