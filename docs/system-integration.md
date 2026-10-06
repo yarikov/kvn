@@ -13,8 +13,8 @@ The Arch package installs:
 | `/usr/bin/kvn-tui` | `0755` | Application binary |
 | `/usr/bin/kvn` | symlink | Canonical command pointing to `kvn-tui` |
 | `/usr/lib/systemd/user/kvn-tui.service` | `0644` | Per-user daemon service |
-| `/usr/lib/kvn/migrations/` | `0755` | Root-owned, ordered breaking-migration scripts |
-| `/var/lib/kvn/migration-baseline` | `0644` | Scripts included by the initial package installation |
+| `/usr/lib/kvn/migrations/` | `0755` | Root-owned, ordered migration scripts |
+| `/var/lib/kvn/migration-baseline` | `0644` | Scripts older than the first installed version, which never run; written by the install scriptlet and removed with the package |
 | `/usr/share/libalpm/hooks/kvn-tui-sing-box-capabilities.hook` | `0644` | Restores sing-box capabilities after package updates |
 | `/usr/share/licenses/kvn-tui/LICENSE` | `0644` | MIT license for the source package |
 | `/usr/share/licenses/kvn-tui-bin/LICENSE` | `0644` | MIT license for the binary package |
@@ -70,8 +70,16 @@ The daemon, the VPN and the kill switch stay up while the scripts run. Once the
 queue finishes, the daemon is still running the previous version and
 configuration, so the runner restarts `kvn-tui.service` — unless a TUI session
 is attached, in which case that session shows a modal prompt instead — `Enter`
-restarts, `Ctrl+C` stops the daemon — and the daemon refuses to persist config
-until it is restarted.
+restarts, `Ctrl+C` stops the daemon. Until it is restarted, the daemon keeps
+the current connection but ignores every command except quitting, rejects
+connect, disconnect, reconnect, and toggle requests with an error, and pauses
+scheduled rule-set and subscription updates.
+
+> [!IMPORTANT]
+> While any migration is pending, the daemon does not start. After a package
+> upgrade followed by a reboot, the VPN stays down until you run `kvn` or
+> `kvn migrate` — and with the kill switch enabled, the computer has no
+> network access until then. Apply migrations right after upgrading.
 
 Use:
 
@@ -114,6 +122,7 @@ authentication prompt:
 - `org.freedesktop.resolve1.set-dns-servers`
 - `org.freedesktop.resolve1.set-domains`
 - `org.freedesktop.resolve1.set-default-route`
+
 No NetworkManager actions are granted. This authorization is group-wide and is
 not restricted to the kvn process. After being added to `kvn-tui`, reboot
 to activate the `kvn-tui` group.
@@ -128,6 +137,11 @@ Cleanup preserves the group while the kill switch still uses it. If neither
 integration remains, cleanup removes the now-unused group and its membership
 records automatically. Auto-connect is turned off in kvn settings: immediately
 if the daemon is running, otherwise on its next start.
+
+Auto-connect depends on this rule. Whenever the daemon starts with
+auto-connect on but polkit denies kvn the DNS actions — the rule is missing, or
+the `kvn-tui` group is not active yet — it turns auto-connect off before
+connecting.
 
 ## Kill switch setup
 
@@ -156,9 +170,10 @@ accepts only:
 - `revoke`
 - `allow <ip> <tcp|udp> <port>`
 
-The nftables policy drops other input, output, and forwarded traffic while
-allowing loopback, `kvn*`, established connections, private LAN ranges,
-DHCP, ICMP, and packets marked by sing-box. kvn adds no temporary exceptions:
+The nftables policy drops other input and output traffic while allowing
+loopback, `kvn*`, established connections, private LAN ranges, DHCP, ICMP, and
+packets marked by sing-box. Forwarded traffic is allowed only out through
+`kvn*` and on established connections. kvn adds no temporary exceptions:
 sing-box's connection to the VPN server and its DNS queries are marked. The
 `allow` operation remains for compatibility, and `revoke` flushes exceptions an
 older kvn left behind.
@@ -168,7 +183,12 @@ Bypass/Only modes and means an explicit Direct service route can leave through
 the physical network while the kill switch is active.
 
 Toggling the kill switch with `Shift+K` runs `systemctl enable --now` or
-`disable --now`; an enabled kill switch therefore loads again at boot. Turning
+`disable --now`; an enabled kill switch therefore loads again at boot.
+Enabling fails with `reboot to activate the kvn-tui group` until the group
+membership added by setup is active, and with a pointer to
+`sudo kvn setup --killswitch` when the user is not in the group. When the
+daemon starts, it sets `settings.kill_switch` to match whether the unit is
+actually active, so a unit changed outside kvn is reflected in the TUI. Turning
 it off from the keybinding is confirmed in a dialog first; the `Space c`
 settings screen and `kvn disable --killswitch` apply without one.
 
@@ -229,12 +249,13 @@ The launcher mode is `0755`.
   plugin is mandatory: when the shell plugin registry is unavailable or the
   install fails, setup aborts and rolls back instead of installing a reduced
   integration;
-- `~/.config/omarchy/shell.json` — the `yarikov.omakvn` bar entry, inserted
-  before `omarchy.bluetooth`;
+- `~/.config/omarchy/shell.json` — the `yarikov.omakvn` bar entry, inserted in
+  the right section before `omarchy.bluetooth`, or before `omarchy.network`, or
+  at its end. `jq` must be installed;
 - `~/.config/hypr/bindings.lua` — optional launcher binding;
 - `~/.config/hypr/hyprland.lua` — floating-window rule.
 - `~/.local/share/applications/kvn-tui.desktop` — Apps menu entry searchable by
-  `kvn`, `kvn-tui`, `tui`, and `vpn`; it opens or focuses the TUI directly.
+  `kvn`, `kvn-tui`, `vpn`, `tui`, `terminal`, and `sing-box`; it opens or focuses the TUI directly.
 - `~/.local/share/icons/hicolor/scalable/apps/kvn-tui.svg` — high-contrast Apps
   icon styled like Omarchy's bundled applications for light and dark themes.
 
@@ -314,8 +335,8 @@ it:
 
    ```text
    ~/.config/kvn-tui/          profiles, settings, geo rule-sets, logs, state, recovery copies
-   ~/.local/state/kvn/         first-run tour, support prompt, applied migrations
-   /run/user/$UID/kvn-tui/     temporary sing-box configuration
+   ~/.local/state/kvn/         first-run tour, support prompt, applied migrations, sing-box cache
+   /run/user/$UID/kvn-tui/     temporary sing-box and latency-test configurations
    /run/user/$UID/kvn/         migration lock
    /run/user/$UID/kvn-tui.sock daemon socket
    ```

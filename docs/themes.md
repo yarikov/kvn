@@ -1,6 +1,20 @@
 # Theme gallery
 
-kvn includes 22 palettes derived from Omarchy themes. Press `Space i` in the TUI to preview and select one.
+kvn includes 22 palettes derived from Omarchy themes. To choose one, press
+`Space i` in the TUI to open **Settings › Interface**, cycle the **Theme** row
+with `h` / `l` — the whole UI previews each palette as you go — and press
+`Enter` to save, or `Esc` to keep the current theme. The same screen has an
+**Icons** row that switches between Nerd Font glyphs and plain Unicode symbols.
+The setting is stored as `settings.theme`; see
+[Themes and logging](configuration.md#themes-and-logging).
+
+On Omarchy the list also offers **Auto (Omarchy)**, stored as `omarchy`, which
+a first launch under Omarchy selects. It reads the active Omarchy theme's
+colors, so any Omarchy theme works, not only the 22 below, and it follows theme
+changes while kvn is open. Without Omarchy it falls back to `tokyo-night`.
+
+kvn also sets the terminal's own foreground and background colors to the
+palette while it runs, and restores them on exit.
 
 ## Catppuccin
 

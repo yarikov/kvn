@@ -1,7 +1,14 @@
 # Command-line interface
 
 Running `kvn` without arguments opens the TUI, starting the background daemon
-first when it is not running. Every other command below runs once and exits.
+first when it is not running. Before that it runs any pending
+[package migrations](#migrate) in the terminal. Every other command below runs
+once and exits.
+
+The package also installs the legacy `kvn-tui` name. It still works, but every
+command run through it, except plain `kvn-tui`, `kvn-tui --daemon` and
+`kvn-tui --waybar-status`, first prints a warning to stderr that the name will be
+removed.
 
 ```bash
 kvn --help              # list commands
@@ -16,7 +23,7 @@ kvn --version
 | [`kvn disconnect`](#disconnect) | Disconnect or cancel a connection attempt |
 | [`kvn reconnect`](#reconnect) | Restart the current connection |
 | [`kvn toggle`](#toggle) | Connect the last profile, or disconnect |
-| [`kvn enable` / `kvn disable`](#enable-and-disable) | Turn the kill switch or the support prompt on or off |
+| [`kvn enable` / `kvn disable`](#enable-and-disable) | Turn the kill switch on or off, or hide the support prompt |
 | [`kvn doctor`](#doctor) | Check that kvn is ready to use |
 | [`kvn migrate`](#migrate) | Run package migrations |
 | [`kvn config`](#config) | Reset or recover `profiles.json` |
@@ -61,8 +68,10 @@ Connecting to Work VPN…
 Disconnected
 ```
 
-When the last action failed, its message follows `Disconnected —` and is also
-written to stderr. `--json` prints the daemon's full state snapshot instead.
+The transfer rates appear only while either of them is above zero, and
+`[kill switch]` only while the kill switch is on. When the last action failed,
+the line becomes `Disconnected — <message>` while kvn is disconnected, and the
+message is written to stderr as `last error: <message>` in every state. `--json` prints the daemon's full state snapshot instead.
 `status` never starts the daemon; it fails when the daemon is not running.
 
 ### connect
@@ -109,6 +118,9 @@ Disconnects (or cancels) when a connection is active or in progress; otherwise
 connects to the last profile that connected successfully. The daemon is started
 if it is not running. This is the command to bind to a key or a bar click.
 
+When no profile has connected yet, it fails with
+`no previous profile; run kvn connect <name> first`.
+
 ## enable and disable
 
 ```bash
@@ -117,9 +129,10 @@ kvn disable --killswitch
 kvn disable --support-prompt
 ```
 
-`--killswitch` turns the kill switch on or off and saves the setting. When the
-daemon is running the change goes through it; otherwise the kill-switch unit is
-switched directly and the daemon picks the state up on its next start. Unlike
+`--killswitch` turns the kill switch on or off. When the daemon is running the
+change goes through it and the setting is saved; otherwise only the kill-switch
+unit is switched, and the daemon aligns `settings.kill_switch` with the unit on
+its next start. Unlike
 `Shift+K` in the TUI, disabling asks for no confirmation. The kill switch must
 have been installed with [`sudo kvn setup --killswitch`](#setup) first; see
 [Kill switch setup](system-integration.md#kill-switch-setup).
@@ -147,7 +160,8 @@ kvn migrate [--pending]
 ```
 
 Runs the package migrations installed by a newer kvn package. They also run
-automatically on the next `kvn` launch. `--pending` only lists them, one
+automatically on the next `kvn` launch. While any migration is pending, the
+daemon refuses to start (see [`--daemon`](#--daemon)). `--pending` only lists them, one
 `<id>⇥<summary>` line each, without running anything. See
 [Package migrations](system-integration.md#package-migrations) and
 [Upgrading kvn](upgrading.md).
@@ -255,6 +269,15 @@ kvn --daemon
 ```
 
 Runs the headless daemon that owns sing-box, the configuration, and the
-background services. It is normally started by `kvn-tui.service` or
-automatically by `kvn`; run it by hand only in a custom service, with
-`ExecStart` pointing at this command.
+background services. It is normally started by `kvn-tui.service`, or on demand
+by `kvn`, `kvn connect`, and `kvn toggle`; run it by hand only in a custom
+service, with `ExecStart` pointing at this command.
+
+While a package migration is pending, the daemon does not start: it prints
+`N kvn migration(s) are pending. Launch kvn in a terminal to apply them` and
+exits with status 0, so systemd does not restart it. Run `kvn` or
+`kvn migrate` to apply them; until then no VPN connection can be made.
+
+The daemon runs `sing-box` from `PATH`, or the binary named by the
+`SING_BOX_PATH` environment variable. Set it in the service environment, for
+example with `systemctl --user edit kvn-tui.service`.

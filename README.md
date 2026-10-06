@@ -45,7 +45,7 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
 - **Geo & service routing** — choose country-based routing modes and ready-made overrides for selected services
 - **Kill switch** — block outbound traffic if the VPN connection drops
 - **IPv4 tunnel** — IPv6 is blocked rather than leaked while connected; see [what kvn protects](docs/privacy.md#ipv4-only)
-- **DNS controls** — built-in DoH, DoT, system resolver, strategy, and fake-IP settings
+- **DNS presets** — built-in Cloudflare and Quad9 DoH, Google DoT, and system resolver presets, your own presets with per-domain rules, strategy, and fake-IP
 - **Auto-connect & resume** — restore the last connection on startup and after system resume
 - **Persistent daemon** — keep the VPN and background services running after detaching the TUI
 - **Live insights** — traffic rates, totals, active connections, and combined logs
@@ -218,8 +218,8 @@ See the [command-line reference](docs/cli.md) for every other command.
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+h/←` | Focus left pane |
-| `Ctrl+l/→` | Focus right pane |
+| `Ctrl+h` / `Ctrl+←` | Focus left pane |
+| `Ctrl+l` / `Ctrl+→` | Focus right pane |
 | `j` / `↓` | Move or scroll down |
 | `k` / `↑` | Move or scroll up |
 | `gg` / `G` | Go to the first / last item |
@@ -231,7 +231,7 @@ See the [command-line reference](docs/cli.md) for every other command.
 | `Enter` | Connect to selected profile |
 | `e` | Open `profiles.json` in `$EDITOR` |
 | `y` | Yank selected profile or subscription |
-| `p` | Paste profile or subscription from clipboard |
+| `p` / `Ctrl+V` | Paste profile or subscription from clipboard |
 | `d` | Delete selected profile or subscription |
 | `u` / `U` | Update selected subscription / geo |
 | `i` / `I` | Cycle subscription / geo auto-update |
@@ -265,6 +265,7 @@ See the [command-line reference](docs/cli.md) for every other command.
 | `Space d` | DNS settings |
 | `Space i` | Interface settings |
 | `Space r` | Routing settings |
+| `Backspace` | Return from a settings page to the menu, discarding its changes |
 
 **Dialogs**
 

@@ -67,29 +67,51 @@ the `protocol` discriminator. See the
 [supported protocols](../README.md#supported-protocols) for available profile
 types and share-link schemes.
 
-A subscription contains `id`, `name`, `url`, `auto_update`, and an optional
-`last_updated` timestamp. Valid update schedules are `off`, `every1d`,
-`every3d`, and `every7d` — written without an underscore, unlike the geo
-schedules below. An imported subscription starts at `every1d`; existing
-subscriptions keep whatever they store, and `i` changes the schedule at any
-time. The legacy values `every1h` and `every12h` behave as `every1d`, and the
-schema migration rewrites them.
+## Subscriptions
+
+| Field | Description |
+|-------|-------------|
+| `id` | UUID; generated when absent |
+| `name` | Display name |
+| `url` | Subscription URL; `http://` is rejected unless `allow_insecure_http_subscriptions` is on |
+| `auto_update` | Update schedule (see below); `off` when absent |
+| `last_updated` | Time of the last successful update; maintained by kvn |
+| `next_auto_update` | Date of the next scheduled update; maintained by kvn |
+| `retry_state` | Retry bookkeeping after a failed update; maintained by kvn |
+| `send_hwid` | Send device identification headers with this subscription's requests; `false` when absent |
+| `hwid` | Identifier sent instead of `settings.hwid`; used only with `send_hwid` |
+
+Valid update schedules are `off`, `every1d`, `every3d`, and `every7d` — written
+without an underscore, unlike the geo schedules below. An imported subscription
+starts at `every1d`; existing subscriptions keep whatever they store, and `i`
+changes the schedule at any time. The legacy values `every1h` and `every12h`
+behave as `every1d`, and the schema migration rewrites them.
+
+Every subscription request carries `User-Agent: kvn-tui/<version>`. With
+`send_hwid: true` it also carries `X-Hwid` (the subscription's `hwid`, or
+`settings.hwid`), `X-Device-Os: Linux`, `X-Ver-Os` (the kernel version),
+`X-Device-Model: Desktop`, and `X-Device-Locale` (for example `ru-RU`). Some
+providers require these headers to count devices; leave `send_hwid` off
+otherwise. The HWID must be non-empty, at most 256 bytes, and a valid HTTP
+header value.
 
 ## Settings
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `default_profile` | `null` | UUID of the selected default profile |
+| `default_profile` | `null` | Reserved; checked to reference an existing profile, but not used by kvn |
 | `tun_interface` | `kvn0` | Name of the sing-box TUN interface; must start with `kvn` |
 | `dns` | Cloudflare DoH | DNS presets, the active preset, strategy, and fake-IP state |
+| `dns_strategy` | mirrors `dns.strategy` | Legacy copy kept for older kvn builds; edit `dns.strategy` instead |
 | `geo_routing` | no region; `auto_update` every 7 days on a new installation, `off` when the field or section is absent (`I` changes it at any time) | Country modes, rule-set updates, and service overrides |
 | `auto_connect` | `false` | Connect to `last_connected_profile` at startup |
 | `kill_switch` | `false` | Persisted kill-switch state |
 | `last_connected_profile` | `null` | Last connected profile; maintained by the application |
-| `theme` | `tokyo-night` | Bundled palette slug or `omarchy` |
+| `theme` | `omarchy` on a first launch under Omarchy, `tokyo-night` otherwise | Bundled palette slug or `omarchy` |
 | `icons` | `nerd` on Omarchy, `unicode` elsewhere | `nerd` for Nerd Font glyphs, or `unicode` for terminals without a Nerd Font |
+| `hwid` | generated on first launch (`lnx-` + UUID) | Installation identifier sent only by subscriptions with `send_hwid` |
 | `allow_insecure_http_subscriptions` | `false` (`true` after migration from v4) | Temporarily allow deprecated HTTP subscription URLs for backward compatibility |
-| `connectivity_probe.enabled` | `true` | Enable the HTTP(S) endpoint used only by manual `t` / `T` latency tests |
+| `connectivity_probe.enabled` | `true` when `connectivity_probe` is absent, `false` when the object omits it | Enable the HTTP(S) endpoint used only by manual `t` / `T` latency tests |
 | `connectivity_probe.url` | `https://connectivitycheck.gstatic.com/generate_204` | Probe endpoint; required and validated only when the probe is enabled |
 | `logs.level` | `info` | `trace`, `debug`, `info`, `warn`, or `error` |
 | `logs.line_retention.app` | `1000` | Physical lines retained in `app.log` |
@@ -126,8 +148,12 @@ HTTP before any network request is made.
 }
 ```
 
-`dns_strategy` is a legacy compatibility field mirrored from `dns.strategy`.
-Edit `dns.strategy` instead. `RUST_LOG`, when set, overrides `logs.level`.
+`RUST_LOG`, when set, overrides `logs.level`.
+
+`kvn config reset` writes the built-in defaults, which differ from a new
+installation in two places: `icons` is `nerd` on every desktop and
+`geo_routing.auto_update` is `off`. Change them in Settings › Interface and
+with `I` afterwards if needed.
 
 ## DNS
 
@@ -202,6 +228,9 @@ convenient starting point for your own:
 ```
 
 Supported server types are `local`, `udp`, `tcp`, `tls`, `https`, and `quic`.
+Every type except `local` takes a `server` address and an optional
+`server_port` (the protocol's standard port when absent); `https` also takes an
+optional `path`, `/dns-query` by default.
 Within a preset, server tags must be non-empty and unique, and `final_server`
 and every rule's `server` must name one of that preset's servers. A server may
 be addressed by hostname (`"server": "dns.google"`) only when the preset also
@@ -298,12 +327,15 @@ migration rewrites it.
 The Steam and Telegram rows of Settings › Routing set the predefined service
 overrides. `proxy` always uses the
 tunnel; `direct` sends matching traffic through the real network, including
-past the kill switch. An absent service entry means Disabled and follows the
+past the kill switch. An absent service entry, or `"disabled"`, follows the
 country routing mode.
 
 Service rule-sets are fetched through the active tunnel. Missing files do not
 block a connection: the override remains inactive until the files are
-downloaded and the connection is restarted.
+downloaded and the connection is restarted. Turning an override on in
+Settings › Routing while connected downloads its files and reconnects
+automatically. Files that were missing when a connection started are
+downloaded once it is up, but take effect only on the next connection.
 
 ## Themes and logging
 
@@ -330,16 +362,26 @@ is never truncated in place.
 
 ## Validation and schema versions
 
-Configuration is parsed and validated before use. Validation checks profile
-references and required values, DNS tags and server references, the TUN
-interface, theme slug, log level, and minimum log limits.
+Configuration is parsed and validated before use, and every problem is
+reported at once. Validation checks:
+
+- unique profile and subscription IDs, required profile values, and that each
+  profile's `subscription_id` names an existing subscription;
+- the HWID of every subscription with `send_hwid`;
+- DNS presets, server tags and references, fake-IP range syntax, the strategy,
+  and leftover pre-preset DNS fields;
+- the TUN interface, theme slug, log level, and minimum log limits;
+- `connectivity_probe.url` while the probe is enabled: an `http` or `https`
+  URL with a host, without credentials or a fragment, at most 2048 bytes.
 
 The TUN interface must contain only ASCII letters, digits, `-`, or `_`, and be
 at most 15 characters. `default_profile`, when set, must reference an existing
 profile.
 
-Older schema versions must be migrated before use. Newer schema versions are
-not supported by older `kvn` releases.
+A configuration with an older `schema_version` is migrated automatically when
+kvn loads it, after a copy is saved to `~/.config/kvn-tui/recovery/`. A
+configuration with a newer `schema_version` is refused: older `kvn` releases
+cannot read it.
 
 ## Runtime files
 
@@ -350,15 +392,17 @@ not supported by older `kvn` releases.
 | Application log | `~/.config/kvn-tui/logs/app.log` |
 | sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |
 | Waybar and recovery state | `~/.config/kvn-tui/state.json` |
-| Migration backups | `~/.config/kvn-tui/recovery/profiles.json.before-migration-*` |
+| Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved) |
 | Applied migration markers | `$XDG_STATE_HOME/kvn/migrations/` |
 | First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
 | sing-box cache (fake-IP map) | `$XDG_STATE_HOME/kvn/singbox-cache.db` |
 | IPC socket | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
 | Generated sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
+| Latency-test configs | `$XDG_RUNTIME_DIR/kvn-tui/test-<uuid>.json` |
 | Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |
 | Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
+| Migration baseline (system-wide) | `/var/lib/kvn/migration-baseline` |
 
 The application-owned runtime directory is created with mode `0700`; generated
 sing-box configs and the IPC socket use mode `0600`. No secret-bearing config is
