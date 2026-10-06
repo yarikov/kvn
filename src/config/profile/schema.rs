@@ -32,7 +32,8 @@ pub struct Config {
     pub profiles: Vec<Profile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subscriptions: Vec<Subscription>,
-    #[serde(default)]
+    #[serde(default = "Settings::for_this_desktop")]
+    #[schemars(transform = super::json_schema::without_default)]
     pub settings: Settings,
 }
 
@@ -54,7 +55,10 @@ impl Config {
     /// a config file that merely omits a field or a whole section must keep its
     /// current meaning rather than silently gain background downloads.
     pub fn for_first_run() -> Self {
-        let mut config = Self::default();
+        let mut config = Self {
+            settings: Settings::for_this_desktop(),
+            ..Self::default()
+        };
         config.settings.geo_routing.auto_update = GeoAutoUpdate::Every7d;
         config
     }
@@ -183,6 +187,28 @@ mod tests {
     use crate::config::profile::*;
     use crate::test_helpers::subscription_with_hwid;
     use uuid::Uuid;
+
+    #[test]
+    fn defaulted_icons_follow_the_desktop() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_STATE_HOME", state.path()) };
+        let defaulted = || {
+            [
+                Config::for_first_run(),
+                serde_json::from_str("{}").unwrap(),
+                serde_json::from_str(r#"{"settings": {}}"#).unwrap(),
+            ]
+            .map(|config| config.settings.icons)
+        };
+
+        assert_eq!(defaulted(), [IconSet::Unicode; 3]);
+
+        let current = state.path().join("omarchy").join("current");
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(current.join("theme.name"), "gruvbox\n").unwrap();
+        assert_eq!(defaulted(), [IconSet::Nerd; 3]);
+    }
 
     #[test]
     fn first_run_preferences_never_leak_into_a_parsed_config() {
