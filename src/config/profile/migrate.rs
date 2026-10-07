@@ -8,10 +8,9 @@ use super::{
 };
 
 impl Config {
-    /// Apply schema migrations needed to bring an explicitly staged config up
-    /// to [`CURRENT_SCHEMA_VERSION`]. Package migration scripts call this via
-    /// `kvn config migrate`; ordinary config loading never calls it. Each
-    /// migration step is idempotent.
+    /// Bring a loaded config up to [`CURRENT_SCHEMA_VERSION`]. Every config
+    /// load runs this (`load_config_at`, the read-only and recovery loads).
+    /// Each migration step is idempotent.
     ///
     /// Files written by a newer kvn version (higher `schema_version` than
     /// this build knows about) are rejected here — loading them would silently
@@ -20,9 +19,8 @@ impl Config {
         self.migrate_to(CURRENT_SCHEMA_VERSION)
     }
 
-    /// Apply only the ordered schema steps up to `target_version`. Migration
-    /// scripts pin this value so a package jump cannot run later config steps
-    /// before the intervening release scripts.
+    /// Apply the ordered schema steps up to `target_version`. [`Self::migrate`]
+    /// passes [`CURRENT_SCHEMA_VERSION`]; tests stop at an intermediate version.
     pub(crate) fn migrate_to(&mut self, target_version: u32) -> anyhow::Result<()> {
         self.migrate_with_update_date_to(target_version, next_update_window_date(Local::now()))
     }
