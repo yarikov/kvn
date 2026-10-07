@@ -171,9 +171,11 @@ accepts only:
 - `allow <ip> <tcp|udp> <port>`
 
 The nftables policy drops other input and output traffic while allowing
-loopback, `kvn*`, established connections, private LAN ranges, DHCP, ICMP, and
-packets marked by sing-box. Forwarded traffic is allowed only out through
-`kvn*` and on established connections. kvn adds no temporary exceptions:
+loopback, `kvn*`, private LAN ranges, DHCP, ICMP, and packets marked by
+sing-box; input also admits replies on established connections, while output
+does not, so direct connections opened before the kill switch stop. Forwarded
+traffic is allowed only out through `kvn*` and back on established connections
+from `kvn*`. kvn adds no temporary exceptions:
 sing-box's connection to the VPN server and its DNS queries are marked. The
 `allow` operation remains for compatibility, and `revoke` flushes exceptions an
 older kvn left behind.

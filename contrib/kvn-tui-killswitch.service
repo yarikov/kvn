@@ -9,6 +9,7 @@ ConditionPathExists=/etc/kvn-tui/killswitch.nft
 [Service]
 Type=oneshot
 ExecStart=/usr/sbin/nft -f /etc/kvn-tui/killswitch.nft
+ExecReload=/usr/sbin/nft -f /etc/kvn-tui/killswitch.nft
 ExecStop=/usr/sbin/nft delete table inet kvn_tui_killswitch
 ExecStopPost=-/usr/sbin/nft delete table inet kvn_tui_killswitch
 RemainAfterExit=yes
