@@ -1,7 +1,7 @@
 # Architecture
 
-`kvn` does not implement any VPN protocol. It is a configuration generator and
-process manager around [sing-box](https://sing-box.sagernet.org/): it stores
+`kvn` does not implement any VPN protocol. It is a configuration and process
+manager around [sing-box](https://sing-box.sagernet.org/): it stores
 profiles and settings, turns the active profile into a sing-box configuration,
 runs `sing-box` as a child process and shows its state in a terminal UI.
 
@@ -22,30 +22,34 @@ runs `sing-box` as a child process and shows its state in a terminal UI.
 
 ```text
  ┌──────────────┐ ┌──────────────────────┐ ┌──────────────────────────┐
- │ kvn (TUI)    │ │ kvn status/connect/… │ │ Omarchy plugin (omakvn)  │
+ │ kvn (TUI)    │ │ kvn (CLI)            │ │ Omarchy plugin (omakvn)  │
  └──────┬───────┘ └──────────┬───────────┘ └────────────┬─────────────┘
-        │   NDJSON over $XDG_RUNTIME_DIR/kvn-tui.sock    │
-        └────────────────────┼───────────────────────────┘
+        │   NDJSON over $XDG_RUNTIME_DIR/kvn-tui.sock   │
+        └────────────────────┼──────────────────────────┘
                              ▼
               ┌───────────────────────────────┐
               │ kvn --daemon                  │   systemd user unit
               │ (kvn-tui.service)             │   kvn-tui.service
               │ canonical Model, config, geo, │
-              │ suspend, logs, kill switch    │
-              └──────────────┬────────────────┘
-                             │ spawn / kill, Clash API (loopback)
-                             ▼
-              ┌───────────────────────────────┐
-              │ sing-box run                  │   cap_net_admin,cap_net_raw
-              │ TUN, protocols, DNS, routing  │
-              └───────────────────────────────┘
+              │ suspend, logs                 │
+              └───────┬───────────────┬───────┘
+     spawn / kill,    │               │  sudo killswitch-helper.sh
+     Clash API        │               │  enable / disable
+     (loopback)       ▼               ▼
+ ┌────────────────────────────┐ ┌────────────────────────────────┐
+ │ sing-box run               │ │ kill switch: nftables table    │
+ │ TUN, protocols, DNS,       │ │ kvn-tui-killswitch.service     │
+ │ routing                    │ │ (systemd system unit)          │
+ │ cap_net_admin,cap_net_raw  │ │ drops egress outside the       │
+ │ marks packets 0x29a ───────┼─┼▶ tunnel, passes 0x29a          │
+ └────────────────────────────┘ └────────────────────────────────┘
 ```
 
 **The daemon** (`kvn --daemon`, started by the `kvn-tui.service` user unit, or
 on demand by `kvn`, `kvn connect` and `kvn toggle`, which fall back to spawning
 it directly when the unit cannot be started) controls the running VPN: while it runs, every change goes through it. It owns
 the canonical application state, `profiles.json`, the sing-box process, geo rule-set downloads, suspend
-and resume handling and the kill switch. It runs headless, so the VPN does not
+and resume handling, and it turns the kill switch on and off. It runs headless, so the VPN does not
 depend on a terminal being open.
 
 At startup the daemon refuses to run while a package migration is pending. It
@@ -77,6 +81,15 @@ and the tunnel keep running, and running `kvn` again reattaches instantly.
 **sing-box** is a child of the daemon. It creates the TUN interface, speaks
 the VPN protocol and does DNS and routing. The daemon reads live traffic
 statistics from its Clash API on a loopback port chosen for each start.
+
+**The kill switch** lives outside the daemon: an nftables table loaded by the
+`kvn-tui-killswitch.service` system unit before the network comes up. It drops
+traffic leaving outside the tunnel, but lets through packets sing-box marks
+with fwmark `0x29a`, so its own connection to the VPN server gets through; the
+full list of exceptions is in [What kvn protects](privacy.md#kill-switch). The
+daemon only enables or disables the unit through `sudo killswitch-helper.sh`;
+the table stays loaded when the daemon or sing-box stops or crashes, so traffic
+is blocked rather than leaked.
 
 ## The core: The Elm Architecture
 
@@ -198,8 +211,8 @@ Clients talk to the daemon in newline-delimited JSON over
   their result or error.
 - **Restart required**: after package migrations finish while a TUI is
   attached, the daemon enters a frozen state until it is restarted. It ignores
-  every command except `Quit`, answers connection requests with an error, and
-  pauses scheduled downloads.
+  every command except `Quit` and `ClearErrorStatus`, answers connection
+  requests with an error, and pauses scheduled downloads.
 
 Every snapshot carries the daemon's version and `IPC_VERSION`. When a package
 upgrade leaves an older daemon running, the TUI sends it `Quit`, waits up to
