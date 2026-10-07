@@ -72,11 +72,9 @@ pub struct Settings {
     pub(crate) legacy_default_profile: Option<Uuid>,
     #[serde(default = "default_tun_interface")]
     pub tun_interface: String,
-    /// Legacy field, superseded by `dns.strategy`. Kept for one release so
-    /// existing config files still load; on save we re-emit it from `dns.strategy`
-    /// to avoid splitting the source of truth.
-    #[serde(default = "default_dns_strategy")]
-    pub dns_strategy: DnsStrategy,
+    #[serde(default, rename = "dns_strategy", skip_serializing)]
+    #[schemars(skip)]
+    pub(crate) legacy_dns_strategy: Option<DnsStrategy>,
     #[serde(default)]
     pub dns: DnsConfig,
     #[serde(default)]
@@ -148,10 +146,6 @@ impl IconSet {
 
 pub(super) fn default_tun_interface() -> String {
     "kvn0".to_string()
-}
-
-fn default_dns_strategy() -> DnsStrategy {
-    DnsStrategy::PreferIpv4
 }
 
 /// Default theme slug for fresh installs. Works on every distro because
@@ -350,7 +344,7 @@ impl Default for Settings {
         Self {
             legacy_default_profile: None,
             tun_interface: default_tun_interface(),
-            dns_strategy: default_dns_strategy(),
+            legacy_dns_strategy: None,
             dns: DnsConfig::default(),
             geo_routing: GeoRouting::default(),
             auto_connect: false,
@@ -376,7 +370,6 @@ mod tests {
     fn settings_default() {
         let s = Settings::default();
         assert_eq!(s.tun_interface, "kvn0");
-        assert_eq!(s.dns_strategy, DnsStrategy::PreferIpv4);
         assert!(!s.auto_connect);
         assert!(!s.kill_switch);
         assert!(s.last_connected_profile.is_none());
@@ -408,6 +401,14 @@ mod tests {
         let s: Settings = serde_json::from_str(&json).unwrap();
         let saved = serde_json::to_value(&s).unwrap();
         assert!(saved.get("default_profile").is_none());
+    }
+
+    #[test]
+    fn settings_load_and_drop_legacy_dns_strategy() {
+        let s: Settings = serde_json::from_str(r#"{"dns_strategy":"ipv4_only"}"#).unwrap();
+        assert_eq!(s.legacy_dns_strategy, Some(DnsStrategy::OnlyIpv4));
+        let saved = serde_json::to_value(&s).unwrap();
+        assert!(saved.get("dns_strategy").is_none());
     }
 
     #[test]

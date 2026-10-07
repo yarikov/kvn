@@ -1,10 +1,7 @@
 //! DNS configuration: strategy, servers, rules, and validation.
 //!
 //! `DnsConfig` is the source of truth used both by sing-box config generation
-//! (`singbox::config`) and by the TUI's settings overlay. The legacy
-//! top-level `settings.dns_strategy` field is mirrored from `dns.strategy`
-//! by the v0 → v1 schema migration (see `Config::migrate`) for backward
-//! compatibility.
+//! (`singbox::config`) and by the TUI's settings overlay.
 
 use std::collections::HashSet;
 use std::net::IpAddr;

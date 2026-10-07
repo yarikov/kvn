@@ -134,10 +134,6 @@ fn serialized_config_with_schema(config: &Config, json_schema: Option<String>) -
         .validate()
         .context("Refusing to save invalid config")?;
 
-    // Mirror `dns.strategy` into the legacy `dns_strategy` field so configs
-    // remain readable by older kvn-tui builds during the deprecation window.
-    serializable.settings.dns_strategy = serializable.settings.dns.strategy.clone();
-
     Ok(serde_json::to_string_pretty(&serializable)?)
 }
 
@@ -253,7 +249,7 @@ mod tests {
             assert!(config.profiles.is_empty());
             assert_eq!(config.settings.tun_interface, "kvn0");
             assert_eq!(
-                config.settings.dns_strategy,
+                config.settings.dns.strategy,
                 profile::DnsStrategy::PreferIpv4
             );
             assert_eq!(
