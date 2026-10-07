@@ -9,11 +9,16 @@ pub enum SubscriptionAutoUpdate {
     #[default]
     Off,
     #[doc(hidden)]
+    #[serde(rename = "every_1h", alias = "every1h")]
     Every1h,
     #[doc(hidden)]
+    #[serde(rename = "every_12h", alias = "every12h")]
     Every12h,
+    #[serde(rename = "every_1d", alias = "every1d")]
     Every1d,
+    #[serde(rename = "every_3d", alias = "every3d")]
     Every3d,
+    #[serde(rename = "every_7d", alias = "every7d")]
     Every7d,
 }
 
@@ -160,6 +165,25 @@ mod tests {
             serde_json::to_string(&GeoAutoUpdate::Every3d).unwrap(),
             r#""every_3d""#
         );
+    }
+
+    #[test]
+    fn subscription_auto_update_uses_geo_spelling_and_reads_legacy_values() {
+        assert_eq!(
+            serde_json::to_string(&SubscriptionAutoUpdate::Every3d).unwrap(),
+            r#""every_3d""#
+        );
+        for (legacy, schedule) in [
+            ("every1h", SubscriptionAutoUpdate::Every1h),
+            ("every12h", SubscriptionAutoUpdate::Every12h),
+            ("every1d", SubscriptionAutoUpdate::Every1d),
+            ("every3d", SubscriptionAutoUpdate::Every3d),
+            ("every7d", SubscriptionAutoUpdate::Every7d),
+        ] {
+            let restored: SubscriptionAutoUpdate =
+                serde_json::from_str(&format!("\"{legacy}\"")).unwrap();
+            assert_eq!(restored, schedule);
+        }
     }
 
     #[test]

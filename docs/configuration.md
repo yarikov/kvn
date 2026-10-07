@@ -81,11 +81,11 @@ types and share-link schemes.
 | `send_hwid` | Send device identification headers with this subscription's requests; `false` when absent |
 | `hwid` | Identifier sent instead of `settings.hwid`; used only with `send_hwid` |
 
-Valid update schedules are `off`, `every1d`, `every3d`, and `every7d` — written
-without an underscore, unlike the geo schedules below. An imported subscription
-starts at `every1d`; existing subscriptions keep whatever they store, and `i`
-changes the schedule at any time. The legacy values `every1h` and `every12h`
-behave as `every1d`, and the schema migration rewrites them.
+Valid update schedules are `off`, `every_1d`, `every_3d`, and `every_7d`. An
+imported subscription starts at `every_1d`; existing subscriptions keep whatever
+they store, and `i` changes the schedule at any time. The legacy values
+`every_1h` and `every_12h` behave as `every_1d`, and the schema migration
+rewrites them.
 
 Every subscription request carries `User-Agent: kvn-tui/<version>`. With
 `send_hwid: true` it also carries `X-Hwid` (the subscription's `hwid`, or
