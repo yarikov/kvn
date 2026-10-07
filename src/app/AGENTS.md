@@ -210,9 +210,11 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   `persist_onboarding` right after a successful write; `check_prompt` gates on
   `onboarding.is_complete()`. `support_prompt::load_for_daemon` keeps a
   start-time path only as crash recovery between the two writes.
-- **First-install defaults.** `Config::for_first_run` (used only when
-  `profiles.json` does not exist) sets `geo_routing.auto_update` to `Every7d`,
-  and a pasted subscription gets `Every1d`. Every `Default`/`#[serde(default)]`
+- **First-install defaults.** `Config::for_first_run` (used when
+  `profiles.json` does not exist and by `kvn config reset`) sets
+  `geo_routing.auto_update` to `Every7d`, picks the icon set for the desktop and,
+  under Omarchy, the `omarchy` theme sentinel; a pasted subscription gets
+  `Every1d`. Every `Default`/`#[serde(default)]`
   in that chain still means `Off`, so a config that omits the field — or the
   whole `geo_routing` or `settings` section — keeps its current behaviour.
 

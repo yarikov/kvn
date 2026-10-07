@@ -181,8 +181,8 @@ path is printed. kvn keeps only the three newest archives and deletes older
 ones as new archives are created; copy an archive elsewhere if you need to keep
 it.
 
-- `reset` creates a default configuration. It asks for confirmation unless
-  `--yes` is given.
+- `reset` creates the configuration a fresh install starts with. It asks for
+  confirmation unless `--yes` is given.
 - `recover` installs `<file>` — for example an editor copy that kvn preserved
   in the recovery directory — after checking that it loads and is valid.
   Those copies are rotated the same way, three of each kind.
