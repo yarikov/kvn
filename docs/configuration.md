@@ -150,11 +150,6 @@ HTTP before any network request is made.
 
 `RUST_LOG`, when set, overrides `logs.level`.
 
-`kvn config reset` writes the built-in defaults, which differ from a new
-installation in two places: `icons` is `nerd` on every desktop and
-`geo_routing.auto_update` is `off`. Change them in Settings › Interface and
-with `I` afterwards if needed.
-
 ## DNS
 
 DNS settings are organized in presets. A preset is a set of DNS servers, the
