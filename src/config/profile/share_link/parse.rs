@@ -20,7 +20,9 @@ pub fn parse_share_link(text: &str) -> Result<Profile> {
         "ss" => parse_shadowsocks(rest),
         "hysteria2" | "hy2" => parse_hysteria2(rest),
         "tuic" => parse_tuic(rest),
-        "socks" | "socks5" => parse_socks(rest),
+        "socks" | "socks5" | "socks5h" => parse_socks(scheme, rest, SocksVersion::V5),
+        "socks4" => parse_socks(scheme, rest, SocksVersion::V4),
+        "socks4a" => parse_socks(scheme, rest, SocksVersion::V4a),
         "http" | "https" => parse_http(rest, scheme == "https"),
         "ssh" => parse_ssh(rest),
         "anytls" => parse_anytls(rest),
@@ -522,8 +524,8 @@ fn parse_tuic(rest: &str) -> Result<Profile> {
 }
 
 /// Parse `socks5://user:pass@host:port#name` (also `socks://`).
-fn parse_socks(rest: &str) -> Result<Profile> {
-    let url = parse_uri("socks5", rest)?;
+fn parse_socks(scheme: &str, rest: &str, version: SocksVersion) -> Result<Profile> {
+    let url = parse_uri(scheme, rest)?;
     let host = url
         .host_str()
         .context("Missing host in SOCKS URL")?
@@ -532,13 +534,16 @@ fn parse_socks(rest: &str) -> Result<Profile> {
     let name = fragment_name(&url, &host)?;
     let user = url.username();
     let pass = url.password();
+    if pass.is_some() && version != SocksVersion::V5 {
+        anyhow::bail!("SOCKS4 share link cannot carry a password");
+    }
     Ok(Profile {
         id: Uuid::new_v4(),
         name,
         address: host,
         port,
         config: ProtocolConfig::Socks(SocksConfig {
-            version: SocksVersion::V5,
+            version,
             username: (!user.is_empty())
                 .then(|| urlencoding::decode(user).unwrap_or_default().to_string()),
             password: pass.map(|p| urlencoding::decode(p).unwrap_or_default().to_string()),
@@ -1199,6 +1204,26 @@ mod tests {
     #[test]
     fn parse_ssh_rejects_missing_user() {
         assert!(parse_share_link("ssh://@ssh.example:22#X").is_err());
+    }
+
+    #[test]
+    fn parse_socks_version_follows_scheme() {
+        for (link, version) in [
+            ("socks4://user@s.example:1080#S4", SocksVersion::V4),
+            ("socks4a://s.example:1080#S4a", SocksVersion::V4a),
+            ("socks5h://s.example:1080#S5h", SocksVersion::V5),
+        ] {
+            let p = parse_share_link(link).unwrap();
+            let ProtocolConfig::Socks(cfg) = &p.config else {
+                panic!("ProtocolConfig variant mismatch")
+            };
+            assert_eq!(cfg.version, version, "{link}");
+        }
+    }
+
+    #[test]
+    fn parse_socks4_rejects_password() {
+        assert!(parse_share_link("socks4://user:pass@s.example:1080#S4").is_err());
     }
 
     #[test]
