@@ -25,7 +25,7 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
   - [Omarchy integration](#omarchy-integration-optional)
   - [Build from source](#build-from-source)
 - [Diagnostics](#diagnostics)
-- [Default Key Bindings](#default-key-bindings)
+- [Key Bindings](#key-bindings)
 - [Configuration](#configuration)
 - [Architecture](#architecture)
 - [Platform Support](#platform-support)
@@ -41,7 +41,6 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
 - **Profiles & subscriptions** — manage profiles and keep subscriptions automatically up to date
 - **Geo & service routing** — choose country-based routing modes and ready-made overrides for selected services
 - **Kill switch** — block outbound traffic if the VPN connection drops
-- **IPv4 tunnel** — IPv6 is blocked rather than leaked while connected; see [what kvn protects](docs/privacy.md#ipv4-only)
 - **DNS presets** — built-in Cloudflare and Quad9 DoH, Google DoT, and system resolver presets, your own presets with per-domain rules, strategy, and fake-IP
 - **Auto-connect & resume** — restore the last connection on startup and after system resume
 - **Persistent daemon** — keep the VPN and background services running after detaching the TUI
@@ -59,16 +58,31 @@ the clipboard using supported share links.
 | Protocol | Share-link scheme(s) | Key support |
 |----------|----------------------|-------------|
 | **VLESS** | `vless://` | REALITY, XTLS Vision, TLS; gRPC, WebSocket, HTTP |
-| **VMess** | `vmess://` | Base64 JSON and URI formats; TLS and shared transports |
+| **Hysteria 2** | `hysteria2://`, `hy2://` | QUIC and Salamander obfuscation |
 | **Trojan** | `trojan://` | TLS; gRPC, WebSocket, HTTP |
 | **Shadowsocks** | `ss://` | AEAD and AEAD-2022 ciphers; SIP002 and legacy Base64 |
-| **Hysteria 2** | `hysteria2://`, `hy2://` | QUIC and Salamander obfuscation |
+
+<details>
+<summary>More protocols</summary>
+
+| Protocol | Share-link scheme(s) | Key support |
+|----------|----------------------|-------------|
+| **VMess** | `vmess://` | Base64 JSON and URI formats; TLS and shared transports |
 | **TUIC** | `tuic://` | TUIC v5, congestion control, and UDP relay modes |
-| **ShadowTLS** | `shadowtls://` | Versions 1–3 with an inner Shadowsocks connection |
 | **AnyTLS** | `anytls://` | TLS-based multiplexing |
+| **ShadowTLS** | `shadowtls://` | Versions 1–3 with an inner Shadowsocks connection |
 | **SOCKS** | `socks://`, `socks5://`, `socks5h://`, `socks4://`, `socks4a://` | SOCKS4, SOCKS4a, SOCKS5, and optional authentication |
 | **HTTP proxy** | `http://`, `https://` | HTTP CONNECT with optional TLS and authentication |
 | **SSH** | `ssh://` | Password and private-key authentication |
+
+A pasted `http(s)://` URL is a subscription unless it looks like a proxy:
+`user:pass@host`, `host:port` or `#name`.
+
+</details>
+
+> [!TIP]
+> sing-box does not implement the XHTTP transport; use VLESS over gRPC with
+> REALITY or another supported transport instead.
 
 ---
 
@@ -102,8 +116,9 @@ You’ll need a VPN share link or subscription URL from your provider.
 
 ### Polkit setup (optional)
 
-> **Note:** This setup and the kill switch setup below both add you to the
-> dedicated `kvn-tui` group; reboot once afterwards to activate it.
+> [!IMPORTANT]
+> This setup and the kill switch setup below both add you to the dedicated
+> `kvn-tui` group; reboot once afterwards to activate it.
 
 Polkit lets kvn auto-connect and reconnect without authentication prompts. Set
 it up:
@@ -118,8 +133,9 @@ After setup and a reboot, toggle it with `Shift+A`. See
 
 ### Kill switch setup (optional)
 
-> **Note:** If the daemon crashes or cannot start while the kill switch is
-> enabled, use the emergency command below to restore network access.
+> [!WARNING]
+> If the daemon crashes or cannot start while the kill switch is enabled, use
+> the emergency command below to restore network access.
 >
 > ```bash
 > kvn disable --killswitch
@@ -207,11 +223,9 @@ Runs a read-only check of sing-box, configuration, pending package migrations,
 the daemon, clipboard, and optional integrations, with remediation hints for
 detected problems.
 
-See the [command-line reference](docs/cli.md) for every other command.
-
 ---
 
-## Default Key Bindings
+## Key Bindings
 
 **Navigation**
 
