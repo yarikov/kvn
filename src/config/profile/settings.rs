@@ -48,17 +48,27 @@ impl Default for LogsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectivityProbeConfig {
-    #[serde(default)]
+    #[serde(default = "default_connectivity_probe_enabled")]
     pub enabled: bool,
-    #[serde(default)]
+    #[serde(default = "default_connectivity_probe_url")]
     pub url: Option<String>,
+}
+
+const DEFAULT_CONNECTIVITY_PROBE_URL: &str = "https://connectivitycheck.gstatic.com/generate_204";
+
+fn default_connectivity_probe_enabled() -> bool {
+    true
+}
+
+fn default_connectivity_probe_url() -> Option<String> {
+    Some(DEFAULT_CONNECTIVITY_PROBE_URL.to_string())
 }
 
 impl Default for ConnectivityProbeConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
-            url: Some("https://connectivitycheck.gstatic.com/generate_204".to_string()),
+            enabled: default_connectivity_probe_enabled(),
+            url: default_connectivity_probe_url(),
         }
     }
 }
@@ -530,9 +540,26 @@ mod tests {
     }
 
     #[test]
+    fn connectivity_probe_partial_object_fills_missing_fields_with_defaults() {
+        let empty: Settings = serde_json::from_str(r#"{"connectivity_probe":{}}"#).unwrap();
+        assert_eq!(empty.connectivity_probe, ConnectivityProbeConfig::default());
+
+        let url_only: Settings =
+            serde_json::from_str(r#"{"connectivity_probe":{"url":"https://probe.example/204"}}"#)
+                .unwrap();
+        assert_eq!(
+            url_only.connectivity_probe,
+            ConnectivityProbeConfig {
+                enabled: true,
+                url: Some("https://probe.example/204".to_string()),
+            }
+        );
+    }
+
+    #[test]
     fn connectivity_probe_enabled_requires_url() {
         let settings: Settings =
-            serde_json::from_str(r#"{"connectivity_probe":{"enabled":true}}"#).unwrap();
+            serde_json::from_str(r#"{"connectivity_probe":{"enabled":true,"url":null}}"#).unwrap();
         let error = crate::test_helpers::single_diagnostic(settings.diagnostics()).message;
         assert!(error.contains("url is required"), "got: {error}");
     }

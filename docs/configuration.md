@@ -109,7 +109,7 @@ header value.
 | `icons` | `nerd` on Omarchy, `unicode` elsewhere | `nerd` for Nerd Font glyphs, or `unicode` for terminals without a Nerd Font |
 | `hwid` | generated on first launch (`lnx-` + UUID) | Installation identifier sent only by subscriptions with `send_hwid` |
 | `allow_insecure_http_subscriptions` | `false` (`true` after migration from v4) | Temporarily allow deprecated HTTP subscription URLs for backward compatibility |
-| `connectivity_probe.enabled` | `true` when `connectivity_probe` is absent, `false` when the object omits it | Enable the HTTP(S) endpoint used only by manual `t` / `T` latency tests |
+| `connectivity_probe.enabled` | `true` | Enable the HTTP(S) endpoint used only by manual `t` / `T` latency tests |
 | `connectivity_probe.url` | `https://connectivitycheck.gstatic.com/generate_204` | Probe endpoint; required and validated only when the probe is enabled |
 | `logs.level` | `info` | `trace`, `debug`, `info`, `warn`, or `error` |
 | `logs.line_retention.app` | `1000` | Physical lines retained in `app.log` |
@@ -127,8 +127,10 @@ response byte through the tested VPN profile. The probe runs only when `t` or
 }
 ```
 
-Set `enabled` to `false` to disable active probing. While disabled, `url` may
-be absent or retain any value; it is ignored until probing is enabled again.
+A field missing from `connectivity_probe` takes its default, so
+`"connectivity_probe": {"enabled": false}` is enough to disable active probing.
+While disabled, `url` may retain any value; it is ignored until probing is
+enabled again.
 
 New configurations reject HTTP subscription URLs by default. Configurations
 migrated from schema v4 enable them to preserve compatibility with self-hosted
