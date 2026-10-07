@@ -99,7 +99,6 @@ header value.
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `default_profile` | `null` | Reserved; checked to reference an existing profile, but not used by kvn |
 | `tun_interface` | `kvn0` | Name of the sing-box TUN interface; must start with `kvn` |
 | `dns` | Cloudflare DoH | DNS presets, the active preset, strategy, and fake-IP state |
 | `dns_strategy` | mirrors `dns.strategy` | Legacy copy kept for older kvn builds; edit `dns.strategy` instead |
@@ -375,8 +374,7 @@ reported at once. Validation checks:
   URL with a host, without credentials or a fragment, at most 2048 bytes.
 
 The TUN interface must contain only ASCII letters, digits, `-`, or `_`, and be
-at most 15 characters. `default_profile`, when set, must reference an existing
-profile.
+at most 15 characters.
 
 A configuration with an older `schema_version` is migrated automatically when
 kvn loads it, after a copy is saved to `~/.config/kvn-tui/recovery/`. A

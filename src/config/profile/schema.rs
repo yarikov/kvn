@@ -80,7 +80,6 @@ impl Config {
     /// - Profile and subscription IDs are unique.
     /// - Subscription-owned profiles reference an existing subscription.
     /// - Each profile has non-empty `name`, `address`, and `uuid`.
-    /// - `settings.default_profile` references an existing profile if set.
     /// - `dns.current_preset` names a built-in or custom preset; custom preset
     ///   names are unique, and within each preset server tags are unique and
     ///   `final_server` and every `rules[*].server` reference one of them.
@@ -152,15 +151,6 @@ impl Config {
                     ),
                 ));
             }
-        }
-
-        if let Some(id) = self.settings.default_profile
-            && !self.profiles.iter().any(|p| p.id == id)
-        {
-            diagnostics.push(ConfigDiagnostic::new(
-                "/settings/default_profile",
-                format!("settings.default_profile ({id}) references a non-existent profile"),
-            ));
         }
 
         diagnostics.extend(
@@ -367,7 +357,6 @@ mod tests {
             443,
             crate::test_helpers::TEST_UUID.to_string(),
         ));
-        config.settings.default_profile = Some(config.profiles[0].id);
         assert!(config.validate().is_ok());
     }
 
@@ -518,18 +507,6 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("subscription_id")
-        );
-    }
-
-    #[test]
-    fn config_validate_rejects_dangling_default_profile() {
-        let mut config = Config::default();
-        config.settings.default_profile = Some(Uuid::new_v4());
-        let err = config.validate().unwrap_err().to_string();
-        assert!(
-            err.contains("references a non-existent profile"),
-            "Error was: {}",
-            err
         );
     }
 }

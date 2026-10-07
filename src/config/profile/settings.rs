@@ -67,8 +67,9 @@ impl Default for ConnectivityProbeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_profile: Option<Uuid>,
+    #[serde(default, rename = "default_profile", skip_serializing)]
+    #[schemars(skip)]
+    pub(crate) legacy_default_profile: Option<Uuid>,
     #[serde(default = "default_tun_interface")]
     pub tun_interface: String,
     /// Legacy field, superseded by `dns.strategy`. Kept for one release so
@@ -347,7 +348,7 @@ impl Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            default_profile: None,
+            legacy_default_profile: None,
             tun_interface: default_tun_interface(),
             dns_strategy: default_dns_strategy(),
             dns: DnsConfig::default(),
@@ -376,7 +377,6 @@ mod tests {
         let s = Settings::default();
         assert_eq!(s.tun_interface, "kvn0");
         assert_eq!(s.dns_strategy, DnsStrategy::PreferIpv4);
-        assert!(s.default_profile.is_none());
         assert!(!s.auto_connect);
         assert!(!s.kill_switch);
         assert!(s.last_connected_profile.is_none());
@@ -400,6 +400,14 @@ mod tests {
         assert_eq!(restored.logs.level, "debug");
         assert_eq!(restored.logs.line_retention.app, 1_000);
         assert_eq!(restored.logs.line_retention.singbox, 100_000);
+    }
+
+    #[test]
+    fn settings_load_and_drop_legacy_default_profile() {
+        let json = format!(r#"{{"default_profile":"{}"}}"#, Uuid::new_v4());
+        let s: Settings = serde_json::from_str(&json).unwrap();
+        let saved = serde_json::to_value(&s).unwrap();
+        assert!(saved.get("default_profile").is_none());
     }
 
     #[test]
