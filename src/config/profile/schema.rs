@@ -4,7 +4,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::subscription::validate_hwid;
-use super::{ConfigDiagnostic, GeoAutoUpdate, Profile, Settings, Subscription, into_result};
+use super::{
+    ConfigDiagnostic, GeoAutoUpdate, OMARCHY_THEME_SENTINEL, Profile, Settings, Subscription,
+    into_result,
+};
 
 /// Current schema version for `profiles.json`. Bumped on every breaking
 /// change to the persisted shape; new migrations go in `Config::migrate`.
@@ -60,6 +63,9 @@ impl Config {
             ..Self::default()
         };
         config.settings.geo_routing.auto_update = GeoAutoUpdate::Every7d;
+        if crate::omarchy::detect_omarchy_theme().is_some() {
+            config.settings.theme = OMARCHY_THEME_SENTINEL.to_string();
+        }
         config
     }
 
@@ -198,6 +204,22 @@ mod tests {
         std::fs::create_dir_all(&current).unwrap();
         std::fs::write(current.join("theme.name"), "gruvbox\n").unwrap();
         assert_eq!(defaulted(), [IconSet::Nerd; 3]);
+    }
+
+    #[test]
+    fn first_run_theme_follows_omarchy() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_STATE_HOME", state.path()) };
+        assert_eq!(Config::for_first_run().settings.theme, "tokyo-night");
+
+        let current = state.path().join("omarchy").join("current");
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(current.join("theme.name"), "catppuccin-mocha\n").unwrap();
+        assert_eq!(
+            Config::for_first_run().settings.theme,
+            OMARCHY_THEME_SENTINEL
+        );
     }
 
     #[test]

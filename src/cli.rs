@@ -278,7 +278,7 @@ fn run_config_reset(yes: bool) -> Result<()> {
     }
     let path = crate::paths::profiles_path().context("Failed to determine profiles path")?;
     let archived = archive_current(&path)?;
-    crate::config::save_config_at(&path, &crate::config::profile::Config::default())
+    crate::config::save_config_at(&path, &crate::config::profile::Config::for_first_run())
         .context("failed to create default config")?;
     match archived {
         Some(path) => println!(
