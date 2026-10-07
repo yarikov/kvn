@@ -21,7 +21,7 @@ The routing mode decides which traffic uses the tunnel. Change it in
 
 | Mode | Through the VPN | Directly, past the VPN |
 |------|-----------------|------------------------|
-| Global | All IPv4 traffic | Nothing |
+| Global | All IPv4 traffic | Only the local network your computer is directly connected to |
 | Bypass (`bypass_ru`, …) | All IPv4 traffic except the region's sites | The region's sites and IP addresses, and your local network |
 | Only (`only_ru`, …) | Only the region's sites | Everything else, including your local network |
 
@@ -37,6 +37,13 @@ connection still starts but without the region's rules: the local network
 still goes directly in Bypass and Only, and service overrides whose files are
 present still apply, but everything else follows the mode's default — the
 tunnel in Bypass, and directly in Only, including the region's own sites.
+
+The local network your computer is directly connected to — for example
+`192.168.1.0/24` with your router — is reached directly in every mode: the
+system routes it before traffic reaches the tunnel. Other private addresses,
+such as another network behind your router or a work network, are sent through
+the VPN in Global mode, where they are usually unreachable; Bypass and Only
+send every private address directly.
 
 The tunnel carries IPv4 only; IPv6 is blocked in every mode, see
 [IPv4 only](#ipv4-only).
@@ -77,6 +84,28 @@ selected DNS preset (see the [configuration guide](configuration.md#dns)):
 - **The VPN server's own name** is looked up directly, through a copy of your
   main DNS server, because the tunnel does not exist yet when it is needed.
 
+Fake-IP adds one more direct path. It is off by default; when it is on, or
+when a DNS rule sends some names to it, programs receive a placeholder address
+for those names, and kvn looks up the real one only when it opens the
+connection. Which way that lookup goes depends on the rule that
+matched:
+
+- **A site sent directly because of its name** — on the region's list in
+  Bypass, or on the list of a service set to `direct` in any mode — is looked
+  up through the direct copy of your main DNS server, past the tunnel. Your
+  DNS provider then sees these names together with your real IP address. The
+  site itself sees that address anyway, and your provider sees the connection
+  either way.
+- **A site sent directly because of its address** is looked up through the
+  tunnel first.
+- **While a Steam or Telegram override is on**, kvn looks every other name up
+  through the tunnel before it checks the region's list, so region sites no
+  longer take the first path; the service's own names still do when it is set
+  to `direct`.
+
+Without fake-IP, programs get real addresses from kvn, through the tunnel in
+Global and Bypass, and the direct connection needs no lookup of its own.
+
 Encrypted DNS (`https`, `tls`, `quic`) hides the questions even when they are
 sent directly; plain DNS (`udp`, `tcp`) shows them to anyone on the path. The
 built-in presets other than System local use encrypted DNS.
@@ -86,6 +115,12 @@ tunnel. In Global and Bypass modes kvn therefore refuses to connect with them
 while a public `udp` or `quic` DNS server is configured, rather than sending
 those questions past the VPN. Use an `https`, `tls` or `tcp` server with these
 profiles.
+
+UDP from other programs is refused on these profiles, not sent around the
+tunnel: the program gets an immediate error. Browsers then fall back from
+HTTP/3 to TCP, so websites keep working, but UDP-only traffic such as voice
+and video calls or games does not work. VLESS, VMess, Trojan, Shadowsocks,
+Hysteria 2, TUIC, AnyTLS and SOCKS5 profiles carry UDP.
 
 ## Kill switch
 
