@@ -104,11 +104,13 @@ Exactly what the kill switch lets through, besides the tunnel interface
 (`kvn*`) and loopback:
 
 - packets kvn marks (firewall mark `0x29a`), as described above;
-- all traffic on established and related connections, in both directions:
-  turning the kill switch on does not cut direct connections that are already
-  open;
+- incoming replies on established and related connections, so the exceptions
+  in this list work in both directions; a direct connection opened before the
+  kill switch came on stops sending as soon as it does;
 - the local network: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
-  `fc00::/7` and `fe80::/10`;
+  `fc00::/7` and `fe80::/10`, except `fc00::/18`, kvn's default IPv6 fake-IP
+  range, so fake addresses programs still hold do not leave outside the tunnel
+  (a custom `inet6_range` inside the local ranges is not covered);
 - all ICMP and ICMPv6 (ping, path MTU discovery, IPv6 neighbor discovery);
 - DHCP and DHCPv6, so the network connection itself keeps working.
 
@@ -116,8 +118,8 @@ Everything else leaving the computer is dropped when it starts a new
 connection — for example a connection to a `169.254.0.0/16` link-local
 address, multicast and broadcast traffic such as mDNS and SSDP, or a
 `100.64.0.0/10` address used by Tailscale. Traffic the computer forwards for
-containers and virtual machines may leave only through the tunnel, apart from
-connections that are already established.
+containers and virtual machines may leave only through the tunnel, including
+connections they opened before the kill switch came on.
 
 Latency tests (`t` / `T`) start a separate sing-box whose packets carry the
 same mark, so they reach each tested VPN server directly even with the kill

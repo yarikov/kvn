@@ -85,7 +85,7 @@ systemctl daemon-reload
 # take effect immediately (e.g. when re-running this installer after an upgrade).
 if systemctl is-active --quiet kvn-tui-killswitch.service; then
     echo "kvn-tui-killswitch.service is active — reloading ruleset…"
-    systemctl restart kvn-tui-killswitch.service
+    systemctl reload kvn-tui-killswitch.service
 fi
 
 echo

@@ -2,10 +2,20 @@
 # kvn-tui kill switch: drop all non-VPN egress.
 # Loaded by kvn-tui-killswitch.service at boot when enabled.
 
-# Idempotent atomic replace — add-then-delete-then-add lets `nft -f` succeed
-# both on first load (no prior table) and on reload (prior table exists).
+# Idempotent atomic replace: `nft -f` succeeds both on first load (no prior
+# table) and on reload (prior table exists), and the flushed chains get their
+# rules back in the same transaction.
+# NOTE: the table is never deleted on reload. Deleting and recreating base
+# chains, even in one transaction, unhooks them briefly and lets packets through
+# unfiltered; flushing keeps the hooks and their drop policy in place. A reload
+# therefore cannot change a chain's hook or priority, or a set's type or flags.
 add table inet kvn_tui_killswitch
-delete table inet kvn_tui_killswitch
+add chain inet kvn_tui_killswitch input { type filter hook input priority -10; policy drop; }
+add chain inet kvn_tui_killswitch output { type filter hook output priority -10; policy drop; }
+add chain inet kvn_tui_killswitch forward { type filter hook forward priority -10; policy drop; }
+flush chain inet kvn_tui_killswitch input
+flush chain inet kvn_tui_killswitch output
+flush chain inet kvn_tui_killswitch forward
 table inet kvn_tui_killswitch {
     # Dynamic sets populated by the daemon during the connect handshake.
     # IPv6 uses `meta l4proto` so extension headers are followed to the actual
@@ -35,11 +45,15 @@ table inet kvn_tui_killswitch {
         type filter hook output priority -10; policy drop;
         oifname "lo" accept
         oifname "kvn*" accept
+        # NOTE: fc00::/18 is kvn's default IPv6 fake-IP range (dns.fakeip_ranges).
+        # It lies inside the ULA exception below, so without this drop a fake
+        # address an application cached would leave through the physical
+        # interface once the tunnel is down.
+        ip6 daddr fc00::/18 drop
         # Packets marked by sing-box (route.default_mark = 666 / 0x29a). This
         # allows the `direct` outbound used by Bypass/Only routing modes to
         # reach the physical interface; everything else still drops.
         meta mark 0x29a accept
-        ct state established,related accept
         ip daddr { 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12 } accept
         ip6 daddr { fc00::/7, fe80::/10 } accept
         meta l4proto { icmp, icmpv6 } accept
@@ -52,6 +66,7 @@ table inet kvn_tui_killswitch {
     chain forward {
         type filter hook forward priority -10; policy drop;
         oifname "kvn*" accept
-        ct state established,related accept
+        ip6 daddr fc00::/18 drop
+        iifname "kvn*" ct state established,related accept
     }
 }

@@ -29,6 +29,18 @@ An older kvn cannot read a v6 configuration. The sing-box cache now lives in
 in the daemon's working directory (your home directory under the systemd unit)
 is no longer used and can be deleted.
 
+If the kill switch is installed, refresh it after upgrading:
+
+```bash
+sudo kvn setup --killswitch
+```
+
+The new rules stop direct connections that were open before the kill switch
+came on, and keep kvn's IPv6 fake-IP addresses (`fc00::/18`) from leaving
+outside the tunnel. Until you run the command, the installed rules keep the
+previous exceptions and `kvn doctor` reports the kill switch as outdated. An
+active kill switch is updated in place, without a moment of lost protection.
+
 ## v0.29.0
 
 - The command is now `kvn`. The legacy `kvn-tui` name still works but prints a
