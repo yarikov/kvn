@@ -75,8 +75,9 @@ the clipboard using supported share links.
 | **HTTP proxy** | `http://`, `https://` | HTTP CONNECT with optional TLS and authentication |
 | **SSH** | `ssh://` | Password and private-key authentication |
 
-A pasted `http(s)://` URL is a subscription unless it looks like a proxy:
-`user:pass@host`, `host:port` or `#name`.
+A pasted `http(s)://` URL is a proxy link when it has no path beyond `/` or
+query and has credentials, a non-empty `#name`, or (for `http://` only) a
+non-default port. Otherwise it is a subscription.
 
 </details>
 
@@ -141,9 +142,10 @@ After setup and a reboot, toggle it with `Shift+A`. See
 > kvn disable --killswitch
 > ```
 
-The kill switch prevents new internet connections from going outside the VPN
-if the tunnel goes down. See [what kvn protects](docs/privacy.md) for what it
-does and does not block. Set it up:
+The kill switch blocks internet traffic outside the VPN, including direct
+connections opened before it was enabled. See
+[what kvn protects](docs/privacy.md) for its routing and local-network
+exceptions. Set it up:
 
 ```bash
 sudo pacman -S --needed nftables \
@@ -242,7 +244,7 @@ detected problems.
 | Key | Action |
 |-----|--------|
 | `Enter` | Connect to selected profile |
-| `e` | Open `profiles.json` in `$EDITOR` |
+| `e` | Open `profiles.json` in `$VISUAL` or `$EDITOR` |
 | `y` | Yank selected profile or subscription |
 | `p` / `Ctrl+V` | Paste profile or subscription from clipboard |
 | `d` | Delete selected profile or subscription |

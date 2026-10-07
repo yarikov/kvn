@@ -132,7 +132,7 @@ See the `release` skill in `.agents/skills/release/SKILL.md` for the full versio
 
 - Clipboard: Wayland and X11 tools are both supported (`clipboard` in § Module Map)
 - Power events: listens to `org.freedesktop.login1.Manager.PrepareForSleep` via zbus (display-server-agnostic)
-- TUN interface: created by sing-box; requires root privileges
+- TUN interface: created by sing-box with `cap_net_admin,cap_net_raw` file capabilities; kvn runs as the regular user
 
 ---
 
@@ -194,7 +194,7 @@ Rules of thumb:
 - All persistent data uses `serde` + `serde_json`.
 - Config file: `profiles.json` (top-level `Config` struct with `profiles: Vec<Profile>` and `settings: Settings`).
 - `Profile` stores common fields (`id`, `name`, `address`, `port`) plus `#[serde(flatten)] config: ProtocolConfig`. `ProtocolConfig` is an internally-tagged enum (`#[serde(tag = "protocol", rename_all = "lowercase")]`) with one variant per protocol (11 total). VLESS keeps its protocol-specific fields flat on `VlessConfig` for backward compatibility with configs written before the multi-protocol refactor.
-- Shared TLS/transport types: `TlsCommon` (SNI, ALPN, fingerprint, insecure, `EchSettings`, `RealitySettings`), `TransportConfig` (WebSocket, gRPC, HTTP upgrade). ECH and REALITY are mutually exclusive and reported by `ProtocolConfig::diagnostics`.
+- Shared TLS/transport types: `TlsCommon` (SNI, ALPN, fingerprint, insecure, `EchSettings`, `RealitySettings`), `TransportConfig` (WebSocket, gRPC, HTTP). ECH and REALITY are mutually exclusive and reported by `ProtocolConfig::diagnostics`.
 - `Profile::dedup_key()` returns a stable string key (`"protocol:credential@host:port"`) used by the subscription importer to detect duplicate profiles across imports.
 - Enums use `#[serde(rename_all = "snake_case")]` or `"lowercase"` as appropriate.
 

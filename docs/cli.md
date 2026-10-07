@@ -2,8 +2,8 @@
 
 Running `kvn` without arguments opens the TUI, starting the background daemon
 first when it is not running. Before that it runs any pending
-[package migrations](#migrate) in the terminal. Every other command below runs
-once and exits.
+[package migrations](#migrate) in the terminal. The `--daemon` flag runs the
+persistent background process; the other commands below run once and exit.
 
 The package also installs the legacy `kvn-tui` name. It still works, but every
 command run through it, except plain `kvn-tui`, `kvn-tui --daemon` and
@@ -162,7 +162,10 @@ kvn migrate [--pending]
 Runs the package migrations installed by a newer kvn package. They also run
 automatically on the next `kvn` launch. While any migration is pending, the
 daemon refuses to start (see [`--daemon`](#--daemon)). `--pending` only lists them, one
-`<id>⇥<summary>` line each, without running anything. See
+`<id>⇥<summary>` line each, without running anything. If a pacman transaction
+is updating kvn or sing-box, it also prints a `pacman-transaction` line. With
+neither pending migrations nor such a transaction, it prints
+`No pending kvn migrations.` See
 [Package migrations](system-integration.md#package-migrations) and
 [Upgrading kvn](upgrading.md).
 
