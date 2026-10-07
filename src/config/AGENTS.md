@@ -4,13 +4,13 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 
 ## Share-Link Parsing
 - Entry point: `config::profile::parse_share_link(uri)` dispatches on the URI scheme.
-- Supported schemes: `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`, `hy2://`, `tuic://`, `shadowtls://`, `anytls://`, `socks://`, `socks5://`, `http://`, `https://`, `ssh://`.
+- Supported schemes: `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`, `hy2://`, `tuic://`, `shadowtls://`, `anytls://`, `socks://`, `socks5://`, `socks5h://`, `socks4://`, `socks4a://`, `http://`, `https://`, `ssh://`.
 - All supported schemes are listed in `SUPPORTED_SHARE_SCHEMES` (used by both dispatch and the subscription Base64 heuristic in `config::subscription`).
 - VLESS: extracts UUID, host, port, fragment (name), `flow`, `security`, `fp`, transport type, and REALITY params (`pbk`, `sid`, `sni`, `spx`). ECH config also parsed when present.
 - VMess: handles both base64-JSON (v2rayN / Shadowrocket) and inline URI forms.
 - Shadowsocks: handles SIP002 (`ss://base64(method:password)@host:port`) and legacy fully-base64 forms.
 - Hysteria 2: `hy2://` is an alias for `hysteria2://`.
-- SOCKS: `socks5://` is an alias for `socks://`.
+- SOCKS: `socks://`, `socks5://` and `socks5h://` create SOCKS5 profiles, `socks4://` and `socks4a://` the matching versions; a SOCKS4 link with a password is rejected, and encoding picks the scheme from `SocksConfig::version`.
 - TLS and transport parameters map onto the shared `TlsCommon` / `TransportConfig` types (root `AGENTS.md` § Serialization); VLESS keeps its fields flat for backward compatibility. `TransportConfig` is shared across VLESS, VMess, Trojan, AnyTLS.
 
 ## DNS Configuration

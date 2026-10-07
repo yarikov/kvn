@@ -233,17 +233,23 @@ fn encode_tuic(profile: &Profile, cfg: &TuicConfig) -> String {
 }
 
 fn encode_socks(profile: &Profile, cfg: &SocksConfig) -> String {
+    let (scheme, password) = match cfg.version {
+        SocksVersion::V4 => ("socks4", None),
+        SocksVersion::V4a => ("socks4a", None),
+        SocksVersion::V5 => ("socks5", cfg.password.as_ref()),
+    };
     let mut userinfo = String::new();
     if let Some(u) = &cfg.username {
         userinfo.push_str(&urlencoding::encode(u));
-        if let Some(p) = &cfg.password {
+        if let Some(p) = password {
             userinfo.push(':');
             userinfo.push_str(&urlencoding::encode(p));
         }
         userinfo.push('@');
     }
     format!(
-        "socks5://{}{}:{}{}",
+        "{}://{}{}:{}{}",
+        scheme,
         userinfo,
         host_for_uri(&profile.address),
         profile.port,
@@ -522,6 +528,25 @@ mod tests {
             subscription_id: None,
         };
         assert_roundtrip(p);
+    }
+
+    #[test]
+    fn encode_socks4_roundtrip_keeps_version() {
+        for version in [SocksVersion::V4, SocksVersion::V4a] {
+            assert_roundtrip(Profile {
+                id: Uuid::new_v4(),
+                name: "Socks4".to_string(),
+                address: "socks.example".to_string(),
+                port: 1080,
+                config: ProtocolConfig::Socks(SocksConfig {
+                    version,
+                    username: Some("alice".to_string()),
+                    password: None,
+                }),
+                tags: Vec::new(),
+                subscription_id: None,
+            });
+        }
     }
 
     #[test]

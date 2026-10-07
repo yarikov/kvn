@@ -56,8 +56,6 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
 `kvn` supports 11 sing-box outbound protocols. Profiles and subscriptions can be added from
 the clipboard using supported share links. A pasted `http://` or `https://` URL is always
 added as a subscription, so HTTP proxy links are imported only from text subscriptions.
-Share links always create SOCKS5 profiles; SOCKS4 and SOCKS4a are set by editing
-`profiles.json`.
 
 | Protocol | Share-link scheme(s) | Key support |
 |----------|----------------------|-------------|
@@ -69,7 +67,7 @@ Share links always create SOCKS5 profiles; SOCKS4 and SOCKS4a are set by editing
 | **TUIC** | `tuic://` | TUIC v5, congestion control, and UDP relay modes |
 | **ShadowTLS** | `shadowtls://` | Versions 1–3 with an inner Shadowsocks connection |
 | **AnyTLS** | `anytls://` | TLS-based multiplexing |
-| **SOCKS** | `socks://`, `socks5://` | SOCKS4, SOCKS4a, SOCKS5, and optional authentication |
+| **SOCKS** | `socks://`, `socks5://`, `socks5h://`, `socks4://`, `socks4a://` | SOCKS4, SOCKS4a, SOCKS5, and optional authentication |
 | **HTTP proxy** | `http://`, `https://` | HTTP CONNECT with optional TLS and authentication |
 | **SSH** | `ssh://` | Password and private-key authentication |
 
