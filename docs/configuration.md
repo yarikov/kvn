@@ -101,7 +101,6 @@ header value.
 |-------|---------|-------------|
 | `tun_interface` | `kvn0` | Name of the sing-box TUN interface; must start with `kvn` |
 | `dns` | Cloudflare DoH | DNS presets, the active preset, strategy, and fake-IP state |
-| `dns_strategy` | mirrors `dns.strategy` | Legacy copy kept for older kvn builds; edit `dns.strategy` instead |
 | `geo_routing` | no region; `auto_update` every 7 days on a new installation, `off` when the field or section is absent (`I` changes it at any time) | Country modes, rule-set updates, and service overrides |
 | `auto_connect` | `false` | Connect to `last_connected_profile` at startup |
 | `kill_switch` | `false` | Persisted kill-switch state |

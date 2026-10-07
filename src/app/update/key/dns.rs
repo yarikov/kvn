@@ -171,7 +171,6 @@ fn apply_dns_drafts(model: &mut Model) {
     if let Some(enabled) = model.dns_fakeip_draft.take() {
         model.config.settings.dns.fakeip_enabled = enabled;
     }
-    model.config.settings.dns_strategy = model.config.settings.dns.strategy.clone();
 }
 
 #[cfg(test)]
@@ -304,7 +303,6 @@ mod tests {
         model.dns_fakeip_draft = Some(true);
         let effects = handle_dns_settings(&mut model, enter());
         assert_eq!(model.config.settings.dns.strategy, DnsStrategy::OnlyIpv4);
-        assert_eq!(model.config.settings.dns_strategy, DnsStrategy::OnlyIpv4);
         assert_eq!(model.config.settings.dns.current_preset, "google_dot");
         assert!(model.config.settings.dns.fakeip_enabled);
         assert!(effects.contains(&Effect::SaveConfig));
