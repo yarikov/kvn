@@ -5,6 +5,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 ## Share-Link Parsing
 - Entry point: `config::profile::parse_share_link(uri)` dispatches on the URI scheme.
 - Supported schemes: `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`, `hy2://`, `tuic://`, `shadowtls://`, `anytls://`, `socks://`, `socks5://`, `socks5h://`, `socks4://`, `socks4a://`, `http://`, `https://`, `ssh://`.
+- Paste tells an HTTP proxy link from a subscription URL with `is_http_proxy_link`: no path or query, plus credentials, a non-default port or a `#name`; any other `http(s)://` URL is a subscription.
 - All supported schemes are listed in `SUPPORTED_SHARE_SCHEMES` (used by both dispatch and the subscription Base64 heuristic in `config::subscription`).
 - VLESS: extracts UUID, host, port, fragment (name), `flow`, `security`, `fp`, transport type, and REALITY params (`pbk`, `sid`, `sni`, `spx`). ECH config also parsed when present.
 - VMess: handles both base64-JSON (v2rayN / Shadowrocket) and inline URI forms.

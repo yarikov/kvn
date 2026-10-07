@@ -54,8 +54,7 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
 ## Supported Protocols
 
 `kvn` supports 11 sing-box outbound protocols. Profiles and subscriptions can be added from
-the clipboard using supported share links. A pasted `http://` or `https://` URL is always
-added as a subscription, so HTTP proxy links are imported only from text subscriptions.
+the clipboard using supported share links.
 
 | Protocol | Share-link scheme(s) | Key support |
 |----------|----------------------|-------------|
