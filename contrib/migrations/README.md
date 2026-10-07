@@ -87,8 +87,9 @@ config and the previous binary. The runner therefore connects to it and either:
   `Ctrl+C` stops the daemon outright. Either way the next `kvn` launch comes
   up on the new binary, so the overlay never asks the user to type a command.
 
-Only `kvn` closes the loop: `kvn migrate` runs the queue and exits, so anything
-a script stopped stays stopped until the next launch.
+`kvn migrate` performs the same daemon handoff and then exits. If no daemon is
+running, it does not start one; the next `kvn` launch starts it and opens the
+TUI.
 
 Sessions are counted from `AttachSession`, which only the TUI sends, so a
 one-shot CLI client is never mistaken for an open window. The freeze still

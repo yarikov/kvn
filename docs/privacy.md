@@ -149,12 +149,11 @@ Exactly what the kill switch lets through, besides the tunnel interface
 - all ICMP and ICMPv6 (ping, path MTU discovery, IPv6 neighbor discovery);
 - DHCP and DHCPv6, so the network connection itself keeps working.
 
-Everything else leaving the computer is dropped when it starts a new
-connection — for example a connection to a `169.254.0.0/16` link-local
-address, multicast and broadcast traffic such as mDNS and SSDP, or a
-`100.64.0.0/10` address used by Tailscale. Traffic the computer forwards for
-containers and virtual machines may leave only through the tunnel, including
-connections they opened before the kill switch came on.
+Everything else leaving the computer is dropped — for example traffic to a
+`169.254.0.0/16` link-local address, multicast and broadcast traffic such as
+mDNS and SSDP, or a `100.64.0.0/10` address used by Tailscale. Traffic the
+computer forwards for containers and virtual machines may leave only through
+the tunnel, including connections they opened before the kill switch came on.
 
 Latency tests (`t` / `T`) start a separate sing-box whose packets carry the
 same mark, so they reach each tested VPN server directly even with the kill

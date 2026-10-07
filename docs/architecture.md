@@ -156,8 +156,8 @@ Other threads report to it with messages:
 - **Ticker**: `Msg::Tick` every 250 ms. It starts queued connections and
   drives timeouts, auto-update schedules, sing-box exit detection and, once a second while
   connected, a Clash API traffic sample.
-- **IPC server**: accepts socket connections and turns each NDJSON line into
-  `Msg::IpcCommand`.
+- **IPC server**: accepts socket connections and turns each NDJSON command into
+  `Msg::IpcCommand`, or `Msg::IpcRequest` when it carries a request id.
 - **Suspend watcher**: listens for systemd-logind `PrepareForSleep` over D-Bus
   and sends `Msg::SystemResumed`, so the tunnel is reconnected after resume
   even with no TUI open.
@@ -206,9 +206,10 @@ Clients talk to the daemon in newline-delimited JSON over
   snapshot, including the complete config, to every attached client. There are
   no diffs to get out of sync.
 - **Correlated requests**: saving an edited config (`ApplyEditedConfig`),
-  wheel scrolling (`ScrollViewport`), pane focus (`SetMainPaneFocus`) and every
-  one-shot CLI command carry a request id. Only the matching reply carries
-  their result or error.
+  wheel scrolling (`ScrollViewport`), pane focus (`SetMainPaneFocus`), CLI
+  connection commands (`connect`, `disconnect`, `reconnect`, `toggle`) and
+  `disable --support-prompt` carry a request id. Only the matching reply
+  carries their result or error.
 - **Restart required**: after package migrations finish while a TUI is
   attached, the daemon enters a frozen state until it is restarted. It ignores
   every command except `Quit` and `ClearErrorStatus`, answers connection
@@ -354,8 +355,10 @@ is listed in [System integration](system-integration.md).
 
 ## Testing
 
-Logic is tested through `update`: build a `Model`, send a `Msg`, check the
-model and the returned effects. Rendering is tested only with insta snapshots
-of whole screens. Code that wraps processes, D-Bus, sockets and HTTP is kept
-thin and is not unit-tested. CI requires at least 85 % line and region
-coverage. See [CONTRIBUTING.md](../CONTRIBUTING.md) for the commands.
+State transitions are tested through `update`: build a `Model`, send a `Msg`,
+check the model and the returned effects. Rendering is tested only with insta
+snapshots. Configuration and protocol logic have unit tests; IPC, subscription
+and geo downloads also use local socket and HTTP fixtures. Runtime
+wrappers around processes, D-Bus and desktop services are kept thin and do not
+require unit-test coverage. CI requires at least 85 % line and region coverage
+overall. See [CONTRIBUTING.md](../CONTRIBUTING.md) for the commands.

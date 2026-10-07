@@ -148,7 +148,8 @@ HTTP before any network request is made.
 }
 ```
 
-`RUST_LOG`, when set, overrides `logs.level`.
+`RUST_LOG`, when set to a valid filter, overrides `logs.level` for application
+logging. sing-box still uses `logs.level`.
 
 ## DNS
 
@@ -246,9 +247,10 @@ Fake-IP answers address lookups with addresses from `fakeip_ranges`
 (`198.18.0.0/15` and `fc00::/18` unless set). A rule can send particular
 domains to it with `"server": "fakeip"`, whether or not the Fake-IP toggle is
 on; the tag `fakeip` is reserved for this and cannot name a preset's own
-server. The toggle additionally sends every remaining lookup to fake-IP. Both
-ranges must be IP prefixes; putting an IPv6 prefix in `inet4_range`, or the
-reverse, is not supported:
+server. If no active rule already targets `fakeip`, the toggle adds a
+catch-all for remaining `A` and `AAAA` queries. Both ranges must be IP
+prefixes; putting an IPv6 prefix in `inet4_range`, or the reverse, is not
+supported:
 
 ```json
 { "fakeip_ranges": { "inet4_range": "198.18.0.0/15", "inet6_range": "fc00::/18" } }
@@ -271,12 +273,13 @@ service route. A rule is skipped while any of its rule-sets is not in use,
 because the routing mode does not use that region, the service route is
 disabled, or the file has not been downloaded yet.
 
-With fake-IP on, kvn adds a rule that sends every remaining `A` and `AAAA`
-query to its fake-IP server, after the active preset's rules. sing-box cannot combine
-that rule with a DNS rule using an IP rule-set (`geoip-*`), so connecting
-fails while such a rule is active. Add a rule with `"server": "fakeip"` to the
-preset, or match by domain (`geosite-*`) instead. sing-box 1.16 will
-stop accepting IP rule-sets in DNS rules altogether.
+With fake-IP on and no active rule already targeting `fakeip`, kvn adds a rule
+that sends every remaining `A` and `AAAA` query to its fake-IP server, after
+the active preset's rules. sing-box cannot combine that rule with a DNS rule
+using an IP rule-set (`geoip-*`), so connecting fails while such a rule is
+active. Add a rule with `"server": "fakeip"` to the preset, or match by domain
+(`geosite-*`) instead. sing-box 1.16 will stop accepting IP rule-sets in DNS
+rules altogether.
 
 In Global and Bypass modes, DNS queries to public servers go through the
 tunnel; [what kvn protects](privacy.md#dns) summarizes where every query goes.
@@ -346,8 +349,9 @@ field or the whole `settings` section, uses `nerd` on Omarchy, which ships a
 Nerd Font, and `unicode` elsewhere.
 
 `logs.level` controls both application and generated sing-box logging. Accepted
-values are `trace`, `debug`, `info`, `warn`, and `error`; `RUST_LOG` takes
-precedence when present.
+values are `trace`, `debug`, `info`, `warn`, and `error`. A valid `RUST_LOG`
+filter takes precedence for application logging only; it does not change
+sing-box logging.
 
 `logs.line_retention.app` and `logs.line_retention.singbox` are line limits for
 the two on-disk log files. Both values must be at least `1000`. Both files are
@@ -386,7 +390,7 @@ cannot read it.
 | Application log | `~/.config/kvn-tui/logs/app.log` |
 | sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |
 | Waybar and recovery state | `~/.config/kvn-tui/state.json` |
-| Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved) |
+| Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema or package migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved) |
 | Applied migration markers | `$XDG_STATE_HOME/kvn/migrations/` |
 | First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
@@ -394,6 +398,7 @@ cannot read it.
 | IPC socket | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
 | Generated sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
 | Latency-test configs | `$XDG_RUNTIME_DIR/kvn-tui/test-<uuid>.json` |
+| Private editor copy | `$XDG_RUNTIME_DIR/kvn-tui/profiles-edit-<pid>.json` |
 | Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |
 | Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
 | Migration baseline (system-wide) | `/var/lib/kvn/migration-baseline` |
