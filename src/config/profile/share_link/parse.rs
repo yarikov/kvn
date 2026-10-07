@@ -10,7 +10,8 @@ use crate::config::profile::*;
 pub fn parse_share_link(text: &str) -> Result<Profile> {
     let trimmed = text.trim();
     let scheme_end = trimmed.find("://").context("Missing URI scheme")?;
-    let scheme = &trimmed[..scheme_end];
+    let scheme = trimmed[..scheme_end].to_ascii_lowercase();
+    let scheme = scheme.as_str();
     let rest = &trimmed[scheme_end + 3..];
 
     match scheme {
@@ -23,7 +24,7 @@ pub fn parse_share_link(text: &str) -> Result<Profile> {
         "socks" | "socks5" | "socks5h" => parse_socks(scheme, rest, SocksVersion::V5),
         "socks4" => parse_socks(scheme, rest, SocksVersion::V4),
         "socks4a" => parse_socks(scheme, rest, SocksVersion::V4a),
-        "http" | "https" => parse_http(rest, scheme == "https"),
+        "http" | "https" => parse_http(scheme, rest),
         "ssh" => parse_ssh(rest),
         "anytls" => parse_anytls(rest),
         "shadowtls" => parse_shadowtls(rest),
@@ -42,7 +43,7 @@ fn query_map(url: &Url) -> std::collections::HashMap<String, String> {
 }
 
 fn fragment_name(url: &Url, fallback: &str) -> Result<String> {
-    Ok(match url.fragment() {
+    Ok(match url.fragment().filter(|name| !name.is_empty()) {
         Some(f) => urlencoding::decode(f)?.to_string(),
         None => fallback.to_string(),
     })
@@ -235,7 +236,11 @@ fn parse_vmess_b64(b64: &str) -> Result<Profile> {
         .or_else(|| v["port"].as_str().and_then(|s| s.parse().ok()))
         .context("VMess: missing 'port'")? as u16;
     let uuid = v["id"].as_str().context("VMess: missing 'id'")?.to_string();
-    let name = v["ps"].as_str().unwrap_or(&host).to_string();
+    let name = v["ps"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(&host)
+        .to_string();
     let aid = v["aid"]
         .as_u64()
         .or_else(|| v["aid"].as_str().and_then(|s| s.parse().ok()))
@@ -404,7 +409,7 @@ fn parse_shadowsocks(rest: &str) -> Result<Profile> {
 
     let cipher = parse_shadowsocks_cipher(&method)
         .with_context(|| format!("Unsupported Shadowsocks cipher: {method}"))?;
-    let name = match fragment {
+    let name = match fragment.filter(|name| !name.is_empty()) {
         Some(f) => urlencoding::decode(f)?.to_string(),
         None => host.clone(),
     };
@@ -555,8 +560,9 @@ fn parse_socks(scheme: &str, rest: &str, version: SocksVersion) -> Result<Profil
 
 /// Parse `http://user:pass@host:port#name` / `https://...#name`. The `tls` flag
 /// is set when the scheme is `https`.
-fn parse_http(rest: &str, tls_enabled: bool) -> Result<Profile> {
-    let url = parse_uri("http", rest)?;
+fn parse_http(scheme: &str, rest: &str) -> Result<Profile> {
+    let tls_enabled = scheme == "https";
+    let url = parse_uri(scheme, rest)?;
     let host = url
         .host_str()
         .context("Missing host in HTTP URL")?
@@ -874,6 +880,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_accepts_scheme_in_any_case() {
+        let profile = parse_share_link("SOCKS5://1.2.3.4:1080#Upper").unwrap();
+        assert!(matches!(profile.config, ProtocolConfig::Socks(_)));
+    }
+
+    #[test]
+    fn parse_empty_name_names_the_profile_after_its_host() {
+        use base64::Engine;
+        let profile = parse_share_link("socks5://1.2.3.4:1080#").unwrap();
+        assert_eq!(profile.name, "1.2.3.4");
+
+        let creds = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("aes-256-gcm:ssecret");
+        let profile = parse_share_link(&format!("ss://{creds}@ss.example:8388#")).unwrap();
+        assert_eq!(profile.name, "ss.example");
+
+        let body =
+            serde_json::json!({ "ps": "", "add": "1.2.3.4", "port": "10086", "id": "vm-id" });
+        let encoded =
+            base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&body).unwrap());
+        let profile = parse_share_link(&format!("vmess://{encoded}")).unwrap();
+        assert_eq!(profile.name, "1.2.3.4");
+    }
+
+    #[test]
     fn parse_rejects_unknown_scheme() {
         let result = parse_share_link("snake-oil://whatever");
         assert!(result.is_err());
@@ -1064,6 +1094,10 @@ mod tests {
 
         let secure = parse_share_link("https://u:p@h.example#HTTPS").unwrap();
         assert_eq!(secure.port, 443);
+        assert_eq!(
+            parse_share_link("https://h.example:80#HTTPS").unwrap().port,
+            80
+        );
         let ProtocolConfig::Http(cfg) = &secure.config else {
             panic!("ProtocolConfig variant mismatch")
         };

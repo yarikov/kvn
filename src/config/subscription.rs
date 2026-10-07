@@ -311,9 +311,10 @@ fn fetch_subscription_after_validation(
 
 /// True when `line` (already trimmed) starts with any supported share-link scheme.
 fn line_has_supported_scheme(line: &str) -> bool {
-    SUPPORTED_SHARE_SCHEMES
-        .iter()
-        .any(|prefix| line.starts_with(prefix))
+    SUPPORTED_SHARE_SCHEMES.iter().any(|prefix| {
+        line.get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+    })
 }
 
 fn try_parse_singbox_json(body: &str) -> Option<Vec<Profile>> {
@@ -600,6 +601,14 @@ mod tests {
         let encoded = base64::engine::general_purpose::STANDARD.encode(&plain);
         let profiles = parse_subscription_body(&encoded).unwrap();
         assert_eq!(profiles.len(), 2);
+    }
+
+    #[test]
+    fn parse_base64_body_with_uppercase_scheme() {
+        let encoded =
+            base64::engine::general_purpose::STANDARD.encode("SOCKS5://proxy.example:1080#Proxy\n");
+        let profiles = parse_subscription_body(&encoded).unwrap();
+        assert_eq!(profiles.len(), 1);
     }
 
     #[test]

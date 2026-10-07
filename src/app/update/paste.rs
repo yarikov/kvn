@@ -23,7 +23,8 @@ pub(in crate::app::update) fn handle_clipboard_text(model: &mut Model, text: &st
         );
         return effects;
     }
-    let is_http_url = trimmed.starts_with("http://") || trimmed.starts_with("https://");
+    let lowercase = trimmed.to_ascii_lowercase();
+    let is_http_url = lowercase.starts_with("http://") || lowercase.starts_with("https://");
     if is_http_url && !crate::config::profile::is_http_proxy_link(trimmed) {
         return add_and_fetch_subscription(model, trimmed);
     }
@@ -203,6 +204,16 @@ mod tests {
                 app_log_info("Subscription added: 192.0.2.10 — fetching profiles…")
             ]
         );
+    }
+
+    #[test]
+    fn paste_uppercase_https_url_creates_subscription() {
+        let mut model = model_with_profiles(vec![]);
+
+        handle_clipboard_text(&mut model, "HTTPS://sub.example.com:2096/sub/token");
+
+        assert_eq!(model.config.subscriptions.len(), 1);
+        assert!(model.config.profiles.is_empty());
     }
 
     #[test]

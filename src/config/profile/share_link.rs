@@ -43,8 +43,8 @@ pub fn is_http_proxy_link(link: &str) -> bool {
     let addresses_host_only = url.path() == "/" && url.query().is_none();
     let has_proxy_marker = !url.username().is_empty()
         || url.password().is_some()
-        || url.fragment().is_some()
-        || url.port().is_some();
+        || url.fragment().is_some_and(|name| !name.is_empty())
+        || (url.scheme() == "http" && url.port().is_some());
     is_http && addresses_host_only && has_proxy_marker
 }
 
@@ -59,6 +59,8 @@ mod tests {
             "http://1.2.3.4:3128",
             "https://proxy.example#HTTPS",
             "https://user@proxy.example/",
+            "https://user:pass@proxy.example:8443",
+            "https://proxy.example:8443#Proxy",
         ] {
             assert!(is_http_proxy_link(link), "{link}");
         }
@@ -68,6 +70,11 @@ mod tests {
     fn subscription_urls_are_not_proxy_links() {
         for link in [
             "https://192.0.2.10:2096/sub/test-token",
+            "https://sub.example.com:2096",
+            "https://sub.example.com:2096/",
+            "https://sub.example.com:443",
+            "https://[2001:db8::1]:2096",
+            "https://sub.example.com:2096#",
             "https://example.com/?token=x",
             "https://example.com",
             "socks5://1.2.3.4:1080#Socks",
