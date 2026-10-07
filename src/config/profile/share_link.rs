@@ -34,3 +34,46 @@ pub const SUPPORTED_SHARE_SCHEMES: &[&str] = &[
     "anytls://",
     "shadowtls://",
 ];
+
+pub fn is_http_proxy_link(link: &str) -> bool {
+    let Ok(url) = url::Url::parse(link) else {
+        return false;
+    };
+    let is_http = matches!(url.scheme(), "http" | "https");
+    let addresses_host_only = url.path() == "/" && url.query().is_none();
+    let has_proxy_marker = !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || url.port().is_some();
+    is_http && addresses_host_only && has_proxy_marker
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn http_proxy_links_are_recognized() {
+        for link in [
+            "http://user:pass@1.2.3.4:8080#Office",
+            "http://1.2.3.4:3128",
+            "https://proxy.example#HTTPS",
+            "https://user@proxy.example/",
+        ] {
+            assert!(is_http_proxy_link(link), "{link}");
+        }
+    }
+
+    #[test]
+    fn subscription_urls_are_not_proxy_links() {
+        for link in [
+            "https://192.0.2.10:2096/sub/test-token",
+            "https://example.com/?token=x",
+            "https://example.com",
+            "socks5://1.2.3.4:1080#Socks",
+            "not a url",
+        ] {
+            assert!(!is_http_proxy_link(link), "{link}");
+        }
+    }
+}

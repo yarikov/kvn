@@ -39,7 +39,9 @@ pub use settings::{
     ConnectivityProbeConfig, IconSet, OMARCHY_THEME_SENTINEL, Settings, normalized_log_level,
     parse_connectivity_probe_url,
 };
-pub use share_link::{SUPPORTED_SHARE_SCHEMES, encode_share_link, parse_share_link};
+pub use share_link::{
+    SUPPORTED_SHARE_SCHEMES, encode_share_link, is_http_proxy_link, parse_share_link,
+};
 #[allow(unused_imports)]
 pub use subscription::{Subscription, SubscriptionRetryState};
 #[allow(unused_imports)]

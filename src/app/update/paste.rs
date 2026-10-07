@@ -23,7 +23,8 @@ pub(in crate::app::update) fn handle_clipboard_text(model: &mut Model, text: &st
         );
         return effects;
     }
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+    let is_http_url = trimmed.starts_with("http://") || trimmed.starts_with("https://");
+    if is_http_url && !crate::config::profile::is_http_proxy_link(trimmed) {
         return add_and_fetch_subscription(model, trimmed);
     }
 
@@ -153,6 +154,24 @@ mod tests {
         );
         assert!(model.status_is_error());
         assert!(model.status_text().contains("already exists"));
+    }
+
+    #[test]
+    fn paste_http_proxy_link_imports_profile() {
+        let mut model = model_with_profiles(vec![]);
+
+        let effects = handle_clipboard_text(&mut model, "http://user:pass@203.0.113.5:8080#Office");
+
+        assert!(model.config.subscriptions.is_empty());
+        assert_eq!(model.config.profiles.len(), 1);
+        assert!(matches!(
+            model.config.profiles[0].config,
+            crate::config::profile::ProtocolConfig::Http(_)
+        ));
+        assert_eq!(
+            effects,
+            vec![Effect::SaveConfig, app_log_info("Profile imported: Office")]
+        );
     }
 
     #[test]
