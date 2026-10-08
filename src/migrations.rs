@@ -5,20 +5,19 @@
 //! later invocation resumes from the script that failed.
 
 use std::collections::HashSet;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, IsTerminal, Write};
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 
 const INSTALLED_DIR: &str = "/usr/lib/kvn/migrations";
 const BASELINE_PATH: &str = "/var/lib/kvn/migration-baseline";
 const MIGRATION_SENSITIVE_PACKAGE_FILES: [&str; 2] = ["/usr/bin/kvn-tui", "/usr/bin/sing-box"];
-const PACKAGE_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(900);
+const PACKAGE_TRANSACTION_TIMEOUT: Duration = Duration::from_mins(15);
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Migration {
@@ -352,10 +351,11 @@ impl MigrationLock {
             .read(true)
             .write(true)
             .open(&path)?;
-        #[allow(unsafe_code)]
-        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        ensure!(result == 0, "another kvn migration is already running");
-        Ok(Self { _file: file })
+        match file.try_lock() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(TryLockError::WouldBlock) => bail!("another kvn migration is already running"),
+            Err(TryLockError::Error(error)) => Err(error.into()),
+        }
     }
 }
 
@@ -364,10 +364,8 @@ impl Drop for MigrationLock {
         // close() alone can leave the lock held by a concurrently forked child
         // until exec closes its inherited CLOEXEC descriptor. Release it
         // explicitly when the runner finishes, regardless of those copies.
-        #[allow(unsafe_code)]
-        let result = unsafe { libc::flock(self._file.as_raw_fd(), libc::LOCK_UN) };
-        if result != 0 {
-            tracing::warn!(error = %io::Error::last_os_error(), "Failed to release migration lock");
+        if let Err(error) = self._file.unlock() {
+            tracing::warn!(%error, "Failed to release migration lock");
         }
     }
 }

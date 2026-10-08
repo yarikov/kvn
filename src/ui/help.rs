@@ -331,7 +331,7 @@ mod tests {
         );
         assert!(
             lines
-                .windows(2)
+                .array_windows()
                 .all(|pair| !matches!(pair, [HelpLine::Separator, HelpLine::Separator]))
         );
     }

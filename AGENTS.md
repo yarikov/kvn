@@ -28,9 +28,14 @@ cargo llvm-cov --summary-only  # coverage report; both region & line totals must
 cargo deny check all           # dependency licenses, advisories, bans, sources (CI gate, deny.toml)
 ```
 
-CI runs `cargo test --locked` and `cargo llvm-cov --locked`, so commit an updated
-`Cargo.lock` together with any dependency change. The toolchain is pinned to
-`stable` with `rustfmt` and `clippy` by `rust-toolchain.toml`.
+CI runs `cargo test --locked` and `cargo llvm-cov --locked`, and the release
+workflow builds the published binary with `--locked`, so commit an updated
+`Cargo.lock` together with any dependency change.
+
+Every CI job and the release build use one Rust version: `rust-version` in
+`Cargo.toml`, installed by `.github/actions/rust-toolchain`. Raise it there,
+when Arch ships the new Rust, to move CI and releases together.
+`rust-toolchain.toml` keeps local rustup on `stable` with `rustfmt` and `clippy`.
 
 The rules behind each gate live in § Testing Patterns, § Coverage Policy, and § Formatting & Linting.
 
@@ -105,7 +110,7 @@ The Omarchy bar widget is not in this repository: it is the standalone [omakvn](
 
 ## Build System & Dependencies
 
-- **Rust**: edition 2024, minimum version 1.88
+- **Rust**: edition 2024, minimum version 1.98 (`rust-version` in `Cargo.toml`); CI builds and releases with exactly that version, so std APIs stabilized later fail CI
 - **External binary**: `sing-box` must be installed separately and available on `$PATH` (or via `SING_BOX_PATH` env var)
 - **Key crates**: `ratatui` + `crossterm` (TUI), `serde` + `serde_json` (config), `schemars` (config JSON Schema), `zbus` (D-Bus), `ureq` (HTTP), `tracing` (logs), `anyhow` (errors)
 

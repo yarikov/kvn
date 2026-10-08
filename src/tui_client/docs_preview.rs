@@ -342,8 +342,8 @@ mod tests {
 
         assert!(
             endpoints
-                .windows(2)
-                .all(|pair| pair[0].len() == pair[1].len())
+                .array_windows()
+                .all(|[left, right]| left.len() == right.len())
         );
         assert_eq!(endpoints[0].len(), 21);
         assert_eq!(

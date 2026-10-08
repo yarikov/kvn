@@ -11,7 +11,7 @@ use super::DaemonShared;
 use super::process_slot::{ProcessSlot, is_current_attempt, lock_process_slot};
 
 const LOG_PRUNE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
-const SING_BOX_UPDATE_TIMEOUT: Duration = Duration::from_secs(300);
+const SING_BOX_UPDATE_TIMEOUT: Duration = Duration::from_mins(5);
 
 fn wait_for_sing_box_update(slot: &Arc<Mutex<ProcessSlot>>, attempt_id: u64) {
     let Some(binary) = crate::singbox::runner::binary_path() else {

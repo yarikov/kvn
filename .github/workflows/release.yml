@@ -19,10 +19,10 @@ jobs:
           ref: ${{ github.event.workflow_run.head_branch }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: ./.github/actions/rust-toolchain
 
       - name: Build release
-        run: cargo build --release
+        run: cargo build --release --locked
 
       - name: Prepare package
         run: |

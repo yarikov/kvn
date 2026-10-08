@@ -3,7 +3,7 @@
 [![CI](https://github.com/yarikov/kvn/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/yarikov/kvn/actions/workflows/ci.yml)
 [![AUR version](https://img.shields.io/aur/version/kvn-tui-bin?logo=arch-linux&label=AUR)](https://aur.archlinux.org/packages/kvn-tui-bin)
 [![GitHub Release](https://img.shields.io/github/v/release/yarikov/kvn?logo=github&label=release)](https://github.com/yarikov/kvn/releases/latest)
-[![Rust Version](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Rust Version](https://img.shields.io/badge/rust-1.98%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/github/license/yarikov/kvn)](LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-read-blue)](docs/README.md)
 
@@ -186,7 +186,7 @@ changes and how to remove the integration.
 
 ### Build from source
 
-Requires Rust 1.88+, sing-box 1.14+, `base-devel`, `dbus`, and a clipboard tool
+Requires Rust 1.98+, sing-box 1.14+, `base-devel`, `dbus`, and a clipboard tool
 (`wl-clipboard` on Wayland or `xclip` / `xsel` on X11).
 
 ```bash
@@ -317,7 +317,7 @@ advanced DNS and routing, validation, migrations, and runtime file locations.
 
 ## Architecture
 
-`kvn` is built with Rust 2024 on top of sing-box, with a persistent daemon and a
+`kvn` is built with Rust on top of sing-box, with a persistent daemon and a
 TEA-style core. See the [architecture overview](docs/architecture.md) for how
 the daemon, its clients and sing-box fit together, the IPC protocol, privileges,
 and the source layout.
