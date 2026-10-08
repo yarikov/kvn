@@ -134,7 +134,7 @@ fn finish_ipc_effects(mut effects: Vec<Effect>) -> Vec<Effect> {
 pub(in crate::app::update) fn handle_go_first(model: &mut Model) -> Vec<Effect> {
     match model.overlay {
         Overlay::None => model.select_first(),
-        Overlay::SettingsMenu(_) => {}
+        Overlay::SettingsMenu(_) => crate::ui::nav::select_first(&mut model.settings_menu_selected),
         Overlay::RoutingMode => crate::ui::nav::select_first(&mut model.routing_selected),
         Overlay::GeoRegions => crate::ui::nav::select_first(&mut model.geo_region_selected),
         Overlay::DnsSettings => crate::ui::nav::select_first(&mut model.dns_selected),
@@ -679,6 +679,11 @@ mod tests {
         model.selected = 1;
         handle_ipc_command(&mut model, crate::app::msg::IpcCommand::GoFirst);
         assert_eq!(model.selected, 0);
+
+        model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Root);
+        model.settings_menu_selected = 3;
+        handle_ipc_command(&mut model, crate::app::msg::IpcCommand::GoFirst);
+        assert_eq!(model.settings_menu_selected, 0);
 
         model.overlay = Overlay::RoutingMode;
         model.routing_selected = 2;
