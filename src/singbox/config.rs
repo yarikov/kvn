@@ -98,7 +98,7 @@ pub fn generate_config(
             settings.dns.current_preset
         )
     })?;
-    let upstreams = DnsUpstreams::new(active_dns, &routing_mode, profile)?;
+    let upstreams = DnsUpstreams::new(active_dns, &routing_mode, profile);
     let bootstrap = upstreams.bootstrap();
     let resolvers = RouteResolvers {
         default_domain: json!({
@@ -267,6 +267,7 @@ fn fakeip_catch_all_rule(
 struct DnsUpstreams {
     active: ActiveDns,
     through_proxy: bool,
+    carries_udp: bool,
 }
 
 struct BootstrapResolver {
@@ -275,37 +276,25 @@ struct BootstrapResolver {
 }
 
 impl DnsUpstreams {
-    fn new(
-        active: ActiveDns,
-        routing_mode: &RoutingMode,
-        profile: &Profile,
-    ) -> anyhow::Result<Self> {
-        let upstreams = Self {
+    fn new(active: ActiveDns, routing_mode: &RoutingMode, profile: &Profile) -> Self {
+        Self {
             active,
             through_proxy: final_outbound(routing_mode) == "proxy",
-        };
-        if !proxy_carries_udp(&profile.config)
-            && let Some(server) = upstreams.udp_servers_to_tunnel().next()
-        {
-            bail!(
-                "DNS server {:?} of the active preset is a {} server, but the {} profile {:?} cannot carry UDP through the tunnel, so its DNS queries would bypass the VPN; use an https, tls or tcp DNS server instead",
-                server.tag(),
-                server.kind_label(),
-                profile.protocol(),
-                profile.name,
-            );
+            carries_udp: proxy_carries_udp(&profile.config),
         }
-        Ok(upstreams)
     }
 
-    fn udp_servers_to_tunnel(&self) -> impl Iterator<Item = &DnsServer> {
+    fn udp_servers_kept_out_of_tunnel(&self) -> impl Iterator<Item = &DnsServer> {
         self.active.servers.iter().filter(|server| {
-            matches!(server, DnsServer::Udp { .. } | DnsServer::Quic { .. })
-                && self.is_tunnelled(server)
+            !self.carries_udp && is_udp_server(server) && self.is_public_behind_proxy(server)
         })
     }
 
     fn is_tunnelled(&self, server: &DnsServer) -> bool {
+        self.is_public_behind_proxy(server) && (self.carries_udp || !is_udp_server(server))
+    }
+
+    fn is_public_behind_proxy(&self, server: &DnsServer) -> bool {
         server
             .address()
             .is_some_and(|address| self.through_proxy && !is_local_address(address))
@@ -345,6 +334,27 @@ impl DnsUpstreams {
             Some(&bootstrap.tag)
         }
     }
+}
+
+pub fn dns_bypass_warning(profile: &Profile, settings: &Settings) -> Option<String> {
+    let active = settings.dns.active()?;
+    let upstreams = DnsUpstreams::new(active, &settings.geo_routing.mode(), profile);
+    let servers: Vec<String> = upstreams
+        .udp_servers_kept_out_of_tunnel()
+        .map(|server| format!("{:?} ({})", server.tag(), server.kind_label()))
+        .collect();
+    (!servers.is_empty()).then(|| {
+        format!(
+            "DNS server {} bypasses the VPN: the {} profile {:?} cannot carry UDP, so its queries are sent directly; use an https, tls or tcp DNS server to keep them in the tunnel",
+            servers.join(", "),
+            profile.protocol(),
+            profile.name,
+        )
+    })
+}
+
+fn is_udp_server(server: &DnsServer) -> bool {
+    matches!(server, DnsServer::Udp { .. } | DnsServer::Quic { .. })
 }
 
 fn is_local_address(address: &str) -> bool {
@@ -1312,6 +1322,7 @@ mod tests {
         DnsUpstreams {
             active,
             through_proxy: false,
+            carries_udp: true,
         }
     }
 
@@ -1319,6 +1330,7 @@ mod tests {
         DnsUpstreams {
             active,
             through_proxy: true,
+            carries_udp: true,
         }
     }
 
@@ -1640,37 +1652,41 @@ mod tests {
     }
 
     #[test]
-    fn dns_upstreams_refuse_public_udp_servers_on_a_profile_without_udp() {
+    fn dns_upstreams_send_public_udp_servers_directly_on_a_profile_without_udp() {
         let doq = DnsServer::Quic {
             tag: "doq".into(),
             server: "94.140.14.14".into(),
             server_port: None,
         };
+        let dns = active(vec![doh("remote", "1.1.1.1")], "remote");
+        let upstreams = DnsUpstreams::new(dns, &RoutingMode::Global, &http_profile());
+        assert!(upstreams.is_tunnelled(&doh("remote", "1.1.1.1")));
         for server in [udp("plain", "8.8.8.8"), doq] {
-            let tag = server.tag().to_string();
-            let dns = active(vec![doh("remote", "1.1.1.1"), server], "remote");
-            let error = DnsUpstreams::new(dns, &RoutingMode::Global, &http_profile())
-                .err()
-                .unwrap();
-            assert!(error.to_string().contains(&format!("{tag:?}")), "{error}");
-            assert!(error.to_string().contains("http"), "{error}");
+            assert!(!upstreams.is_tunnelled(&server), "{server:?}");
         }
     }
 
     #[test]
-    fn dns_upstreams_accept_udp_servers_that_stay_direct_or_can_be_carried() {
-        let lan = active(vec![udp("router", "192.168.1.1")], "router");
-        let public = active(vec![udp("plain", "8.8.8.8")], "plain");
-        for (dns, mode, profile) in [
-            (lan, RoutingMode::Global, http_profile()),
-            (
-                public.clone(),
-                RoutingMode::Only(GeoRegion::Ru),
-                http_profile(),
-            ),
-            (public, RoutingMode::Global, test_profile()),
+    fn dns_bypass_warning_names_public_udp_servers_a_profile_cannot_tunnel() {
+        let preset =
+            |server| custom_preset(vec![doh("remote", "1.1.1.1"), server], vec![], "remote");
+        let public = settings_with_preset(preset(udp("plain", "8.8.8.8")));
+        let warning = dns_bypass_warning(&http_profile(), &public).unwrap();
+        assert!(warning.contains("\"plain\" (UDP)"), "{warning}");
+        assert!(warning.contains("http"), "{warning}");
+
+        let lan = settings_with_preset(preset(udp("router", "192.168.1.1")));
+        let mut only = public.clone();
+        only.geo_routing.current_region = Some(GeoRegion::Ru);
+        only.geo_routing
+            .selected_region_modes
+            .insert(GeoRegion::Ru, RoutingMode::Only(GeoRegion::Ru));
+        for (profile, settings) in [
+            (http_profile(), &lan),
+            (http_profile(), &only),
+            (test_profile(), &public),
         ] {
-            assert!(DnsUpstreams::new(dns, &mode, &profile).is_ok());
+            assert_eq!(dns_bypass_warning(&profile, settings), None);
         }
     }
 
