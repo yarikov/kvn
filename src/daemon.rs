@@ -232,7 +232,7 @@ fn run_loop(
         }
 
         for effect in effects {
-            if let Some(result) = execute_daemon_effect(effect, tx, model, shared, edit_requested)?
+            if let Some(result) = execute_daemon_effect(effect, tx, model, shared, edit_requested)
                 && edit_requested
             {
                 config_edit_result = Some(result);

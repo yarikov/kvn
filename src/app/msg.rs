@@ -59,18 +59,8 @@ pub enum Msg {
     GeoMetadataRefreshed {
         last_updated: Option<String>,
         last_checked_at: Option<chrono::DateTime<chrono::Local>>,
-        retry_state: Option<crate::geo::GeoRetryState>,
-        service_retry_states: std::collections::HashMap<
-            crate::config::profile::RoutedService,
-            crate::geo::GeoRetryState,
-        >,
-        service_checked_at: std::collections::HashMap<
-            crate::config::profile::RoutedService,
-            chrono::DateTime<chrono::Local>,
-        >,
-        next_update: Option<chrono::NaiveDate>,
-        service_next_updates:
-            std::collections::HashMap<crate::config::profile::RoutedService, chrono::NaiveDate>,
+        service_checked_at: ServiceCheckTimes,
+        schedule: Option<GeoSchedule>,
     },
     SystemResumed,
     Connected {
@@ -98,16 +88,8 @@ pub enum Msg {
     /// that service"). Consumed by the reducer to report the result and run
     /// any reconnect deferred by a service-routing commit.
     ServiceRuleSetsReady {
-        retry_states: std::collections::HashMap<
-            crate::config::profile::RoutedService,
-            crate::geo::GeoRetryState,
-        >,
-        checked_at: std::collections::HashMap<
-            crate::config::profile::RoutedService,
-            chrono::DateTime<chrono::Local>,
-        >,
-        next_updates:
-            std::collections::HashMap<crate::config::profile::RoutedService, chrono::NaiveDate>,
+        checked_at: ServiceCheckTimes,
+        schedule: Option<ServiceSchedule>,
         updated_parts: Vec<String>,
         errors: Vec<String>,
     },
@@ -163,56 +145,43 @@ pub enum Msg {
     },
 }
 
+pub type ServiceCheckTimes = std::collections::HashMap<RoutedService, DateTime<Local>>;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GeoSchedule {
+    pub epoch: u64,
+    pub retry_state: Option<crate::geo::GeoRetryState>,
+    pub next_update: Option<chrono::NaiveDate>,
+    pub service_retry_states: std::collections::HashMap<RoutedService, crate::geo::GeoRetryState>,
+    pub service_next_updates: std::collections::HashMap<RoutedService, chrono::NaiveDate>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServiceSchedule {
+    pub epoch: u64,
+    pub retry_states: std::collections::HashMap<RoutedService, crate::geo::GeoRetryState>,
+    pub next_updates: std::collections::HashMap<RoutedService, chrono::NaiveDate>,
+}
+
 #[derive(Debug)]
 pub enum GeoResult {
     Updated {
         parts: Vec<String>,
-        last_updated: Option<String>,
-        checked_at: chrono::DateTime<chrono::Local>,
-        retry_state: Option<crate::geo::GeoRetryState>,
-        service_retry_states: std::collections::HashMap<
-            crate::config::profile::RoutedService,
-            crate::geo::GeoRetryState,
-        >,
-        service_checked_at: std::collections::HashMap<
-            crate::config::profile::RoutedService,
-            chrono::DateTime<chrono::Local>,
-        >,
-        next_update: Option<chrono::NaiveDate>,
-        service_next_updates:
-            std::collections::HashMap<crate::config::profile::RoutedService, chrono::NaiveDate>,
+        checked_at: DateTime<Local>,
+        service_checked_at: ServiceCheckTimes,
+        schedule: Option<GeoSchedule>,
         warnings: Vec<String>,
     },
     UpToDate {
-        checked_at: Option<chrono::DateTime<chrono::Local>>,
-        retry_state: Option<crate::geo::GeoRetryState>,
-        service_retry_states: std::collections::HashMap<
-            crate::config::profile::RoutedService,
-            crate::geo::GeoRetryState,
-        >,
-        service_checked_at: std::collections::HashMap<
-            crate::config::profile::RoutedService,
-            chrono::DateTime<chrono::Local>,
-        >,
-        next_update: Option<chrono::NaiveDate>,
-        service_next_updates:
-            std::collections::HashMap<crate::config::profile::RoutedService, chrono::NaiveDate>,
+        checked_at: Option<DateTime<Local>>,
+        service_checked_at: ServiceCheckTimes,
+        schedule: Option<GeoSchedule>,
         warnings: Vec<String>,
     },
     Error {
         message: String,
-        retry_state: Option<crate::geo::GeoRetryState>,
-        service_retry_states: std::collections::HashMap<
-            crate::config::profile::RoutedService,
-            crate::geo::GeoRetryState,
-        >,
-        service_checked_at: std::collections::HashMap<
-            crate::config::profile::RoutedService,
-            chrono::DateTime<chrono::Local>,
-        >,
-        next_update: Option<chrono::NaiveDate>,
-        service_next_updates:
-            std::collections::HashMap<crate::config::profile::RoutedService, chrono::NaiveDate>,
+        service_checked_at: ServiceCheckTimes,
+        schedule: Option<GeoSchedule>,
         updated_parts: Vec<String>,
     },
 }

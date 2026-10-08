@@ -38,20 +38,16 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::GeoMetadataRefreshed {
             last_updated,
             last_checked_at,
-            retry_state,
-            service_retry_states,
             service_checked_at,
-            next_update,
-            service_next_updates,
+            schedule,
         } => {
             model.geo_last_updated = last_updated;
             model.geo_last_checked_at = last_checked_at;
             model.geo_last_attempt_at = None;
-            model.geo_retry_state = retry_state;
-            model.service_retry_states = service_retry_states;
             model.service_checked_at = service_checked_at;
-            model.geo_next_update = next_update;
-            model.service_next_updates = service_next_updates;
+            if let Some(schedule) = schedule {
+                model.apply_geo_schedule(schedule);
+            }
             vec![Effect::BroadcastState]
         }
         Msg::SystemResumed => on_system_resumed(model),
@@ -66,19 +62,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             effects
         }
         Msg::ServiceRuleSetsReady {
-            retry_states,
             checked_at,
-            next_updates,
+            schedule,
             updated_parts,
             errors,
-        } => on_service_rule_sets_ready(
-            model,
-            retry_states,
-            checked_at,
-            next_updates,
-            updated_parts,
-            errors,
-        ),
+        } => on_service_rule_sets_ready(model, checked_at, schedule, updated_parts, errors),
         Msg::ConnectFailed { attempt_id, error } => on_connect_failed(model, attempt_id, error),
         Msg::SingBoxExited {
             attempt_id,

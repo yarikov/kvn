@@ -15,20 +15,15 @@ pub(in crate::app::update) fn handle_geo_result(
     let mut effects = match result {
         GeoResult::Updated {
             parts,
-            last_updated: _,
             checked_at,
-            retry_state,
-            service_retry_states,
             service_checked_at,
-            next_update,
-            service_next_updates,
+            schedule,
             warnings,
         } => {
-            model.geo_retry_state = retry_state;
-            model.service_retry_states = service_retry_states;
             model.service_checked_at = service_checked_at;
-            model.geo_next_update = next_update;
-            model.service_next_updates = service_next_updates;
+            if let Some(schedule) = schedule {
+                model.apply_geo_schedule(schedule);
+            }
             model.geo_last_updated = Some(checked_at.format("%d %b %H:%M").to_string());
             model.geo_last_checked_at = Some(checked_at);
             let mut log_effects = Vec::new();
@@ -71,18 +66,14 @@ pub(in crate::app::update) fn handle_geo_result(
         }
         GeoResult::UpToDate {
             checked_at,
-            retry_state,
-            service_retry_states,
             service_checked_at,
-            next_update,
-            service_next_updates,
+            schedule,
             warnings,
         } => {
-            model.geo_retry_state = retry_state;
-            model.service_retry_states = service_retry_states;
             model.service_checked_at = service_checked_at;
-            model.geo_next_update = next_update;
-            model.service_next_updates = service_next_updates;
+            if let Some(schedule) = schedule {
+                model.apply_geo_schedule(schedule);
+            }
             model.geo_last_checked_at = checked_at;
             if let Some(checked_at) = checked_at {
                 model.geo_last_updated = Some(checked_at.format("%d %b %H:%M").to_string());
@@ -104,18 +95,14 @@ pub(in crate::app::update) fn handle_geo_result(
         }
         GeoResult::Error {
             message,
-            retry_state,
-            service_retry_states,
             service_checked_at,
-            next_update,
-            service_next_updates,
+            schedule,
             updated_parts,
         } => {
-            model.geo_retry_state = retry_state;
-            model.service_retry_states = service_retry_states;
             model.service_checked_at = service_checked_at;
-            model.geo_next_update = next_update;
-            model.service_next_updates = service_next_updates;
+            if let Some(schedule) = schedule {
+                model.apply_geo_schedule(schedule);
+            }
             let mut effects = Vec::new();
             let has_updates = !updated_parts.is_empty();
             push_status(
@@ -154,11 +141,76 @@ pub(in crate::app::update) fn handle_geo_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::msg::Msg;
+    use crate::app::msg::{GeoSchedule, Msg};
     use crate::app::update::update;
-    use crate::config::profile::Profile;
+    use crate::config::profile::{Profile, RoutedService};
+    use crate::geo::GeoRetryState;
     use crate::test_helpers::*;
     use chrono::Local;
+    use std::collections::HashMap;
+
+    fn stale_retry_state() -> GeoRetryState {
+        GeoRetryState {
+            consecutive_failures: 3,
+            retry_at: Local::now(),
+            attempt_date: None,
+        }
+    }
+
+    #[test]
+    fn geo_result_from_before_a_schedule_reset_keeps_the_reset_schedule() {
+        let mut model = model_with_profiles(vec![]);
+        model.geo_schedule_epoch = 2;
+        let reset_next = Some(Local::now().date_naive());
+        model.geo_next_update = reset_next;
+        let checked_at = Local::now();
+
+        update(
+            &mut model,
+            Msg::GeoUpdated(GeoResult::UpToDate {
+                checked_at: Some(checked_at),
+                service_checked_at: Default::default(),
+                schedule: Some(GeoSchedule {
+                    epoch: 1,
+                    retry_state: Some(stale_retry_state()),
+                    service_retry_states: HashMap::from([(
+                        RoutedService::Steam,
+                        stale_retry_state(),
+                    )]),
+                    ..Default::default()
+                }),
+                warnings: Vec::new(),
+            }),
+        );
+
+        assert_eq!(model.geo_next_update, reset_next);
+        assert!(model.geo_retry_state.is_none());
+        assert!(model.service_retry_states.is_empty());
+        assert_eq!(model.geo_last_checked_at, Some(checked_at));
+    }
+
+    #[test]
+    fn geo_result_of_the_current_schedule_updates_the_schedule() {
+        let mut model = model_with_profiles(vec![]);
+        model.geo_schedule_epoch = 2;
+        let retry_state = stale_retry_state();
+
+        update(
+            &mut model,
+            Msg::GeoUpdated(GeoResult::Error {
+                message: "unavailable".into(),
+                service_checked_at: Default::default(),
+                schedule: Some(GeoSchedule {
+                    epoch: 2,
+                    retry_state: Some(retry_state),
+                    ..Default::default()
+                }),
+                updated_parts: Vec::new(),
+            }),
+        );
+
+        assert_eq!(model.geo_retry_state, Some(retry_state));
+    }
 
     #[test]
     fn geo_last_updated_message_updates_model() {
@@ -169,11 +221,8 @@ mod tests {
             Msg::GeoMetadataRefreshed {
                 last_updated: Some("2026-06-15 08:00".to_string()),
                 last_checked_at: None,
-                retry_state: None,
-                service_retry_states: Default::default(),
                 service_checked_at: Default::default(),
-                next_update: None,
-                service_next_updates: Default::default(),
+                schedule: None,
             },
         );
         assert_eq!(model.geo_last_updated, Some("2026-06-15 08:00".to_string()));
@@ -188,13 +237,9 @@ mod tests {
             &mut model,
             Msg::GeoUpdated(GeoResult::Updated {
                 parts: vec!["geoip".into()],
-                last_updated: Some("2026-05-31 13:41".to_string()),
                 checked_at: Local::now(),
-                retry_state: None,
-                service_retry_states: Default::default(),
                 service_checked_at: Default::default(),
-                next_update: None,
-                service_next_updates: Default::default(),
+                schedule: None,
                 warnings: Vec::new(),
             }),
         );
@@ -223,13 +268,9 @@ mod tests {
             &mut model,
             Msg::GeoUpdated(GeoResult::Updated {
                 parts: vec!["geoip".into()],
-                last_updated: None,
                 checked_at: Local::now(),
-                retry_state: None,
-                service_retry_states: Default::default(),
                 service_checked_at: Default::default(),
-                next_update: None,
-                service_next_updates: Default::default(),
+                schedule: None,
                 warnings: Vec::new(),
             }),
         );
@@ -245,11 +286,8 @@ mod tests {
             &mut model,
             Msg::GeoUpdated(GeoResult::UpToDate {
                 checked_at: Some(Local::now()),
-                retry_state: None,
-                service_retry_states: Default::default(),
                 service_checked_at: Default::default(),
-                next_update: None,
-                service_next_updates: Default::default(),
+                schedule: None,
                 warnings: Vec::new(),
             }),
         );
@@ -276,11 +314,11 @@ mod tests {
             &mut model,
             Msg::GeoUpdated(GeoResult::Error {
                 message: "net fail".into(),
-                retry_state: Some(retry_state),
-                service_retry_states: Default::default(),
                 service_checked_at: Default::default(),
-                next_update: None,
-                service_next_updates: Default::default(),
+                schedule: Some(GeoSchedule {
+                    retry_state: Some(retry_state),
+                    ..Default::default()
+                }),
                 updated_parts: Vec::new(),
             }),
         );

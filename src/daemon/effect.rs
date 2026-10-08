@@ -1,7 +1,5 @@
 use std::sync::mpsc::Sender;
 
-use anyhow::Result;
-
 use crate::app::effect::Effect;
 use crate::app::model::Model;
 use crate::app::msg::{ConfigEditResult, Msg};
@@ -15,7 +13,7 @@ pub(super) fn execute_daemon_effect(
     model: &mut Model,
     shared: &DaemonShared,
     reply_requested: bool,
-) -> Result<Option<ConfigEditResult>> {
+) -> Option<ConfigEditResult> {
     match effect {
         Effect::Connect {
             profile,
@@ -37,7 +35,7 @@ pub(super) fn execute_daemon_effect(
         }
         Effect::RefreshGeoLastUpdated => geo::refresh_last_updated(tx, model),
         Effect::ClearGeoRetryState { region } => geo::clear_retry_state(region),
-        Effect::ResetGeoUpdateSchedules => geo::reset_update_schedules(model)?,
+        Effect::ResetGeoUpdateSchedules => geo::reset_update_schedules(model),
         Effect::SaveConfig => config_io::report_uncommitted_save(model),
         Effect::PersistSupportPrompt {
             previous,
@@ -48,15 +46,21 @@ pub(super) fn execute_daemon_effect(
         }
         Effect::SaveConfigConflict { edited, conflicts } => {
             if reply_requested {
-                return Ok(Some(ConfigEditResult::Failed {
+                return Some(ConfigEditResult::Failed {
                     message: conflicts.join(", "),
-                }));
+                });
             }
             config_io::save_conflict(model, edited, conflicts)
         }
         Effect::CommitEditedConfig { base, edited } => {
-            return config_io::commit_edited(tx, model, shared, base, edited, reply_requested)
-                .map(Some);
+            return Some(config_io::commit_edited(
+                tx,
+                model,
+                shared,
+                base,
+                edited,
+                reply_requested,
+            ));
         }
         Effect::ReloadConfig => config_io::reload(tx),
         Effect::UpdateSubscription { id } => subscription::fetch(tx, model, id),
@@ -76,5 +80,5 @@ pub(super) fn execute_daemon_effect(
             model.should_quit = true;
         }
     }
-    Ok(None)
+    None
 }
