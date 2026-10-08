@@ -499,16 +499,6 @@ impl GeoManager {
         Ok(state)
     }
 
-    #[cfg(test)]
-    pub fn clear_service_retry_state(&self, service: RoutedService) -> Result<()> {
-        let _guard = METADATA_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let mut meta = self.load_metadata().unwrap_or_default();
-        if meta.service_retry_states.remove(&service).is_some() {
-            self.save_metadata(&meta)?;
-        }
-        Ok(())
-    }
-
     pub fn reset_update_schedules(
         &self,
         region: GeoRegion,
@@ -1230,7 +1220,8 @@ mod tests {
             gm.retry_state(GeoRegion::Ru).unwrap().consecutive_failures,
             1
         );
-        gm.clear_service_retry_state(RoutedService::Steam).unwrap();
+        gm.record_service_schedule_success(RoutedService::Steam, 7)
+            .unwrap();
         let states = gm.service_retry_states();
         assert!(!states.contains_key(&RoutedService::Steam));
         assert_eq!(states[&RoutedService::Telegram], telegram);
