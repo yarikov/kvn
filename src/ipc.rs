@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
+use std::net::Shutdown;
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -195,6 +196,7 @@ impl IpcServer {
         for (fd, mut client) in writers {
             if let Err(e) = client.write_all(json.as_bytes()) {
                 tracing::debug!("Dropping IPC client (fd={fd}): {e}");
+                let _ = client.shutdown(Shutdown::Both);
                 dead_fds.insert(fd);
             }
         }
@@ -207,6 +209,15 @@ impl IpcServer {
 
     pub fn tui_sessions(&self) -> usize {
         self.tui_sessions.load(Ordering::SeqCst)
+    }
+}
+
+#[derive(Debug)]
+pub struct DaemonConnectionLost;
+
+impl std::fmt::Display for DaemonConnectionLost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Lost connection to the kvn daemon")
     }
 }
 
@@ -226,11 +237,44 @@ impl IpcClient {
         Ok(Self { stream })
     }
 
+    pub fn daemon_executable(&self) -> anyhow::Result<std::path::PathBuf> {
+        let pid = self.daemon_pid()?;
+        let executable = std::fs::read_link(format!("/proc/{pid}/exe"))
+            .with_context(|| format!("Failed to find the executable of daemon process {pid}"))?;
+        anyhow::ensure!(
+            executable.exists(),
+            "the daemon's executable {} was replaced; start kvn again",
+            executable.display()
+        );
+        Ok(executable)
+    }
+
+    fn daemon_pid(&self) -> anyhow::Result<libc::pid_t> {
+        let mut credentials = libc::ucred {
+            pid: 0,
+            uid: 0,
+            gid: 0,
+        };
+        let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        #[allow(unsafe_code)]
+        let result = unsafe {
+            libc::getsockopt(
+                self.stream.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                (&raw mut credentials).cast(),
+                &raw mut length,
+            )
+        };
+        if result != 0 {
+            return Err(std::io::Error::last_os_error())
+                .context("Failed to read the daemon's process credentials");
+        }
+        Ok(credentials.pid)
+    }
+
     pub fn send(&mut self, cmd: &IpcCommand) -> anyhow::Result<()> {
-        let json = serde_json::to_string(cmd)? + "\n";
-        self.stream.write_all(json.as_bytes())?;
-        self.stream.flush()?;
-        Ok(())
+        self.write_line(serde_json::to_string(cmd)? + "\n")
     }
 
     pub fn send_request(&mut self, cmd: &IpcCommand) -> anyhow::Result<Uuid> {
@@ -240,10 +284,28 @@ impl IpcClient {
             .as_object_mut()
             .context("IPC command did not serialize as an object")?
             .insert("request_id".into(), request_id.to_string().into());
-        let json = serde_json::to_string(&value)? + "\n";
-        self.stream.write_all(json.as_bytes())?;
-        self.stream.flush()?;
+        self.write_line(serde_json::to_string(&value)? + "\n")?;
         Ok(request_id)
+    }
+
+    fn write_line(&mut self, line: String) -> anyhow::Result<()> {
+        use std::io::ErrorKind;
+
+        self.stream
+            .write_all(line.as_bytes())
+            .and_then(|()| self.stream.flush())
+            .map_err(|error| {
+                let connection_lost = matches!(
+                    error.kind(),
+                    ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::NotConnected
+                );
+                let error = anyhow::Error::new(error);
+                if connection_lost {
+                    error.context(DaemonConnectionLost)
+                } else {
+                    error
+                }
+            })
     }
 
     pub fn read_response(
@@ -314,39 +376,28 @@ impl IpcClient {
             .set_read_timeout(None)
             .context("Failed to clear IPC read timeout")?;
         thread::spawn(move || {
-            let reader = BufReader::new(stream);
-            let mut failure_reported = false;
-            for line in reader.lines() {
-                match line {
-                    Ok(line) => match serde_json::from_str::<StateSnapshot>(&line) {
-                        Ok(snapshot) => {
-                            let _ = tx.send(Msg::StateUpdate {
-                                snapshot: Box::new(snapshot),
-                            });
-                        }
-                        Err(error) => {
-                            let _ = tx.send(Msg::IpcReadFailed {
-                                message: format!(
-                                    "Malformed state snapshot from the daemon: {error}"
-                                ),
-                            });
-                            failure_reported = true;
-                            break;
-                        }
-                    },
+            let mut reader = BufReader::new(stream);
+            let mut line = Vec::new();
+            loop {
+                line.clear();
+                let complete = reader.read_until(b'\n', &mut line).is_ok() && line.ends_with(b"\n");
+                if !complete {
+                    let _ = tx.send(Msg::DaemonDisconnected);
+                    break;
+                }
+                match serde_json::from_slice::<StateSnapshot>(&line) {
+                    Ok(snapshot) => {
+                        let _ = tx.send(Msg::StateUpdate {
+                            snapshot: Box::new(snapshot),
+                        });
+                    }
                     Err(error) => {
                         let _ = tx.send(Msg::IpcReadFailed {
-                            message: format!("Lost connection to the daemon: {error}"),
+                            message: format!("Malformed state snapshot from the daemon: {error}"),
                         });
-                        failure_reported = true;
                         break;
                     }
                 }
-            }
-            if !failure_reported {
-                let _ = tx.send(Msg::IpcReadFailed {
-                    message: "Daemon closed the IPC connection".to_string(),
-                });
             }
         });
         Ok(())
@@ -569,13 +620,68 @@ mod tests {
         client.spawn_reader(tx).unwrap();
         drop(daemon_stream);
 
-        match rx.recv_timeout(Duration::from_secs(1)) {
-            Ok(Msg::IpcReadFailed { message }) => {
-                assert!(message.contains("closed"));
-            }
-            Ok(_) => panic!("expected a disconnect report"),
-            Err(error) => panic!("reader did not report disconnect: {error}"),
-        }
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(1)),
+            Ok(Msg::DaemonDisconnected)
+        ));
+    }
+
+    #[test]
+    fn snapshot_reader_treats_a_line_cut_by_disconnect_as_a_disconnect() {
+        let (client_stream, mut daemon_stream) = UnixStream::pair().unwrap();
+        let client = IpcClient {
+            stream: client_stream,
+        };
+        let (tx, rx) = channel();
+        client.spawn_reader(tx).unwrap();
+        daemon_stream.write_all(br#"{"daemon_version":"#).unwrap();
+        drop(daemon_stream);
+
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(1)),
+            Ok(Msg::DaemonDisconnected)
+        ));
+    }
+
+    #[test]
+    fn snapshot_reader_reports_a_malformed_snapshot() {
+        let (client_stream, mut daemon_stream) = UnixStream::pair().unwrap();
+        let client = IpcClient {
+            stream: client_stream,
+        };
+        let (tx, rx) = channel();
+        client.spawn_reader(tx).unwrap();
+        daemon_stream.write_all(b"{}\n").unwrap();
+
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(1)),
+            Ok(Msg::IpcReadFailed { message }) if message.contains("Malformed")
+        ));
+    }
+
+    #[test]
+    fn daemon_executable_is_the_binary_of_the_peer_process() {
+        let (client_stream, _daemon_stream) = UnixStream::pair().unwrap();
+        let client = IpcClient {
+            stream: client_stream,
+        };
+
+        assert_eq!(
+            client.daemon_executable().unwrap(),
+            std::env::current_exe().unwrap()
+        );
+    }
+
+    #[test]
+    fn sending_after_the_daemon_closes_the_connection_reports_it_as_lost() {
+        let (client_stream, daemon_stream) = UnixStream::pair().unwrap();
+        let mut client = IpcClient {
+            stream: client_stream,
+        };
+        daemon_stream.shutdown(Shutdown::Both).unwrap();
+
+        let error = client.send(&IpcCommand::Attach).unwrap_err();
+        assert!(error.downcast_ref::<DaemonConnectionLost>().is_some());
     }
 
     #[test]
@@ -823,5 +929,51 @@ mod tests {
 
         cleanup_socket();
         unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+    }
+
+    #[test]
+    fn broadcast_disconnects_a_client_that_stops_reading() {
+        use std::io::Read;
+
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", tmp.path());
+
+        let (server_tx, server_rx) = channel::<Msg>();
+        let server = IpcServer::bind(server_tx).expect("server bind");
+
+        let mut stalled = IpcClient::connect().expect("stalled connect");
+        stalled.send(&IpcCommand::AttachSession).unwrap();
+        server_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("AttachSession reaches the daemon");
+        assert_eq!(server.tui_sessions(), 1);
+
+        let mut large = sample_snapshot();
+        large.status = "x".repeat(256 * 1024);
+        for _ in 0..20 {
+            if server.clients.lock().unwrap().is_empty() {
+                break;
+            }
+            server.broadcast(&large);
+        }
+
+        stalled
+            .stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stalled
+            .stream
+            .read_to_end(&mut Vec::new())
+            .expect("stalled client reaches EOF");
+        for _ in 0..40 {
+            if server.tui_sessions() == 0 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert_eq!(server.tui_sessions(), 0);
+
+        cleanup_socket();
     }
 }

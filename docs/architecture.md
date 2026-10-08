@@ -207,7 +207,16 @@ Clients talk to the daemon in newline-delimited JSON over
   run the same logic.
 - **StateSnapshot**: after every state change the daemon pushes a full
   snapshot, including the complete config, to every attached client. There are
-  no diffs to get out of sync.
+  no diffs to get out of sync. A client that cannot take a snapshot within
+  200 ms, for example a TUI process stopped with `SIGSTOP`, is disconnected
+  and no longer counts as an open window.
+- **Reattaching**: a TUI that loses its connection, because the daemon was
+  restarted (`systemctl --user restart kvn-tui.service`, `kvn migrate`) or
+  disconnected it, reattaches on its own and shows the current state. When the
+  new daemon is a different version, for example after a package update, the
+  TUI restarts itself from the daemon's executable in the same terminal, so the
+  two match and the daemon and the VPN are left alone. When the daemon is gone
+  for more than 2 seconds, the TUI exits with an error.
 - **Correlated requests**: saving an edited config (`ApplyEditedConfig`),
   wheel scrolling (`ScrollViewport`), pane focus (`SetMainPaneFocus`), CLI
   connection commands (`connect`, `disconnect`, `reconnect`, `toggle`) and

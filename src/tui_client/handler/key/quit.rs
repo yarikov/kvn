@@ -31,7 +31,7 @@ pub(super) fn handle_unsupported_size(state: &mut ClientLoop, key: KeyEvent) -> 
 }
 
 pub(super) fn detach(state: &mut ClientLoop) -> Result<Flow> {
-    state.client.send(&IpcCommand::Detach)?;
+    let _ = state.client.send(&IpcCommand::Detach);
     Ok(Flow::Exit(TuiExit::Normal))
 }
 

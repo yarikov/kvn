@@ -8,9 +8,7 @@ use super::super::ClientLoop;
 pub(super) fn paste(state: &mut ClientLoop) -> Result<()> {
     match clipboard::read_clipboard_text() {
         Ok(text) => state.client.send(&IpcCommand::Paste { text })?,
-        Err(error) => state.client.send(&IpcCommand::ClientError {
-            message: format!("Clipboard read failed: {error:#}"),
-        })?,
+        Err(error) => state.report_error(format!("Clipboard read failed: {error:#}"))?,
     }
     Ok(())
 }

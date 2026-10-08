@@ -8,7 +8,6 @@ use crossterm::terminal::{
 };
 
 use crate::app::model::AppStatus;
-use crate::app::msg::IpcCommand;
 use crate::tui_client::{OSC_POINTER_DEFAULT, editor, input};
 
 use super::super::ClientLoop;
@@ -33,9 +32,7 @@ pub(super) fn open(state: &mut ClientLoop) -> Result<()> {
         // editor. Route the snapshot error through
         // the daemon so it survives the next state
         // broadcast and appears in app.log.
-        state.client.send(&IpcCommand::ClientError {
-            message: message.clone(),
-        })
+        state.report_error(message.clone())
     } else {
         if let Some(AppStatus::Info(message)) = &status {
             crate::services::log_tailer::append_app_log("INFO", message);

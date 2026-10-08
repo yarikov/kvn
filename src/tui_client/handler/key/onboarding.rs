@@ -31,9 +31,7 @@ fn copy_command(state: &mut ClientLoop, command: &str) -> Result<()> {
         Ok(()) => state.client.send(&IpcCommand::Copied {
             target: CopiedTarget::Command,
         })?,
-        Err(error) => state.client.send(&IpcCommand::ClientError {
-            message: format!("Command copy failed: {error:#}"),
-        })?,
+        Err(error) => state.report_error(format!("Command copy failed: {error:#}"))?,
     }
     Ok(())
 }

@@ -47,9 +47,7 @@ fn resolve_selected(state: &mut ClientLoop) -> Result<()> {
             Ok(()) => state.client.send(&IpcCommand::ResolveSupportPrompt {
                 resolution: SupportPromptResolution::Supported,
             })?,
-            Err(error) => state.client.send(&IpcCommand::ClientError {
-                message: format!("Support page open failed: {error:#}"),
-            })?,
+            Err(error) => state.report_error(format!("Support page open failed: {error:#}"))?,
         },
         1 => state.client.send(&IpcCommand::ResolveSupportPrompt {
             resolution: SupportPromptResolution::RemindLater,

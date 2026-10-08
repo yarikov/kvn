@@ -106,12 +106,12 @@ pub enum Msg {
     StateUpdate {
         snapshot: Box<StateSnapshot>,
     },
-    /// The local TUI's IPC reader stopped or received a snapshot it could not
-    /// decode. Daemon-side reducers ignore this; the TUI turns it into a
-    /// visible error.
+    /// The local TUI's IPC reader received a snapshot it could not decode.
+    /// Daemon-side reducers ignore this; the TUI turns it into a visible error.
     IpcReadFailed {
         message: String,
     },
+    DaemonDisconnected,
     ConfigReloaded(Box<Result<crate::config::profile::Config, IpcError>>),
     KillSwitchApplied {
         enabled: bool,
