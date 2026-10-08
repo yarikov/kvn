@@ -20,6 +20,7 @@ mod onboarding;
 mod pacman;
 mod paths;
 mod redaction;
+mod runtime_lock;
 mod services;
 mod singbox;
 mod support_prompt;
@@ -34,7 +35,6 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::app::model::Model;
 use crate::paths::ensure_config_dirs;
 
 /// Entry point for the TUI VPN client.
@@ -52,8 +52,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
         initialize_logging()?;
-        let model = Model::new()?;
-        daemon::run(model)?;
+        daemon::start()?;
     } else {
         migrations::run_pending_interactive()?;
         initialize_logging()?;

@@ -10,7 +10,7 @@ mod traffic;
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -19,6 +19,7 @@ use crate::app::model::{AppStatus, ConnectionState, Model};
 use crate::app::msg::{IpcCommand, LogSessionOffsets, Msg, StateSnapshot};
 use crate::app::update::update;
 use crate::ipc::{IpcServer, cleanup_socket};
+use crate::runtime_lock::RuntimeLock;
 
 use config_io::{commit_config_change, persist_config_unless_frozen};
 use effect::execute_daemon_effect;
@@ -30,8 +31,19 @@ struct DaemonShared {
     singbox_log_pruned_at: Arc<Mutex<Option<Instant>>>,
 }
 
+const PREVIOUS_DAEMON_EXIT_TIMEOUT: Duration = Duration::from_secs(3);
+
+pub fn start() -> Result<()> {
+    let _instance = RuntimeLock::try_acquire_within(
+        &crate::paths::daemon_lock_path()?,
+        PREVIOUS_DAEMON_EXIT_TIMEOUT,
+    )?
+    .context("kvn daemon is already running")?;
+    run(Model::new()?)
+}
+
 /// Run the daemon main loop.
-pub fn run(mut model: Model) -> Result<()> {
+fn run(mut model: Model) -> Result<()> {
     if let Err(error) = crate::config::recovery::maintain() {
         tracing::warn!("Failed to maintain config recovery files: {error:#}");
     }

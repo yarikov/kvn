@@ -667,6 +667,42 @@ mod tests {
     }
 
     #[test]
+    fn daemons_racing_over_a_stale_socket_leave_one_live_server() {
+        use crate::runtime_lock::RuntimeLock;
+        use std::sync::{Arc, Barrier};
+
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", tmp.path());
+        drop(UnixListener::bind(socket_path().unwrap()).unwrap());
+
+        let start = Arc::new(Barrier::new(2));
+        let starters: Vec<_> = (0..2)
+            .map(|_| {
+                let start = start.clone();
+                thread::spawn(move || {
+                    start.wait();
+                    let lock = RuntimeLock::try_acquire_within(
+                        &crate::paths::daemon_lock_path().unwrap(),
+                        Duration::ZERO,
+                    )
+                    .unwrap()?;
+                    let (tx, rx) = channel::<Msg>();
+                    let server = IpcServer::bind(tx).unwrap();
+                    Some((lock, server, rx))
+                })
+            })
+            .collect();
+        let running: Vec<_> = starters
+            .into_iter()
+            .filter_map(|starter| starter.join().unwrap())
+            .collect();
+
+        assert_eq!(running.len(), 1);
+        assert!(UnixStream::connect(socket_path().unwrap()).is_ok());
+    }
+
+    #[test]
     fn is_daemon_running_returns_false_when_no_socket() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();

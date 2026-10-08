@@ -54,7 +54,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `update::key` | `src/app/update/key.rs` + `src/app/update/key/` | Keyboard input routed by `Model.overlay`, plus `IpcCommand` handling; see [`src/app/AGENTS.md`](src/app/AGENTS.md) § Module Layout |
 | `scroll` | `src/app/scroll.rs`, `src/app/scroll/lists.rs` | Pure wheel viewport/selection movement and selectable Profiles/dialog rows |
 | `effect` | `src/app/effect.rs` | Effect enum — declarative description of side effects to be executed by runtime |
-| `daemon` | `src/daemon.rs` | Headless daemon: owns sing-box process, config, mpsc channel, IPC server, background services; `run` / `run_loop`, `DaemonShared`, `build_snapshot`, and the startup reconciliation of kill-switch and auto-connect state |
+| `daemon` | `src/daemon.rs` | Headless daemon: owns sing-box process, config, mpsc channel, IPC server, background services; `start` (takes `daemon.lock` before loading the model) / `run` / `run_loop`, `DaemonShared`, `build_snapshot`, and the startup reconciliation of kill-switch and auto-connect state |
 | `daemon` submodules | `src/daemon/{effect,connection,geo,config_io,subscription,traffic,profile_test,process_slot}.rs` | Effect execution, one submodule per concern; see [`src/daemon/AGENTS.md`](src/daemon/AGENTS.md) |
 | `tui_client` | `src/tui_client.rs` | TUI client orchestration: `run`, the daemon handshake (`connect_to_current_daemon`), terminal setup (`TerminalSession`, OSC colors), snapshot application, and the `run_loop` skeleton that feeds every `Msg` to the handler tree |
 | `tui_client` submodules | `src/tui_client/handler.rs` + `src/tui_client/handler/`, `src/tui_client/docs_preview.rs` | `ClientLoop` and its message handlers, client-local keys, docs preview; see [`src/tui_client/AGENTS.md`](src/tui_client/AGENTS.md) |
@@ -75,6 +75,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `geo` | `src/geo.rs` | Download and cache geoip/geosite rule-sets for sing-box routing |
 | `paths` | `src/paths.rs` | Every file path kvn uses: config (`~/.config/kvn-tui/`), state (`$XDG_STATE_HOME/kvn/`) and both runtime namespaces (`$XDG_RUNTIME_DIR/kvn-tui/`, `$XDG_RUNTIME_DIR/kvn/`) |
 | `atomic_write` | `src/atomic_write.rs` | Atomic file write helper (write `.tmp` + fsync + rename + parent-dir fsync) |
+| `runtime_lock` | `src/runtime_lock.rs` | `flock`-based exclusive lock on a runtime file, optionally waiting for the holder to release it; backs the migration runner lock and the daemon's single-instance lock |
 | `net` | `src/net.rs` | Free loopback port allocation (bind `127.0.0.1:0`, read the OS-assigned port, drop the listener) for the Clash API control port and the profile-test SOCKS5 port |
 | `pacman` | `src/pacman.rs` | Detects a pacman transaction that has already written a given package file (its ctime is not older than `/var/lib/pacman/db.lck`) and waits for it to settle; used by the migration runner for `kvn-tui`/`sing-box` and by the daemon's connect path for the sing-box binary it launches (`singbox::runner::binary_path`: `SING_BOX_PATH` or the first `sing-box` on `PATH`), whose capabilities hook runs only at PostTransaction |
 | `systemd` | `src/systemd.rs` | The daemon's systemd user unit name and its restart helper, so a unit rename lands in one place |
@@ -345,6 +346,7 @@ Any added, removed, or changed CLI command, option, or output updates
 | Applied migration markers | `$XDG_STATE_HOME/kvn/migrations/` |
 | Recovery copies (3 per kind) | `~/.config/kvn-tui/recovery/profiles.json.{before-migration,invalid,conflict,conflict-invalid}-*` |
 | Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |
+| Daemon instance lock | `$XDG_RUNTIME_DIR/kvn/daemon.lock` |
 | Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
 | Migration baseline, machine-wide markers | `/var/lib/kvn/migration-baseline`, `/var/lib/kvn/migrations/` |
 | Integration stamps | `/var/lib/kvn/integrations/{polkit,killswitch-sudoers}.sha256` |
