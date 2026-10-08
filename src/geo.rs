@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::app::msg::GeoResult;
 use crate::config::profile::{GeoRegion, RoutedService};
 
-const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-const GEO_BATCH_TIMEOUT: Duration = Duration::from_secs(180);
+const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
+const GEO_BATCH_TIMEOUT: Duration = Duration::from_mins(3);
 
 /// One downloadable rule-set file (geoip *or* geosite) for a region.
 pub(crate) struct GeoAsset {

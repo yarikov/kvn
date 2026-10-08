@@ -338,7 +338,7 @@ is listed in [System integration](system-integration.md).
 
 ## Technology stack
 
-`kvn` is built with Rust 2024 and requires Rust 1.88 or newer.
+`kvn` is built with Rust and requires version 1.98 or newer.
 
 | Component | Library / Tool | Purpose |
 |-----------|--------------|---------|
