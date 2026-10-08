@@ -8,7 +8,7 @@ expression: output
 ┌ Profiles ─────────────────────────────────────────────────────────────────────────────┐
 │ └ A                                                                vless  a:1         │
 │                                                                                       │
-│ Subscription: Sub  (off)                                                             │
+│ Sub  (off)                                                                           │
 │ └ B                                                                vless  b:2         │
 │                                                                                       │
 │                                                                                       │
