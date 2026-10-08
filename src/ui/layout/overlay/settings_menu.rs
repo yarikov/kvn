@@ -81,15 +81,14 @@ pub(super) fn draw(
             use crate::config::profile::{GeoRegion, RoutedService, ServiceRoute};
 
             let geo_routing = &model.config.settings.geo_routing;
-            let region = geo_routing.current_region.unwrap_or(GeoRegion::Global);
             let mode = geo_routing.mode();
             let routes = &geo_routing.service_routes;
             let has_draft = model.routing_settings_draft.is_some();
-            let (shown_region, shown_mode, shown_routes) = model
-                .routing_settings_draft
-                .as_ref()
-                .map(|draft| (draft.region, draft.mode, &draft.service_routes))
-                .unwrap_or((region, mode, routes));
+            let crate::app::model::RoutingSettings {
+                region: shown_region,
+                mode: shown_mode,
+                service_routes: shown_routes,
+            } = model.shown_routing_settings();
             let mut settings = vec![(
                 "Region",
                 geo_region_label(shown_region).to_string(),
@@ -156,12 +155,7 @@ pub(super) fn draw(
         SettingsMenuPage::Connection => {
             let saved_auto_connect = model.config.settings.auto_connect;
             let saved_kill_switch = model.config.settings.kill_switch;
-            let shown = model.connection_settings_draft.unwrap_or(
-                crate::app::model::ConnectionSettingsDraft {
-                    auto_connect: saved_auto_connect,
-                    kill_switch: model.kill_switch_pending.unwrap_or(saved_kill_switch),
-                },
-            );
+            let shown = model.shown_connection_settings();
             let settings = [
                 (
                     "Auto-connect",

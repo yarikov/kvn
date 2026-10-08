@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model, RoutingSettingsDraft};
+use crate::app::model::{AppStatus, ConnectionState, Model, RoutingSettings};
 use crate::config::profile::{GeoRegion, RoutedService, RoutingMode};
 
 use crate::app::update::connection::queue_connect;
@@ -122,17 +122,17 @@ pub(in crate::app::update) fn commit_routing_mode(
 
 pub(in crate::app::update) fn commit_routing_settings(
     model: &mut Model,
-    draft: RoutingSettingsDraft,
+    settings: RoutingSettings,
 ) -> Vec<Effect> {
-    if !RoutingMode::available(Some(draft.region)).contains(&draft.mode) {
+    if !RoutingMode::available(Some(settings.region)).contains(&settings.mode) {
         let mut effects = vec![];
         push_status(
             &mut effects,
             model,
             AppStatus::Error(format!(
                 "Routing mode change failed: {} is unavailable for region {}",
-                draft.mode,
-                draft.region.code_upper()
+                settings.mode,
+                settings.region.code_upper()
             )),
         );
         return effects;
@@ -141,9 +141,9 @@ pub(in crate::app::update) fn commit_routing_settings(
     let old_region = model.config.settings.geo_routing.current_region;
     let old_mode = model.config.settings.geo_routing.mode();
     let old_routes = model.config.settings.geo_routing.service_routes.clone();
-    let region_changed = old_region != Some(draft.region);
-    let mode_changed = old_mode != draft.mode;
-    let service_routes_changed = old_routes != draft.service_routes;
+    let region_changed = old_region != Some(settings.region);
+    let mode_changed = old_mode != settings.mode;
+    let service_routes_changed = old_routes != settings.service_routes;
     if !region_changed && !mode_changed && !service_routes_changed {
         return vec![];
     }
@@ -156,9 +156,13 @@ pub(in crate::app::update) fn commit_routing_settings(
             .selected_region_modes
             .insert(region, old_mode);
     }
-    model.config.settings.geo_routing.set_region(draft.region);
-    model.config.settings.geo_routing.set_mode(draft.mode);
-    model.config.settings.geo_routing.service_routes = draft.service_routes;
+    model
+        .config
+        .settings
+        .geo_routing
+        .set_region(settings.region);
+    model.config.settings.geo_routing.set_mode(settings.mode);
+    model.config.settings.geo_routing.service_routes = settings.service_routes;
 
     let connection = model.connection;
     let mut effects = vec![Effect::SaveConfig, Effect::BroadcastState];
@@ -170,7 +174,7 @@ pub(in crate::app::update) fn commit_routing_settings(
 
     if region_changed {
         effects.push(Effect::RefreshGeoLastUpdated);
-        if draft.region != GeoRegion::Global {
+        if settings.region != GeoRegion::Global {
             if download_allowed(model) {
                 model.geo_updating = true;
                 model.geo_last_attempt_at = Some(chrono::Local::now());
@@ -412,7 +416,7 @@ mod tests {
             );
             let effects = commit_routing_settings(
                 &mut model,
-                RoutingSettingsDraft {
+                RoutingSettings {
                     region: GeoRegion::Ru,
                     mode: RoutingMode::Global,
                     service_routes,

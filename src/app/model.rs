@@ -47,15 +47,33 @@ pub enum SettingsMenuPage {
     Interface,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoutingSettingsDraft {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoutingSettings {
     pub region: GeoRegion,
     pub mode: crate::config::profile::RoutingMode,
     pub service_routes: HashMap<RoutedService, ServiceRoute>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutingSettingsDraft {
+    #[serde(default)]
+    pub region: Option<GeoRegion>,
+    #[serde(default)]
+    pub mode: Option<crate::config::profile::RoutingMode>,
+    #[serde(default)]
+    pub service_routes: HashMap<RoutedService, ServiceRoute>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectionSettingsDraft {
+    #[serde(default)]
+    pub auto_connect: Option<bool>,
+    #[serde(default)]
+    pub kill_switch: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConnectionSettings {
     pub auto_connect: bool,
     pub kill_switch: bool,
 }
@@ -854,6 +872,46 @@ impl Model {
     pub fn icon_set(&self) -> crate::config::profile::IconSet {
         self.interface_settings_draft
             .unwrap_or(self.config.settings.icons)
+    }
+
+    pub fn connection_settings(&self) -> ConnectionSettings {
+        ConnectionSettings {
+            auto_connect: self.config.settings.auto_connect || self.auto_connect_pending,
+            kill_switch: self
+                .kill_switch_pending
+                .unwrap_or(self.config.settings.kill_switch),
+        }
+    }
+
+    pub fn shown_routing_settings(&self) -> RoutingSettings {
+        let geo_routing = &self.config.settings.geo_routing;
+        let mut shown = RoutingSettings {
+            region: geo_routing.current_region.unwrap_or(GeoRegion::Global),
+            mode: geo_routing.mode(),
+            service_routes: geo_routing.service_routes.clone(),
+        };
+        let Some(draft) = &self.routing_settings_draft else {
+            return shown;
+        };
+        shown.region = draft.region.unwrap_or(shown.region);
+        shown.mode = draft.mode.unwrap_or(shown.mode);
+        for (service, route) in &draft.service_routes {
+            if *route == ServiceRoute::Disabled {
+                shown.service_routes.remove(service);
+            } else {
+                shown.service_routes.insert(*service, *route);
+            }
+        }
+        shown
+    }
+
+    pub fn shown_connection_settings(&self) -> ConnectionSettings {
+        let live = self.connection_settings();
+        let draft = self.connection_settings_draft.unwrap_or_default();
+        ConnectionSettings {
+            auto_connect: draft.auto_connect.unwrap_or(live.auto_connect),
+            kill_switch: draft.kill_switch.unwrap_or(live.kill_switch),
+        }
     }
 
     /// Replace the config while keeping the cursor on the same source item.

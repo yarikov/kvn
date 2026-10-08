@@ -542,6 +542,10 @@ pub struct StateSnapshot {
     #[serde(default)]
     pub connection_settings_draft: Option<ConnectionSettingsDraft>,
     #[serde(default)]
+    pub auto_connect_pending: bool,
+    #[serde(default)]
+    pub kill_switch_pending: Option<bool>,
+    #[serde(default)]
     pub interface_settings_draft: Option<crate::config::profile::IconSet>,
     pub geo_updating: bool,
     pub geo_last_updated: Option<String>,

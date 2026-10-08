@@ -116,7 +116,9 @@ fn commit_dns_drafts(model: &mut Model) -> Vec<Effect> {
     }
     let previous = model.config.settings.dns.clone();
     apply_dns_drafts(model);
-    finish_settings_overlay(model);
+    if model.settings_menu_return.is_none() {
+        finish_settings_overlay(model);
+    }
     if model.config.settings.dns == previous {
         return vec![];
     }

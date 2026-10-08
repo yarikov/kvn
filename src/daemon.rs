@@ -382,6 +382,8 @@ pub(crate) fn build_snapshot(
         settings_menu_selected: model.settings_menu_selected,
         routing_settings_draft: model.routing_settings_draft.clone(),
         connection_settings_draft: model.connection_settings_draft,
+        auto_connect_pending: model.auto_connect_pending,
+        kill_switch_pending: model.kill_switch_pending,
         interface_settings_draft: model.interface_settings_draft,
         geo_updating: model.geo_updating,
         geo_last_updated: model.geo_last_updated.clone(),

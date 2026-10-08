@@ -57,11 +57,9 @@ pub(crate) fn list(model: &Model) -> Option<(Vec<Option<usize>>, usize)> {
         Overlay::SettingsMenu(page) => {
             let len = match page {
                 SettingsMenuPage::Root => 4,
-                SettingsMenuPage::Routing => model
-                    .routing_settings_draft
-                    .as_ref()
-                    .map(|draft| RoutingSettingsItem::available(draft.region).len())
-                    .unwrap_or(0),
+                SettingsMenuPage::Routing => {
+                    RoutingSettingsItem::available(model.shown_routing_settings().region).len()
+                }
                 _ => 2,
             };
             (len, model.settings_menu_selected)
@@ -102,9 +100,8 @@ mod tests {
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let mut model = crate::test_helpers::model_with_subscription();
         model.routing_settings_draft = Some(RoutingSettingsDraft {
-            region: GeoRegion::Ru,
-            mode: crate::config::profile::RoutingMode::Global,
-            service_routes: Default::default(),
+            region: Some(GeoRegion::Ru),
+            ..Default::default()
         });
         for overlay in [
             Overlay::None,
