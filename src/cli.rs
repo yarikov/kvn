@@ -1824,6 +1824,8 @@ esac
             settings_menu_selected: 0,
             routing_settings_draft: None,
             connection_settings_draft: None,
+            auto_connect_pending: false,
+            kill_switch_pending: None,
             interface_settings_draft: None,
             geo_updating: false,
             geo_last_updated: None,

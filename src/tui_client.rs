@@ -352,6 +352,8 @@ fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
     model.settings_menu_selected = snapshot.settings_menu_selected;
     model.routing_settings_draft = snapshot.routing_settings_draft;
     model.connection_settings_draft = snapshot.connection_settings_draft;
+    model.auto_connect_pending = snapshot.auto_connect_pending;
+    model.kill_switch_pending = snapshot.kill_switch_pending;
     model.interface_settings_draft = snapshot.interface_settings_draft;
     model.geo_updating = snapshot.geo_updating;
     model.geo_last_updated = snapshot.geo_last_updated;
@@ -456,6 +458,38 @@ mod tests {
         assert_eq!(
             client_model.icon_set(),
             crate::config::profile::IconSet::Nerd
+        );
+    }
+
+    #[test]
+    fn applied_connection_settings_stay_visible_while_pending() {
+        let mut daemon_model = crate::test_helpers::model_with_profiles(vec![]);
+        let mut client_model = crate::test_helpers::model_with_profiles(vec![]);
+        for key in [' ', 'c', 'l', 'j', 'l'] {
+            crate::app::update::update(
+                &mut daemon_model,
+                Msg::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE)),
+            );
+        }
+        crate::app::update::update(
+            &mut daemon_model,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        let snapshot = crate::daemon::build_snapshot(
+            &daemon_model,
+            crate::app::msg::LogSessionOffsets::default(),
+            1,
+            None,
+            None,
+        );
+        apply_snapshot(&mut client_model, snapshot);
+
+        assert_eq!(
+            client_model.connection_settings(),
+            crate::app::model::ConnectionSettings {
+                auto_connect: true,
+                kill_switch: true,
+            }
         );
     }
 

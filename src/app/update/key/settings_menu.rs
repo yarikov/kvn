@@ -1,8 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{
-    AppStatus, ConnectionSettingsDraft, Model, Overlay, RoutingSettingsDraft, RoutingSettingsItem,
-    SettingsMenuPage,
-};
+use crate::app::model::{AppStatus, Model, Overlay, RoutingSettingsItem, SettingsMenuPage};
 use crate::config::profile::GeoRegion;
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -17,11 +14,9 @@ pub(in crate::app::update) fn handle_settings_menu(
 ) -> Vec<Effect> {
     let len = match page {
         SettingsMenuPage::Root => 4,
-        SettingsMenuPage::Routing => model
-            .routing_settings_draft
-            .as_ref()
-            .map(|draft| RoutingSettingsItem::available(draft.region).len())
-            .unwrap_or(0),
+        SettingsMenuPage::Routing => {
+            RoutingSettingsItem::available(model.shown_routing_settings().region).len()
+        }
         SettingsMenuPage::Connection => 2,
         SettingsMenuPage::Interface => 2,
     };
@@ -64,12 +59,11 @@ pub(in crate::app::update) fn handle_settings_menu(
             cycle_routing_draft(model, false);
         }
         (SettingsMenuPage::Routing, KeyCode::Enter) => {
-            let Some(draft) = model.routing_settings_draft.take() else {
+            let settings = model.shown_routing_settings();
+            if model.routing_settings_draft.take().is_none() {
                 return vec![];
-            };
-            model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
-            model.settings_menu_selected = 3;
-            return commit_routing_settings(model, draft);
+            }
+            return commit_routing_settings(model, settings);
         }
         (SettingsMenuPage::Connection, KeyCode::Char('l') | KeyCode::Right) => {
             cycle_connection_draft(model);
@@ -81,10 +75,13 @@ pub(in crate::app::update) fn handle_settings_menu(
             let Some(draft) = model.connection_settings_draft.take() else {
                 return vec![];
             };
-            model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
-            model.settings_menu_selected = 0;
-            let mut effects = set_auto_connect(model, draft.auto_connect);
-            effects.extend(set_kill_switch(model, draft.kill_switch));
+            let mut effects = vec![];
+            if let Some(enabled) = draft.auto_connect {
+                effects.extend(set_auto_connect(model, enabled));
+            }
+            if let Some(enabled) = draft.kill_switch {
+                effects.extend(set_kill_switch(model, enabled));
+            }
             return effects;
         }
         (SettingsMenuPage::Interface, KeyCode::Char('l') | KeyCode::Right) => {
@@ -94,8 +91,6 @@ pub(in crate::app::update) fn handle_settings_menu(
             cycle_interface_draft(model, false);
         }
         (SettingsMenuPage::Interface, KeyCode::Enter) => {
-            model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
-            model.settings_menu_selected = 2;
             return commit_interface_settings(model);
         }
         (
@@ -121,13 +116,7 @@ pub(in crate::app::update) fn handle_settings_menu(
 }
 
 fn open_routing_settings(model: &mut Model) {
-    let geo_routing = &model.config.settings.geo_routing;
-    let region = geo_routing.current_region.unwrap_or(GeoRegion::Global);
-    model.routing_settings_draft = Some(RoutingSettingsDraft {
-        region,
-        mode: geo_routing.mode(),
-        service_routes: geo_routing.service_routes.clone(),
-    });
+    model.routing_settings_draft = None;
     model.settings_menu_selected = 0;
     model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
 }
@@ -187,12 +176,7 @@ fn commit_interface_settings(model: &mut Model) -> Vec<Effect> {
 }
 
 fn open_connection_settings(model: &mut Model) {
-    model.connection_settings_draft = Some(ConnectionSettingsDraft {
-        auto_connect: model.config.settings.auto_connect,
-        kill_switch: model
-            .kill_switch_pending
-            .unwrap_or(model.config.settings.kill_switch),
-    });
+    model.connection_settings_draft = None;
     model.settings_menu_selected = 0;
     model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Connection);
 }
@@ -205,50 +189,49 @@ fn clear_settings_drafts(model: &mut Model) {
 }
 
 fn cycle_routing_draft(model: &mut Model, forward: bool) {
-    use crate::config::profile::ServiceRoute;
-
-    let Some(draft) = model.routing_settings_draft.as_mut() else {
-        return;
-    };
-    let item = RoutingSettingsItem::available(draft.region)
+    let shown = model.shown_routing_settings();
+    let item = RoutingSettingsItem::available(shown.region)
         .get(model.settings_menu_selected)
         .copied();
     match item {
         Some(RoutingSettingsItem::Region) => {
             let current = GeoRegion::ALL
                 .iter()
-                .position(|region| *region == draft.region)
+                .position(|region| *region == shown.region)
                 .unwrap_or(0);
             let next = if forward {
                 (current + 1) % GeoRegion::ALL.len()
             } else {
                 (current + GeoRegion::ALL.len() - 1) % GeoRegion::ALL.len()
             };
-            draft.region = GeoRegion::ALL[next];
-            draft.mode = model
+            let region = GeoRegion::ALL[next];
+            let mode = model
                 .config
                 .settings
                 .geo_routing
                 .selected_region_modes
-                .get(&draft.region)
+                .get(&region)
                 .copied()
                 .unwrap_or_default();
+            let draft = model.routing_settings_draft.get_or_insert_default();
+            draft.region = Some(region);
+            draft.mode = Some(mode);
         }
         Some(RoutingSettingsItem::Mode) => {
-            let modes = crate::config::profile::RoutingMode::available(Some(draft.region));
+            let modes = crate::config::profile::RoutingMode::available(Some(shown.region));
             let current = modes
                 .iter()
-                .position(|mode| *mode == draft.mode)
+                .position(|mode| *mode == shown.mode)
                 .unwrap_or(0);
             let next = if forward {
                 (current + 1) % modes.len()
             } else {
                 (current + modes.len() - 1) % modes.len()
             };
-            draft.mode = modes[next];
+            model.routing_settings_draft.get_or_insert_default().mode = Some(modes[next]);
         }
         Some(RoutingSettingsItem::Service(service)) => {
-            let current = draft
+            let current = shown
                 .service_routes
                 .get(&service)
                 .copied()
@@ -258,23 +241,31 @@ fn cycle_routing_draft(model: &mut Model, forward: bool) {
             } else {
                 current.prev()
             };
-            if next == ServiceRoute::Disabled {
-                draft.service_routes.remove(&service);
-            } else {
-                draft.service_routes.insert(service, next);
-            }
+            model
+                .routing_settings_draft
+                .get_or_insert_default()
+                .service_routes
+                .insert(service, next);
         }
         None => {}
     }
 }
 
 fn cycle_connection_draft(model: &mut Model) {
-    let Some(draft) = model.connection_settings_draft.as_mut() else {
-        return;
-    };
+    let shown = model.shown_connection_settings();
     match model.settings_menu_selected {
-        0 => draft.auto_connect = !draft.auto_connect,
-        1 if model.kill_switch_pending.is_none() => draft.kill_switch = !draft.kill_switch,
+        0 => {
+            model
+                .connection_settings_draft
+                .get_or_insert_default()
+                .auto_connect = Some(!shown.auto_connect);
+        }
+        1 if model.kill_switch_pending.is_none() => {
+            model
+                .connection_settings_draft
+                .get_or_insert_default()
+                .kill_switch = Some(!shown.kill_switch);
+        }
         _ => {}
     }
 }
@@ -403,7 +394,7 @@ pub(in crate::app::update) fn finish_settings_overlay(model: &mut Model) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::model::ConnectionState;
+    use crate::app::model::{ConnectionSettingsDraft, ConnectionState};
     use crate::app::msg::Msg;
     use crate::app::update::key::handle_key;
     use crate::app::update::key::sources::handle_sources;
@@ -488,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_menu_connection_commits_all_drafts_and_returns_to_root() {
+    fn settings_menu_connection_commits_all_drafts_and_stays_on_page() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
 
@@ -510,10 +501,23 @@ mod tests {
         assert!(!model.config.settings.auto_connect);
         assert!(model.auto_connect_pending);
         assert_eq!(model.kill_switch_pending, Some(true));
-        assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
-        assert_eq!(model.settings_menu_selected, 0);
+        assert_eq!(
+            model.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Connection)
+        );
+        assert_eq!(model.settings_menu_selected, 1);
+        assert_eq!(model.connection_settings_draft, None);
 
-        handle_key(&mut model, key('c'));
+        assert!(handle_key(&mut model, key('k')).is_empty());
+        assert!(handle_key(&mut model, key('l')).is_empty());
+        assert_eq!(
+            model.connection_settings_draft,
+            Some(ConnectionSettingsDraft {
+                auto_connect: Some(false),
+                kill_switch: None,
+            })
+        );
+
         assert!(handle_key(&mut model, KeyEvent::from(KeyCode::Backspace)).is_empty());
         assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
         assert_eq!(model.connection_settings_draft, None);
@@ -564,14 +568,11 @@ mod tests {
         assert_eq!(model.config.settings.icons, IconSet::Unicode);
         assert_eq!(model.theme_draft, None);
         assert_eq!(model.interface_settings_draft, None);
-        assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
-        assert_eq!(model.settings_menu_selected, 2);
-
-        handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
             model.overlay,
             Overlay::SettingsMenu(SettingsMenuPage::Interface)
         );
+        assert_eq!(model.settings_menu_selected, 1);
         assert!(handle_key(&mut model, KeyEvent::from(KeyCode::Enter)).is_empty());
     }
 
@@ -623,7 +624,7 @@ mod tests {
             Overlay::SettingsMenu(SettingsMenuPage::Routing)
         );
         assert_eq!(model.settings_menu_selected, 0);
-        assert!(model.routing_settings_draft.is_some());
+        assert!(model.routing_settings_draft.is_none());
     }
 
     #[test]
@@ -674,6 +675,52 @@ mod tests {
     }
 
     #[test]
+    fn blocked_kill_switch_toggle_after_apply_creates_no_draft() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        handle_key(&mut model, key('c'));
+        handle_key(&mut model, key('j'));
+        handle_key(&mut model, key('l'));
+        handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
+
+        handle_key(&mut model, key('l'));
+        update(
+            &mut model,
+            Msg::KillSwitchApplied {
+                enabled: true,
+                error: Some(crate::app::msg::IpcError::new("helper failed")),
+            },
+        );
+
+        assert_eq!(model.connection_settings_draft, None);
+        assert!(!model.connection_settings().kill_switch);
+    }
+
+    #[test]
+    fn auto_connect_edit_during_kill_switch_apply_leaves_kill_switch_untouched() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        handle_key(&mut model, key('c'));
+        handle_key(&mut model, key('j'));
+        handle_key(&mut model, key('l'));
+        handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
+
+        handle_key(&mut model, key('k'));
+        handle_key(&mut model, key('l'));
+        update(
+            &mut model,
+            Msg::KillSwitchApplied {
+                enabled: true,
+                error: Some(crate::app::msg::IpcError::new("helper failed")),
+            },
+        );
+        assert!(!model.shown_connection_settings().kill_switch);
+
+        let effects = handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
+        assert_eq!(effects, vec![Effect::CheckAutoConnectPolkit]);
+    }
+
+    #[test]
     fn settings_menu_root_opens_dns_with_clean_drafts() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
@@ -713,18 +760,13 @@ mod tests {
         model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         handle_key(&mut model, key('r'));
 
-        assert_eq!(
-            model.routing_settings_draft.as_ref().unwrap().region,
-            GeoRegion::Global
-        );
+        assert_eq!(model.shown_routing_settings().region, GeoRegion::Global);
         handle_key(&mut model, key('j'));
         assert_eq!(model.settings_menu_selected, 1);
         handle_key(&mut model, key('l'));
         assert_eq!(
             model
-                .routing_settings_draft
-                .as_ref()
-                .unwrap()
+                .shown_routing_settings()
                 .service_routes
                 .get(&RoutedService::Steam),
             Some(&ServiceRoute::Proxy)
@@ -748,16 +790,45 @@ mod tests {
         handle_key(&mut model, key('r'));
 
         handle_key(&mut model, key('h'));
-        let draft = model.routing_settings_draft.as_ref().unwrap();
-        assert_eq!(draft.region, GeoRegion::Global);
-        assert_eq!(draft.mode, RoutingMode::Global);
-        assert_eq!(RoutingSettingsItem::available(draft.region).len(), 3);
+        let shown = model.shown_routing_settings();
+        assert_eq!(shown.region, GeoRegion::Global);
+        assert_eq!(shown.mode, RoutingMode::Global);
+        assert_eq!(RoutingSettingsItem::available(shown.region).len(), 3);
 
         handle_key(&mut model, key('l'));
-        let draft = model.routing_settings_draft.as_ref().unwrap();
-        assert_eq!(draft.region, GeoRegion::Ru);
-        assert_eq!(draft.mode, RoutingMode::Bypass(GeoRegion::Ru));
-        assert_eq!(RoutingSettingsItem::available(draft.region).len(), 4);
+        let shown = model.shown_routing_settings();
+        assert_eq!(shown.region, GeoRegion::Ru);
+        assert_eq!(shown.mode, RoutingMode::Bypass(GeoRegion::Ru));
+        assert_eq!(RoutingSettingsItem::available(shown.region).len(), 4);
+    }
+
+    #[test]
+    fn repeated_routing_enter_keeps_routes_merged_from_disk() {
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        handle_key(&mut model, key('r'));
+        handle_key(&mut model, key('j'));
+        handle_key(&mut model, key('l'));
+        handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
+
+        let mut merged = model.config.clone();
+        merged
+            .settings
+            .geo_routing
+            .service_routes
+            .insert(RoutedService::Steam, ServiceRoute::Proxy);
+        model.replace_config_preserving_selection(merged);
+
+        assert!(handle_key(&mut model, KeyEvent::from(KeyCode::Enter)).is_empty());
+        assert_eq!(
+            model
+                .config
+                .settings
+                .geo_routing
+                .service_route(RoutedService::Steam),
+            ServiceRoute::Proxy
+        );
     }
 
     #[test]
@@ -832,7 +903,7 @@ mod tests {
     }
 
     #[test]
-    fn enter_commits_and_returns_to_the_originating_settings_menu() {
+    fn enter_applies_and_keeps_the_settings_page_open() {
         let mut routing = model_with_profiles(vec![]);
         routing.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         handle_key(&mut routing, key('r'));
@@ -846,7 +917,7 @@ mod tests {
         let effects = handle_key(&mut routing, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
             routing.overlay,
-            Overlay::SettingsMenu(SettingsMenuPage::Root)
+            Overlay::SettingsMenu(SettingsMenuPage::Routing)
         );
         assert_eq!(
             routing.config.settings.geo_routing.current_region,
@@ -879,16 +950,17 @@ mod tests {
                 .count(),
             1
         );
+        assert_eq!(routing.routing_settings_draft, None);
 
         let mut dns = model_with_profiles(vec![]);
         dns.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         handle_key(&mut dns, key('d'));
         dns.dns_preset_draft = Some("google_dot".to_string());
         let effects = handle_key(&mut dns, KeyEvent::from(KeyCode::Enter));
-        assert_eq!(dns.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+        assert_eq!(dns.overlay, Overlay::DnsSettings);
         assert_eq!(dns.config.settings.dns.current_preset, "google_dot");
         assert!(effects.contains(&Effect::SaveConfig));
-        assert_eq!(dns.settings_menu_return, None);
+        assert_eq!(dns.settings_menu_return, Some(SettingsMenuPage::Root));
 
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let mut theme = model_with_profiles(vec![]);
@@ -897,7 +969,10 @@ mod tests {
         handle_key(&mut theme, key('l'));
         let selected_theme = theme.theme_draft.clone().unwrap();
         handle_key(&mut theme, KeyEvent::from(KeyCode::Enter));
-        assert_eq!(theme.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+        assert_eq!(
+            theme.overlay,
+            Overlay::SettingsMenu(SettingsMenuPage::Interface)
+        );
         assert_eq!(theme.config.settings.theme, selected_theme);
         assert_eq!(theme.theme_draft, None);
         assert_eq!(theme.settings_menu_return, None);
