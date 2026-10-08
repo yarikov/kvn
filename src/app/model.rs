@@ -377,6 +377,7 @@ pub struct Model {
     pub service_retry_states: HashMap<RoutedService, crate::geo::GeoRetryState>,
     pub service_checked_at: HashMap<RoutedService, DateTime<Local>>,
     pub service_next_updates: HashMap<RoutedService, chrono::NaiveDate>,
+    pub geo_schedule_epoch: u64,
     pub geo_automatic_update: bool,
     /// Latest traffic stats sample, applied either by the daemon (after a
     /// Clash-API fetch) or by the TUI client (from a `StateSnapshot`).
@@ -454,6 +455,24 @@ impl Model {
         }
         self.status = Some(status);
         self.status_revision = self.status_revision.wrapping_add(1);
+    }
+
+    pub fn apply_geo_schedule(&mut self, schedule: crate::app::msg::GeoSchedule) {
+        if schedule.epoch != self.geo_schedule_epoch {
+            return;
+        }
+        self.geo_retry_state = schedule.retry_state;
+        self.geo_next_update = schedule.next_update;
+        self.service_retry_states = schedule.service_retry_states;
+        self.service_next_updates = schedule.service_next_updates;
+    }
+
+    pub fn apply_service_schedule(&mut self, schedule: crate::app::msg::ServiceSchedule) {
+        if schedule.epoch != self.geo_schedule_epoch {
+            return;
+        }
+        self.service_retry_states = schedule.retry_states;
+        self.service_next_updates = schedule.next_updates;
     }
 
     /// Clear an error after its toast was rendered without creating another
@@ -556,12 +575,14 @@ impl Model {
             .current_region
             .unwrap_or(GeoRegion::Global);
         let geo_manager = crate::geo::GeoManager::new().ok();
+        let geo_schedule_epoch = geo_manager.as_ref().map_or(0, |g| g.schedule_epoch());
         if let Some(manager) = &geo_manager {
             let _ = manager.ensure_update_schedules(
                 region,
                 &config.settings.geo_routing.enabled_services(),
                 config.settings.geo_routing.auto_update
                     != crate::config::profile::GeoAutoUpdate::Off,
+                geo_schedule_epoch,
             );
         }
         let geo_last_updated = geo_manager.as_ref().and_then(|g| g.last_updated(region));
@@ -636,6 +657,7 @@ impl Model {
             service_retry_states,
             service_checked_at,
             service_next_updates,
+            geo_schedule_epoch,
             geo_automatic_update: false,
             traffic: TrafficStats::default(),
             last_traffic_sample_at_ms: 0,
@@ -680,12 +702,14 @@ impl Model {
             .current_region
             .unwrap_or(GeoRegion::Global);
         let geo_manager = crate::geo::GeoManager::new().ok();
+        let geo_schedule_epoch = geo_manager.as_ref().map_or(0, |g| g.schedule_epoch());
         if let Some(manager) = &geo_manager {
             let _ = manager.ensure_update_schedules(
                 region,
                 &config.settings.geo_routing.enabled_services(),
                 config.settings.geo_routing.auto_update
                     != crate::config::profile::GeoAutoUpdate::Off,
+                geo_schedule_epoch,
             );
         }
         let geo_last_updated = geo_manager.as_ref().and_then(|g| g.last_updated(region));
@@ -763,6 +787,7 @@ impl Model {
             service_retry_states,
             service_checked_at,
             service_next_updates,
+            geo_schedule_epoch,
             geo_automatic_update: false,
             traffic: TrafficStats::default(),
             last_traffic_sample_at_ms: 0,
@@ -1047,6 +1072,7 @@ impl Model {
             service_retry_states: HashMap::new(),
             service_checked_at: HashMap::new(),
             service_next_updates: HashMap::new(),
+            geo_schedule_epoch: 0,
             geo_automatic_update: false,
             traffic: TrafficStats::default(),
             last_traffic_sample_at_ms: 0,

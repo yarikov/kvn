@@ -1,8 +1,7 @@
-use std::collections::HashMap;
-
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model, RoutingSettings};
-use crate::config::profile::{GeoRegion, RoutedService, RoutingMode};
+use crate::app::msg::{ServiceCheckTimes, ServiceSchedule};
+use crate::config::profile::{GeoRegion, RoutingMode};
 
 use crate::app::update::connection::queue_connect;
 use crate::app::update::status::{
@@ -11,16 +10,16 @@ use crate::app::update::status::{
 
 pub(in crate::app::update) fn on_service_rule_sets_ready(
     model: &mut Model,
-    retry_states: HashMap<RoutedService, crate::geo::GeoRetryState>,
-    checked_at: HashMap<RoutedService, chrono::DateTime<chrono::Local>>,
-    next_updates: HashMap<RoutedService, chrono::NaiveDate>,
+    checked_at: ServiceCheckTimes,
+    schedule: Option<ServiceSchedule>,
     updated_parts: Vec<String>,
     errors: Vec<String>,
 ) -> Vec<Effect> {
     model.geo_updating = model.pending_geo_reconnect;
-    model.service_retry_states = retry_states;
     model.service_checked_at = checked_at;
-    model.service_next_updates = next_updates;
+    if let Some(schedule) = schedule {
+        model.apply_service_schedule(schedule);
+    }
     let mut effects = Vec::new();
     for part in updated_parts {
         effects.push(Effect::AppendAppLog {
@@ -339,9 +338,10 @@ mod tests {
     use crate::app::msg::{GeoResult, Msg};
     use crate::app::update::tick::handle_tick;
     use crate::app::update::update;
-    use crate::config::profile::Profile;
+    use crate::config::profile::{Profile, RoutedService};
     use crate::test_helpers::*;
     use chrono::Local;
+    use std::collections::HashMap;
 
     #[test]
     fn service_rule_sets_ready_reconnects_active_profile_not_cursor() {
@@ -357,9 +357,8 @@ mod tests {
         update(
             &mut model,
             Msg::ServiceRuleSetsReady {
-                retry_states: Default::default(),
                 checked_at: Default::default(),
-                next_updates: Default::default(),
+                schedule: None,
                 updated_parts: Vec::new(),
                 errors: Vec::new(),
             },
@@ -384,20 +383,16 @@ mod tests {
         fn geo_ready() -> Msg {
             Msg::GeoUpdated(GeoResult::UpToDate {
                 checked_at: Some(Local::now()),
-                retry_state: None,
-                service_retry_states: Default::default(),
                 service_checked_at: Default::default(),
-                next_update: None,
-                service_next_updates: Default::default(),
+                schedule: None,
                 warnings: Vec::new(),
             })
         }
 
         fn services_ready() -> Msg {
             Msg::ServiceRuleSetsReady {
-                retry_states: Default::default(),
                 checked_at: Default::default(),
-                next_updates: Default::default(),
+                schedule: None,
                 updated_parts: Vec::new(),
                 errors: Vec::new(),
             }
@@ -449,6 +444,39 @@ mod tests {
     }
 
     #[test]
+    fn service_rule_sets_from_before_a_schedule_reset_keep_the_reset_schedule() {
+        let mut model = model_with_profiles(vec![]);
+        model.geo_schedule_epoch = 2;
+        let checked_at = Local::now();
+        let stale_retry = crate::geo::GeoRetryState {
+            consecutive_failures: 1,
+            retry_at: checked_at,
+            attempt_date: None,
+        };
+
+        update(
+            &mut model,
+            Msg::ServiceRuleSetsReady {
+                checked_at: HashMap::from([(RoutedService::Steam, checked_at)]),
+                schedule: Some(ServiceSchedule {
+                    epoch: 1,
+                    retry_states: HashMap::from([(RoutedService::Steam, stale_retry)]),
+                    next_updates: HashMap::from([(RoutedService::Steam, checked_at.date_naive())]),
+                }),
+                updated_parts: Vec::new(),
+                errors: Vec::new(),
+            },
+        );
+
+        assert!(model.service_retry_states.is_empty());
+        assert!(model.service_next_updates.is_empty());
+        assert_eq!(
+            model.service_checked_at.get(&RoutedService::Steam),
+            Some(&checked_at)
+        );
+    }
+
+    #[test]
     fn service_rule_sets_ready_without_pending_commit_is_noop() {
         // The post-connect backstop download also reports readiness; it must
         // not trigger a reconnect loop.
@@ -459,9 +487,8 @@ mod tests {
         let effects = update(
             &mut model,
             Msg::ServiceRuleSetsReady {
-                retry_states: Default::default(),
                 checked_at: Default::default(),
-                next_updates: Default::default(),
+                schedule: None,
                 updated_parts: Vec::new(),
                 errors: Vec::new(),
             },
@@ -480,9 +507,8 @@ mod tests {
         let effects = update(
             &mut model,
             Msg::ServiceRuleSetsReady {
-                retry_states: Default::default(),
                 checked_at: Default::default(),
-                next_updates: Default::default(),
+                schedule: None,
                 updated_parts: Vec::new(),
                 errors: Vec::new(),
             },
@@ -503,9 +529,8 @@ mod tests {
         let effects = update(
             &mut model,
             Msg::ServiceRuleSetsReady {
-                retry_states: Default::default(),
                 checked_at: Default::default(),
-                next_updates: Default::default(),
+                schedule: None,
                 updated_parts: Vec::new(),
                 errors: Vec::new(),
             },

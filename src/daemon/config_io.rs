@@ -1,7 +1,7 @@
 use std::sync::mpsc::Sender;
 use std::thread;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 
 use crate::app::model::{AppStatus, Model, Overlay};
 use crate::app::msg::{ConfigEditResult, IpcError, Msg};
@@ -191,20 +191,20 @@ pub(super) fn commit_edited(
     base: Box<Config>,
     edited: Box<Config>,
     reply_requested: bool,
-) -> Result<ConfigEditResult> {
+) -> ConfigEditResult {
     let mut edited_for_commit = (*edited).clone();
     edited_for_commit.settings.kill_switch = model.config.settings.kill_switch;
     let result = commit_config_change(model, &base, &edited_for_commit);
     match result {
         Ok(config) => {
             for nested in crate::app::update::handle_config_reloaded(model, Ok(config)) {
-                execute_daemon_effect(nested, tx, model, shared, false)?;
+                execute_daemon_effect(nested, tx, model, shared, false);
             }
-            Ok(ConfigEditResult::Saved)
+            ConfigEditResult::Saved
         }
         Err(error) => {
             if reply_requested {
-                return Ok(match error.downcast::<ConfigConflict>() {
+                return match error.downcast::<ConfigConflict>() {
                     Ok(conflict) => ConfigEditResult::Conflict {
                         current: conflict.current,
                         paths: conflict.paths,
@@ -212,7 +212,7 @@ pub(super) fn commit_edited(
                     Err(error) => ConfigEditResult::Failed {
                         message: format!("{error:#}"),
                     },
-                });
+                };
             }
             let message = match crate::config::save_conflict_config(&edited) {
                 Ok(path) => format!(
@@ -225,7 +225,7 @@ pub(super) fn commit_edited(
             };
             model.set_status(AppStatus::Error(message.clone()));
             crate::services::log_tailer::append_app_log("ERROR", &message);
-            Ok(ConfigEditResult::Failed { message })
+            ConfigEditResult::Failed { message }
         }
     }
 }
