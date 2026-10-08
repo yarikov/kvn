@@ -42,9 +42,9 @@ pub use settings::{
 pub use share_link::{
     SUPPORTED_SHARE_SCHEMES, encode_share_link, is_http_proxy_link, parse_share_link,
 };
-#[allow(unused_imports)]
-pub use subscription::{Subscription, SubscriptionRetryState};
-#[allow(unused_imports)]
-pub use tls::{
-    EchSettings, Flow, RealitySettings, Security, TlsCommon, TransportConfig, TransportType,
-};
+pub use subscription::Subscription;
+#[cfg(test)]
+pub use subscription::SubscriptionRetryState;
+#[cfg(test)]
+pub use tls::EchSettings;
+pub use tls::{Flow, RealitySettings, Security, TlsCommon, TransportConfig, TransportType};

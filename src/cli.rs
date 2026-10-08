@@ -840,17 +840,10 @@ fn format_rate(bytes_per_sec: u64) -> String {
     }
 }
 
-/// Parse CLI arguments and execute any non-TUI commands.
+/// Execute any non-TUI command from an already-parsed `Cli`.
 ///
 /// Returns `Some(Ok(()))` or `Some(Err(_))` if a CLI action was handled
 /// and the application should exit. Returns `None` if the TUI should start.
-#[allow(dead_code)]
-pub fn try_run() -> Option<Result<()>> {
-    let cli = Cli::parse();
-    try_run_from_parsed(&cli)
-}
-
-/// Same as `try_run` but takes an already-parsed `Cli`.
 pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
     match &cli.command {
         Some(Command::DocsPreview { theme }) => {
