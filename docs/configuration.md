@@ -401,6 +401,7 @@ cannot read it.
 | Latency-test configs | `$XDG_RUNTIME_DIR/kvn-tui/test-<uuid>.json` |
 | Private editor copy | `$XDG_RUNTIME_DIR/kvn-tui/profiles-edit-<pid>.json` |
 | Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |
+| Daemon instance lock | `$XDG_RUNTIME_DIR/kvn/daemon.lock` |
 | Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
 | Migration baseline (system-wide) | `/var/lib/kvn/migration-baseline` |
 

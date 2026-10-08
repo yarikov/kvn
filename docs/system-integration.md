@@ -339,7 +339,7 @@ it:
    ~/.config/kvn-tui/          profiles, settings, geo rule-sets, logs, state, recovery copies
    ~/.local/state/kvn/         first-run tour, support prompt, applied migrations, sing-box cache
    /run/user/$UID/kvn-tui/     temporary sing-box and latency-test configurations
-   /run/user/$UID/kvn/         migration lock
+   /run/user/$UID/kvn/         migration and daemon locks
    /run/user/$UID/kvn-tui.sock daemon socket
    ```
 

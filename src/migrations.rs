@@ -5,14 +5,16 @@
 //! later invocation resumes from the script that failed.
 
 use std::collections::HashSet;
-use std::fs::{self, File, OpenOptions, TryLockError};
+use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
+
+use crate::runtime_lock::RuntimeLock;
 
 const INSTALLED_DIR: &str = "/usr/lib/kvn/migrations";
 const BASELINE_PATH: &str = "/var/lib/kvn/migration-baseline";
@@ -212,7 +214,7 @@ pub fn run_pending_interactive() -> Result<bool> {
 }
 
 fn run_interactive(store: &Store) -> Result<bool> {
-    let _lock = MigrationLock::acquire()?;
+    let _lock = acquire_migration_lock()?;
     run_migrations(store, prompt_retry)
 }
 
@@ -338,37 +340,11 @@ pub(crate) fn package_transaction_active() -> bool {
     crate::pacman::transaction_wrote_any(&MIGRATION_SENSITIVE_PACKAGE_FILES)
 }
 
-struct MigrationLock {
-    _file: File,
+fn acquire_migration_lock() -> Result<RuntimeLock> {
+    RuntimeLock::try_acquire_within(&crate::paths::migration_lock_path()?, Duration::ZERO)?
+        .context("another kvn migration is already running")
 }
 
-impl MigrationLock {
-    fn acquire() -> Result<Self> {
-        let path = crate::paths::ensure_kvn_runtime_dir()?.join("migrate.lock");
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&path)?;
-        match file.try_lock() {
-            Ok(()) => Ok(Self { _file: file }),
-            Err(TryLockError::WouldBlock) => bail!("another kvn migration is already running"),
-            Err(TryLockError::Error(error)) => Err(error.into()),
-        }
-    }
-}
-
-impl Drop for MigrationLock {
-    fn drop(&mut self) {
-        // close() alone can leave the lock held by a concurrently forked child
-        // until exec closes its inherited CLOEXEC descriptor. Release it
-        // explicitly when the runner finishes, regardless of those copies.
-        if let Err(error) = self._file.unlock() {
-            tracing::warn!(%error, "Failed to release migration lock");
-        }
-    }
-}
 /// Refuse to start a new daemon on unmigrated state. An active package
 /// transaction is not one: nothing is pending until its payload is installed.
 pub fn block_daemon_if_pending() -> Result<bool> {
@@ -752,8 +728,8 @@ print_migration_notice "$1"
         let dir = tempfile::tempdir().unwrap();
         let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
 
-        let held = MigrationLock::acquire().unwrap();
-        let contended = MigrationLock::acquire();
+        let held = acquire_migration_lock().unwrap();
+        let contended = acquire_migration_lock();
         assert!(
             contended
                 .err()
@@ -762,7 +738,7 @@ print_migration_notice "$1"
         );
 
         drop(held);
-        MigrationLock::acquire().unwrap();
+        acquire_migration_lock().unwrap();
     }
 
     fn sample_migration() -> Migration {

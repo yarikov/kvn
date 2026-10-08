@@ -53,7 +53,10 @@ and resume handling, and it turns the kill switch on and off. It runs headless, 
 depend on a terminal being open.
 
 At startup the daemon refuses to run while a package migration is pending. It
-then reconciles settings with the system: `settings.kill_switch` follows
+then takes `$XDG_RUNTIME_DIR/kvn/daemon.lock` for its whole lifetime, before it
+touches the socket, `state.json` or a sing-box left by a crashed daemon. A
+second daemon waits up to 3 seconds for the previous one to exit and otherwise
+quits without changing anything. The daemon then reconciles settings with the system: `settings.kill_switch` follows
 whether the kill-switch unit is actually active, and auto-connect is turned off
 before the first connect when polkit denies the DNS actions it needs. On exit
 it stops sing-box and flushes kill-switch exceptions an older kvn left behind.
