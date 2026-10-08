@@ -99,7 +99,7 @@ pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused
             };
             let profiles = &sub_profile_rows[sub_idx];
             let header_text = format!(
-                "Subscription: {} {} {}",
+                "{} {} {}",
                 sub.name,
                 icons(model.icon_set()).refresh,
                 sub.auto_update.label()

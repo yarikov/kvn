@@ -8,7 +8,7 @@ expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ┌ Profiles ──────────────────────────────────────────────────────────┐
 │ └ A                                             vless  a:1         │
 │                                                                    │
-│ Subscription: Sub  (off)                                          │
+│ Sub  (off)                                                        │
 │ └ B                                             vless  b:2         │
 │                                                                    │
 │                                                                    │

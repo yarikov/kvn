@@ -8,7 +8,7 @@ expression: "snapshot_terminal(&model, TWO_PANE_MIN_WIDTH, 16)"
 ┌ Profiles ─────────────────────────────────┐┌ Logs ─────────────────────────────────────┐
 │ └ A                    vless  a:1         ││                                           │
 │                                           ││                                           │
-│ Subscription: A subscription name far ... ││                                           │
+│ A subscription name far too long to fi... ││                                           │
 │ └ B                    vless  b:2         ││                                           │
 │                                           ││                                           │
 │                                           ││                                           │
