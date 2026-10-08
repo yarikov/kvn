@@ -286,9 +286,10 @@ tunnel; [what kvn protects](privacy.md#dns) summarizes where every query goes.
 Servers on a local address, such as a router at `192.168.1.1` or a resolver on
 `127.0.0.1`, are always queried directly, and so is every server in Only mode.
 Profiles whose protocol cannot carry UDP (HTTP, SSH, ShadowTLS, and SOCKS
-4/4a) refuse to connect in Global and Bypass modes while a public `udp` or
-`quic` server is configured, because its queries would bypass the VPN; use an
-`https`, `tls` or `tcp` server with these profiles. kvn resolves the VPN
+4/4a) query a public `udp` or `quic` server directly in Global and Bypass
+modes, so its queries bypass the VPN; kvn shows a warning after connecting.
+Use an `https`, `tls` or `tcp` server with these profiles to keep DNS in the
+tunnel. kvn resolves the VPN
 server's own hostname through a direct copy of the active preset's
 `final_server`, so connecting never depends on the tunnel being up.
 

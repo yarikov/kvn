@@ -40,12 +40,10 @@ pub(in crate::app::update) fn on_connected(
     // (carried in the message) — never to the cursor's row, which may
     // have moved since the connect was issued.
     model.active_profile_id = Some(profile_id);
-    let profile_name = model
-        .config
-        .profiles
-        .iter()
-        .find(|p| p.id == profile_id)
-        .map(|p| p.name.clone());
+    let profile = model.config.profiles.iter().find(|p| p.id == profile_id);
+    let profile_name = profile.map(|p| p.name.clone());
+    let dns_warning =
+        profile.and_then(|p| crate::singbox::config::dns_bypass_warning(p, &model.config.settings));
     push_status(
         &mut effects,
         model,
@@ -55,6 +53,9 @@ pub(in crate::app::update) fn on_connected(
             None => "Connected".to_string(),
         }),
     );
+    if let Some(warning) = dns_warning {
+        push_status(&mut effects, model, AppStatus::Error(warning));
+    }
     // Persist last connected profile for auto-connect on next startup.
     if model.config.settings.last_connected_profile != Some(profile_id) {
         model.config.settings.last_connected_profile = Some(profile_id);
@@ -715,6 +716,32 @@ mod tests {
                 Effect::SaveConfig
             ]
         );
+    }
+
+    #[test]
+    fn connected_warns_when_dns_bypasses_the_tunnel() {
+        use crate::config::profile::{CustomDnsPreset, DnsServer, ProtocolConfig};
+        let mut profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        profile.config = ProtocolConfig::Http(Default::default());
+        let mut model = model_with_profiles(vec![profile.clone()]);
+        let dns = &mut model.config.settings.dns;
+        dns.custom_presets = vec![CustomDnsPreset {
+            name: "plain".into(),
+            servers: vec![DnsServer::Udp {
+                tag: "plain".into(),
+                server: "8.8.8.8".into(),
+                server_port: None,
+            }],
+            rules: vec![],
+            final_server: "plain".into(),
+        }];
+        dns.current_preset = "plain".into();
+        let warning =
+            crate::singbox::config::dns_bypass_warning(&profile, &model.config.settings).unwrap();
+        let effects = on_connected(&mut model, 1, profile.id, 0);
+        assert_eq!(model.connection, ConnectionState::Connected);
+        assert_eq!(model.status, Some(AppStatus::Error(warning.clone())));
+        assert!(effects.contains(&app_log_error(&warning)));
     }
 
     #[test]

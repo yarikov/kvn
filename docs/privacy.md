@@ -111,10 +111,10 @@ sent directly; plain DNS (`udp`, `tcp`) shows them to anyone on the path. The
 built-in presets other than System local use encrypted DNS.
 
 HTTP, SSH, ShadowTLS and SOCKS 4/4a profiles cannot carry UDP through the
-tunnel. In Global and Bypass modes kvn therefore refuses to connect with them
-while a public `udp` or `quic` DNS server is configured, rather than sending
-those questions past the VPN. Use an `https`, `tls` or `tcp` server with these
-profiles.
+tunnel. In Global and Bypass modes kvn therefore sends a public `udp` or
+`quic` DNS server's questions directly, past the VPN, and shows a warning after
+connecting. Use an `https`, `tls` or `tcp` server with these profiles to keep
+DNS in the tunnel.
 
 UDP from other programs is refused on these profiles, not sent around the
 tunnel: the program gets an immediate error. Browsers then fall back from
