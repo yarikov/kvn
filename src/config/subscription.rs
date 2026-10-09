@@ -209,6 +209,15 @@ pub fn hwid_response_error(headers: &HashMap<String, String>, hwid_sent: bool) -
     None
 }
 
+fn http_status_error(status: u16, redacted_url: &str) -> String {
+    match status {
+        403 => format!(
+            "HTTP 403 for {redacted_url}: the subscription server refuses this client ({KVN_TUI_USER_AGENT}); the provider may serve the subscription only to the apps it recommends, so ask the provider to allow kvn"
+        ),
+        _ => format!("HTTP {status} for {redacted_url}"),
+    }
+}
+
 fn fetch_response(
     url: &str,
     headers: &HashMap<String, String>,
@@ -256,7 +265,10 @@ fn fetch_response(
         if let Some(message) = hwid_response_error(&resp_headers, hwid_sent) {
             anyhow::bail!("{} (HTTP {} for {})", message, resp.status(), redacted_url);
         }
-        anyhow::bail!("HTTP {} for {}", resp.status(), redacted_url);
+        anyhow::bail!(
+            "{}",
+            http_status_error(resp.status().as_u16(), &redacted_url)
+        );
     }
 
     // Read one byte beyond the application limit so an exact-limit body is
@@ -879,6 +891,16 @@ mod tests {
         assert_eq!(
             headers.get("X-Hwid").map(String::as_str),
             Some("provider-registered-device-id"),
+        );
+    }
+
+    #[test]
+    fn http_status_error_explains_a_refused_client() {
+        let message = http_status_error(403, "https://sub.example/<redacted>");
+        assert!(message.starts_with("HTTP 403 for https://sub.example/<redacted>: the subscription server refuses this client (kvn-tui/"));
+        assert_eq!(
+            http_status_error(404, "https://sub.example/<redacted>"),
+            "HTTP 404 for https://sub.example/<redacted>"
         );
     }
 

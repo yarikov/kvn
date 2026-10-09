@@ -105,6 +105,12 @@ providers require these headers to count devices; leave `send_hwid` off
 otherwise. The HWID must be non-empty, at most 256 bytes, and a valid HTTP
 header value.
 
+kvn does not change its `User-Agent`. A panel picks the subscription format by
+it, and some providers let only the apps they recommend download the
+subscription: Remnawave, for example, answers `403` when its response rules
+block the client or no rule matches it. kvn then reports that the server
+refuses this client; ask the provider to allow kvn.
+
 ## Settings
 
 | Field | Default | Description |
