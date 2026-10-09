@@ -23,8 +23,8 @@ pub use entry::Profile;
 pub use json_schema::{config_json_schema, schema_diagnostics};
 pub use protocol::Protocol;
 pub use protocol_config::{
-    AnytlsConfig, HttpConfig, Hysteria2Config, ProtocolConfig, ShadowsocksConfig, ShadowtlsConfig,
-    SocksConfig, SshConfig, TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
+    AnytlsConfig, HttpConfig, Hysteria2Config, NaiveConfig, ProtocolConfig, ShadowsocksConfig,
+    ShadowtlsConfig, SocksConfig, SshConfig, TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
 };
 pub use protocol_options::{
     Hysteria2Obfs, Hysteria2ObfsType, ShadowsocksCipher, ShadowtlsVersion, SocksVersion,

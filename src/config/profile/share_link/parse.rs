@@ -27,6 +27,8 @@ pub fn parse_share_link(text: &str) -> Result<Profile> {
         "http" | "https" => parse_http(scheme, rest),
         "ssh" => parse_ssh(rest),
         "anytls" => parse_anytls(rest),
+        "naive+https" | "naive+quic" => parse_naive(scheme, rest),
+        "http2" => parse_naive_base64(rest),
         "shadowtls" => parse_shadowtls(rest),
         other => anyhow::bail!("Unsupported share link scheme: {other}://"),
     }?;
@@ -115,6 +117,11 @@ fn mapped_query_keys(scheme: &str) -> Vec<&'static str> {
             &["congestion_control", "udp_relay_mode", "zero_rtt_handshake"],
         ),
         "anytls" => (true, false, &[]),
+        "naive+https" | "naive+quic" | "http2" => (
+            false,
+            false,
+            &["peer", "sni", "insecure", "allowInsecure", "ech"],
+        ),
         "shadowtls" => (
             true,
             false,
@@ -795,6 +802,62 @@ fn parse_http(scheme: &str, rest: &str) -> Result<Profile> {
         subscription_id: None,
         share_link_params: Default::default(),
     })
+}
+
+fn parse_naive(scheme: &str, rest: &str) -> Result<Profile> {
+    let url = parse_uri(scheme, rest)?;
+    let host = url
+        .host_str()
+        .context("Missing host in NaiveProxy URL")?
+        .to_string();
+    let port = url.port().unwrap_or(443);
+    let name = fragment_name(&url, &host)?;
+    let query = query_map(&url);
+    let mut tls = TlsCommon {
+        server_name: query.get("peer").or_else(|| query.get("sni")).cloned(),
+        insecure: ["insecure", "allowInsecure"]
+            .iter()
+            .any(|key| query.get(*key).is_some_and(|value| parse_bool_param(value))),
+        ..TlsCommon::default()
+    };
+    tls.ech = query.get("ech").map(|value| ech_from_link(value, &tls));
+    let user = url.username();
+    Ok(Profile {
+        id: Uuid::new_v4(),
+        name,
+        address: host,
+        port,
+        config: ProtocolConfig::Naive(NaiveConfig {
+            username: (!user.is_empty())
+                .then(|| urlencoding::decode(user).unwrap_or_default().to_string()),
+            password: url
+                .password()
+                .map(|p| urlencoding::decode(p).unwrap_or_default().to_string()),
+            quic: scheme == "naive+quic",
+            tls,
+        }),
+        tags: Vec::new(),
+        subscription_id: None,
+        share_link_params: Default::default(),
+    })
+}
+
+fn parse_naive_base64(rest: &str) -> Result<Profile> {
+    let (encoded, tail) = rest.split_at(rest.find(['?', '#']).unwrap_or(rest.len()));
+    let decoded = String::from_utf8(decode_b64_lenient(encoded).context("NaiveProxy base64")?)
+        .context("NaiveProxy base64 is not UTF-8")?;
+    let (userinfo, host_port) = decoded
+        .rsplit_once('@')
+        .context("NaiveProxy base64 payload missing '@'")?;
+    let userinfo = match userinfo.split_once(':') {
+        Some((user, password)) => format!(
+            "{}:{}",
+            urlencoding::encode(user),
+            urlencoding::encode(password)
+        ),
+        None => urlencoding::encode(userinfo).into_owned(),
+    };
+    parse_naive("naive+https", &format!("{userinfo}@{host_port}{tail}"))
 }
 
 /// Parse `ssh://user@host:port#name` (optional `?password=&private_key_path=`).
@@ -1663,6 +1726,53 @@ mod tests {
         assert_eq!(cfg.udp_relay_mode, TuicUdpRelayMode::Quic);
         assert!(cfg.zero_rtt_handshake);
         assert_eq!(cfg.tls.alpn, vec!["h3".to_string()]);
+    }
+
+    // ---- NaiveProxy ----
+
+    #[test]
+    fn parse_naive_links_in_s_ui_form() {
+        let https = parse_share_link("naive+https://alice:pw@n.example:443?padding=1&peer=sni.example&alpn=h2,http/1.1&insecure=1&tfo=0#S-UI").unwrap();
+        let ProtocolConfig::Naive(cfg) = &https.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        assert_eq!(cfg.username.as_deref(), Some("alice"));
+        assert_eq!(cfg.password.as_deref(), Some("pw"));
+        assert!(!cfg.quic);
+        assert_eq!(cfg.tls.server_name.as_deref(), Some("sni.example"));
+        assert!(cfg.tls.insecure);
+        assert!(cfg.tls.alpn.is_empty());
+        assert_eq!(
+            https.share_link_params,
+            params(&[
+                ("alpn", "h2,http/1.1".into()),
+                ("padding", "1".into()),
+                ("tfo", "0".into())
+            ])
+        );
+
+        let quic = parse_share_link("naive+quic://alice:pw@n.example:443?padding=1#Q").unwrap();
+        let ProtocolConfig::Naive(cfg) = &quic.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        assert!(cfg.quic);
+    }
+
+    #[test]
+    fn parse_naive_shadowrocket_base64_with_slash_plus_and_at_in_the_password() {
+        let p = parse_share_link(
+            "http2://YWxpY2U6cEA/Pz8+QG4uZXhhbXBsZTo0NDM=?padding=1&peer=sni.example#S-UI",
+        )
+        .unwrap();
+        let ProtocolConfig::Naive(cfg) = &p.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        assert_eq!((p.address.as_str(), p.port), ("n.example", 443));
+        assert_eq!(p.name, "S-UI");
+        assert_eq!(cfg.username.as_deref(), Some("alice"));
+        assert_eq!(cfg.password.as_deref(), Some("p@???>"));
+        assert_eq!(cfg.tls.server_name.as_deref(), Some("sni.example"));
+        assert_eq!(p.share_link_params, params(&[("padding", "1".into())]));
     }
 
     // ---- SOCKS / HTTP / SSH / AnyTLS / ShadowTLS ----

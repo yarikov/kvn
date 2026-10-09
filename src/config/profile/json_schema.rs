@@ -533,6 +533,7 @@ mod tests {
                 with_tls(merge(base("anytls"), json!({
                     "password": "p", "idle_session_check_interval": "30s", "idle_session_timeout": "30s"
                 }))),
+                with_tls(merge(base("naive"), json!({ "username": "u", "password": "p", "quic": true }))),
                 merge(base("socks"), json!({ "version": "5", "username": "u", "password": "p" })),
                 with_tls(merge(base("http"), json!({ "username": "u", "password": "p" }))),
                 merge(base("ssh"), json!({
@@ -608,7 +609,7 @@ mod tests {
             .unwrap()
             .iter()
             .collect();
-        assert_eq!(listed.len(), 11);
+        assert_eq!(listed.len(), 12);
         assert_eq!(listed, branch_protocols);
         assert_eq!(
             profile["if"]["properties"]["protocol"],

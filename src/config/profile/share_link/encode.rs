@@ -18,6 +18,7 @@ pub fn encode_share_link(profile: &Profile) -> Result<String> {
         ProtocolConfig::Http(cfg) => Ok(encode_http(profile, cfg)),
         ProtocolConfig::Ssh(cfg) => Ok(encode_ssh(profile, cfg)),
         ProtocolConfig::Anytls(cfg) => Ok(encode_anytls(profile, cfg)),
+        ProtocolConfig::Naive(cfg) => Ok(encode_naive(profile, cfg)),
         ProtocolConfig::Shadowtls(cfg) => Ok(encode_shadowtls(profile, cfg)),
     };
     Ok(append_share_link_params(link?, &link_params(profile)))
@@ -472,6 +473,42 @@ fn encode_http(profile: &Profile, cfg: &HttpConfig) -> String {
         userinfo,
         host_for_uri(&profile.address),
         profile.port,
+        fragment_for(&profile.name),
+    )
+}
+
+fn encode_naive(profile: &Profile, cfg: &NaiveConfig) -> String {
+    let scheme = if cfg.quic {
+        "naive+quic"
+    } else {
+        "naive+https"
+    };
+    let mut userinfo = String::new();
+    if let Some(u) = &cfg.username {
+        userinfo.push_str(&urlencoding::encode(u));
+        if let Some(p) = &cfg.password {
+            userinfo.push(':');
+            userinfo.push_str(&urlencoding::encode(p));
+        }
+        userinfo.push('@');
+    }
+    let mut pairs: Vec<(&str, String)> = Vec::new();
+    if let Some(sni) = &cfg.tls.server_name {
+        pairs.push(("peer", sni.clone()));
+    }
+    if cfg.tls.insecure {
+        pairs.push(("insecure", "1".to_string()));
+    }
+    if let Some(ech) = exported_ech(&cfg.tls).and_then(EchSettings::link_value) {
+        pairs.push(("ech", ech));
+    }
+    format!(
+        "{}://{}{}:{}{}{}",
+        scheme,
+        userinfo,
+        host_for_uri(&profile.address),
+        profile.port,
+        build_query(&pairs),
         fragment_for(&profile.name),
     )
 }
@@ -1075,6 +1112,32 @@ mod tests {
             share_link_params: Default::default(),
         };
         assert_roundtrip(p);
+    }
+
+    #[test]
+    fn encode_naive_roundtrip() {
+        for quic in [false, true] {
+            assert_roundtrip(Profile {
+                id: Uuid::new_v4(),
+                name: "Naive".to_string(),
+                address: "n.example".to_string(),
+                port: 8443,
+                config: ProtocolConfig::Naive(NaiveConfig {
+                    username: Some("alice".to_string()),
+                    password: Some("p@ss word".to_string()),
+                    quic,
+                    tls: TlsCommon {
+                        server_name: Some("sni.example".to_string()),
+                        insecure: true,
+                        ech: Some(EchSettings::from_link_value("AEb+DQBC", true)),
+                        ..TlsCommon::default()
+                    },
+                }),
+                tags: Vec::new(),
+                subscription_id: None,
+                share_link_params: [("padding".to_string(), "1".into())].into(),
+            });
+        }
     }
 
     #[test]

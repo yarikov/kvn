@@ -100,6 +100,7 @@ impl Profile {
             | ProtocolConfig::Hysteria2(_)
             | ProtocolConfig::Shadowtls(_)
             | ProtocolConfig::Anytls(_)
+            | ProtocolConfig::Naive(_)
             | ProtocolConfig::Socks(_)
             | ProtocolConfig::Http(_)
             | ProtocolConfig::Ssh(_) => return None,
@@ -145,6 +146,11 @@ impl Profile {
             ProtocolConfig::Tuic(c) => format!("tuic:{}", c.uuid),
             ProtocolConfig::Shadowtls(c) => format!("shadowtls:{}", c.password),
             ProtocolConfig::Anytls(c) => format!("anytls:{}", c.password),
+            ProtocolConfig::Naive(c) => format!(
+                "naive:{}:{}",
+                c.username.as_deref().unwrap_or(""),
+                c.password.as_deref().unwrap_or("")
+            ),
             ProtocolConfig::Socks(c) => {
                 format!("socks:{}", c.username.as_deref().unwrap_or(""))
             }
@@ -390,6 +396,24 @@ mod tests {
             }),
             ..TlsCommon::default()
         }
+    }
+
+    #[test]
+    fn naive_dedup_merges_one_server_in_two_link_forms_and_keeps_quic_apart() {
+        let key = |link: &str| {
+            crate::config::profile::parse_share_link(link)
+                .unwrap()
+                .dedup_key()
+        };
+        let https = key("naive+https://alice:pw@n.example:443?peer=sni.example#A");
+        assert_eq!(
+            https,
+            key("http2://YWxpY2U6cHdAbi5leGFtcGxlOjQ0Mw==?peer=sni.example#A")
+        );
+        assert_ne!(
+            https,
+            key("naive+quic://alice:pw@n.example:443?peer=sni.example#A")
+        );
     }
 
     #[test]

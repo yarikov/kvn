@@ -16,8 +16,8 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │ ├ H-anytls                       anytls 8.8.8.8:443   ││                                                      │
 │ ├ I-socks                        socks  9.9.9.9:1080  ││                                                      │
 │ ├ J-http                         http   10.0.0.1:8080 ││                                                      │
-│ └ K-ssh                          ssh    10.0.0.2:22   ││                                                      │
-│                                                       ││                                                      │
+│ ├ K-ssh                          ssh    10.0.0.2:22   ││                                                      │
+│ └ L-naive                        naive  10.0.0.3:443  ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

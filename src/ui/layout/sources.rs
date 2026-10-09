@@ -388,9 +388,9 @@ mod tests {
     #[test]
     fn draw_sources_multi_protocol_badges_snapshot() {
         use crate::config::profile::{
-            AnytlsConfig, HttpConfig, Hysteria2Config, ProtocolConfig, ShadowsocksCipher,
-            ShadowsocksConfig, ShadowtlsConfig, SocksConfig, SshConfig, TrojanConfig, TuicConfig,
-            VmessConfig,
+            AnytlsConfig, HttpConfig, Hysteria2Config, NaiveConfig, ProtocolConfig,
+            ShadowsocksCipher, ShadowsocksConfig, ShadowtlsConfig, SocksConfig, SshConfig,
+            TrojanConfig, TuicConfig, VmessConfig,
         };
         use uuid::Uuid;
 
@@ -497,6 +497,12 @@ mod tests {
                     user: "root".to_string(),
                     ..Default::default()
                 }),
+            ),
+            make(
+                "L-naive",
+                "10.0.0.3",
+                443,
+                ProtocolConfig::Naive(NaiveConfig::default()),
             ),
         ];
         let mut model = model_with_profiles(profiles);
