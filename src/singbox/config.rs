@@ -336,15 +336,19 @@ impl DnsUpstreams {
     }
 }
 
+const CERTIFICATE_FINGERPRINT_PIN_KEYS: [&str; 2] = ["pinSHA256", "pcs"];
+
 pub fn certificate_pin_warning(profile: &Profile) -> Option<String> {
-    profile
-        .share_link_params
-        .get("pinSHA256")
-        .and_then(serde_json::Value::as_str)
-        .filter(|pin| !pin.is_empty())
-        .map(|_| {
-            "pinSHA256 is not checked: sing-box pins certificate public keys, not the certificate fingerprint the link gives, so the server certificate is verified only as the profile's TLS settings allow (not at all with insecure)".to_string()
-        })
+    let key = CERTIFICATE_FINGERPRINT_PIN_KEYS.into_iter().find(|key| {
+        profile
+            .share_link_params
+            .get(*key)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|pin| !pin.is_empty())
+    })?;
+    Some(format!(
+        "{key} is not checked: sing-box pins certificate public keys, not the certificate fingerprint the link gives, so the server certificate is verified only as the profile's TLS settings allow (not at all with insecure)"
+    ))
 }
 
 pub fn dns_bypass_warning(profile: &Profile, settings: &Settings) -> Option<String> {
@@ -1285,6 +1289,15 @@ mod tests {
                 .contains("pinSHA256 is not checked")
         );
         assert_eq!(certificate_pin_warning(&hysteria2(&[])), None);
+    }
+
+    #[test]
+    fn certificate_pin_warning_names_an_unchecked_pcs() {
+        assert!(
+            certificate_pin_warning(&hysteria2(&[("pcs", "ab01")]))
+                .unwrap()
+                .starts_with("pcs is not checked")
+        );
     }
 
     #[test]

@@ -103,7 +103,11 @@ fn mapped_query_keys(scheme: &str) -> Vec<&'static str> {
         "vless" => (true, true, &["flow", "security"]),
         "vmess" => (true, true, &["scy", "encryption", "security", "aid"]),
         "trojan" => (true, true, &[]),
-        "hysteria2" | "hy2" => (true, false, &["obfs", "obfs-password", "up", "down"]),
+        "hysteria2" | "hy2" => (
+            true,
+            false,
+            &["obfs", "obfs-password", "up", "down", "upmbps", "downmbps"],
+        ),
         "tuic" => (
             true,
             false,
@@ -637,8 +641,8 @@ fn parse_hysteria2(rest: &str) -> Result<Profile> {
         port,
         config: ProtocolConfig::Hysteria2(Hysteria2Config {
             password,
-            up_mbps: query.get("up").and_then(|s| s.parse().ok()),
-            down_mbps: query.get("down").and_then(|s| s.parse().ok()),
+            up_mbps: mbps(&query, "up", "upmbps"),
+            down_mbps: mbps(&query, "down", "downmbps"),
             obfs,
             tls: extract_tls_common_from_query(&query),
         }),
@@ -646,6 +650,13 @@ fn parse_hysteria2(rest: &str) -> Result<Profile> {
         subscription_id: None,
         share_link_params: Default::default(),
     })
+}
+
+fn mbps(query: &HashMap<String, String>, key: &str, alias: &str) -> Option<u32> {
+    query
+        .get(key)
+        .or_else(|| query.get(alias))
+        .and_then(|s| s.parse().ok())
 }
 
 /// Parse `tuic://uuid:password@host:port?congestion_control=&udp_relay_mode=&alpn=&sni=#name`.
@@ -1519,6 +1530,17 @@ mod tests {
         assert_eq!(cfg.tls.server_name.as_deref(), Some("sni.example"));
         assert!(cfg.tls.insecure);
         assert_eq!(cfg.tls.alpn, vec!["h3".to_string()]);
+    }
+
+    #[test]
+    fn parse_hysteria2_reads_s_ui_speeds() {
+        let p = parse_share_link("hysteria2://hp@hy.example:443?downmbps=200&upmbps=50&security=tls&sni=sni.example&fastopen=0#S-UI").unwrap();
+        let ProtocolConfig::Hysteria2(cfg) = &p.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        assert_eq!((cfg.up_mbps, cfg.down_mbps), (Some(50), Some(200)));
+        assert!(!p.share_link_params.contains_key("upmbps"));
+        assert!(!p.share_link_params.contains_key("downmbps"));
     }
 
     // ---- TUIC ----
