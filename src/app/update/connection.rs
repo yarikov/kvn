@@ -47,6 +47,7 @@ pub(in crate::app::update) fn on_connected(
             [
                 crate::singbox::config::dns_bypass_warning(p, &model.config.settings),
                 crate::singbox::config::certificate_pin_warning(p),
+                crate::singbox::config::ech_dns_warning(p, &model.config.settings),
             ]
             .into_iter()
             .flatten()
@@ -725,6 +726,32 @@ mod tests {
                 Effect::PersistConfirmedState
             ]
         );
+    }
+
+    #[test]
+    fn connected_warns_when_the_ech_config_is_looked_up_over_plain_dns() {
+        use crate::config::profile::{EchSettings, ProtocolConfig, TlsCommon, TrojanConfig};
+        let mut profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        profile.config = ProtocolConfig::Trojan(TrojanConfig {
+            password: "pw".into(),
+            tls: TlsCommon {
+                server_name: Some("ech.example".into()),
+                ech: Some(EchSettings {
+                    enabled: true,
+                    config: Vec::new(),
+                }),
+                ..TlsCommon::default()
+            },
+            ..TrojanConfig::default()
+        });
+        let mut model = model_with_profiles(vec![profile.clone()]);
+        model.config.settings.dns.current_preset = "system_local".into();
+        let warning =
+            crate::singbox::config::ech_dns_warning(&profile, &model.config.settings).unwrap();
+
+        on_connected(&mut model, 1, profile.id, 0);
+
+        assert_eq!(model.status, Some(AppStatus::Error(warning)));
     }
 
     #[test]

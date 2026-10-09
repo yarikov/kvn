@@ -224,6 +224,13 @@ impl ProtocolConfig {
         }
     }
 
+    pub fn tls(&self) -> Option<&TlsCommon> {
+        match self {
+            ProtocolConfig::Vless(c) => Some(&c.tls),
+            other => other.tls_common(),
+        }
+    }
+
     fn tls_common(&self) -> Option<&TlsCommon> {
         match self {
             ProtocolConfig::Vmess(c) => Some(&c.tls),
@@ -344,11 +351,7 @@ impl ProtocolConfig {
     }
 
     pub(super) fn endpoint_identity(&self) -> String {
-        let tls = match self {
-            ProtocolConfig::Vless(c) => Some(&c.tls),
-            other => other.tls_common(),
-        };
-        let tls_identity = match tls {
+        let tls_identity = match self.tls() {
             Some(TlsCommon {
                 reality: Some(reality),
                 ..

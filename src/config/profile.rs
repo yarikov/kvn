@@ -46,6 +46,6 @@ pub use share_link::{
 pub use subscription::Subscription;
 #[cfg(test)]
 pub use subscription::SubscriptionRetryState;
-#[cfg(test)]
-pub use tls::EchSettings;
-pub use tls::{Flow, RealitySettings, Security, TlsCommon, TransportConfig, TransportType};
+pub use tls::{
+    EchSettings, Flow, RealitySettings, Security, TlsCommon, TransportConfig, TransportType,
+};
