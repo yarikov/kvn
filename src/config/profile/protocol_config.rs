@@ -326,6 +326,47 @@ impl ProtocolConfig {
         }
         diagnostics
     }
+
+    pub(super) fn endpoint_identity(&self) -> String {
+        let tls = match self {
+            ProtocolConfig::Vless(c) => Some(&c.tls),
+            other => other.tls_common(),
+        };
+        let tls_identity = match tls {
+            Some(TlsCommon {
+                reality: Some(reality),
+                ..
+            }) => format!("|reality:{}", reality.server_name),
+            Some(tls) => format!("|tls:{}", tls.server_name.as_deref().unwrap_or("")),
+            None => String::new(),
+        };
+        let transport_identity = match self {
+            ProtocolConfig::Vless(VlessConfig {
+                transport_type: Some(kind),
+                transport_service_name,
+                ..
+            }) => format!(
+                "|{kind:?}:{}",
+                transport_service_name.as_deref().unwrap_or("")
+            ),
+            ProtocolConfig::Vmess(VmessConfig {
+                transport: Some(transport),
+                ..
+            })
+            | ProtocolConfig::Trojan(TrojanConfig {
+                transport: Some(transport),
+                ..
+            }) => format!(
+                "|{:?}:{}:{}:{}",
+                transport.kind,
+                transport.path.as_deref().unwrap_or(""),
+                transport.host.as_deref().unwrap_or(""),
+                transport.service_name.as_deref().unwrap_or("")
+            ),
+            _ => String::new(),
+        };
+        tls_identity + &transport_identity
+    }
 }
 
 #[cfg(test)]
