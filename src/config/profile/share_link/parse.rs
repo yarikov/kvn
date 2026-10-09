@@ -362,7 +362,9 @@ fn parse_vmess_b64(b64: &str) -> Result<Profile> {
     let port = v["port"]
         .as_u64()
         .or_else(|| v["port"].as_str().and_then(|s| s.parse().ok()))
-        .context("VMess: missing 'port'")? as u16;
+        .context("VMess: missing 'port'")?;
+    let port =
+        u16::try_from(port).with_context(|| format!("VMess: port {port} is out of range"))?;
     let uuid = v["id"].as_str().context("VMess: missing 'id'")?.to_string();
     let name = v["ps"]
         .as_str()
@@ -1703,6 +1705,20 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("missing 'add'"), "Error was: {err}");
+    }
+
+    #[test]
+    fn parse_vmess_b64_rejects_out_of_range_port() {
+        use base64::Engine;
+        let json = r#"{"add":"1.1.1.1","port":"70000","id":"u","ps":"X"}"#;
+        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes());
+        let err = parse_share_link(&format!("vmess://{b64}"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("port 70000 is out of range"),
+            "Error was: {err}"
+        );
     }
 
     #[test]
