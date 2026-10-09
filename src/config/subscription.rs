@@ -1,6 +1,6 @@
 use std::{collections::HashMap, env, process::Command};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use base64::Engine;
 use uuid::Uuid;
 
@@ -317,7 +317,7 @@ fn line_has_supported_scheme(line: &str) -> bool {
     })
 }
 
-fn try_parse_singbox_json(body: &str) -> Option<Vec<Profile>> {
+fn try_parse_xray_json(body: &str) -> Option<Vec<Profile>> {
     use serde_json::Value;
     let v: Value = serde_json::from_str(body).ok()?;
     let items: Vec<serde_json::Value> = match v {
@@ -328,177 +328,20 @@ fn try_parse_singbox_json(body: &str) -> Option<Vec<Profile>> {
 
     let mut profiles = Vec::new();
     for item in items {
+        let remarks = item.get("remarks").and_then(|x| x.as_str());
         let outbounds = item.get("outbounds").and_then(|x| x.as_array());
-        let objs = match outbounds {
-            Some(a) => a.iter().collect::<Vec<_>>(),
-            None => continue,
-        };
-
-        for ob in objs {
-            let proto = ob.get("protocol").and_then(|x| x.as_str()).unwrap_or("");
-            if proto != "vless" {
-                continue;
-            }
-
-            // settings.vnext[0]: address, port
-            let vnext = ob
-                .get("settings")
-                .and_then(|s| s.get("vnext"))
-                .and_then(|v| v.as_array())
-                .and_then(|a| a.first());
-            let vnext = match vnext {
-                Some(x) => x,
-                None => continue,
+        for ob in outbounds.into_iter().flatten() {
+            let link = match xray_vless_link(remarks, ob) {
+                Ok(Some(link)) => link,
+                Ok(None) => continue,
+                Err(e) => {
+                    tracing::warn!("subscription: xray-json: skipped VLESS outbound: {e}");
+                    continue;
+                }
             };
-
-            let addr = vnext.get("address").and_then(|x| x.as_str())?.to_string();
-            let port = vnext.get("port").and_then(|x| x.as_u64())? as u16;
-
-            // settings.vnext[0].users[0]: id, flow, encryption
-            let user = vnext
-                .get("users")
-                .and_then(|u| u.as_array())
-                .and_then(|u| u.first());
-            let user = match user {
-                Some(x) => x,
-                None => continue,
-            };
-            let uuid = user.get("id").and_then(|x| x.as_str())?.to_string();
-            let flow = user
-                .get("flow")
-                .and_then(|x| x.as_str())
-                .map(str::to_string);
-            let encryption = user
-                .get("encryption")
-                .and_then(|x| x.as_str())
-                .unwrap_or("none")
-                .to_string();
-
-            // streamSettings: network, security, + transport / tls / reality
-            let ss = ob.get("streamSettings").cloned().unwrap_or(Value::Null);
-            let network = ss
-                .get("network")
-                .and_then(|x| x.as_str())
-                .unwrap_or("tcp")
-                .to_string();
-            let security = ss
-                .get("security")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            // собираем query-параметры в порядке, который ждёт парсер share-link
-            let mut q = vec![
-                ("type", network.as_str()),
-                ("encryption", encryption.as_str()),
-            ];
-            let mut fp = None;
-            let mut pbk = None;
-            let mut sid = None;
-            let mut sni = None;
-            if security == "reality" {
-                if let Some(rs) = ss.get("realitySettings") {
-                    sni = rs
-                        .get("serverName")
-                        .and_then(|x| x.as_str())
-                        .map(str::to_string);
-                    pbk = rs
-                        .get("publicKey")
-                        .and_then(|x| x.as_str())
-                        .map(str::to_string);
-                    sid = rs
-                        .get("shortId")
-                        .and_then(|x| x.as_str())
-                        .map(str::to_string);
-                    fp = rs
-                        .get("fingerprint")
-                        .and_then(|x| x.as_str())
-                        .map(str::to_string);
-                }
-                q.push(("security", "reality"));
-            } else if security == "tls" {
-                q.push(("security", "tls"));
-                if let Some(ts) = ss.get("tlsSettings") {
-                    sni = ts
-                        .get("serverName")
-                        .and_then(|x| x.as_str())
-                        .map(str::to_string);
-                    fp = ts
-                        .get("fingerprint")
-                        .and_then(|x| x.as_str())
-                        .map(str::to_string);
-                }
-            }
-            if let Some(ref s) = sni {
-                q.push(("sni", s.as_str()));
-            }
-            if let Some(ref p) = pbk {
-                q.push(("pbk", p.as_str()));
-            }
-            if let Some(ref s) = sid {
-                q.push(("sid", s.as_str()));
-            }
-            if let Some(ref f) = fp {
-                q.push(("fp", f.as_str()));
-            }
-            if let Some(ref f) = flow {
-                q.push(("flow", f.as_str()));
-            }
-
-            let transport = ss.get("wsSettings");
-
-            // транспорт (для ws / grpc / http)
-            match network.as_str() {
-                "ws" => {
-                    if let Some(ws) = transport {
-                        if let Some(path) = ws.get("path").and_then(|x| x.as_str()) {
-                            q.push(("path", path));
-                        }
-                        if let Some(host) = ws
-                            .get("headers")
-                            .and_then(|h| h.get("Host"))
-                            .and_then(|x| x.as_str())
-                        {
-                            q.push(("host", host));
-                        }
-                    }
-                }
-                "grpc" => {
-                    if let Some(g) = ss.get("grpcSettings")
-                        && let Some(sn) = g.get("serviceName")
-                        && let Some(sn) = sn.as_str()
-                    {
-                        q.push(("serviceName", sn));
-                    }
-                }
-                _ => {}
-            }
-
-            let query = q
-                .iter()
-                .map(|(k, v)| format!("{}={}", urlencode(k), urlencode(v)))
-                .collect::<Vec<_>>()
-                .join("&");
-
-            // имя — поле `remarks` если есть, иначе адрес
-            let name = item
-                .get("remarks")
-                .and_then(|x| x.as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| addr.clone());
-
-            let uri = format!(
-                "vless://{uuid}@{addr}:{port}?{query}#{name}",
-                uuid = uuid,
-                addr = addr,
-                port = port,
-                query = query,
-                name = urlencode(&name),
-            );
-
-            match parse_share_link(&uri) {
+            match parse_share_link(&link) {
                 Ok(p) => profiles.push(p),
-                Err(e) => tracing::warn!("subscription: singbox-json: bad vless URI: {e}"),
+                Err(e) => tracing::warn!("subscription: xray-json: bad vless URI: {e}"),
             }
         }
     }
@@ -507,6 +350,176 @@ fn try_parse_singbox_json(body: &str) -> Option<Vec<Profile>> {
     } else {
         Some(profiles)
     }
+}
+
+fn xray_vless_link(remarks: Option<&str>, ob: &serde_json::Value) -> Result<Option<String>> {
+    use serde_json::Value;
+    let proto = ob.get("protocol").and_then(|x| x.as_str()).unwrap_or("");
+    if proto != "vless" {
+        return Ok(None);
+    }
+
+    // settings.vnext[0]: address, port
+    let vnext = ob
+        .get("settings")
+        .and_then(|s| s.get("vnext"))
+        .and_then(|v| v.as_array())
+        .and_then(|a| a.first());
+    let Some(vnext) = vnext else {
+        return Ok(None);
+    };
+
+    let addr = vnext
+        .get("address")
+        .and_then(|x| x.as_str())
+        .context("missing address")?
+        .to_string();
+    let port = vnext
+        .get("port")
+        .and_then(|x| x.as_u64())
+        .context("missing port")?;
+    let port = u16::try_from(port).with_context(|| format!("port {port} is out of range"))?;
+
+    // settings.vnext[0].users[0]: id, flow, encryption
+    let user = vnext
+        .get("users")
+        .and_then(|u| u.as_array())
+        .and_then(|u| u.first());
+    let Some(user) = user else {
+        return Ok(None);
+    };
+    let uuid = user
+        .get("id")
+        .and_then(|x| x.as_str())
+        .context("missing user id")?
+        .to_string();
+    let flow = user
+        .get("flow")
+        .and_then(|x| x.as_str())
+        .map(str::to_string);
+    let encryption = user
+        .get("encryption")
+        .and_then(|x| x.as_str())
+        .unwrap_or("none")
+        .to_string();
+
+    // streamSettings: network, security, + transport / tls / reality
+    let ss = ob.get("streamSettings").cloned().unwrap_or(Value::Null);
+    let network = ss
+        .get("network")
+        .and_then(|x| x.as_str())
+        .unwrap_or("tcp")
+        .to_string();
+    let security = ss
+        .get("security")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // собираем query-параметры в порядке, который ждёт парсер share-link
+    let mut q = vec![
+        ("type", network.as_str()),
+        ("encryption", encryption.as_str()),
+    ];
+    let mut fp = None;
+    let mut pbk = None;
+    let mut sid = None;
+    let mut sni = None;
+    if security == "reality" {
+        if let Some(rs) = ss.get("realitySettings") {
+            sni = rs
+                .get("serverName")
+                .and_then(|x| x.as_str())
+                .map(str::to_string);
+            pbk = rs
+                .get("publicKey")
+                .and_then(|x| x.as_str())
+                .map(str::to_string);
+            sid = rs
+                .get("shortId")
+                .and_then(|x| x.as_str())
+                .map(str::to_string);
+            fp = rs
+                .get("fingerprint")
+                .and_then(|x| x.as_str())
+                .map(str::to_string);
+        }
+        q.push(("security", "reality"));
+    } else if security == "tls" {
+        q.push(("security", "tls"));
+        if let Some(ts) = ss.get("tlsSettings") {
+            sni = ts
+                .get("serverName")
+                .and_then(|x| x.as_str())
+                .map(str::to_string);
+            fp = ts
+                .get("fingerprint")
+                .and_then(|x| x.as_str())
+                .map(str::to_string);
+        }
+    }
+    if let Some(ref s) = sni {
+        q.push(("sni", s.as_str()));
+    }
+    if let Some(ref p) = pbk {
+        q.push(("pbk", p.as_str()));
+    }
+    if let Some(ref s) = sid {
+        q.push(("sid", s.as_str()));
+    }
+    if let Some(ref f) = fp {
+        q.push(("fp", f.as_str()));
+    }
+    if let Some(ref f) = flow {
+        q.push(("flow", f.as_str()));
+    }
+
+    let transport = ss.get("wsSettings");
+
+    // транспорт (для ws / grpc / http)
+    match network.as_str() {
+        "ws" => {
+            if let Some(ws) = transport {
+                if let Some(path) = ws.get("path").and_then(|x| x.as_str()) {
+                    q.push(("path", path));
+                }
+                if let Some(host) = ws
+                    .get("headers")
+                    .and_then(|h| h.get("Host"))
+                    .and_then(|x| x.as_str())
+                {
+                    q.push(("host", host));
+                }
+            }
+        }
+        "grpc" => {
+            if let Some(g) = ss.get("grpcSettings")
+                && let Some(sn) = g.get("serviceName")
+                && let Some(sn) = sn.as_str()
+            {
+                q.push(("serviceName", sn));
+            }
+        }
+        _ => {}
+    }
+
+    let query = q
+        .iter()
+        .map(|(k, v)| format!("{}={}", urlencode(k), urlencode(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+
+    // имя — поле `remarks` если есть, иначе адрес
+    let name = remarks.map_or_else(|| addr.clone(), str::to_string);
+
+    Ok(Some(format!(
+        "vless://{uuid}@{addr}:{port}?{query}#{name}",
+        uuid = uuid,
+        addr = addr,
+        port = port,
+        query = query,
+        name = urlencode(&name),
+    )))
 }
 
 fn urlencode(s: &str) -> String {
@@ -531,7 +544,7 @@ pub fn parse_subscription_body(body: &str) -> Result<Vec<Profile>> {
         anyhow::bail!("Subscription body is empty");
     }
 
-    if let Some(profiles) = try_parse_singbox_json(trimmed) {
+    if let Some(profiles) = try_parse_xray_json(trimmed) {
         return Ok(profiles);
     }
 
@@ -928,7 +941,7 @@ mod tests {
         assert!(msg.contains("not base64!!!"), "got: {msg}");
     }
 
-    fn singbox_json_body() -> String {
+    fn xray_json_body() -> String {
         r#"{
             "remarks": "JSON node",
             "outbounds": [{
@@ -956,8 +969,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_singbox_json_object() {
-        let profiles = parse_subscription_body(&singbox_json_body()).unwrap();
+    fn parse_xray_json_object() {
+        let profiles = parse_subscription_body(&xray_json_body()).unwrap();
         assert_eq!(profiles.len(), 1);
         assert_eq!(profiles[0].name, "JSON node");
         assert_eq!(profiles[0].address, "198.51.100.7");
@@ -965,27 +978,43 @@ mod tests {
     }
 
     #[test]
-    fn parse_singbox_json_array() {
-        let single = singbox_json_body();
+    fn parse_xray_json_array() {
+        let single = xray_json_body();
         let body = format!("[{}, {}]", single, single);
         let profiles = parse_subscription_body(&body).unwrap();
         assert_eq!(profiles.len(), 2);
     }
 
     #[test]
-    fn parse_singbox_json_malformed_falls_back_to_text_and_fails() {
+    fn parse_xray_json_skips_only_the_broken_outbound() {
+        let valid: serde_json::Value = serde_json::from_str(&xray_json_body()).unwrap();
+        let mut out_of_range = valid.clone();
+        out_of_range["outbounds"][0]["settings"]["vnext"][0]["port"] = 70000.into();
+        let mut without_id = valid.clone();
+        without_id["outbounds"][0]["settings"]["vnext"][0]["users"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("id");
+        let body = serde_json::json!([out_of_range, without_id, valid]).to_string();
+        let profiles = parse_subscription_body(&body).unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].port, 8443);
+    }
+
+    #[test]
+    fn parse_xray_json_malformed_falls_back_to_text_and_fails() {
         let body = "{not valid json, and not share links either}";
         assert!(parse_subscription_body(body).is_err());
     }
 
     #[test]
-    fn parse_singbox_json_without_vless_outbounds_fails() {
+    fn parse_xray_json_without_vless_outbounds_fails() {
         let body = r#"{"outbounds": [{"protocol": "shadowsocks"}]}"#;
         assert!(parse_subscription_body(body).is_err());
     }
 
     #[test]
-    fn parse_singbox_json_malformed_outbound_fields_are_skipped() {
+    fn parse_xray_json_malformed_outbound_fields_are_skipped() {
         // vless outbound missing `settings.vnext` — must not panic; the body
         // falls through to text parsing and fails cleanly.
         let body = r#"{"outbounds": [{"protocol": "vless"}]}"#;
