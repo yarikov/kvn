@@ -5,7 +5,7 @@ use base64::Engine;
 use uuid::Uuid;
 
 use crate::config::profile::{
-    Profile, SUPPORTED_SHARE_SCHEMES, Settings, Subscription, parse_share_link,
+    Profile, SUPPORTED_SHARE_SCHEMES, Settings, Subscription, decode_b64_lenient, parse_share_link,
 };
 
 const KVN_TUI_USER_AGENT: &str = concat!("kvn-tui/", env!("CARGO_PKG_VERSION"));
@@ -561,7 +561,7 @@ pub fn parse_subscription_body(body: &str) -> Result<Vec<Profile>> {
 /// succeeds and the result looks like a subscription (contains at least one
 /// supported scheme prefix). This prevents treating plain text as binary garbage.
 fn try_decode_base64(text: &str) -> Result<Option<String>> {
-    let Some(decoded_bytes) = base64::engine::general_purpose::STANDARD.decode(text).ok() else {
+    let Ok(decoded_bytes) = decode_b64_lenient(text) else {
         return Ok(None);
     };
     ensure_subscription_size(decoded_bytes.len(), "decoded body")?;
@@ -601,6 +601,23 @@ mod tests {
         let encoded = base64::engine::general_purpose::STANDARD.encode(&plain);
         let profiles = parse_subscription_body(&encoded).unwrap();
         assert_eq!(profiles.len(), 2);
+    }
+
+    #[test]
+    fn parse_base64_body_in_lenient_encodings() {
+        let plain = format!("{}\n{}?sni=a.example\n", sample_vless(), sample_vless());
+        let unpadded = base64::engine::general_purpose::STANDARD_NO_PAD.encode(&plain);
+        let url_safe = base64::engine::general_purpose::URL_SAFE.encode(&plain);
+        assert!(url_safe.contains(['-', '_']) && plain.len() % 3 != 0);
+        let wrapped = unpadded
+            .as_bytes()
+            .chunks(76)
+            .map(|line| std::str::from_utf8(line).unwrap())
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        for body in [unpadded, url_safe, wrapped] {
+            assert_eq!(parse_subscription_body(&body).unwrap().len(), 2, "{body}");
+        }
     }
 
     #[test]

@@ -54,7 +54,7 @@ fn fragment_name(url: &Url, fallback: &str) -> Result<String> {
     })
 }
 
-fn decode_b64_lenient(s: &str) -> Result<Vec<u8>> {
+pub(crate) fn decode_b64_lenient(s: &str) -> Result<Vec<u8>> {
     use base64::Engine;
     let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
     // Try URL-safe-no-pad first (ss://, vmess JSON often), then standard.
