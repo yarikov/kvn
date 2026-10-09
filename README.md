@@ -52,7 +52,7 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
 
 ## Supported Protocols
 
-`kvn` supports 11 sing-box outbound protocols. Profiles and subscriptions can be added from
+`kvn` supports 12 sing-box outbound protocols. Profiles and subscriptions can be added from
 the clipboard using supported share links.
 
 | Protocol | Share-link scheme(s) | Key support |
@@ -70,6 +70,7 @@ the clipboard using supported share links.
 | **VMess** | `vmess://` | Base64 JSON and URI formats; TLS with ECH and shared transports |
 | **TUIC** | `tuic://` | TUIC v5, congestion control, and UDP relay modes |
 | **AnyTLS** | `anytls://` | TLS-based multiplexing |
+| **NaiveProxy** | `naive+https://`, `naive+quic://`, `http2://` | Chromium network stack over HTTP/2 or QUIC; no UDP |
 | **ShadowTLS** | `shadowtls://` | Versions 1–3 with an inner Shadowsocks connection |
 | **SOCKS** | `socks://`, `socks5://`, `socks5h://`, `socks4://`, `socks4a://` | SOCKS4, SOCKS4a, SOCKS5, and optional authentication |
 | **HTTP proxy** | `http://`, `https://` | HTTP CONNECT with optional TLS and authentication |

@@ -9,7 +9,7 @@ use crate::config::profile::{
     RoutedService, RoutingMode, ServiceRoute, Settings,
 };
 use crate::singbox::outbound::{
-    build_anytls_outbound, build_http_outbound, build_hysteria2_outbound,
+    build_anytls_outbound, build_http_outbound, build_hysteria2_outbound, build_naive_outbound,
     build_shadowsocks_outbound, build_shadowtls_outbounds, build_socks_outbound,
     build_ssh_outbound, build_trojan_outbound, build_tuic_outbound, build_vless_outbound,
     build_vmess_outbound, proxy_carries_udp,
@@ -718,6 +718,7 @@ fn build_outbound(profile: &Profile) -> anyhow::Result<Vec<Value>> {
         ProtocolConfig::Tuic(cfg) => vec![build_tuic_outbound(profile, cfg)?],
         ProtocolConfig::Shadowtls(cfg) => build_shadowtls_outbounds(profile, cfg)?,
         ProtocolConfig::Anytls(cfg) => vec![build_anytls_outbound(profile, cfg)?],
+        ProtocolConfig::Naive(cfg) => vec![build_naive_outbound(profile, cfg)?],
         ProtocolConfig::Socks(cfg) => vec![build_socks_outbound(profile, cfg)?],
         ProtocolConfig::Http(cfg) => vec![build_http_outbound(profile, cfg)?],
         ProtocolConfig::Ssh(cfg) => vec![build_ssh_outbound(profile, cfg)?],
@@ -1478,6 +1479,34 @@ mod tests {
         assert_eq!(outbound["password"], "anytls-pass");
         assert_eq!(outbound["idle_session_timeout"], "30s");
         assert_eq!(outbound["tls"]["enabled"], true);
+    }
+
+    #[test]
+    fn naive_outbound_shape() {
+        use crate::config::profile::NaiveConfig;
+        let outbound = build_one(&profile_with(
+            ProtocolConfig::Naive(NaiveConfig {
+                username: Some("alice".into()),
+                password: Some("pw".into()),
+                quic: true,
+                ..Default::default()
+            }),
+            "n.example",
+            443,
+        ));
+        assert_eq!(
+            outbound,
+            json!({
+                "type": "naive",
+                "tag": "proxy",
+                "server": "n.example",
+                "server_port": 443,
+                "username": "alice",
+                "password": "pw",
+                "quic": true,
+                "tls": { "enabled": true, "server_name": "n.example" }
+            })
+        );
     }
 
     #[test]

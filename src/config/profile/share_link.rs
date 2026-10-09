@@ -34,6 +34,9 @@ pub const SUPPORTED_SHARE_SCHEMES: &[&str] = &[
     "ssh://",
     "anytls://",
     "shadowtls://",
+    "naive+https://",
+    "naive+quic://",
+    "http2://",
 ];
 
 pub fn is_http_proxy_link(link: &str) -> bool {

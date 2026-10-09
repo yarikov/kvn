@@ -140,6 +140,18 @@ pub struct AnytlsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
+pub struct NaiveConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quic: bool,
+    #[serde(default, flatten)]
+    pub tls: TlsCommon,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SocksConfig {
     #[serde(default)]
@@ -186,7 +198,7 @@ pub struct SshConfig {
 /// For VLESS this preserves the historic `profiles.json` shape exactly.
 ///
 /// Structs that carry `#[serde(flatten)] tls: TlsCommon` (Vless/Vmess/Trojan/
-/// Hysteria2/Tuic/Shadowtls/Anytls/Http) cannot use `#[serde(deny_unknown_fields)]`
+/// Hysteria2/Tuic/Shadowtls/Anytls/Naive/Http) cannot use `#[serde(deny_unknown_fields)]`
 /// — serde silently disables the check whenever `flatten` is present, since it
 /// can no longer tell which fields "belong" to the parent versus the flattened
 /// child. Typos inside those variants therefore still deserialize as `None`.
@@ -202,6 +214,7 @@ pub enum ProtocolConfig {
     Tuic(TuicConfig),
     Shadowtls(ShadowtlsConfig),
     Anytls(AnytlsConfig),
+    Naive(NaiveConfig),
     Socks(SocksConfig),
     Http(HttpConfig),
     Ssh(SshConfig),
@@ -218,6 +231,7 @@ impl ProtocolConfig {
             ProtocolConfig::Tuic(_) => Protocol::Tuic,
             ProtocolConfig::Shadowtls(_) => Protocol::Shadowtls,
             ProtocolConfig::Anytls(_) => Protocol::Anytls,
+            ProtocolConfig::Naive(_) => Protocol::Naive,
             ProtocolConfig::Socks(_) => Protocol::Socks,
             ProtocolConfig::Http(_) => Protocol::Http,
             ProtocolConfig::Ssh(_) => Protocol::Ssh,
@@ -239,6 +253,7 @@ impl ProtocolConfig {
             ProtocolConfig::Tuic(c) => Some(&c.tls),
             ProtocolConfig::Shadowtls(c) => Some(&c.tls),
             ProtocolConfig::Anytls(c) => Some(&c.tls),
+            ProtocolConfig::Naive(c) => Some(&c.tls),
             ProtocolConfig::Http(c) => Some(&c.tls),
             // VLESS keeps reality/ech flat on VlessConfig; no shared block.
             ProtocolConfig::Vless(_)
@@ -332,7 +347,7 @@ impl ProtocolConfig {
                     "anytls.password must not be empty",
                 );
             }
-            ProtocolConfig::Socks(_) | ProtocolConfig::Http(_) => {}
+            ProtocolConfig::Naive(_) | ProtocolConfig::Socks(_) | ProtocolConfig::Http(_) => {}
             ProtocolConfig::Ssh(c) => {
                 require(
                     c.user.trim().is_empty(),
@@ -378,6 +393,7 @@ impl ProtocolConfig {
                 transport.host.as_deref().unwrap_or(""),
                 transport.service_name.as_deref().unwrap_or("")
             ),
+            ProtocolConfig::Naive(NaiveConfig { quic: true, .. }) => "|quic".to_string(),
             _ => String::new(),
         };
         tls_identity + &transport_identity

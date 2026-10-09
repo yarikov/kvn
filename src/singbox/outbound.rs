@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, HashMap};
 use serde_json::{Map, Value, json};
 
 use crate::config::profile::{
-    AnytlsConfig, HttpConfig, Hysteria2Config, Profile, ProtocolConfig, Security,
+    AnytlsConfig, HttpConfig, Hysteria2Config, NaiveConfig, Profile, ProtocolConfig, Security,
     ShadowsocksConfig, ShadowtlsConfig, ShadowtlsVersion, SocksConfig, SocksVersion, SshConfig,
     TlsCommon, TransportConfig, TransportType, TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
 };
@@ -421,6 +421,26 @@ pub(super) fn build_anytls_outbound(
     Ok(outbound)
 }
 
+pub(super) fn build_naive_outbound(profile: &Profile, cfg: &NaiveConfig) -> anyhow::Result<Value> {
+    let mut outbound = json!({
+        "type": "naive",
+        "tag": "proxy",
+        "server": profile.address,
+        "server_port": profile.port,
+        "tls": build_tls_block(&profile.address, &[], &cfg.tls),
+    });
+    if let Some(username) = cfg.username.as_deref() {
+        outbound["username"] = json!(username);
+    }
+    if let Some(password) = cfg.password.as_deref() {
+        outbound["password"] = json!(password);
+    }
+    if cfg.quic {
+        outbound["quic"] = json!(true);
+    }
+    Ok(outbound)
+}
+
 /// Build SOCKS outbound (no TLS layer in sing-box; use ShadowTLS for that).
 pub(super) fn build_socks_outbound(profile: &Profile, cfg: &SocksConfig) -> anyhow::Result<Value> {
     let mut outbound = json!({
@@ -500,7 +520,10 @@ pub(super) fn build_ssh_outbound(profile: &Profile, cfg: &SshConfig) -> anyhow::
 
 pub(super) fn proxy_carries_udp(config: &ProtocolConfig) -> bool {
     match config {
-        ProtocolConfig::Http(_) | ProtocolConfig::Ssh(_) | ProtocolConfig::Shadowtls(_) => false,
+        ProtocolConfig::Http(_)
+        | ProtocolConfig::Ssh(_)
+        | ProtocolConfig::Shadowtls(_)
+        | ProtocolConfig::Naive(_) => false,
         ProtocolConfig::Socks(cfg) => cfg.version == SocksVersion::V5,
         ProtocolConfig::Vless(_)
         | ProtocolConfig::Vmess(_)
@@ -542,6 +565,7 @@ mod tests {
             (ProtocolConfig::Http(HttpConfig::default()), false),
             (ProtocolConfig::Ssh(SshConfig::default()), false),
             (ProtocolConfig::Shadowtls(ShadowtlsConfig::default()), false),
+            (ProtocolConfig::Naive(NaiveConfig::default()), false),
         ];
         for (config, carries_udp) in cases {
             assert_eq!(proxy_carries_udp(&config), carries_udp, "{config:?}");
