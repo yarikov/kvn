@@ -31,6 +31,16 @@ impl ToastState {
         false
     }
 
+    pub(super) fn reattach(
+        &mut self,
+        revision: u64,
+        status: Option<AppStatus>,
+        now: Instant,
+    ) -> Option<u64> {
+        *self = Self::new(revision);
+        self.show_initial_error(status, now).then_some(revision)
+    }
+
     pub(super) fn show_info(&mut self, message: impl Into<String>, now: Instant) {
         self.status = Some(AppStatus::Info(message.into()));
         self.expires_at = Some(now + TOAST_INFO_DURATION);
@@ -168,5 +178,28 @@ mod tests {
 
         toast.observe(3, Some(AppStatus::Info("Recovered".into())), start);
         assert_eq!(toast.current().map(AppStatus::text), Some("Recovered"));
+    }
+    #[test]
+    fn reattached_daemon_statuses_are_shown_even_when_revisions_repeat() {
+        let start = Instant::now();
+        let mut toast = ToastState::new(0);
+        toast.observe(5, Some(AppStatus::Info("Old daemon".into())), start);
+
+        assert_eq!(toast.reattach(1, None, start), None);
+        assert!(toast.current().is_none());
+        assert_eq!(
+            toast.observe(5, Some(AppStatus::Error("New failure".into())), start),
+            Some(5)
+        );
+        assert_eq!(toast.current().map(AppStatus::text), Some("New failure"));
+
+        assert_eq!(
+            toast.reattach(7, Some(AppStatus::Error("Pending failure".into())), start),
+            Some(7)
+        );
+        assert_eq!(
+            toast.current().map(AppStatus::text),
+            Some("Pending failure")
+        );
     }
 }

@@ -278,7 +278,7 @@ Background work is executed in dedicated threads spawned by the **daemon** (`dae
 The **TUI client** (`tui_client.rs`) additionally spawns:
 - **Event reader** — reads terminal input (`tui_client/input.rs`) and sends `Msg::Key`, `Msg::Mouse`, `Msg::Paste` and `Msg::Resize` to the local TUI channel. Reading can be paused while `$EDITOR` is open.
 - **Ticker** — sends `Msg::Tick` every 250 ms; on each tick `LogTailer` (`services/log_tailer.rs`) reads the new lines of both log files for the log pane.
-- **IPC reader** — reads NDJSON state snapshots from the daemon socket and forwards them as `Msg::StateUpdate`.
+- **IPC reader** — reads NDJSON state snapshots from the daemon socket and forwards them as `Msg::StateUpdate`; when the connection drops it sends `Msg::DaemonDisconnected`, and the client loop reattaches and applies the fresh snapshot, or, when the daemon is a different version, restarts the TUI from the daemon's executable.
 
 ### Daemon + TUI Client Architecture
 - **Daemon** (`kvn --daemon`) runs headless. It owns the canonical `Model`, the `mpsc` channel, the sing-box `process_slot`, the config, geo updates, suspend/resume handling, and the background services (§ Background Services). It binds a Unix domain socket for IPC.

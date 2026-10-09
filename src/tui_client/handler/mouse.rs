@@ -152,9 +152,7 @@ fn release(state: &mut ClientLoop, mouse: MouseEvent) -> Result<()> {
             Ok(()) => state.client.send(&IpcCommand::Copied {
                 target: CopiedTarget::Logs,
             })?,
-            Err(error) => state.client.send(&IpcCommand::ClientError {
-                message: format!("Log copy failed: {error:#}"),
-            })?,
+            Err(error) => state.report_error(format!("Log copy failed: {error:#}"))?,
         }
     }
     state.needs_redraw = true;

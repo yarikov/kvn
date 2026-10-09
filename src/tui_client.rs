@@ -167,21 +167,38 @@ pub fn run() -> Result<()> {
         &mut model,
         rx,
         &mut client,
+        tx,
         &mut log_tailer,
         event_reader_control,
     )?;
     drop(terminal);
     drop(terminal_session);
-    if outcome == TuiExit::RestartDaemon {
-        crate::systemd::restart_daemon_unit();
+    match outcome {
+        TuiExit::Normal => Ok(()),
+        TuiExit::RestartDaemon => {
+            crate::systemd::restart_daemon_unit();
+            Ok(())
+        }
+        TuiExit::Relaunch(executable) => relaunch(&executable),
     }
-    Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+fn relaunch(executable: &std::path::Path) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+
+    let mut args = std::env::args_os();
+    let error = std::process::Command::new(executable)
+        .arg0(args.next().unwrap_or_default())
+        .args(args)
+        .exec();
+    Err(error).with_context(|| format!("Failed to start kvn from {}", executable.display()))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum TuiExit {
     Normal,
     RestartDaemon,
+    Relaunch(std::path::PathBuf),
 }
 
 fn reconnect_profile_from_snapshot(value: &serde_json::Value) -> Option<uuid::Uuid> {
@@ -309,11 +326,18 @@ fn run_loop(
     model: &mut Model,
     rx: std::sync::mpsc::Receiver<Msg>,
     client: &mut IpcClient,
+    tx: Sender<Msg>,
     log_tailer: &mut LogTailer,
     event_reader_control: Arc<input::EventReaderControl>,
 ) -> Result<TuiExit> {
-    let mut state =
-        handler::ClientLoop::new(terminal, model, client, log_tailer, event_reader_control)?;
+    let mut state = handler::ClientLoop::new(
+        terminal,
+        model,
+        client,
+        tx,
+        log_tailer,
+        event_reader_control,
+    )?;
     state.initial_draw()?;
     loop {
         match state.handle(rx.recv()?)? {

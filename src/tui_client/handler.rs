@@ -7,6 +7,7 @@ mod wheel;
 
 use std::io;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -16,18 +17,21 @@ use ratatui::layout::Rect;
 
 use crate::app::model::{AppStatus, MainPaneFocus, Model, Overlay};
 use crate::app::msg::{IpcCommand, Msg, StateSnapshot};
-use crate::ipc::IpcClient;
+use crate::ipc::{DaemonConnectionLost, IpcClient};
 use crate::services::LogTailer;
 use crate::ui::layout::{LogNavigation, LogSelection};
 use crate::ui::styles::Theme;
 
-use super::{TuiExit, apply_snapshot, apply_terminal_colors, input, theme_watch};
+use super::{
+    TuiExit, apply_snapshot, apply_terminal_colors, input, snapshot_is_compatible, theme_watch,
+};
 use key::GoFirstSequence;
 use pointer::{ClickTracker, PointerShape, update_pointer_shape};
 use toast::ToastState;
 use wheel::WheelAccelerator;
 
 pub(super) const IPC_INTERACTION_TIMEOUT: Duration = Duration::from_secs(2);
+const DAEMON_RECONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(super) enum Flow {
     Continue,
@@ -38,6 +42,7 @@ pub(super) struct ClientLoop<'a> {
     terminal: &'a mut Terminal<CrosstermBackend<io::Stdout>>,
     model: &'a mut Model,
     client: &'a mut IpcClient,
+    tx: Sender<Msg>,
     log_tailer: &'a mut LogTailer,
     event_reader_control: Arc<input::EventReaderControl>,
     pane_focus: MainPaneFocus,
@@ -53,6 +58,7 @@ pub(super) struct ClientLoop<'a> {
     wheel: WheelAccelerator,
     scroll_queue: scroll::ScrollQueue,
     pending_error_status_clear: Option<u64>,
+    unreported_error: Option<String>,
     needs_redraw: bool,
 }
 
@@ -61,6 +67,7 @@ impl<'a> ClientLoop<'a> {
         terminal: &'a mut Terminal<CrosstermBackend<io::Stdout>>,
         model: &'a mut Model,
         client: &'a mut IpcClient,
+        tx: Sender<Msg>,
         log_tailer: &'a mut LogTailer,
         event_reader_control: Arc<input::EventReaderControl>,
     ) -> Result<Self> {
@@ -70,6 +77,7 @@ impl<'a> ClientLoop<'a> {
             terminal,
             model,
             client,
+            tx,
             log_tailer,
             event_reader_control,
             pane_focus,
@@ -85,6 +93,7 @@ impl<'a> ClientLoop<'a> {
             wheel: WheelAccelerator::default(),
             scroll_queue: scroll::ScrollQueue::default(),
             pending_error_status_clear: None,
+            unreported_error: None,
             needs_redraw: false,
         };
         if !crate::ui::layout::logs_visible(state.terminal_area()?)
@@ -109,6 +118,15 @@ impl<'a> ClientLoop<'a> {
     }
 
     pub(super) fn handle(&mut self, msg: Msg) -> Result<Flow> {
+        match self.dispatch(msg) {
+            Err(error) if error.downcast_ref::<DaemonConnectionLost>().is_some() => {
+                Ok(Flow::Continue)
+            }
+            result => result,
+        }
+    }
+
+    fn dispatch(&mut self, msg: Msg) -> Result<Flow> {
         self.needs_redraw = false;
         let flow = match msg {
             Msg::Mouse(mouse) => mouse::handle(self, mouse)?,
@@ -119,6 +137,7 @@ impl<'a> ClientLoop<'a> {
             }
             Msg::StateUpdate { snapshot, .. } => self.apply_state_update(*snapshot)?,
             Msg::IpcReadFailed { message, .. } => anyhow::bail!(message),
+            Msg::DaemonDisconnected => self.reconnect()?,
             Msg::Tick => self.tick()?,
             Msg::Resize => self.resize()?,
             Msg::ThemeChanged(theme)
@@ -187,6 +206,41 @@ impl<'a> ClientLoop<'a> {
         self.refresh_pointer_shape()?;
         self.needs_redraw = true;
         Ok(Flow::Continue)
+    }
+
+    fn reconnect(&mut self) -> Result<Flow> {
+        let attached = reattach(self.tx.clone()).map_err(|error| {
+            anyhow::anyhow!("Lost connection to the kvn daemon and could not reconnect: {error:#}")
+        })?;
+        let (client, snapshot) = match attached {
+            Reattached::Attached(client, snapshot) => (client, *snapshot),
+            Reattached::OtherVersion(executable) => {
+                return Ok(Flow::Exit(TuiExit::Relaunch(executable)));
+            }
+        };
+        *self.client = client;
+        self.scroll_queue.cancel();
+        self.pending_focus = None;
+        let revision = snapshot.status_revision;
+        let status = AppStatus::from_snapshot(snapshot.status.clone(), snapshot.status_is_error);
+        let flow = self.apply_state_update(snapshot)?;
+        self.pending_error_status_clear = self.toast.reattach(revision, status, Instant::now());
+        if let Some(message) = self.unreported_error.take() {
+            self.report_error(message)?;
+        }
+        Ok(flow)
+    }
+
+    fn report_error(&mut self, message: String) -> Result<()> {
+        match self.client.send(&IpcCommand::ClientError {
+            message: message.clone(),
+        }) {
+            Err(error) if error.downcast_ref::<DaemonConnectionLost>().is_some() => {
+                self.unreported_error = Some(message);
+                Ok(())
+            }
+            result => result,
+        }
     }
 
     fn tick(&mut self) -> Result<Flow> {
@@ -322,4 +376,26 @@ impl<'a> ClientLoop<'a> {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         self.client.send(&IpcCommand::Key { code, char, ctrl })
     }
+}
+
+enum Reattached {
+    Attached(IpcClient, Box<StateSnapshot>),
+    OtherVersion(std::path::PathBuf),
+}
+
+fn reattach(tx: Sender<Msg>) -> Result<Reattached> {
+    anyhow::ensure!(
+        crate::ipc::wait_for_daemon(DAEMON_RECONNECT_TIMEOUT),
+        "the daemon is not running"
+    );
+    let mut client = IpcClient::connect()?;
+    client.send(&IpcCommand::Attach)?;
+    let value = client.read_snapshot_value(IPC_INTERACTION_TIMEOUT)?;
+    if !snapshot_is_compatible(&value) {
+        return Ok(Reattached::OtherVersion(client.daemon_executable()?));
+    }
+    let snapshot = serde_json::from_value(value)?;
+    client.spawn_reader(tx)?;
+    client.send(&IpcCommand::AttachSession)?;
+    Ok(Reattached::Attached(client, Box::new(snapshot)))
 }
