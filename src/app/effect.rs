@@ -29,6 +29,7 @@ pub enum Effect {
     ResetGeoUpdateSchedules,
     WriteState,
     SaveConfig,
+    PersistConfirmedState,
     PersistSupportPrompt {
         previous: crate::support_prompt::SupportPromptState,
         reopen_prompt: bool,

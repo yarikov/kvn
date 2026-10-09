@@ -203,7 +203,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   navigate to the unescapable region picker, so the card must come back at the
   originating step. Settings the same update already
   committed are never rolled back. On the `SaveConfig` error path in
-  `daemon.rs`, the revert is gated on `config_io::onboarding_transition`, read
+  `daemon/config_io.rs`, the revert is gated on `config_io::onboarding_transition`, read
   before the effect list is filtered — an unrelated failed save must not reopen
   a finished tour.
 - **Support prompt.** The 7-day clock starts from `completed_at`, armed by
@@ -226,7 +226,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 
 ## Auto-Connect
 - `settings.auto_connect` (persisted in `profiles.json`) controls whether the app reconnects to the last used profile on startup.
-- `settings.last_connected_profile` stores the UUID of the most recently connected profile. It is updated in `update/connection.rs` on `Msg::Connected` and saved via `Effect::SaveConfig`.
+- `settings.last_connected_profile` stores the UUID of the most recently connected profile. It is updated in `update/connection.rs` on `Msg::Connected` and saved via `Effect::PersistConfirmedState`.
 - `Model::new()` calls `resolve_startup_state()` to check `auto_connect` + `last_connected_profile`. If both are set and the profile exists, the model starts in `ConnectionState::Connecting` with that profile pre-selected, and the status bar shows `Auto-connecting to {name}…`.
 - The user can toggle `auto_connect` at runtime with the `Shift+A` keybinding (the legacy `a` still works and shows a deprecation toast from `tui_client::handler::key::deprecated_settings_shortcut_message`), the Connection settings overlay, or IPC `SetAutoConnect`. Disabling saves immediately. Enabling first emits `Effect::CheckAutoConnectPolkit` (with `Model::auto_connect_pending` set): the daemon runs `doctor::polkit_readiness()` and replies with `Msg::AutoConnectPolkitChecked`. The flag is flipped and saved only when passwordless polkit is set up and the `kvn-tui` group is active in the daemon's session; otherwise auto-connect stays off and the reason is shown as an error toast and written to the app log.
 - `sudo kvn clean --polkit` / `--killswitch` connect to the invoking user's daemon (`/run/user/$SUDO_UID/kvn-tui.sock`) and send `SetAutoConnect`/`SetKillSwitch { enabled: false }`, so the daemon saves the config as the user. If the daemon is not running, startup reconciliation handles it: `reconcile_kill_switch_state` for the kill switch, and `reconcile_auto_connect_state` turns auto-connect off (before the first tick connects) when `doctor::polkit_authorization_denied()`.

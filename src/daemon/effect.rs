@@ -36,7 +36,9 @@ pub(super) fn execute_daemon_effect(
         Effect::RefreshGeoLastUpdated => geo::refresh_last_updated(tx, model),
         Effect::ClearGeoRetryState { region } => geo::clear_retry_state(region),
         Effect::ResetGeoUpdateSchedules => geo::reset_update_schedules(model),
-        Effect::SaveConfig => config_io::report_uncommitted_save(model),
+        Effect::SaveConfig | Effect::PersistConfirmedState => {
+            config_io::report_uncommitted_save(model)
+        }
         Effect::PersistSupportPrompt {
             previous,
             reopen_prompt,

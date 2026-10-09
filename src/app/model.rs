@@ -295,6 +295,7 @@ pub struct Model {
     /// Prevents a fallback config from overwriting an unreadable persisted
     /// config. Cleared only after a successful reload from disk.
     pub config_persistence_blocked: bool,
+    pub unsaved_state_merge_base: Option<Config>,
     pub restart_required: bool,
     /// Persisted schedule for the optional project-support prompt.
     pub support_prompt: crate::support_prompt::SupportPromptState,
@@ -614,6 +615,7 @@ impl Model {
             connection,
             config,
             config_persistence_blocked,
+            unsaved_state_merge_base: None,
             restart_required: false,
             support_prompt,
             onboarding,
@@ -741,6 +743,7 @@ impl Model {
             connection: ConnectionState::Idle,
             config,
             config_persistence_blocked: false,
+            unsaved_state_merge_base: None,
             restart_required: false,
             support_prompt: crate::support_prompt::SupportPromptState::default(),
             onboarding: crate::onboarding::OnboardingProgress::new(
@@ -1029,6 +1032,7 @@ impl Model {
             connection: ConnectionState::Idle,
             config,
             config_persistence_blocked: false,
+            unsaved_state_merge_base: None,
             restart_required: false,
             support_prompt: crate::support_prompt::SupportPromptState::default(),
             onboarding: crate::onboarding::OnboardingProgress::default(),

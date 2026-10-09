@@ -21,7 +21,7 @@ use crate::app::update::update;
 use crate::ipc::{IpcServer, cleanup_socket};
 use crate::runtime_lock::RuntimeLock;
 
-use config_io::{commit_config_change, persist_config_unless_frozen};
+use config_io::commit_config_change;
 use effect::execute_daemon_effect;
 use process_slot::{ProcessSlot, lock_process_slot, spawn_ticker};
 
@@ -158,7 +158,6 @@ fn run_loop(
             }
             _ => None,
         };
-        let config_before = model.config.clone();
         let edit_requested = matches!(
             &msg,
             Msg::IpcRequest {
@@ -168,53 +167,9 @@ fn run_loop(
         );
         let mut config_edit_result =
             edit_requested.then(|| missing_edit_result(model.restart_required));
-        let support_prompt_before = model.support_prompt.clone();
-        let onboarding_before = model.onboarding;
+        let before = config_io::UpdateBaseline::capture(model);
         let mut effects = update(model, msg);
-        let onboarding_transition = config_io::onboarding_transition(&effects);
-        if effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::SaveConfig))
-        {
-            let edited = model.config.clone();
-            match persist_config_unless_frozen(model, &config_before, &edited) {
-                Ok(config) => {
-                    model.replace_config_preserving_selection(config);
-                    effects.retain(|effect| !matches!(effect, Effect::SaveConfig));
-                }
-                Err(error) => {
-                    model.replace_config_preserving_selection(config_before);
-                    model.support_prompt = support_prompt_before;
-                    if let Some(recovery) = onboarding_transition {
-                        config_io::restore_onboarding_after_failure(
-                            model,
-                            onboarding_before,
-                            recovery,
-                        );
-                    }
-                    let message = match crate::config::save_conflict_config(&edited) {
-                        Ok(path) => format!(
-                            "Configuration save failed: {error:#}; unsaved version preserved at {}",
-                            path.display()
-                        ),
-                        Err(save_error) => format!(
-                            "Configuration save failed: {error:#}; unsaved version preservation failed: {save_error:#}"
-                        ),
-                    };
-                    model.set_status(AppStatus::Error(message.clone()));
-                    crate::services::log_tailer::append_app_log("ERROR", &message);
-                    effects.retain(|effect| {
-                        matches!(effect, Effect::BroadcastState | Effect::AppendAppLog { .. })
-                    });
-                    if !effects
-                        .iter()
-                        .any(|effect| matches!(effect, Effect::BroadcastState))
-                    {
-                        effects.push(Effect::BroadcastState);
-                    }
-                }
-            }
-        }
+        config_io::persist_config_changes(model, before, &mut effects);
         // `queue_connect` advances the generation before the next Tick emits
         // `Effect::Connect`. Publish that invalidation immediately so an old
         // worker cannot install its process during the intervening 250 ms.
@@ -231,6 +186,7 @@ fn run_loop(
                     | Effect::ResetGeoUpdateSchedules
                     | Effect::WriteState
                     | Effect::SaveConfig
+                    | Effect::PersistConfirmedState
                     | Effect::PersistSupportPrompt { .. }
                     | Effect::PersistOnboarding { .. }
                     | Effect::CommitEditedConfig { .. }
@@ -309,6 +265,7 @@ fn reconcile_kill_switch_state(model: &mut Model) {
             Ok(config) => model.replace_config_preserving_selection(config),
             Err(e) => {
                 tracing::warn!("Failed to persist reconciled kill switch state: {}", e);
+                model.config.settings.kill_switch = active;
             }
         }
     }
