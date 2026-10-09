@@ -43,6 +43,7 @@ pub(crate) fn handle_config_reloaded(
                 != config.settings.geo_routing.current_region;
             model.replace_config_preserving_selection(config);
             model.config_persistence_blocked = false;
+            model.unsaved_state_merge_base = None;
             let mut effects = vec![Effect::BroadcastState];
             if active_missing || connecting_missing {
                 effects.push(Effect::Disconnect);
@@ -156,8 +157,10 @@ mod tests {
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         let config = model.config.clone();
         model.config_persistence_blocked = true;
+        model.unsaved_state_merge_base = Some(config.clone());
         let effects = update(&mut model, Msg::ConfigReloaded(Box::new(Ok(config))));
         assert!(!model.config_persistence_blocked);
+        assert_eq!(model.unsaved_state_merge_base, None);
         assert_eq!(
             effects,
             vec![

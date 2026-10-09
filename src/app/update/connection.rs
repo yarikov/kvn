@@ -59,7 +59,7 @@ pub(in crate::app::update) fn on_connected(
     // Persist last connected profile for auto-connect on next startup.
     if model.config.settings.last_connected_profile != Some(profile_id) {
         model.config.settings.last_connected_profile = Some(profile_id);
-        effects.push(Effect::SaveConfig);
+        effects.push(Effect::PersistConfirmedState);
     }
     effects
 }
@@ -166,7 +166,7 @@ pub(in crate::app::update) fn handle_kill_switch_applied(
                     if enabled { "enabled" } else { "disabled" }
                 )),
             );
-            effects.push(Effect::SaveConfig);
+            effects.push(Effect::PersistConfirmedState);
             effects.push(Effect::BroadcastState);
         }
         Some(err) => {
@@ -524,7 +524,7 @@ mod tests {
             vec![
                 Effect::WriteState,
                 app_log_info("Connected"),
-                Effect::SaveConfig
+                Effect::PersistConfirmedState
             ]
         );
     }
@@ -713,7 +713,7 @@ mod tests {
             vec![
                 Effect::WriteState,
                 app_log_info("Connected to A"),
-                Effect::SaveConfig
+                Effect::PersistConfirmedState
             ]
         );
     }
@@ -809,7 +809,7 @@ mod tests {
             effects,
             vec![
                 app_log_info("Kill switch enabled"),
-                Effect::SaveConfig,
+                Effect::PersistConfirmedState,
                 Effect::BroadcastState,
             ]
         );
@@ -829,7 +829,7 @@ mod tests {
         assert!(!model.config.settings.kill_switch);
         assert_eq!(model.kill_switch_pending, None);
         assert!(model.status_text().contains("helper missing"));
-        assert!(!effects.iter().any(|e| matches!(e, Effect::SaveConfig)));
+        assert!(!effects.contains(&Effect::PersistConfirmedState));
     }
 
     #[test]

@@ -3,6 +3,7 @@ use std::thread;
 
 use anyhow::Context;
 
+use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, Model, Overlay};
 use crate::app::msg::{ConfigEditResult, IpcError, Msg};
 use crate::config::profile::Config;
@@ -26,7 +27,92 @@ impl std::fmt::Display for ConfigConflict {
 
 impl std::error::Error for ConfigConflict {}
 
-pub(super) fn persist_config_unless_frozen(
+pub(super) struct UpdateBaseline {
+    config: Config,
+    support_prompt: SupportPromptState,
+    onboarding: OnboardingProgress,
+}
+
+impl UpdateBaseline {
+    pub(super) fn capture(model: &Model) -> Self {
+        Self {
+            config: model.config.clone(),
+            support_prompt: model.support_prompt.clone(),
+            onboarding: model.onboarding,
+        }
+    }
+}
+
+pub(super) fn persist_config_changes(
+    model: &mut Model,
+    before: UpdateBaseline,
+    effects: &mut Vec<Effect>,
+) {
+    if effects.contains(&Effect::SaveConfig) {
+        persist_requested_change(model, before, effects);
+    } else if effects.contains(&Effect::PersistConfirmedState) {
+        persist_confirmed_state(model, before.config, effects);
+    }
+}
+
+fn persist_requested_change(model: &mut Model, before: UpdateBaseline, effects: &mut Vec<Effect>) {
+    let onboarding_transition = onboarding_transition(effects);
+    let edited = model.config.clone();
+    match commit_model_config(model, &before.config) {
+        Ok(()) => effects.retain(|effect| *effect != Effect::SaveConfig),
+        Err(error) => {
+            model.replace_config_preserving_selection(before.config);
+            model.support_prompt = before.support_prompt;
+            if let Some(recovery) = onboarding_transition {
+                restore_onboarding_after_failure(model, before.onboarding, recovery);
+            }
+            let message = match crate::config::save_conflict_config(&edited) {
+                Ok(path) => format!(
+                    "Configuration save failed: {error:#}; unsaved version preserved at {}",
+                    path.display()
+                ),
+                Err(save_error) => format!(
+                    "Configuration save failed: {error:#}; unsaved version preservation failed: {save_error:#}"
+                ),
+            };
+            report_save_failure(model, &message);
+            effects.retain(|effect| {
+                matches!(effect, Effect::BroadcastState | Effect::AppendAppLog { .. })
+            });
+            ensure_broadcast(effects);
+        }
+    }
+}
+
+fn persist_confirmed_state(model: &mut Model, before: Config, effects: &mut Vec<Effect>) {
+    if let Err(error) = commit_model_config(model, &before) {
+        model.unsaved_state_merge_base.get_or_insert(before);
+        report_save_failure(model, &format!("Configuration save failed: {error:#}"));
+        ensure_broadcast(effects);
+    }
+    effects.retain(|effect| *effect != Effect::PersistConfirmedState);
+}
+
+fn commit_model_config(model: &mut Model, before: &Config) -> anyhow::Result<()> {
+    let base = model.unsaved_state_merge_base.as_ref().unwrap_or(before);
+    let config = persist_config_unless_frozen(model, base, &model.config)?;
+    model.replace_config_preserving_selection(config);
+    model.unsaved_state_merge_base = None;
+    Ok(())
+}
+
+fn report_save_failure(model: &mut Model, message: &str) {
+    model.set_status(AppStatus::Error(message.to_string()));
+    crate::services::log_tailer::append_app_log("ERROR", message);
+}
+
+fn ensure_broadcast(effects: &mut Vec<Effect>) {
+    if !effects.contains(&Effect::BroadcastState) {
+        effects.push(Effect::BroadcastState);
+    }
+}
+
+fn persist_config_unless_frozen(
     model: &Model,
     base: &Config,
     edited: &Config,
@@ -151,11 +237,9 @@ pub(super) fn restore_onboarding_after_failure(
 /// before the error path filters the effect list: only a tour transition may
 /// revert tour progress, or an unrelated failed save would reopen a finished
 /// tour.
-pub(super) fn onboarding_transition(
-    effects: &[crate::app::effect::Effect],
-) -> Option<OnboardingRecovery> {
+fn onboarding_transition(effects: &[Effect]) -> Option<OnboardingRecovery> {
     effects.iter().find_map(|effect| match effect {
-        crate::app::effect::Effect::PersistOnboarding { recovery, .. } => Some(*recovery),
+        Effect::PersistOnboarding { recovery, .. } => Some(*recovery),
         _ => None,
     })
 }
@@ -454,6 +538,123 @@ mod tests {
             crate::config::load_config_at_read_only(&crate::paths::profiles_path().unwrap())
                 .unwrap(),
             merged
+        );
+    }
+
+    fn update_with_unwritable_config(model: &mut Model, msg: Msg) -> Vec<Effect> {
+        model.config_persistence_blocked = true;
+        let before = UpdateBaseline::capture(model);
+        let mut effects = update(model, msg);
+        persist_config_changes(model, before, &mut effects);
+        effects
+    }
+
+    #[test]
+    fn a_failed_save_keeps_the_kill_switch_state_the_helper_applied() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _config_home = EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+
+        for enabled in [true, false] {
+            let mut model = model_with_profiles(vec![]);
+            model.config.settings.kill_switch = !enabled;
+            model.kill_switch_pending = Some(enabled);
+
+            let effects = update_with_unwritable_config(
+                &mut model,
+                Msg::KillSwitchApplied {
+                    enabled,
+                    error: None,
+                },
+            );
+
+            assert_eq!(model.config.settings.kill_switch, enabled);
+            assert!(model.status_text().contains("Configuration save failed"));
+            assert!(effects.contains(&Effect::BroadcastState));
+            assert!(!effects.contains(&Effect::PersistConfirmedState));
+        }
+    }
+
+    #[test]
+    fn a_failed_save_after_connecting_still_writes_the_connection_state() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _config_home = EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let mut model = model_with_profiles(vec![]);
+        let profile_id = uuid::Uuid::new_v4();
+
+        let effects = update_with_unwritable_config(
+            &mut model,
+            Msg::Connected {
+                pid: 42,
+                profile_id,
+                attempt_id: 0,
+            },
+        );
+
+        assert!(effects.contains(&Effect::WriteState));
+        assert_eq!(
+            model.config.settings.last_connected_profile,
+            Some(profile_id)
+        );
+        assert!(model.status_text().contains("Configuration save failed"));
+    }
+
+    #[test]
+    fn the_next_save_keeps_confirmed_state_an_earlier_save_lost() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _config_home = EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let mut model = model_with_profiles(crate::test_helpers::sample_profiles());
+        crate::config::save_config(&model.config).unwrap();
+        let profile_id = model.config.profiles[0].id;
+        update_with_unwritable_config(
+            &mut model,
+            Msg::Connected {
+                pid: 42,
+                profile_id,
+                attempt_id: 0,
+            },
+        );
+
+        model.config_persistence_blocked = false;
+        let before = UpdateBaseline::capture(&model);
+        model.config.settings.theme = "nord".into();
+        let mut effects = vec![Effect::SaveConfig];
+        persist_config_changes(&mut model, before, &mut effects);
+
+        let saved =
+            crate::config::load_config_at_read_only(&crate::paths::profiles_path().unwrap())
+                .unwrap();
+        assert_eq!(saved.settings.theme, "nord");
+        assert_eq!(saved.settings.last_connected_profile, Some(profile_id));
+        assert_eq!(model.unsaved_state_merge_base, None);
+    }
+
+    #[test]
+    fn confirmed_state_is_saved_without_reaching_the_effect_executor() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _config_home = EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let mut model = model_with_profiles(vec![]);
+        model.kill_switch_pending = Some(true);
+
+        let before = UpdateBaseline::capture(&model);
+        let mut effects = update(
+            &mut model,
+            Msg::KillSwitchApplied {
+                enabled: true,
+                error: None,
+            },
+        );
+        persist_config_changes(&mut model, before, &mut effects);
+
+        assert!(!effects.contains(&Effect::PersistConfirmedState));
+        assert!(
+            crate::config::load_config_at_read_only(&crate::paths::profiles_path().unwrap())
+                .unwrap()
+                .settings
+                .kill_switch
         );
     }
 }
