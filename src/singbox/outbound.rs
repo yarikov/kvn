@@ -9,12 +9,14 @@
 //! `build_tls_block` and `build_transport_block` are the shared helpers
 //! used by every TLS-capable protocol.
 
+use std::collections::{BTreeMap, HashMap};
+
 use serde_json::{Map, Value, json};
 
 use crate::config::profile::{
-    AnytlsConfig, HttpConfig, Hysteria2Config, Profile, ProtocolConfig, ShadowsocksConfig,
-    ShadowtlsConfig, ShadowtlsVersion, SocksConfig, SocksVersion, SshConfig, TlsCommon,
-    TransportConfig, TransportType, TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
+    AnytlsConfig, HttpConfig, Hysteria2Config, Profile, ProtocolConfig, Security,
+    ShadowsocksConfig, ShadowtlsConfig, ShadowtlsVersion, SocksConfig, SocksVersion, SshConfig,
+    TlsCommon, TransportConfig, TransportType, TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
 };
 
 /// Render the sing-box 1.12 `tls` block from [`TlsCommon`].
@@ -65,38 +67,122 @@ fn build_tls_block(default_sni: &str, default_alpn: &[&str], tls: &TlsCommon) ->
 }
 
 /// Render the sing-box 1.12 `transport` block from [`TransportConfig`].
-fn build_transport_block(t: &TransportConfig) -> Value {
+fn build_transport_block(
+    t: &TransportConfig,
+    tls_enabled: bool,
+    params: &BTreeMap<String, Value>,
+) -> anyhow::Result<Value> {
+    if tls_enabled && t.kind == TransportType::Http {
+        reject_tcp_http_header_over_tls(params)?;
+    }
     let mut obj = Map::new();
-    obj.insert("type".to_string(), json!(transport_type_str(&t.kind)));
+    obj.insert("type".to_string(), json!(t.kind.as_str()));
+    match t.kind {
+        TransportType::Ws => {
+            insert_path(&mut obj, t);
+            insert_headers(&mut obj, headers_with_host(t));
+        }
+        TransportType::Http => {
+            let hosts = t.host.as_deref().map(split_hosts).unwrap_or_default();
+            if !hosts.is_empty() {
+                obj.insert("host".to_string(), json!(hosts));
+            }
+            insert_path(&mut obj, t);
+            insert_headers(&mut obj, t.headers.clone());
+        }
+        TransportType::Grpc => {
+            if let Some(service_name) = t.service_name.as_deref() {
+                obj.insert("service_name".to_string(), json!(service_name));
+            }
+            obj.insert("idle_timeout".to_string(), json!("15s"));
+            obj.insert("ping_timeout".to_string(), json!("15s"));
+        }
+        TransportType::HttpUpgrade => {
+            if let Some(host) = t.host.as_deref() {
+                obj.insert("host".to_string(), json!(host));
+            }
+            insert_path(&mut obj, t);
+            insert_headers(&mut obj, t.headers.clone());
+        }
+        TransportType::Quic => reject_quic_options_sing_box_lacks(params)?,
+        TransportType::Other(_) => {}
+    }
+    Ok(Value::Object(obj))
+}
+
+fn drop_tls_when_disabled(outbound: &mut Value, security: Option<&Security>) {
+    if security == Some(&Security::None)
+        && let Some(object) = outbound.as_object_mut()
+    {
+        object.remove("tls");
+    }
+}
+
+fn tls_enabled(outbound: &Value) -> bool {
+    outbound["tls"]["enabled"] == json!(true)
+}
+
+fn reject_quic_options_sing_box_lacks(params: &BTreeMap<String, Value>) -> anyhow::Result<()> {
+    for option in ["quicSecurity", "headerType"] {
+        if let Some(value) = enabled_option(params, option) {
+            anyhow::bail!("sing-box QUIC transport does not support {option}={value}");
+        }
+    }
+    Ok(())
+}
+
+fn reject_tcp_http_header_over_tls(params: &BTreeMap<String, Value>) -> anyhow::Result<()> {
+    if enabled_option(params, "headerType").is_some() {
+        anyhow::bail!(
+            "sing-box cannot send TCP HTTP header obfuscation over TLS: its HTTP transport uses HTTP/2 with TLS"
+        );
+    }
+    Ok(())
+}
+
+fn enabled_option<'a>(params: &'a BTreeMap<String, Value>, option: &str) -> Option<&'a str> {
+    params
+        .get(option)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && *value != "none")
+}
+
+fn insert_path(obj: &mut Map<String, Value>, t: &TransportConfig) {
     if let Some(path) = t.path.as_deref() {
         obj.insert("path".to_string(), json!(path));
     }
-    if let Some(host) = t.host.as_deref() {
-        obj.insert("host".to_string(), json!(host));
-    }
-    if let Some(service_name) = t.service_name.as_deref() {
-        obj.insert("service_name".to_string(), json!(service_name));
-    }
-    if t.kind == TransportType::Grpc {
-        obj.entry("idle_timeout").or_insert(json!("15s"));
-        obj.entry("ping_timeout").or_insert(json!("15s"));
-    }
-    if !t.headers.is_empty() {
-        obj.insert("headers".to_string(), json!(t.headers));
-    }
-    Value::Object(obj)
 }
 
-fn transport_type_str(kind: &TransportType) -> &'static str {
-    match kind {
-        TransportType::Grpc => "grpc",
-        TransportType::Ws => "ws",
-        TransportType::Http => "http",
+fn insert_headers(obj: &mut Map<String, Value>, headers: HashMap<String, String>) {
+    if !headers.is_empty() {
+        obj.insert("headers".to_string(), json!(headers));
     }
+}
+
+fn headers_with_host(t: &TransportConfig) -> HashMap<String, String> {
+    let mut headers = t.headers.clone();
+    let has_host_header = headers.keys().any(|name| name.eq_ignore_ascii_case("host"));
+    if let Some(host) = t.host.as_deref()
+        && !has_host_header
+    {
+        headers.insert("Host".to_string(), host.to_string());
+    }
+    headers
+}
+
+fn split_hosts(hosts: &str) -> Vec<&str> {
+    hosts
+        .split(',')
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .collect()
 }
 
 /// Build VLESS outbound with optional REALITY / XTLS Vision / ECH.
 pub(super) fn build_vless_outbound(profile: &Profile, cfg: &VlessConfig) -> anyhow::Result<Value> {
+    if let Some(encryption) = enabled_option(&profile.share_link_params, "encryption") {
+        anyhow::bail!("sing-box does not support VLESS Encryption (encryption={encryption})");
+    }
     // REALITY requires a utls fingerprint to be useful; preserve the
     // pre-v2 default of "chrome" when the profile didn't specify one.
     let tls_input = if cfg.tls.reality.is_some() && cfg.tls.utls_fingerprint.is_none() {
@@ -115,21 +201,18 @@ pub(super) fn build_vless_outbound(profile: &Profile, cfg: &VlessConfig) -> anyh
         "packet_encoding": "xudp",
         "tls": build_tls_block(&profile.address, &[], tls_input.as_ref()),
     });
+    drop_tls_when_disabled(&mut outbound, cfg.security.as_ref());
 
     if let Some(ref flow) = cfg.flow {
         outbound["flow"] = json!(flow);
     }
 
-    if let Some(ref transport_type) = cfg.transport_type {
-        let mut transport = json!({ "type": transport_type_str(transport_type) });
-        if *transport_type == TransportType::Grpc {
-            if let Some(ref service_name) = cfg.transport_service_name {
-                transport["service_name"] = json!(service_name);
-            }
-            transport["idle_timeout"] = json!("15s");
-            transport["ping_timeout"] = json!("15s");
-        }
-        outbound["transport"] = transport;
+    if let Some(transport) = cfg.transport.as_ref() {
+        outbound["transport"] = build_transport_block(
+            transport,
+            tls_enabled(&outbound),
+            &profile.share_link_params,
+        )?;
     }
 
     Ok(outbound)
@@ -149,11 +232,16 @@ pub(super) fn build_vmess_outbound(profile: &Profile, cfg: &VmessConfig) -> anyh
         "packet_encoding": "xudp",
         "tls": build_tls_block(&profile.address, &[], &cfg.tls),
     });
+    drop_tls_when_disabled(&mut outbound, cfg.stream_security.as_ref());
     if let Some(padding) = cfg.global_padding {
         outbound["global_padding"] = json!(padding);
     }
     if let Some(transport) = cfg.transport.as_ref() {
-        outbound["transport"] = build_transport_block(transport);
+        outbound["transport"] = build_transport_block(
+            transport,
+            tls_enabled(&outbound),
+            &profile.share_link_params,
+        )?;
     }
     Ok(outbound)
 }
@@ -172,7 +260,11 @@ pub(super) fn build_trojan_outbound(
         "tls": build_tls_block(&profile.address, &[], &cfg.tls),
     });
     if let Some(transport) = cfg.transport.as_ref() {
-        outbound["transport"] = build_transport_block(transport);
+        outbound["transport"] = build_transport_block(
+            transport,
+            tls_enabled(&outbound),
+            &profile.share_link_params,
+        )?;
     }
     Ok(outbound)
 }
@@ -182,14 +274,22 @@ pub(super) fn build_shadowsocks_outbound(
     profile: &Profile,
     cfg: &ShadowsocksConfig,
 ) -> anyhow::Result<Value> {
-    Ok(json!({
+    let mut outbound = json!({
         "type": "shadowsocks",
         "tag": "proxy",
         "server": profile.address,
         "server_port": profile.port,
         "method": cfg.method.as_str(),
         "password": cfg.password,
-    }))
+    });
+    if let Some(plugin) = enabled_option(&profile.share_link_params, "plugin") {
+        let (name, options) = plugin.split_once(';').unwrap_or((plugin, ""));
+        outbound["plugin"] = json!(name);
+        if !options.is_empty() {
+            outbound["plugin_opts"] = json!(options);
+        }
+    }
+    Ok(outbound)
 }
 
 /// Build Hysteria2 outbound.
@@ -222,7 +322,28 @@ pub(super) fn build_hysteria2_outbound(
         });
         let _ = &obfs.kind; // single supported type today; kept for forward compat
     }
+    let port_ranges = enabled_option(&profile.share_link_params, "mport")
+        .map(hysteria2_port_ranges)
+        .unwrap_or_default();
+    if !port_ranges.is_empty() {
+        if let Some(object) = outbound.as_object_mut() {
+            object.remove("server_port");
+        }
+        outbound["server_ports"] = json!(port_ranges);
+    }
     Ok(outbound)
+}
+
+fn hysteria2_port_ranges(ports: &str) -> Vec<String> {
+    ports
+        .split(',')
+        .map(str::trim)
+        .filter(|range| !range.is_empty())
+        .map(|range| match range.replace('-', ":") {
+            range if range.contains(':') => range,
+            port => format!("{port}:{port}"),
+        })
+        .collect()
 }
 
 /// Build TUIC v5 outbound.
@@ -341,21 +462,10 @@ pub(super) fn build_http_outbound(profile: &Profile, cfg: &HttpConfig) -> anyhow
     if let Some(pass) = cfg.password.as_deref() {
         outbound["password"] = json!(pass);
     }
-    if tls_is_enabled(&cfg.tls) {
+    if cfg.tls.is_configured() {
         outbound["tls"] = build_tls_block(&profile.address, &[], &cfg.tls);
     }
     Ok(outbound)
-}
-
-/// `TlsCommon::default()` represents "no TLS" — we treat a TLS block as
-/// enabled when the user supplied at least one TLS-related field.
-fn tls_is_enabled(tls: &TlsCommon) -> bool {
-    tls.server_name.is_some()
-        || tls.insecure
-        || !tls.alpn.is_empty()
-        || tls.utls_fingerprint.is_some()
-        || tls.reality.is_some()
-        || tls.ech.as_ref().is_some_and(|e| e.enabled)
 }
 
 /// Build SSH outbound.

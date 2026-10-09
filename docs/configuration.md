@@ -50,19 +50,28 @@ replace a valid configuration with a partial file.
 
 ## File structure
 
-The current schema version is 6. A minimal configuration is:
+The current schema version is 7. A minimal configuration is:
 
 ```json
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "profiles": [],
   "subscriptions": [],
   "settings": {}
 }
 ```
 
+VLESS `security` and VMess `stream_security` take `tls`, `reality` or `none`;
+`none` connects without TLS, and a profile without the field keeps using TLS.
+
 Each profile has common fields such as `id`, `name`, `address`, `port`, and
-`tags`. Protocol-specific fields are stored at the same level and selected by
+`tags`. `share_link_params` keeps the share-link parameters kvn does not map,
+so exporting the profile reproduces its link; kvn passes none of them to
+sing-box except the Shadowsocks `plugin` and the Hysteria 2 port range `mport`,
+and refuses to connect when one of them names a feature sing-box lacks (for
+example VLESS Encryption). A Hysteria 2 `pinSHA256` cannot be checked by
+sing-box, which pins public keys rather than certificate fingerprints; kvn shows
+a warning after connecting with such a profile. Protocol-specific fields are stored at the same level and selected by
 the `protocol` discriminator. See the
 [supported protocols](../README.md#supported-protocols) for available profile
 types and share-link schemes.

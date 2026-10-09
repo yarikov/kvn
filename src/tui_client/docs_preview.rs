@@ -313,6 +313,7 @@ fn preview_profile(
         config,
         tags: Vec::new(),
         subscription_id,
+        share_link_params: Default::default(),
     }
 }
 

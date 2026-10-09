@@ -61,6 +61,15 @@ impl ShadowsocksCipher {
             ShadowsocksCipher::None => "none",
         }
     }
+
+    pub fn is_aead_2022(self) -> bool {
+        matches!(
+            self,
+            ShadowsocksCipher::Blake3Aes128Gcm
+                | ShadowsocksCipher::Blake3Aes256Gcm
+                | ShadowsocksCipher::Blake3Chacha20Poly1305
+        )
+    }
 }
 
 /// Hysteria2 obfuscation. Sing-box 1.12+ supports the `salamander` type

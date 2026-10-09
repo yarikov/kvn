@@ -122,7 +122,10 @@ fn profile_runtime_changed_for_id(old: &[Profile], new: &[Profile], id: Uuid) ->
 }
 
 pub(in crate::app::update) fn profile_runtime_changed(old: &Profile, new: &Profile) -> bool {
-    old.address != new.address || old.port != new.port || old.config != new.config
+    old.address != new.address
+        || old.port != new.port
+        || old.config != new.config
+        || old.share_link_params != new.share_link_params
 }
 
 fn connection_settings_changed(
@@ -304,6 +307,24 @@ mod tests {
         assert_eq!(model.connecting_profile_id, Some(profile_id));
         assert_eq!(model.status_text(), "Configuration changed — reconnecting");
         assert!(!effects.contains(&Effect::Disconnect));
+    }
+
+    #[test]
+    fn config_reload_reconnects_when_share_link_params_change() {
+        let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        let profile_id = profile.id;
+        let mut model = model_with_profiles(vec![profile]);
+        model.connection = ConnectionState::Connected;
+        model.active_profile_id = Some(profile_id);
+        let mut config = model.config.clone();
+        config.profiles[0]
+            .share_link_params
+            .insert("encryption".into(), "mlkem768".into());
+
+        update(&mut model, Msg::ConfigReloaded(Box::new(Ok(config))));
+
+        assert_eq!(model.connection, ConnectionState::Connecting);
+        assert_eq!(model.connecting_profile_id, Some(profile_id));
     }
 
     #[test]

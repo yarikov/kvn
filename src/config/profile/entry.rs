@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,6 +27,8 @@ pub struct Profile {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscription_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub share_link_params: BTreeMap<String, serde_json::Value>,
 }
 
 impl Profile {
@@ -42,6 +46,7 @@ impl Profile {
             }),
             tags: Vec::new(),
             subscription_id: None,
+            share_link_params: Default::default(),
         }
     }
 
@@ -186,8 +191,7 @@ mod tests {
         assert!(cfg.flow.is_none());
         assert!(cfg.security.is_none());
         assert!(cfg.tls.reality.is_none());
-        assert!(cfg.transport_type.is_none());
-        assert!(cfg.transport_service_name.is_none());
+        assert!(cfg.transport.is_none());
         assert!(cfg.tls.utls_fingerprint.is_none());
         assert!(cfg.tls.ech.is_none());
         assert!(cfg.legacy_fingerprint.is_none());
@@ -319,6 +323,7 @@ mod tests {
             }),
             tags: Vec::new(),
             subscription_id: None,
+            share_link_params: Default::default(),
         };
         assert_ne!(
             v.dedup_key(),
@@ -337,6 +342,7 @@ mod tests {
             config,
             tags: Vec::new(),
             subscription_id: None,
+            share_link_params: Default::default(),
         };
         let configs = [
             ProtocolConfig::Vless(VlessConfig {
@@ -426,6 +432,7 @@ mod tests {
             }),
             tags: Vec::new(),
             subscription_id: None,
+            share_link_params: Default::default(),
         };
 
         assert_ne!(trojan("/nl").endpoint_key(), trojan("/de").endpoint_key());

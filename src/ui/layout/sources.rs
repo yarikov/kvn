@@ -402,6 +402,7 @@ mod tests {
             config,
             tags: vec![],
             subscription_id: None,
+            share_link_params: Default::default(),
         };
 
         let profiles = vec![

@@ -34,6 +34,24 @@ pub enum TransportType {
     Grpc,
     Ws,
     Http,
+    #[serde(rename = "httpupgrade")]
+    HttpUpgrade,
+    Quic,
+    #[serde(untagged)]
+    Other(String),
+}
+
+impl TransportType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            TransportType::Grpc => "grpc",
+            TransportType::Ws => "ws",
+            TransportType::Http => "http",
+            TransportType::HttpUpgrade => "httpupgrade",
+            TransportType::Quic => "quic",
+            TransportType::Other(kind) => kind,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
@@ -79,6 +97,17 @@ pub struct TlsCommon {
 }
 
 impl TlsCommon {
+    /// `TlsCommon::default()` represents "no TLS" — we treat a TLS block as
+    /// enabled when the user supplied at least one TLS-related field.
+    pub fn is_configured(&self) -> bool {
+        self.server_name.is_some()
+            || self.insecure
+            || !self.alpn.is_empty()
+            || self.utls_fingerprint.is_some()
+            || self.reality.is_some()
+            || self.ech.as_ref().is_some_and(|e| e.enabled)
+    }
+
     /// REALITY and ECH cannot be enabled simultaneously — REALITY uses its
     /// own SNI-cloaking mechanism that conflicts with ECH's `ECHConfigList`.
     pub fn diagnostics(&self) -> Vec<ConfigDiagnostic> {
@@ -92,7 +121,7 @@ impl TlsCommon {
     }
 }
 
-/// Transport layer configuration (ws / grpc / http / httpupgrade).
+/// Transport layer configuration (ws / grpc / http / httpupgrade / quic).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TransportConfig {

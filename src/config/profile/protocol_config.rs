@@ -23,9 +23,13 @@ pub struct VlessConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security: Option<Security>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub transport_type: Option<TransportType>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub transport_service_name: Option<String>,
+    pub transport: Option<TransportConfig>,
+    #[serde(default, rename = "transport_type", skip_serializing)]
+    #[schemars(skip)]
+    pub legacy_transport_type: Option<TransportType>,
+    #[serde(default, rename = "transport_service_name", skip_serializing)]
+    #[schemars(skip)]
+    pub legacy_transport_service_name: Option<String>,
     /// Pre-v2 alias of `tls.utls_fingerprint`. Read from the legacy JSON
     /// key `"fingerprint"`, never written. `migrate_v1_to_v2` moves it
     /// into `tls.utls_fingerprint` and clears this field.
@@ -45,6 +49,8 @@ pub struct VmessConfig {
     pub security: VmessSecurity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub global_padding: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_security: Option<Security>,
     #[serde(default, flatten)]
     pub tls: TlsCommon,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -249,6 +255,16 @@ impl ProtocolConfig {
                     "uuid",
                     "vless.uuid must not be empty",
                 );
+                require(
+                    c.legacy_transport_type.is_some(),
+                    "transport_type",
+                    "vless.transport_type is no longer read; set transport.type instead",
+                );
+                require(
+                    c.legacy_transport_service_name.is_some(),
+                    "transport_service_name",
+                    "vless.transport_service_name is no longer read; set transport.service_name instead",
+                );
             }
             ProtocolConfig::Vmess(c) => {
                 require(
@@ -342,14 +358,10 @@ impl ProtocolConfig {
         };
         let transport_identity = match self {
             ProtocolConfig::Vless(VlessConfig {
-                transport_type: Some(kind),
-                transport_service_name,
+                transport: Some(transport),
                 ..
-            }) => format!(
-                "|{kind:?}:{}",
-                transport_service_name.as_deref().unwrap_or("")
-            ),
-            ProtocolConfig::Vmess(VmessConfig {
+            })
+            | ProtocolConfig::Vmess(VmessConfig {
                 transport: Some(transport),
                 ..
             })
@@ -357,8 +369,8 @@ impl ProtocolConfig {
                 transport: Some(transport),
                 ..
             }) => format!(
-                "|{:?}:{}:{}:{}",
-                transport.kind,
+                "|{}:{}:{}:{}",
+                transport.kind.as_str(),
                 transport.path.as_deref().unwrap_or(""),
                 transport.host.as_deref().unwrap_or(""),
                 transport.service_name.as_deref().unwrap_or("")
@@ -443,8 +455,18 @@ mod tests {
         assert_eq!(cfg.flow, Some(Flow::XtlsRprxVision));
         assert_eq!(cfg.security, Some(Security::Reality));
         assert!(cfg.tls.reality.is_some());
-        assert_eq!(cfg.transport_type, Some(TransportType::Grpc));
-        assert_eq!(cfg.transport_service_name.as_deref(), Some("svc"));
+        assert_eq!(
+            cfg.transport,
+            Some(TransportConfig {
+                kind: TransportType::Grpc,
+                path: None,
+                host: None,
+                service_name: Some("svc".to_string()),
+                headers: Default::default(),
+            })
+        );
+        assert!(cfg.legacy_transport_type.is_none());
+        assert!(cfg.legacy_transport_service_name.is_none());
         assert_eq!(cfg.tls.utls_fingerprint.as_deref(), Some("chrome"));
         assert!(
             cfg.legacy_fingerprint.is_none(),
@@ -465,6 +487,7 @@ mod tests {
                 alter_id: 0,
                 security: VmessSecurity::Aes128Gcm,
                 global_padding: None,
+                stream_security: None,
                 tls: TlsCommon {
                     server_name: Some("sni".to_string()),
                     ech: Some(EchSettings {
@@ -477,11 +500,29 @@ mod tests {
             }),
             tags: Vec::new(),
             subscription_id: None,
+            share_link_params: Default::default(),
         };
         let json = serde_json::to_string(&profile).unwrap();
         assert!(json.contains("\"protocol\":\"vmess\""));
         assert!(json.contains("\"ech\""));
         let restored: Profile = serde_json::from_str(&json).unwrap();
         assert_eq!(profile, restored);
+    }
+
+    #[test]
+    fn diagnostics_rejects_flat_vless_transport_left_in_a_current_config() {
+        let cfg: ProtocolConfig = serde_json::from_value(serde_json::json!({
+            "protocol": "vless",
+            "uuid": "u",
+            "transport_type": "ws",
+            "transport_service_name": "svc"
+        }))
+        .unwrap();
+        let pointers: Vec<String> = cfg
+            .diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.pointer)
+            .collect();
+        assert_eq!(pointers, ["/transport_type", "/transport_service_name"]);
     }
 }

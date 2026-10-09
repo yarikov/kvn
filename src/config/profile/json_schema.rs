@@ -505,7 +505,7 @@ mod tests {
             "profiles": [
                 merge(base("vless"), json!({
                     "uuid": uuid, "flow": "xtls-rprx-vision", "security": "reality",
-                    "transport_type": "grpc", "transport_service_name": "svc",
+                    "transport": { "type": "grpc", "service_name": "svc" },
                     "server_name": "sni.example", "utls_fingerprint": "chrome",
                     "reality": { "public_key": "pk", "short_id": "ab", "server_name": "sni", "spider_x": "/" }
                 })),
@@ -513,7 +513,11 @@ mod tests {
                     "uuid": uuid, "alter_id": 0, "security": "auto", "global_padding": true,
                     "transport": { "type": "ws", "path": "/ws", "host": "h", "headers": { "X": "y" } }
                 }))),
-                with_tls(merge(base("trojan"), json!({ "password": "p", "transport": { "type": "http" } }))),
+                with_tls(merge(base("trojan"), json!({
+                    "password": "p",
+                    "transport": { "type": "xhttp", "path": "/x" },
+                    "share_link_params": { "mode": "auto", "mtu": 1350, "extra": { "headers": { "X": "y" } } }
+                }))),
                 merge(base("shadowsocks"), json!({ "method": "2022-blake3-aes-256-gcm", "password": "p" })),
                 with_tls(merge(base("hysteria2"), json!({
                     "password": "p", "up_mbps": 10, "down_mbps": 50,
