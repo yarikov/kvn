@@ -77,7 +77,11 @@ fn write_config(
 /// Validate the sing-box configuration by running `sing-box check`.
 fn check_config(path: &PathBuf, cancelled: &dyn Fn() -> bool) -> Result<()> {
     let mut command = Command::new(singbox_binary());
-    command.arg("check").arg("-c").arg(path);
+    command
+        .arg("check")
+        .arg("--disable-color")
+        .arg("-c")
+        .arg(path);
     let (status, stderr) = run_until_exit(command, cancelled)
         .with_context(|| format!("Failed to run {} check", singbox_binary()))?;
 
@@ -473,6 +477,41 @@ mod tests {
         );
     }
 
+    fn sing_box_on_path() -> bool {
+        let found = Command::new("sh")
+            .args(["-c", "command -v sing-box >/dev/null 2>&1"])
+            .status()
+            .is_ok_and(|status| status.success());
+        if !found {
+            eprintln!("skipping: sing-box not on PATH");
+        }
+        found
+    }
+
+    fn check_generated_config(profile: &Profile) -> Result<()> {
+        let path = write_config(
+            profile,
+            &Settings::default(),
+            &GeoAvailability::default(),
+            TEST_CLASH_PORT,
+        )?;
+        let result = check_config(&path, &|| false);
+        let _ = fs::remove_file(&path);
+        result
+    }
+
+    fn vmess_with_transport(transport: crate::config::profile::TransportConfig) -> Profile {
+        let mut profile =
+            Profile::new_vless("T".to_string(), "1.1.1.1".to_string(), 443, "u".to_string());
+        profile.config =
+            crate::config::profile::ProtocolConfig::Vmess(crate::config::profile::VmessConfig {
+                uuid: crate::test_helpers::TEST_UUID.to_string(),
+                transport: Some(transport),
+                ..Default::default()
+            });
+        profile
+    }
+
     /// Validation against the real `sing-box` binary. Skipped automatically
     /// when the binary is not on PATH so CI without sing-box stays green.
     #[test]
@@ -481,27 +520,148 @@ mod tests {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let runtime = tempfile::tempdir().unwrap();
         let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
-        if Command::new("sh")
-            .args(["-c", "command -v sing-box >/dev/null 2>&1"])
-            .status()
-            .map(|s| !s.success())
-            .unwrap_or(true)
-        {
-            eprintln!("skipping: sing-box not on PATH");
+        if !sing_box_on_path() {
             return;
         }
         let profile =
             Profile::new_vless("T".to_string(), "1.1.1.1".to_string(), 443, "u".to_string());
-        let settings = Settings::default();
-        let path = write_config(
-            &profile,
-            &settings,
-            &GeoAvailability::default(),
-            TEST_CLASH_PORT,
-        )
-        .unwrap();
-        check_config(&path, &|| false).expect("sing-box rejected a minimal vless profile");
-        let _ = fs::remove_file(&path);
+        check_generated_config(&profile).expect("sing-box rejected a minimal vless profile");
+    }
+
+    #[test]
+    fn check_config_accepts_every_generated_transport() {
+        use crate::config::profile::{TransportConfig, TransportType};
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
+        if !sing_box_on_path() {
+            return;
+        }
+        for kind in [
+            TransportType::Ws,
+            TransportType::Http,
+            TransportType::Grpc,
+            TransportType::HttpUpgrade,
+            TransportType::Quic,
+        ] {
+            let profile = vmess_with_transport(TransportConfig {
+                kind: kind.clone(),
+                path: Some("/p".to_string()),
+                host: Some("h.example.com".to_string()),
+                service_name: Some("svc".to_string()),
+                headers: Default::default(),
+            });
+            check_generated_config(&profile)
+                .unwrap_or_else(|error| panic!("sing-box rejected {kind:?}: {error:#}"));
+        }
+    }
+
+    #[test]
+    fn check_config_runs_shadowsocks_plugins_sing_box_ships_and_names_others() {
+        use crate::config::profile::{ProtocolConfig, ShadowsocksCipher, ShadowsocksConfig};
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
+        if !sing_box_on_path() {
+            return;
+        }
+        let with_plugin = |plugin: &str| {
+            let mut profile = Profile::new_vless(
+                "T".to_string(),
+                "1.1.1.1".to_string(),
+                8388,
+                "u".to_string(),
+            );
+            profile.config = ProtocolConfig::Shadowsocks(ShadowsocksConfig {
+                method: ShadowsocksCipher::Aes128Gcm,
+                password: "p".to_string(),
+            });
+            profile
+                .share_link_params
+                .insert("plugin".to_string(), plugin.into());
+            profile
+        };
+
+        for plugin in ["obfs-local;obfs=http;obfs-host=a.example", "v2ray-plugin"] {
+            check_generated_config(&with_plugin(plugin))
+                .unwrap_or_else(|error| panic!("sing-box rejected {plugin}: {error:#}"));
+        }
+        let error = check_generated_config(&with_plugin("kcptun"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("plugin not found: kcptun"), "{error}");
+    }
+
+    #[test]
+    fn check_config_accepts_hysteria2_port_hopping() {
+        use crate::config::profile::{Hysteria2Config, ProtocolConfig};
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
+        if !sing_box_on_path() {
+            return;
+        }
+        let mut profile =
+            Profile::new_vless("T".to_string(), "1.1.1.1".to_string(), 443, "u".to_string());
+        profile.config = ProtocolConfig::Hysteria2(Hysteria2Config {
+            password: "p".to_string(),
+            ..Default::default()
+        });
+        profile
+            .share_link_params
+            .insert("mport".to_string(), "20000-30000,443".into());
+
+        check_generated_config(&profile).expect("sing-box rejected Hysteria2 port hopping");
+    }
+
+    #[test]
+    fn check_config_accepts_plain_vmess_and_tcp_http_header_without_tls() {
+        use crate::config::profile::{ProtocolConfig, Security, TransportConfig, TransportType};
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
+        if !sing_box_on_path() {
+            return;
+        }
+        for kind in [TransportType::Ws, TransportType::Http] {
+            let mut profile = vmess_with_transport(TransportConfig {
+                kind,
+                path: Some("/p".to_string()),
+                host: Some("h.example.com".to_string()),
+                service_name: None,
+                headers: Default::default(),
+            });
+            if let ProtocolConfig::Vmess(cfg) = &mut profile.config {
+                cfg.stream_security = Some(Security::None);
+            }
+            profile
+                .share_link_params
+                .insert("headerType".to_string(), "http".into());
+            check_generated_config(&profile).expect("sing-box rejected VMess without TLS");
+        }
+    }
+
+    #[test]
+    fn check_config_reports_an_unknown_transport_without_colors() {
+        use crate::config::profile::{TransportConfig, TransportType};
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
+        if !sing_box_on_path() {
+            return;
+        }
+        let profile = vmess_with_transport(TransportConfig {
+            kind: TransportType::Other("xhttp".to_string()),
+            path: None,
+            host: None,
+            service_name: None,
+            headers: Default::default(),
+        });
+
+        let error = check_generated_config(&profile).unwrap_err().to_string();
+
+        assert!(error.contains("unknown transport type: xhttp"), "{error}");
+        assert!(!error.contains('\u{1b}'), "{error:?}");
     }
 
     #[test]

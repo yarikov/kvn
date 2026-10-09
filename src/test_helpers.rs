@@ -301,3 +301,11 @@ pub fn single_diagnostic(diagnostics: Vec<ConfigDiagnostic>) -> ConfigDiagnostic
         .unwrap_or_else(|diagnostics| panic!("expected one diagnostic, got {diagnostics:?}"));
     diagnostic
 }
+
+pub fn vmess_b64_link(body: &serde_json::Value) -> String {
+    use base64::Engine;
+    format!(
+        "vmess://{}",
+        base64::engine::general_purpose::STANDARD.encode(body.to_string())
+    )
+}

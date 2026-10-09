@@ -4,7 +4,7 @@ use super::schedule::next_update_window_date;
 use super::settings::default_tun_interface;
 use super::{
     CURRENT_SCHEMA_VERSION, Config, ConnectivityProbeConfig, DnsStrategy, GeoAutoUpdate,
-    ProtocolConfig, SubscriptionAutoUpdate,
+    ProtocolConfig, SubscriptionAutoUpdate, TransportConfig,
 };
 
 impl Config {
@@ -68,6 +68,10 @@ impl Config {
         if self.schema_version == 5 && target_version >= 6 {
             self.migrate_v5_to_v6();
             self.schema_version = 6;
+        }
+        if self.schema_version == 6 && target_version >= 7 {
+            self.migrate_v6_to_v7();
+            self.schema_version = 7;
         }
         debug_assert_eq!(self.schema_version, target_version);
         Ok(())
@@ -137,6 +141,25 @@ impl Config {
     fn migrate_v5_to_v6(&mut self) {
         self.settings.dns.migrate_legacy_servers();
         self.settings.dns.strategy = self.settings.dns.strategy.ipv4_counterpart();
+    }
+
+    fn migrate_v6_to_v7(&mut self) {
+        for profile in &mut self.profiles {
+            if let ProtocolConfig::Vless(cfg) = &mut profile.config {
+                let service_name = cfg.legacy_transport_service_name.take();
+                if let Some(kind) = cfg.legacy_transport_type.take()
+                    && cfg.transport.is_none()
+                {
+                    cfg.transport = Some(TransportConfig {
+                        kind,
+                        path: None,
+                        host: None,
+                        service_name,
+                        headers: Default::default(),
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -236,14 +259,45 @@ mod tests {
                 ..Config::default()
             };
             cfg.settings.dns.strategy = before.clone();
-            cfg.migrate().unwrap();
+            cfg.migrate_to(6).unwrap();
             assert_eq!(cfg.schema_version, 6);
             assert_eq!(cfg.settings.dns.strategy, after, "{before:?}");
 
             let once = cfg.clone();
-            cfg.migrate().unwrap();
+            cfg.migrate_to(6).unwrap();
             assert_eq!(cfg, once, "{before:?}");
         }
+    }
+
+    #[test]
+    fn migrate_v6_moves_flat_vless_transport_into_the_shared_block() {
+        let mut profile = Profile::new_vless("V".into(), "1.1.1.1".into(), 443, "u".into());
+        let ProtocolConfig::Vless(cfg) = &mut profile.config else {
+            unreachable!()
+        };
+        cfg.legacy_transport_type = Some(TransportType::Grpc);
+        cfg.legacy_transport_service_name = Some("svc".into());
+        let mut config = Config {
+            schema_version: 6,
+            profiles: vec![profile],
+            ..Config::default()
+        };
+
+        config.migrate_to(7).unwrap();
+        let migrated = config.clone();
+        config.migrate_to(7).unwrap();
+
+        assert_eq!(config, migrated);
+        assert_eq!(
+            vless_cfg(&config.profiles[0]).transport,
+            Some(TransportConfig {
+                kind: TransportType::Grpc,
+                path: None,
+                host: None,
+                service_name: Some("svc".into()),
+                headers: Default::default(),
+            })
+        );
     }
 
     #[test]
@@ -364,6 +418,7 @@ mod tests {
             }),
             tags: Vec::new(),
             subscription_id: None,
+            share_link_params: Default::default(),
         });
         cfg.migrate().unwrap();
         assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);

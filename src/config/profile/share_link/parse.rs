@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result};
 use url::Url;
@@ -14,7 +14,7 @@ pub fn parse_share_link(text: &str) -> Result<Profile> {
     let scheme = scheme.as_str();
     let rest = &trimmed[scheme_end + 3..];
 
-    match scheme {
+    let mut profile = match scheme {
         "vless" => parse_vless(rest),
         "vmess" => parse_vmess(rest),
         "trojan" => parse_trojan(rest),
@@ -29,7 +29,12 @@ pub fn parse_share_link(text: &str) -> Result<Profile> {
         "anytls" => parse_anytls(rest),
         "shadowtls" => parse_shadowtls(rest),
         other => anyhow::bail!("Unsupported share link scheme: {other}://"),
+    }?;
+    let vmess_base64 = scheme == "vmess" && !rest.contains('@');
+    if !vmess_base64 {
+        profile.share_link_params = unmapped_query_params(rest, scheme);
     }
+    Ok(profile)
 }
 
 fn parse_uri(scheme: &str, rest: &str) -> Result<Url> {
@@ -68,11 +73,118 @@ fn decode_b64_lenient(s: &str) -> Result<Vec<u8>> {
 }
 
 fn parse_transport_type(s: &str) -> Option<TransportType> {
-    match s {
-        "grpc" => Some(TransportType::Grpc),
-        "ws" => Some(TransportType::Ws),
-        "http" => Some(TransportType::Http),
-        _ => None,
+    Some(match s {
+        "" | "tcp" | "raw" | "none" => return None,
+        "grpc" => TransportType::Grpc,
+        "ws" => TransportType::Ws,
+        "http" | "h2" => TransportType::Http,
+        "httpupgrade" => TransportType::HttpUpgrade,
+        "quic" => TransportType::Quic,
+        other => TransportType::Other(other.to_string()),
+    })
+}
+
+const TLS_QUERY_KEYS: [&str; 9] = [
+    "sni",
+    "host",
+    "alpn",
+    "fp",
+    "allowInsecure",
+    "insecure",
+    "pbk",
+    "sid",
+    "spx",
+];
+
+const TRANSPORT_QUERY_KEYS: [&str; 4] = ["type", "path", "host", "serviceName"];
+
+fn mapped_query_keys(scheme: &str) -> Vec<&'static str> {
+    let (tls, transport, own): (bool, bool, &[&'static str]) = match scheme {
+        "vless" => (true, true, &["flow", "security"]),
+        "vmess" => (true, true, &["scy", "encryption", "security", "aid"]),
+        "trojan" => (true, true, &[]),
+        "hysteria2" | "hy2" => (true, false, &["obfs", "obfs-password", "up", "down"]),
+        "tuic" => (
+            true,
+            false,
+            &["congestion_control", "udp_relay_mode", "zero_rtt_handshake"],
+        ),
+        "anytls" => (true, false, &[]),
+        "shadowtls" => (
+            true,
+            false,
+            &[
+                "version",
+                "ss-method",
+                "method",
+                "ss-password",
+                "ss_password",
+            ],
+        ),
+        "ssh" => (
+            false,
+            false,
+            &["password", "private_key_path", "private_key_passphrase"],
+        ),
+        _ => (false, false, &[]),
+    };
+    let mut keys = own.to_vec();
+    if tls {
+        keys.extend(TLS_QUERY_KEYS);
+    }
+    if transport {
+        keys.extend(TRANSPORT_QUERY_KEYS);
+    }
+    keys
+}
+
+fn unmapped_query_params(rest: &str, scheme: &str) -> BTreeMap<String, serde_json::Value> {
+    let without_fragment = rest.split_once('#').map_or(rest, |(body, _)| body);
+    let Some((_, query)) = without_fragment.split_once('?') else {
+        return BTreeMap::new();
+    };
+    let mapped = mapped_query_keys(scheme);
+    url::form_urlencoded::parse(query.as_bytes())
+        .filter(|(key, _)| !mapped.contains(&key.as_ref()))
+        .map(|(key, value)| {
+            (
+                key.into_owned(),
+                serde_json::Value::String(value.into_owned()),
+            )
+        })
+        .collect()
+}
+
+const VMESS_B64_MAPPED_FIELDS: [&str; 20] = [
+    "v",
+    "ps",
+    "add",
+    "port",
+    "id",
+    "aid",
+    "scy",
+    "tls",
+    "sni",
+    "alpn",
+    "fp",
+    "insecure",
+    "allowInsecure",
+    "pbk",
+    "sid",
+    "spx",
+    "net",
+    "type",
+    "host",
+    "path",
+];
+
+pub(super) fn vmess_b64_field_keys(net: &str) -> (&'static str, &'static str, &'static str) {
+    match net {
+        "grpc" => ("mode", "authority", "serviceName"),
+        "kcp" | "mkcp" => ("headerType", "host", "seed"),
+        "xhttp" | "splithttp" => ("mode", "host", "path"),
+        "quic" => ("headerType", "quicSecurity", "key"),
+        _ => ("headerType", "host", "path"),
     }
 }
 
@@ -129,12 +241,32 @@ fn extract_tls_common_from_query(q: &std::collections::HashMap<String, String>) 
 fn extract_transport_from_query(
     q: &std::collections::HashMap<String, String>,
 ) -> Option<TransportConfig> {
-    let kind = parse_transport_type(q.get("type")?)?;
+    transport_from_params(
+        &q.iter()
+            .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
+            .collect(),
+    )
+}
+
+fn transport_from_params(params: &BTreeMap<String, serde_json::Value>) -> Option<TransportConfig> {
+    let text = |key: &str| match params.get(key) {
+        Some(serde_json::Value::String(value)) => Some(value.clone()),
+        Some(other) => Some(other.to_string()),
+        None => None,
+    };
+    let kind = match parse_transport_type(text("type").as_deref().unwrap_or("tcp")) {
+        Some(kind) => kind,
+        None => match text("headerType").as_deref() {
+            None | Some("" | "none") => return None,
+            Some("http") => TransportType::Http,
+            Some(_) => TransportType::Other("tcp".to_string()),
+        },
+    };
     Some(TransportConfig {
         kind,
-        path: q.get("path").cloned(),
-        host: q.get("host").cloned(),
-        service_name: q.get("serviceName").cloned(),
+        path: text("path"),
+        host: text("host"),
+        service_name: text("serviceName"),
         headers: HashMap::new(),
     })
 }
@@ -163,22 +295,11 @@ fn parse_vless(rest: &str) -> Result<Profile> {
             _ => None,
         };
     }
-    if let Some(security) = query.get("security") {
-        cfg.security = match security.as_str() {
-            "reality" => Some(Security::Reality),
-            "tls" => Some(Security::Tls),
-            _ => None,
-        };
-    }
-    if let Some(transport) = query.get("type") {
-        cfg.transport_type = parse_transport_type(transport);
-    }
-    if let Some(service_name) = query.get("serviceName") {
-        cfg.transport_service_name = Some(service_name.clone());
-    }
+    cfg.transport = extract_transport_from_query(&query);
     // Shared with VMess/Trojan: handles sni / alpn / fp / insecure and
     // routes pbk+sid+spx+sni into a `RealitySettings` block when present.
     cfg.tls = extract_tls_common_from_query(&query);
+    cfg.security = stream_security(query.get("security").map(String::as_str), &cfg.tls);
 
     Ok(profile)
 }
@@ -200,15 +321,17 @@ fn parse_vmess(rest: &str) -> Result<Profile> {
     let name = fragment_name(&url, &host)?;
     let query = query_map(&url);
 
-    let security = query
+    let cipher = query
         .get("scy")
-        .or_else(|| query.get("security"))
+        .or_else(|| query.get("encryption"))
         .map(String::as_str);
+    let tls = extract_tls_common_from_query(&query);
     let cfg = VmessConfig {
         uuid,
         alter_id: query.get("aid").and_then(|v| v.parse().ok()).unwrap_or(0),
-        security: parse_vmess_security(security),
-        tls: extract_tls_common_from_query(&query),
+        security: parse_vmess_security(cipher),
+        stream_security: stream_security(query.get("security").map(String::as_str), &tls),
+        tls,
         transport: extract_transport_from_query(&query),
         ..VmessConfig::default()
     };
@@ -220,6 +343,7 @@ fn parse_vmess(rest: &str) -> Result<Profile> {
         config: ProtocolConfig::Vmess(cfg),
         tags: Vec::new(),
         subscription_id: None,
+        share_link_params: Default::default(),
     })
 }
 
@@ -247,61 +371,14 @@ fn parse_vmess_b64(b64: &str) -> Result<Profile> {
         .unwrap_or(0) as u32;
     let security = v["scy"].as_str();
 
-    let mut tls = TlsCommon::default();
-    if v["tls"].as_str() == Some("tls") {
-        tls.server_name = v["sni"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .or_else(|| v["host"].as_str().filter(|s| !s.is_empty()))
-            .map(|s| s.to_string());
-        if let Some(alpn) = v["alpn"].as_str() {
-            tls.alpn = parse_alpn(alpn);
-        }
-        if let Some(fp) = v["fp"].as_str().filter(|s| !s.is_empty()) {
-            tls.utls_fingerprint = Some(fp.to_string());
-        }
-    }
+    let tls = vmess_b64_tls(&v);
 
-    let net = v["net"].as_str().unwrap_or("tcp");
-    let transport = match net {
-        "ws" => Some(TransportConfig {
-            kind: TransportType::Ws,
-            path: v["path"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .map(String::from),
-            host: v["host"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .map(String::from),
-            service_name: None,
-            headers: HashMap::new(),
-        }),
-        "grpc" => Some(TransportConfig {
-            kind: TransportType::Grpc,
-            path: None,
-            host: None,
-            service_name: v["path"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .map(String::from),
-            headers: HashMap::new(),
-        }),
-        "h2" | "http" => Some(TransportConfig {
-            kind: TransportType::Http,
-            path: v["path"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .map(String::from),
-            host: v["host"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .map(String::from),
-            service_name: None,
-            headers: HashMap::new(),
-        }),
-        _ => None,
-    };
+    let transport_params = vmess_b64_transport_params(&v);
+    let transport = transport_from_params(&transport_params);
+    let share_link_params = transport_params
+        .into_iter()
+        .filter(|(key, _)| !TRANSPORT_QUERY_KEYS.contains(&key.as_str()))
+        .collect();
 
     Ok(Profile {
         id: Uuid::new_v4(),
@@ -312,13 +389,91 @@ fn parse_vmess_b64(b64: &str) -> Result<Profile> {
             uuid,
             alter_id: aid,
             security: parse_vmess_security(security),
+            stream_security: stream_security(v["tls"].as_str(), &tls),
             tls,
             transport,
             ..VmessConfig::default()
         }),
         tags: Vec::new(),
         subscription_id: None,
+        share_link_params,
     })
+}
+
+fn stream_security(value: Option<&str>, tls: &TlsCommon) -> Option<Security> {
+    match value {
+        Some("reality") => Some(Security::Reality),
+        Some("tls") => Some(Security::Tls),
+        Some("none") => Some(Security::None),
+        Some("") | None if tls.reality.is_some() => Some(Security::Reality),
+        Some("") | None => Some(Security::None),
+        Some(_) => None,
+    }
+}
+
+fn json_flag(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Bool(flag) => *flag,
+        serde_json::Value::Number(number) => number.as_u64() == Some(1),
+        serde_json::Value::String(text) => parse_bool_param(text),
+        _ => false,
+    }
+}
+
+fn vmess_b64_tls(v: &serde_json::Value) -> TlsCommon {
+    let mut tls = TlsCommon::default();
+    let mode = v["tls"].as_str();
+    let text = |field: &str| {
+        v[field]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .map(String::from)
+    };
+    let (_, host_field, _) = vmess_b64_field_keys(v["net"].as_str().unwrap_or("tcp"));
+    let host_is_sni_fallback = host_field == "host" && mode == Some("tls");
+    let sni = text("sni");
+    if let Some(alpn) = v["alpn"].as_str() {
+        tls.alpn = parse_alpn(alpn);
+    }
+    tls.utls_fingerprint = text("fp");
+    tls.insecure = ["insecure", "allowInsecure"]
+        .iter()
+        .any(|field| json_flag(&v[*field]));
+    if mode == Some("reality") || text("pbk").is_some() {
+        tls.reality = Some(RealitySettings {
+            public_key: text("pbk").unwrap_or_default(),
+            short_id: text("sid").unwrap_or_default(),
+            server_name: sni.unwrap_or_default(),
+            spider_x: text("spx").unwrap_or_default(),
+        });
+    } else {
+        tls.server_name = sni.or_else(|| text("host").filter(|_| host_is_sni_fallback));
+    }
+    tls
+}
+
+fn vmess_b64_transport_params(v: &serde_json::Value) -> BTreeMap<String, serde_json::Value> {
+    let (type_key, host_key, path_key) = vmess_b64_field_keys(v["net"].as_str().unwrap_or("tcp"));
+    let mut params: BTreeMap<String, serde_json::Value> = v
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(field, _)| !VMESS_B64_MAPPED_FIELDS.contains(&field.as_str()))
+        .map(|(field, value)| (field.clone(), value.clone()))
+        .collect();
+    for (param, field) in [
+        ("type", "net"),
+        (type_key, "type"),
+        (host_key, "host"),
+        (path_key, "path"),
+    ] {
+        if let Some(value) = v[field].as_str().filter(|value| !value.is_empty()) {
+            params
+                .entry(param.to_string())
+                .or_insert_with(|| serde_json::Value::String(value.to_string()));
+        }
+    }
+    params
 }
 
 fn parse_vmess_security(s: Option<&str>) -> VmessSecurity {
@@ -358,6 +513,7 @@ fn parse_trojan(rest: &str) -> Result<Profile> {
         }),
         tags: Vec::new(),
         subscription_id: None,
+        share_link_params: Default::default(),
     })
 }
 
@@ -365,31 +521,17 @@ fn parse_trojan(rest: &str) -> Result<Profile> {
 /// and the legacy fully-base64 form (`ss://b64(method:pw@host:port)#name`).
 fn parse_shadowsocks(rest: &str) -> Result<Profile> {
     // Split fragment off so we don't accidentally base64-decode the name.
-    let (body, fragment) = match rest.find('#') {
-        Some(i) => (&rest[..i], Some(&rest[i + 1..])),
+    let (body, fragment) = match rest.split_once('#') {
+        Some((body, fragment)) => (body, Some(fragment)),
         None => (rest, None),
     };
-    // Strip query (and plugin) — we don't model SS plugins yet.
-    let body = match body.find('?') {
-        Some(i) => &body[..i],
-        None => body,
-    };
+    let body = body.split_once('?').map_or(body, |(body, _)| body);
+    let body = body.strip_suffix('/').unwrap_or(body);
 
-    let (method, password, host, port) = if let Some(at) = body.rfind('@') {
-        let userinfo = &body[..at];
-        let hostport = &body[at + 1..];
-        let creds = decode_b64_lenient(userinfo)
-            .ok()
-            .and_then(|b| String::from_utf8(b).ok())
-            .unwrap_or_else(|| userinfo.to_string());
-        let (m, p) = creds
-            .split_once(':')
-            .context("Shadowsocks: expected method:password")?;
-        let (h, port_s) = hostport
-            .rsplit_once(':')
-            .context("Shadowsocks: expected host:port")?;
-        let port: u16 = port_s.parse().context("Shadowsocks: invalid port")?;
-        (m.to_string(), p.to_string(), h.to_string(), port)
+    let (method, password, host, port) = if let Some((userinfo, hostport)) = body.rsplit_once('@') {
+        let (method, password) = shadowsocks_userinfo(userinfo)?;
+        let (host, port) = shadowsocks_host_port(hostport)?;
+        (method, password, host, port)
     } else {
         // Legacy: entire body is base64.
         let bytes = decode_b64_lenient(body).context("Shadowsocks base64")?;
@@ -400,11 +542,8 @@ fn parse_shadowsocks(rest: &str) -> Result<Profile> {
         let (m, p) = creds
             .split_once(':')
             .context("Shadowsocks: expected method:password")?;
-        let (h, port_s) = hostport
-            .rsplit_once(':')
-            .context("Shadowsocks: expected host:port")?;
-        let port: u16 = port_s.parse().context("Shadowsocks: invalid port")?;
-        (m.to_string(), p.to_string(), h.to_string(), port)
+        let (host, port) = shadowsocks_host_port(hostport)?;
+        (m.to_string(), p.to_string(), host, port)
     };
 
     let cipher = parse_shadowsocks_cipher(&method)
@@ -424,7 +563,35 @@ fn parse_shadowsocks(rest: &str) -> Result<Profile> {
         }),
         tags: Vec::new(),
         subscription_id: None,
+        share_link_params: Default::default(),
     })
+}
+
+fn shadowsocks_userinfo(userinfo: &str) -> Result<(String, String)> {
+    if let Some((method, password)) = userinfo.split_once(':') {
+        return Ok((
+            urlencoding::decode(method)?.into_owned(),
+            urlencoding::decode(password)?.into_owned(),
+        ));
+    }
+    let creds = String::from_utf8(decode_b64_lenient(userinfo).context("Shadowsocks userinfo")?)
+        .context("Shadowsocks userinfo utf8")?;
+    let (method, password) = creds
+        .split_once(':')
+        .context("Shadowsocks: expected method:password")?;
+    Ok((method.to_string(), password.to_string()))
+}
+
+fn shadowsocks_host_port(hostport: &str) -> Result<(String, u16)> {
+    let (host, port) = hostport
+        .rsplit_once(':')
+        .context("Shadowsocks: expected host:port")?;
+    let host = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+    let port = port.parse().context("Shadowsocks: invalid port")?;
+    Ok((host.to_string(), port))
 }
 
 fn parse_shadowsocks_cipher(s: &str) -> Option<ShadowsocksCipher> {
@@ -477,6 +644,7 @@ fn parse_hysteria2(rest: &str) -> Result<Profile> {
         }),
         tags: Vec::new(),
         subscription_id: None,
+        share_link_params: Default::default(),
     })
 }
 
@@ -525,6 +693,7 @@ fn parse_tuic(rest: &str) -> Result<Profile> {
         }),
         tags: Vec::new(),
         subscription_id: None,
+        share_link_params: Default::default(),
     })
 }
 
@@ -555,6 +724,7 @@ fn parse_socks(scheme: &str, rest: &str, version: SocksVersion) -> Result<Profil
         }),
         tags: Vec::new(),
         subscription_id: None,
+        share_link_params: Default::default(),
     })
 }
 
@@ -592,6 +762,7 @@ fn parse_http(scheme: &str, rest: &str) -> Result<Profile> {
         }),
         tags: Vec::new(),
         subscription_id: None,
+        share_link_params: Default::default(),
     })
 }
 
@@ -626,6 +797,7 @@ fn parse_ssh(rest: &str) -> Result<Profile> {
         }),
         tags: Vec::new(),
         subscription_id: None,
+        share_link_params: Default::default(),
     })
 }
 
@@ -655,6 +827,7 @@ fn parse_anytls(rest: &str) -> Result<Profile> {
         }),
         tags: Vec::new(),
         subscription_id: None,
+        share_link_params: Default::default(),
     })
 }
 
@@ -707,6 +880,7 @@ fn parse_shadowtls(rest: &str) -> Result<Profile> {
         }),
         tags: Vec::new(),
         subscription_id: None,
+        share_link_params: Default::default(),
     })
 }
 
@@ -847,7 +1021,302 @@ mod tests {
         assert!(cfg.tls.reality.is_none());
         assert!(cfg.flow.is_none());
         assert!(cfg.tls.utls_fingerprint.is_none());
-        assert!(cfg.transport_type.is_none());
+        assert!(cfg.transport.is_none());
+    }
+
+    #[test]
+    fn parse_vless_keeps_ws_path_and_host() {
+        let uri = "vless://uuid@cdn.example.com:443?security=tls&type=ws&path=%2Fnl&host=nl.example.com&sni=cdn.example.com#NL";
+        let cfg = vless_cfg(&parse_share_link(uri).unwrap()).clone();
+        assert_eq!(
+            cfg.transport,
+            Some(TransportConfig {
+                kind: TransportType::Ws,
+                path: Some("/nl".into()),
+                host: Some("nl.example.com".into()),
+                service_name: None,
+                headers: HashMap::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_share_links_keep_httpupgrade_and_quic() {
+        let trojan = parse_share_link(
+            "trojan://p@tr.example:443?sni=tr.example&type=httpupgrade&path=%2Fup&host=cdn.example#T",
+        )
+        .unwrap();
+        let ProtocolConfig::Trojan(trojan) = trojan.config else {
+            panic!("expected Trojan")
+        };
+        let vless =
+            parse_share_link("vless://uuid@q.example:443?security=tls&type=quic#Q").unwrap();
+        let vmess = vmess_b64(serde_json::json!({
+            "add": "vm.example", "port": "443", "id": "u", "net": "httpupgrade",
+            "host": "cdn.example", "path": "/up", "tls": "tls"
+        }));
+        let ProtocolConfig::Vmess(vmess) = vmess.config else {
+            panic!("expected VMess")
+        };
+
+        let httpupgrade = Some(TransportConfig {
+            kind: TransportType::HttpUpgrade,
+            path: Some("/up".into()),
+            host: Some("cdn.example".into()),
+            service_name: None,
+            headers: HashMap::new(),
+        });
+        assert_eq!(trojan.transport, httpupgrade);
+        assert_eq!(vmess.transport, httpupgrade);
+        assert_eq!(
+            vless_cfg(&vless).transport.as_ref().map(|t| &t.kind),
+            Some(&TransportType::Quic)
+        );
+    }
+
+    fn params(pairs: &[(&str, serde_json::Value)]) -> BTreeMap<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.clone()))
+            .collect()
+    }
+
+    fn vmess_b64(body: serde_json::Value) -> Profile {
+        parse_share_link(&crate::test_helpers::vmess_b64_link(&body)).unwrap()
+    }
+
+    fn vmess_transport(profile: &Profile) -> TransportConfig {
+        let ProtocolConfig::Vmess(cfg) = &profile.config else {
+            panic!("expected VMess")
+        };
+        cfg.transport.clone().expect("transport")
+    }
+
+    #[test]
+    fn parse_share_links_keep_transports_sing_box_lacks() {
+        let xhttp = parse_share_link(
+            "vless://uuid@x.example:443?security=tls&type=xhttp&path=%2Fx&mode=auto#X",
+        )
+        .unwrap();
+        let kcp = vmess_b64(serde_json::json!({
+            "add": "k.example", "port": "443", "id": "u", "net": "kcp",
+            "type": "wechat-video", "path": "seed"
+        }));
+
+        assert_eq!(
+            vless_cfg(&xhttp).transport,
+            Some(TransportConfig {
+                kind: TransportType::Other("xhttp".into()),
+                path: Some("/x".into()),
+                host: None,
+                service_name: None,
+                headers: HashMap::new(),
+            })
+        );
+        assert_eq!(xhttp.share_link_params, params(&[("mode", "auto".into())]));
+        assert_eq!(
+            vmess_transport(&kcp).kind,
+            TransportType::Other("kcp".into())
+        );
+        assert_eq!(
+            kcp.share_link_params,
+            params(&[
+                ("headerType", "wechat-video".into()),
+                ("seed", "seed".into())
+            ])
+        );
+    }
+
+    #[test]
+    fn parse_share_links_keep_every_unmapped_param_on_the_profile() {
+        let tcp = parse_share_link(
+            "vless://uuid@r.example:443?security=reality&pbk=k&sni=s.example&encryption=mlkem768x25519plus.native.0rtt.key&pqv=v#R",
+        )
+        .unwrap();
+        let hysteria2 = parse_share_link(
+            "hy2://p@h.example:443?sni=h.example&pinSHA256=AB%3ACD&mport=1000-2000#H",
+        )
+        .unwrap();
+        let shadowsocks = parse_share_link(
+            "ss://YWVzLTEyOC1nY206cA@s.example:8388?plugin=obfs-local%3Bobfs%3Dhttp#S",
+        )
+        .unwrap();
+
+        assert_eq!(
+            tcp.share_link_params,
+            params(&[
+                ("encryption", "mlkem768x25519plus.native.0rtt.key".into()),
+                ("pqv", "v".into()),
+            ])
+        );
+        assert_eq!(
+            hysteria2.share_link_params,
+            params(&[("mport", "1000-2000".into()), ("pinSHA256", "AB:CD".into())])
+        );
+        assert_eq!(
+            shadowsocks.share_link_params,
+            params(&[("plugin", "obfs-local;obfs=http".into())])
+        );
+    }
+
+    #[test]
+    fn parse_vmess_b64_keeps_every_unmapped_field_with_its_json_value() {
+        let grpc = vmess_b64(serde_json::json!({
+            "add": "g.example", "port": 443, "id": "u", "net": "grpc",
+            "type": "multi", "path": "svc", "authority": "a.example"
+        }));
+        let xhttp = vmess_b64(serde_json::json!({
+            "add": "x.example", "port": 443, "id": "u", "net": "xhttp", "path": "/x",
+            "mode": "packet-up", "x_padding_bytes": "100-1000",
+            "extra": { "xPaddingBytes": "100-1000", "headers": { "X": "y" } }
+        }));
+        let kcp = vmess_b64(serde_json::json!({
+            "add": "k.example", "port": 443, "id": "u", "net": "kcp", "mtu": 1350, "tti": 20
+        }));
+
+        assert_eq!(vmess_transport(&grpc).service_name.as_deref(), Some("svc"));
+        assert_eq!(
+            grpc.share_link_params,
+            params(&[("authority", "a.example".into()), ("mode", "multi".into())])
+        );
+        assert_eq!(
+            xhttp.share_link_params,
+            params(&[
+                (
+                    "extra",
+                    serde_json::json!({ "xPaddingBytes": "100-1000", "headers": { "X": "y" } })
+                ),
+                ("mode", "packet-up".into()),
+                ("x_padding_bytes", "100-1000".into()),
+            ])
+        );
+        assert_eq!(
+            kcp.share_link_params,
+            params(&[("mtu", 1350.into()), ("tti", 20.into())])
+        );
+    }
+
+    #[test]
+    fn parse_vmess_b64_legacy_quic_moves_encryption_into_quic_keys() {
+        let quic = vmess_b64(serde_json::json!({
+            "add": "q.example", "port": 443, "id": "u", "net": "quic",
+            "type": "none", "host": "aes-128-gcm", "path": "secret"
+        }));
+        let transport = vmess_transport(&quic);
+        assert_eq!(transport.kind, TransportType::Quic);
+        assert_eq!((transport.host, transport.path), (None, None));
+        assert_eq!(
+            quic.share_link_params,
+            params(&[
+                ("headerType", "none".into()),
+                ("key", "secret".into()),
+                ("quicSecurity", "aes-128-gcm".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn parse_tcp_http_header_as_the_sing_box_http_transport() {
+        let profile = parse_share_link(
+            "vless://uuid@h.example:80?type=tcp&headerType=http&host=a.example&path=%2F#H",
+        )
+        .unwrap();
+        assert_eq!(
+            vless_cfg(&profile).transport,
+            Some(TransportConfig {
+                kind: TransportType::Http,
+                path: Some("/".into()),
+                host: Some("a.example".into()),
+                service_name: None,
+                headers: HashMap::new(),
+            })
+        );
+        assert_eq!(
+            profile.share_link_params,
+            params(&[("headerType", "http".into())])
+        );
+        let plain =
+            parse_share_link("vless://uuid@h.example:80?type=tcp&headerType=none#P").unwrap();
+        assert!(vless_cfg(&plain).transport.is_none());
+    }
+
+    #[test]
+    fn parse_share_links_take_tls_from_security_and_cipher_from_encryption() {
+        let vless_security =
+            |link: &str| vless_cfg(&parse_share_link(link).unwrap()).security.clone();
+        let vmess = |link: &str| {
+            let ProtocolConfig::Vmess(cfg) = parse_share_link(link).unwrap().config else {
+                panic!("expected VMess")
+            };
+            (cfg.stream_security, cfg.security)
+        };
+
+        assert_eq!(
+            vless_security("vless://u@v.example:443#V"),
+            Some(Security::None)
+        );
+        assert_eq!(
+            vless_security("vless://u@v.example:443?security=none#V"),
+            Some(Security::None)
+        );
+        assert_eq!(
+            vless_security("vless://u@v.example:443?pbk=k&sni=s.example#V"),
+            Some(Security::Reality)
+        );
+        assert_eq!(
+            vless_security("vless://u@v.example:443?security=none&pbk=k&sni=s.example#V"),
+            Some(Security::None)
+        );
+        assert_eq!(
+            vmess("vmess://u@v.example:443?security=none&pbk=k#V").0,
+            Some(Security::None)
+        );
+        assert_eq!(
+            vmess("vmess://u@v.example:443?security=tls&encryption=aes-128-gcm#V"),
+            (Some(Security::Tls), VmessSecurity::Aes128Gcm)
+        );
+        assert_eq!(
+            vmess(&crate::test_helpers::vmess_b64_link(&serde_json::json!({
+                "add": "v.example", "port": 443, "id": "u", "tls": ""
+            }))),
+            (Some(Security::None), VmessSecurity::Auto)
+        );
+    }
+
+    #[test]
+    fn parse_shadowsocks_follows_sip002() {
+        let shadowsocks = |link: &str| {
+            let profile = parse_share_link(link).unwrap();
+            let ProtocolConfig::Shadowsocks(cfg) = profile.config else {
+                panic!("expected Shadowsocks")
+            };
+            (profile.address, profile.port, cfg.method, cfg.password)
+        };
+
+        assert_eq!(
+            shadowsocks(
+                "ss://2022-blake3-aes-256-gcm:YctPZ6U7xPPcU%2Bgp3u%2B0tx%2FtRizJN9K8y%2BuKlW2qjlI%3D@192.168.100.1:8888#Example3"
+            ),
+            (
+                "192.168.100.1".to_string(),
+                8888,
+                ShadowsocksCipher::Blake3Aes256Gcm,
+                "YctPZ6U7xPPcU+gp3u+0tx/tRizJN9K8y+uKlW2qjlI=".to_string()
+            )
+        );
+        assert_eq!(
+            shadowsocks("ss://YWVzLTEyOC1nY206dGVzdA@192.168.100.1:8888/#Example1"),
+            (
+                "192.168.100.1".to_string(),
+                8888,
+                ShadowsocksCipher::Aes128Gcm,
+                "test".to_string()
+            )
+        );
+        assert_eq!(
+            shadowsocks("ss://YWVzLTEyOC1nY206dGVzdA@[2001:db8::1]:8388#V6").0,
+            "2001:db8::1"
+        );
     }
 
     #[test]

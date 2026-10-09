@@ -57,9 +57,9 @@ the clipboard using supported share links.
 
 | Protocol | Share-link scheme(s) | Key support |
 |----------|----------------------|-------------|
-| **VLESS** | `vless://` | REALITY, XTLS Vision, TLS; gRPC, WebSocket, HTTP |
+| **VLESS** | `vless://` | REALITY, XTLS Vision, TLS; gRPC, WebSocket, HTTP, HTTPUpgrade, QUIC |
 | **Hysteria 2** | `hysteria2://`, `hy2://` | QUIC and Salamander obfuscation |
-| **Trojan** | `trojan://` | TLS; gRPC, WebSocket, HTTP |
+| **Trojan** | `trojan://` | TLS; gRPC, WebSocket, HTTP, HTTPUpgrade, QUIC |
 | **Shadowsocks** | `ss://` | AEAD and AEAD-2022 ciphers; SIP002 and legacy Base64 |
 
 <details>
@@ -82,8 +82,11 @@ non-default port. Otherwise it is a subscription.
 </details>
 
 > [!TIP]
-> sing-box does not implement the XHTTP transport; use VLESS over gRPC with
-> REALITY or another supported transport instead.
+> sing-box does not implement the XHTTP and mKCP transports. Such links are
+> still imported with all their parameters, but sing-box refuses the profile
+> when it connects; with the kill switch on, the network stays blocked until
+> you pick another profile. Use VLESS over gRPC with REALITY or another
+> supported transport instead.
 
 ---
 

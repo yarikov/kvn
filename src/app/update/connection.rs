@@ -42,8 +42,17 @@ pub(in crate::app::update) fn on_connected(
     model.active_profile_id = Some(profile_id);
     let profile = model.config.profiles.iter().find(|p| p.id == profile_id);
     let profile_name = profile.map(|p| p.name.clone());
-    let dns_warning =
-        profile.and_then(|p| crate::singbox::config::dns_bypass_warning(p, &model.config.settings));
+    let warnings: Vec<String> = profile
+        .map(|p| {
+            [
+                crate::singbox::config::dns_bypass_warning(p, &model.config.settings),
+                crate::singbox::config::certificate_pin_warning(p),
+            ]
+            .into_iter()
+            .flatten()
+            .collect()
+        })
+        .unwrap_or_default();
     push_status(
         &mut effects,
         model,
@@ -53,7 +62,7 @@ pub(in crate::app::update) fn on_connected(
             None => "Connected".to_string(),
         }),
     );
-    if let Some(warning) = dns_warning {
+    for warning in warnings {
         push_status(&mut effects, model, AppStatus::Error(warning));
     }
     // Persist last connected profile for auto-connect on next startup.
@@ -716,6 +725,21 @@ mod tests {
                 Effect::PersistConfirmedState
             ]
         );
+    }
+
+    #[test]
+    fn connected_warns_when_the_certificate_pin_is_not_checked() {
+        let mut profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        profile
+            .share_link_params
+            .insert("pinSHA256".into(), "AB:CD".into());
+        let mut model = model_with_profiles(vec![profile.clone()]);
+        let warning = crate::singbox::config::certificate_pin_warning(&profile).unwrap();
+
+        let effects = on_connected(&mut model, 1, profile.id, 0);
+
+        assert_eq!(model.status, Some(AppStatus::Error(warning.clone())));
+        assert!(effects.contains(&app_log_error(&warning)));
     }
 
     #[test]

@@ -336,6 +336,17 @@ impl DnsUpstreams {
     }
 }
 
+pub fn certificate_pin_warning(profile: &Profile) -> Option<String> {
+    profile
+        .share_link_params
+        .get("pinSHA256")
+        .and_then(serde_json::Value::as_str)
+        .filter(|pin| !pin.is_empty())
+        .map(|_| {
+            "pinSHA256 is not checked: sing-box pins certificate public keys, not the certificate fingerprint the link gives, so the server certificate is verified only as the profile's TLS settings allow (not at all with insecure)".to_string()
+        })
+}
+
 pub fn dns_bypass_warning(profile: &Profile, settings: &Settings) -> Option<String> {
     let active = settings.dns.active()?;
     let upstreams = DnsUpstreams::new(active, &settings.geo_routing.mode(), profile);
@@ -656,8 +667,10 @@ mod tests {
     use super::*;
     use crate::config::profile::{
         CustomDnsPreset, DnsConfig, DnsRule, DnsStrategy, GeoRegion, Profile, ProtocolConfig,
-        RealitySettings, ShadowtlsVersion, TransportType, VlessConfig,
+        RealitySettings, ShadowtlsVersion, TransportConfig, TransportType, VlessConfig,
+        VmessConfig,
     };
+    use serde_json::json;
 
     const TEST_CLASH_PORT: u16 = 41390;
 
@@ -676,7 +689,13 @@ mod tests {
                 server_name: "google.com".to_string(),
                 spider_x: "/".to_string(),
             });
-            cfg.transport_type = Some(TransportType::Grpc);
+            cfg.transport = Some(TransportConfig {
+                kind: TransportType::Grpc,
+                path: None,
+                host: None,
+                service_name: None,
+                headers: Default::default(),
+            });
             cfg.tls.utls_fingerprint = Some("chrome".to_string());
         }
         p
@@ -901,7 +920,11 @@ mod tests {
     #[test]
     fn vless_outbound_with_grpc_service_name() {
         let mut profile = test_profile();
-        vless_cfg_mut(&mut profile).transport_service_name = Some("my-service".to_string());
+        vless_cfg_mut(&mut profile)
+            .transport
+            .as_mut()
+            .unwrap()
+            .service_name = Some("my-service".to_string());
         let outbound = build_vless_outbound(&profile, vless_cfg(&profile)).unwrap();
         assert_eq!(outbound["transport"]["service_name"], "my-service");
     }
@@ -909,7 +932,7 @@ mod tests {
     #[test]
     fn vless_outbound_without_transport() {
         let mut profile = test_profile();
-        vless_cfg_mut(&mut profile).transport_type = None;
+        vless_cfg_mut(&mut profile).transport = None;
         let outbound = build_vless_outbound(&profile, vless_cfg(&profile)).unwrap();
         assert!(outbound.get("transport").is_none());
     }
@@ -923,6 +946,7 @@ mod tests {
             config,
             tags: Vec::new(),
             subscription_id: None,
+            share_link_params: Default::default(),
         }
     }
 
@@ -975,9 +999,170 @@ mod tests {
             443,
         );
         let outbound = build_one(&profile);
-        assert_eq!(outbound["transport"]["type"], "ws");
-        assert_eq!(outbound["transport"]["path"], "/ws");
-        assert_eq!(outbound["transport"]["host"], "example.com");
+        assert_eq!(
+            outbound["transport"],
+            json!({"type": "ws", "path": "/ws", "headers": {"Host": "example.com"}})
+        );
+    }
+
+    fn vmess_with_transport(transport: TransportConfig) -> Profile {
+        profile_with(
+            ProtocolConfig::Vmess(VmessConfig {
+                uuid: "u".into(),
+                transport: Some(transport),
+                ..Default::default()
+            }),
+            "1.1.1.1",
+            443,
+        )
+    }
+
+    #[test]
+    fn ws_transport_keeps_an_explicit_host_header() {
+        let profile = vmess_with_transport(TransportConfig {
+            kind: TransportType::Ws,
+            path: None,
+            host: Some("link.example.com".into()),
+            service_name: None,
+            headers: [("host".to_string(), "edited.example.com".to_string())].into(),
+        });
+        let outbound = build_one(&profile);
+        assert_eq!(
+            outbound["transport"]["headers"],
+            json!({"host": "edited.example.com"})
+        );
+    }
+
+    #[test]
+    fn httpupgrade_transport_emits_host_and_path_and_quic_emits_only_its_type() {
+        let httpupgrade = vmess_with_transport(TransportConfig {
+            kind: TransportType::HttpUpgrade,
+            path: Some("/up".into()),
+            host: Some("cdn.example.com".into()),
+            service_name: None,
+            headers: Default::default(),
+        });
+        let quic = vmess_with_transport(TransportConfig {
+            kind: TransportType::Quic,
+            path: Some("/ignored".into()),
+            host: Some("ignored.example.com".into()),
+            service_name: None,
+            headers: Default::default(),
+        });
+        assert_eq!(
+            build_one(&httpupgrade)["transport"],
+            json!({"type": "httpupgrade", "host": "cdn.example.com", "path": "/up"})
+        );
+        assert_eq!(build_one(&quic)["transport"], json!({"type": "quic"}));
+    }
+
+    fn with_params(mut profile: Profile, pairs: &[(&str, &str)]) -> Profile {
+        profile.share_link_params = pairs
+            .iter()
+            .map(|(key, value)| (key.to_string(), json!(value)))
+            .collect();
+        profile
+    }
+
+    fn transport(kind: TransportType, path: Option<&str>, host: Option<&str>) -> TransportConfig {
+        TransportConfig {
+            kind,
+            path: path.map(Into::into),
+            host: host.map(Into::into),
+            service_name: None,
+            headers: Default::default(),
+        }
+    }
+
+    #[test]
+    fn unknown_transport_emits_only_its_type_and_link_params_never_reach_sing_box() {
+        let xhttp = with_params(
+            vmess_with_transport(transport(
+                TransportType::Other("xhttp".into()),
+                Some("/x"),
+                None,
+            )),
+            &[("mode", "auto")],
+        );
+        let ws = with_params(
+            vmess_with_transport(transport(TransportType::Ws, Some("/ws"), None)),
+            &[("mode", "auto")],
+        );
+        assert_eq!(build_one(&xhttp)["transport"], json!({"type": "xhttp"}));
+        assert_eq!(
+            build_one(&ws)["transport"],
+            json!({"type": "ws", "path": "/ws"})
+        );
+    }
+
+    #[test]
+    fn tcp_http_header_is_refused_over_tls_and_sent_as_http_without_it() {
+        let http = transport(TransportType::Http, Some("/"), Some("a.example.com"));
+        let profile = with_params(
+            vmess_with_transport(http.clone()),
+            &[("headerType", "http")],
+        );
+        let error = build_outbound(&profile).unwrap_err().to_string();
+        assert!(error.contains("HTTP/2"), "{error}");
+        let mut plain = profile;
+        if let ProtocolConfig::Vmess(cfg) = &mut plain.config {
+            cfg.stream_security = Some(crate::config::profile::Security::None);
+        }
+        assert_eq!(
+            build_one(&plain)["transport"],
+            json!({"type": "http", "host": ["a.example.com"], "path": "/"})
+        );
+    }
+
+    #[test]
+    fn explicit_no_tls_drops_the_tls_block_and_unset_keeps_it() {
+        use crate::config::profile::Security;
+        let mut vless = test_profile();
+        vless_cfg_mut(&mut vless).security = Some(Security::None);
+        let mut vmess = vmess_with_transport(transport(TransportType::Ws, Some("/ws"), None));
+        let legacy_vmess = vmess.clone();
+        if let ProtocolConfig::Vmess(cfg) = &mut vmess.config {
+            cfg.stream_security = Some(Security::None);
+        }
+
+        assert!(build_one(&vless).get("tls").is_none());
+        assert!(build_one(&vmess).get("tls").is_none());
+        assert_eq!(build_one(&legacy_vmess)["tls"]["enabled"], true);
+    }
+
+    #[test]
+    fn quic_transport_refuses_options_sing_box_lacks() {
+        let profile = with_params(
+            vmess_with_transport(transport(TransportType::Quic, None, None)),
+            &[("quicSecurity", "aes-128-gcm")],
+        );
+        let error = build_outbound(&profile).unwrap_err().to_string();
+        assert!(error.contains("quicSecurity=aes-128-gcm"), "{error}");
+    }
+
+    #[test]
+    fn vless_encryption_is_refused_and_none_is_accepted() {
+        let encrypted = with_params(test_profile(), &[("encryption", "mlkem768x25519plus")]);
+        let plain = with_params(test_profile(), &[("encryption", "none")]);
+        let error = build_outbound(&encrypted).unwrap_err().to_string();
+        assert!(error.contains("VLESS Encryption"), "{error}");
+        assert!(build_outbound(&plain).is_ok());
+    }
+
+    #[test]
+    fn http_transport_emits_hosts_as_a_list() {
+        let profile = vmess_with_transport(TransportConfig {
+            kind: TransportType::Http,
+            path: Some("/h2".into()),
+            host: Some("a.example.com, b.example.com".into()),
+            service_name: Some("ignored".into()),
+            headers: Default::default(),
+        });
+        let outbound = build_one(&profile);
+        assert_eq!(
+            outbound["transport"],
+            json!({"type": "http", "host": ["a.example.com", "b.example.com"], "path": "/h2"})
+        );
     }
 
     #[test]
@@ -1023,6 +1208,34 @@ mod tests {
     }
 
     #[test]
+    fn shadowsocks_outbound_passes_the_link_plugin_to_sing_box() {
+        use crate::config::profile::{ShadowsocksCipher, ShadowsocksConfig};
+        let shadowsocks = || {
+            profile_with(
+                ProtocolConfig::Shadowsocks(ShadowsocksConfig {
+                    method: ShadowsocksCipher::Aes128Gcm,
+                    password: "p".into(),
+                }),
+                "ss.example",
+                8388,
+            )
+        };
+        let obfs = with_params(
+            shadowsocks(),
+            &[("plugin", "obfs-local;obfs=http;obfs-host=a.example")],
+        );
+        let v2ray = with_params(shadowsocks(), &[("plugin", "v2ray-plugin")]);
+
+        let obfs = build_one(&obfs);
+        let v2ray = build_one(&v2ray);
+
+        assert_eq!(obfs["plugin"], "obfs-local");
+        assert_eq!(obfs["plugin_opts"], "obfs=http;obfs-host=a.example");
+        assert_eq!(v2ray["plugin"], "v2ray-plugin");
+        assert!(v2ray.get("plugin_opts").is_none());
+    }
+
+    #[test]
     fn shadowsocks_outbound_uses_aead_cipher() {
         use crate::config::profile::{ShadowsocksCipher, ShadowsocksConfig};
         let profile = profile_with(
@@ -1041,6 +1254,37 @@ mod tests {
             outbound.get("tls").is_none(),
             "Shadowsocks must not carry a tls block"
         );
+    }
+
+    fn hysteria2(params: &[(&str, &str)]) -> Profile {
+        with_params(
+            profile_with(
+                ProtocolConfig::Hysteria2(crate::config::profile::Hysteria2Config {
+                    password: "p".into(),
+                    ..Default::default()
+                }),
+                "hy2.example",
+                443,
+            ),
+            params,
+        )
+    }
+
+    #[test]
+    fn hysteria2_mport_becomes_server_port_ranges() {
+        let outbound = build_one(&hysteria2(&[("mport", "1000-2000, 3000")]));
+        assert!(outbound.get("server_port").is_none());
+        assert_eq!(outbound["server_ports"], json!(["1000:2000", "3000:3000"]));
+    }
+
+    #[test]
+    fn certificate_pin_warning_names_an_unchecked_pin_sha256() {
+        assert!(
+            certificate_pin_warning(&hysteria2(&[("pinSHA256", "AB:CD")]))
+                .unwrap()
+                .contains("pinSHA256 is not checked")
+        );
+        assert_eq!(certificate_pin_warning(&hysteria2(&[])), None);
     }
 
     #[test]
