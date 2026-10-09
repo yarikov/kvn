@@ -57,9 +57,9 @@ the clipboard using supported share links.
 
 | Protocol | Share-link scheme(s) | Key support |
 |----------|----------------------|-------------|
-| **VLESS** | `vless://` | REALITY, XTLS Vision, TLS; gRPC, WebSocket, HTTP, HTTPUpgrade, QUIC |
+| **VLESS** | `vless://` | REALITY, XTLS Vision, TLS with ECH; gRPC, WebSocket, HTTP, HTTPUpgrade, QUIC |
 | **Hysteria 2** | `hysteria2://`, `hy2://` | QUIC and Salamander obfuscation |
-| **Trojan** | `trojan://` | TLS; gRPC, WebSocket, HTTP, HTTPUpgrade, QUIC |
+| **Trojan** | `trojan://` | TLS with ECH; gRPC, WebSocket, HTTP, HTTPUpgrade, QUIC |
 | **Shadowsocks** | `ss://` | AEAD and AEAD-2022 ciphers; SIP002 and legacy Base64 |
 
 <details>
@@ -67,7 +67,7 @@ the clipboard using supported share links.
 
 | Protocol | Share-link scheme(s) | Key support |
 |----------|----------------------|-------------|
-| **VMess** | `vmess://` | Base64 JSON and URI formats; TLS and shared transports |
+| **VMess** | `vmess://` | Base64 JSON and URI formats; TLS with ECH and shared transports |
 | **TUIC** | `tuic://` | TUIC v5, congestion control, and UDP relay modes |
 | **AnyTLS** | `anytls://` | TLS-based multiplexing |
 | **ShadowTLS** | `shadowtls://` | Versions 1–3 with an inner Shadowsocks connection |

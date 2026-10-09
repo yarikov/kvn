@@ -84,7 +84,8 @@ fn parse_transport_type(s: &str) -> Option<TransportType> {
     })
 }
 
-const TLS_QUERY_KEYS: [&str; 9] = [
+const TLS_QUERY_KEYS: [&str; 10] = [
+    "ech",
     "sni",
     "host",
     "alpn",
@@ -149,7 +150,7 @@ fn unmapped_query_params(rest: &str, scheme: &str) -> BTreeMap<String, serde_jso
     };
     let mapped = mapped_query_keys(scheme);
     url::form_urlencoded::parse(query.as_bytes())
-        .filter(|(key, _)| !mapped.contains(&key.as_ref()))
+        .filter(|(key, value)| !is_mapped_param(&mapped, key, value))
         .map(|(key, value)| {
             (
                 key.into_owned(),
@@ -159,7 +160,12 @@ fn unmapped_query_params(rest: &str, scheme: &str) -> BTreeMap<String, serde_jso
         .collect()
 }
 
-const VMESS_B64_MAPPED_FIELDS: [&str; 20] = [
+fn is_mapped_param(mapped: &[&str], key: &str, value: &str) -> bool {
+    mapped.contains(&key) && !(key == "ech" && EchSettings::is_dns_query_link_value(value))
+}
+
+const VMESS_B64_MAPPED_FIELDS: [&str; 21] = [
+    "ech",
     "v",
     "ps",
     "add",
@@ -239,7 +245,12 @@ fn extract_tls_common_from_query(q: &std::collections::HashMap<String, String>) 
         // encode→parse round-trip (one input `sni` becomes two destinations).
         tls.server_name = None;
     }
+    tls.ech = q.get("ech").map(|value| ech_from_link(value, &tls));
     tls
+}
+
+fn ech_from_link(value: &str, tls: &TlsCommon) -> EchSettings {
+    EchSettings::from_link_value(value, tls.reality.is_none())
 }
 
 fn extract_transport_from_query(
@@ -455,6 +466,7 @@ fn vmess_b64_tls(v: &serde_json::Value) -> TlsCommon {
     } else {
         tls.server_name = sni.or_else(|| text("host").filter(|_| host_is_sni_fallback));
     }
+    tls.ech = text("ech").map(|value| ech_from_link(&value, &tls));
     tls
 }
 
@@ -464,7 +476,13 @@ fn vmess_b64_transport_params(v: &serde_json::Value) -> BTreeMap<String, serde_j
         .as_object()
         .into_iter()
         .flatten()
-        .filter(|(field, _)| !VMESS_B64_MAPPED_FIELDS.contains(&field.as_str()))
+        .filter(|(field, value)| {
+            !is_mapped_param(
+                &VMESS_B64_MAPPED_FIELDS,
+                field,
+                value.as_str().unwrap_or_default(),
+            )
+        })
         .map(|(field, value)| (field.clone(), value.clone()))
         .collect();
     for (param, field) in [
@@ -1543,6 +1561,90 @@ mod tests {
         assert_eq!((cfg.up_mbps, cfg.down_mbps), (Some(50), Some(200)));
         assert!(!p.share_link_params.contains_key("upmbps"));
         assert!(!p.share_link_params.contains_key("downmbps"));
+    }
+
+    const ECH_CONFIG_LIST: &str = "AEb+DQBCAAAgACB+GRNFbWuFxJAhX6jcFCDTTdUF4NIBCuehfnWnGNsNaQAMAAEAAQABAAIAAQADAAtlY2guZXhhbXBsZQAA";
+
+    fn ech_pem() -> Vec<String> {
+        vec![
+            "-----BEGIN ECH CONFIGS-----".to_string(),
+            ECH_CONFIG_LIST.to_string(),
+            "-----END ECH CONFIGS-----".to_string(),
+        ]
+    }
+
+    #[test]
+    fn parse_ech_config_list_from_3x_ui_links() {
+        let ech = urlencoding::encode(ECH_CONFIG_LIST);
+        let vless = parse_share_link(&format!(
+            "vless://671c62c7-6768-4b98-ac6b-572c9c707be0@v.example:443?type=tcp&security=tls&sni=v.example&ech={ech}#3x-ui"
+        ))
+        .unwrap();
+        let ProtocolConfig::Vless(cfg) = &vless.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        let expected = Some(EchSettings {
+            enabled: true,
+            config: ech_pem(),
+        });
+        assert_eq!(cfg.tls.ech, expected);
+        assert!(vless.share_link_params.is_empty());
+
+        use base64::Engine;
+        let json = format!(
+            r#"{{"v":"2","ps":"3x-ui","add":"m.example","port":"443","id":"u","net":"tcp","tls":"tls","sni":"m.example","ech":"{ECH_CONFIG_LIST}"}}"#
+        );
+        let vmess = parse_share_link(&format!(
+            "vmess://{}",
+            base64::engine::general_purpose::STANDARD.encode(json)
+        ))
+        .unwrap();
+        let ProtocolConfig::Vmess(cfg) = &vmess.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        assert_eq!(cfg.tls.ech, expected);
+        assert!(vmess.share_link_params.is_empty());
+    }
+
+    #[test]
+    fn parse_ech_dns_query_enables_ech_and_keeps_the_query() {
+        let query = "ech.example+https://1.1.1.1/dns-query";
+        let p = parse_share_link(&format!(
+            "trojan://pw@t.example:443?security=tls&ech={}#T",
+            urlencoding::encode(query)
+        ))
+        .unwrap();
+        let ProtocolConfig::Trojan(cfg) = &p.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        assert_eq!(
+            cfg.tls.ech,
+            Some(EchSettings {
+                enabled: true,
+                config: Vec::new()
+            })
+        );
+        assert_eq!(p.share_link_params.get("ech"), Some(&query.into()));
+    }
+
+    #[test]
+    fn parse_ech_beside_reality_keeps_it_disabled() {
+        let p = parse_share_link(&format!(
+            "vless://u@v.example:443?security=reality&pbk=key&sni=v.example&ech={}#R",
+            urlencoding::encode(ECH_CONFIG_LIST)
+        ))
+        .unwrap();
+        let ProtocolConfig::Vless(cfg) = &p.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        assert_eq!(
+            cfg.tls.ech,
+            Some(EchSettings {
+                enabled: false,
+                config: ech_pem()
+            })
+        );
+        assert!(cfg.tls.diagnostics().is_empty());
     }
 
     // ---- TUIC ----

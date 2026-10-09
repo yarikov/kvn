@@ -75,6 +75,39 @@ pub struct EchSettings {
     pub config: Vec<String>,
 }
 
+const ECH_CONFIGS_PEM_BEGIN: &str = "-----BEGIN ECH CONFIGS-----";
+const ECH_CONFIGS_PEM_END: &str = "-----END ECH CONFIGS-----";
+
+impl EchSettings {
+    pub fn is_dns_query_link_value(value: &str) -> bool {
+        value.contains("://")
+    }
+
+    pub fn from_link_value(value: &str, enabled: bool) -> Self {
+        let config = if Self::is_dns_query_link_value(value) {
+            Vec::new()
+        } else {
+            vec![
+                ECH_CONFIGS_PEM_BEGIN.to_string(),
+                value.to_string(),
+                ECH_CONFIGS_PEM_END.to_string(),
+            ]
+        };
+        Self { enabled, config }
+    }
+
+    pub fn link_value(&self) -> Option<String> {
+        let body: String = self
+            .config
+            .iter()
+            .flat_map(|entry| entry.lines())
+            .map(str::trim)
+            .filter(|line| *line != ECH_CONFIGS_PEM_BEGIN && *line != ECH_CONFIGS_PEM_END)
+            .collect();
+        (!body.is_empty()).then_some(body)
+    }
+}
+
 /// Shared TLS configuration for protocols that carry a TLS layer
 /// (VMess, Trojan, ShadowTLS, AnyTLS, Hysteria2, TUIC).
 ///
@@ -211,5 +244,16 @@ mod tests {
         let diagnostic = crate::test_helpers::single_diagnostic(tls.diagnostics());
         assert_eq!(diagnostic.pointer, "/ech");
         assert!(diagnostic.message.contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn ech_link_value_reads_a_multiline_pem_entry() {
+        let ech = EchSettings {
+            enabled: true,
+            config: vec![
+                "-----BEGIN ECH CONFIGS-----\nAEb+DQBC\nAAAgACB+\n-----END ECH CONFIGS-----".into(),
+            ],
+        };
+        assert_eq!(ech.link_value().as_deref(), Some("AEb+DQBCAAAgACB+"));
     }
 }

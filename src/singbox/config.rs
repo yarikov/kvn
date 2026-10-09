@@ -125,6 +125,7 @@ pub fn generate_config(
         bootstrap,
         &settings.dns.strategy,
         &available_rule_sets,
+        &ech_dns_lookup_names(&proxy_outbounds),
     )?;
 
     let mut cache_file = json!({ "enabled": true });
@@ -182,6 +183,7 @@ fn build_dns(
     bootstrap: BootstrapResolver,
     strategy: &DnsStrategy,
     available_rule_sets: &HashSet<&str>,
+    ech_lookup_names: &[String],
 ) -> anyhow::Result<Value> {
     let active = &upstreams.active;
     let mut servers: Vec<Value> = active
@@ -196,15 +198,18 @@ fn build_dns(
         })
         .collect();
     servers.extend(active.fakeip.as_ref().map(fakeip_server_value));
+    let active_rules = active_dns_rules(active, available_rule_sets);
+    let ech_rule = ech_lookup_rule(
+        ech_lookup_names,
+        &bootstrap.tag,
+        uses_ip_rule_set(&active_rules),
+    );
     servers.extend(bootstrap.server);
     let mut block = Map::new();
     block.insert("servers".to_string(), Value::Array(servers));
 
-    let active_rules = active_dns_rules(active, available_rule_sets);
-    let mut rules: Vec<Value> = active_rules
-        .iter()
-        .map(|(_, rule)| build_dns_rule(rule))
-        .collect();
+    let mut rules: Vec<Value> = ech_rule.into_iter().collect();
+    rules.extend(active_rules.iter().map(|(_, rule)| build_dns_rule(rule)));
     rules.extend(fakeip_catch_all_rule(active, &active_rules)?);
     if !rules.is_empty() {
         block.insert("rules".to_string(), Value::Array(rules));
@@ -213,6 +218,43 @@ fn build_dns(
     block.insert("final".to_string(), json!(active.final_server));
     block.insert("strategy".to_string(), json!(strategy.as_str()));
     Ok(Value::Object(block))
+}
+
+fn ech_dns_lookup_names(outbounds: &[Value]) -> Vec<String> {
+    outbounds
+        .iter()
+        .map(|outbound| &outbound["tls"])
+        .filter(|tls| tls["ech"]["enabled"] == json!(true) && tls["ech"].get("config").is_none())
+        .filter_map(|tls| tls["server_name"].as_str())
+        .map(|name| name.trim_end_matches('.').to_ascii_lowercase())
+        .filter(|name| !name.is_empty() && name.parse::<std::net::IpAddr>().is_err())
+        .collect()
+}
+
+fn ech_lookup_rule(
+    names: &[String],
+    bootstrap_tag: &str,
+    legacy_address_filters: bool,
+) -> Option<Value> {
+    if names.is_empty() {
+        return None;
+    }
+    let mut rule = json!({
+        "domain": names,
+        "server": bootstrap_tag,
+    });
+    if !legacy_address_filters {
+        rule["query_type"] = json!(["HTTPS"]);
+    }
+    Some(rule)
+}
+
+fn uses_ip_rule_set(active_rules: &[(usize, &DnsRule)]) -> bool {
+    active_rules.iter().any(|(_, rule)| {
+        rule.rule_set
+            .iter()
+            .any(|tag| crate::geo::is_ip_rule_set_tag(tag))
+    })
 }
 
 fn active_dns_rules<'a>(
@@ -349,6 +391,23 @@ pub fn certificate_pin_warning(profile: &Profile) -> Option<String> {
     Some(format!(
         "{key} is not checked: sing-box pins certificate public keys, not the certificate fingerprint the link gives, so the server certificate is verified only as the profile's TLS settings allow (not at all with insecure)"
     ))
+}
+
+pub fn ech_dns_warning(profile: &Profile, settings: &Settings) -> Option<String> {
+    let outbounds = build_outbound(profile).ok()?;
+    let name = ech_dns_lookup_names(&outbounds).into_iter().next()?;
+    let active = settings.dns.active()?;
+    let final_server = active.final_server_entry()?;
+    let encrypted = matches!(
+        final_server,
+        DnsServer::Tls { .. } | DnsServer::Https { .. } | DnsServer::Quic { .. }
+    );
+    (!encrypted).then(|| {
+        format!(
+            "ECH config for {name:?} is looked up over unencrypted DNS ({}) before connecting, so the server name ECH hides is visible on the network; choose a DoH, DoT or DoQ DNS preset, or use a link that carries the ECH config",
+            final_server.kind_label()
+        )
+    })
 }
 
 pub fn dns_bypass_warning(profile: &Profile, settings: &Settings) -> Option<String> {
@@ -1600,6 +1659,7 @@ mod tests {
             upstreams.bootstrap(),
             &DnsStrategy::PreferIpv4,
             available_rule_sets,
+            &[],
         )
     }
 
@@ -1945,6 +2005,117 @@ mod tests {
         ] {
             assert_eq!(dns_bypass_warning(&profile, settings), None);
         }
+    }
+
+    #[test]
+    fn ech_dns_lookup_names_are_the_server_names_whose_ech_config_comes_from_dns() {
+        let outbound = |ech: Value, server_name: &str| json!({ "tls": { "server_name": server_name, "ech": ech } });
+        let outbounds = [
+            outbound(json!({ "enabled": true }), "dns.example"),
+            outbound(
+                json!({ "enabled": true, "config": ["pem"] }),
+                "static.example",
+            ),
+            outbound(json!({ "enabled": true }), "203.0.113.7"),
+            outbound(json!({ "enabled": true }), "Mixed.Example."),
+            json!({ "type": "direct" }),
+        ];
+        assert_eq!(
+            ech_dns_lookup_names(&outbounds),
+            ["dns.example", "mixed.example"]
+        );
+    }
+
+    fn trojan_with_ech(config: Vec<String>) -> Profile {
+        use crate::config::profile::{EchSettings, TlsCommon, TrojanConfig};
+        profile_with(
+            ProtocolConfig::Trojan(TrojanConfig {
+                password: "pw".into(),
+                tls: TlsCommon {
+                    server_name: Some("ech.example".into()),
+                    ech: Some(EchSettings {
+                        enabled: true,
+                        config,
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            "203.0.113.7",
+            443,
+        )
+    }
+
+    #[test]
+    fn ech_dns_warning_names_an_unencrypted_lookup() {
+        let doh = Settings::default();
+        let mut plain = Settings::default();
+        plain.dns.current_preset = "system_local".into();
+        assert_eq!(ech_dns_warning(&trojan_with_ech(Vec::new()), &doh), None);
+        assert_eq!(
+            ech_dns_warning(&trojan_with_ech(vec!["pem".into()]), &plain),
+            None
+        );
+        assert!(
+            ech_dns_warning(&trojan_with_ech(Vec::new()), &plain)
+                .unwrap()
+                .starts_with(
+                    "ECH config for \"ech.example\" is looked up over unencrypted DNS (local)"
+                )
+        );
+    }
+
+    #[test]
+    fn build_dns_sends_the_ech_lookup_to_the_direct_bootstrap_first() {
+        let ech_rule = |dns: ActiveDns| {
+            let upstreams = through_proxy(dns);
+            build_dns(
+                &upstreams,
+                upstreams.bootstrap(),
+                &DnsStrategy::PreferIpv4,
+                &HashSet::from(["geoip-ru"]),
+                &["ech.example".to_string()],
+            )
+            .unwrap()["rules"][0]
+                .clone()
+        };
+        assert_eq!(
+            ech_rule(active(vec![doh("remote", "1.1.1.1")], "remote")),
+            json!({ "query_type": ["HTTPS"], "domain": ["ech.example"], "server": "bootstrap" })
+        );
+
+        let mut with_ip_rule_set = active(vec![local(), doh("remote", "1.1.1.1")], "remote");
+        with_ip_rule_set.rules = vec![DnsRule {
+            rule_set: vec!["geoip-ru".into()],
+            server: "local".into(),
+            ..Default::default()
+        }];
+        assert_eq!(
+            ech_rule(with_ip_rule_set),
+            json!({ "domain": ["ech.example"], "server": "bootstrap" })
+        );
+    }
+
+    #[test]
+    fn generated_config_looks_up_a_dns_ech_config_outside_the_tunnel() {
+        let profile = trojan_with_ech(Vec::new());
+        let config = generate_config(
+            &profile,
+            &Settings::default(),
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
+        let rule = &config["dns"]["rules"][0];
+        assert_eq!(rule["domain"], json!(["ech.example"]));
+        assert_ne!(rule["server"], config["dns"]["final"]);
+        let server = config["dns"]["servers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|server| server["tag"] == rule["server"])
+            .unwrap();
+        assert!(server.get("detour").is_none());
     }
 
     #[test]

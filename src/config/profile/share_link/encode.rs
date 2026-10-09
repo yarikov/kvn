@@ -9,7 +9,7 @@ use crate::config::profile::*;
 pub fn encode_share_link(profile: &Profile) -> Result<String> {
     let link: Result<String> = match &profile.config {
         ProtocolConfig::Vless(cfg) => Ok(encode_vless(profile, cfg)),
-        ProtocolConfig::Vmess(cfg) => return Ok(encode_vmess(profile, cfg)),
+        ProtocolConfig::Vmess(cfg) => return Ok(encode_vmess(profile, cfg, link_params(profile))),
         ProtocolConfig::Trojan(cfg) => Ok(encode_trojan(profile, cfg)),
         ProtocolConfig::Shadowsocks(cfg) => Ok(encode_shadowsocks(profile, cfg)),
         ProtocolConfig::Hysteria2(cfg) => Ok(encode_hysteria2(profile, cfg)),
@@ -20,7 +20,24 @@ pub fn encode_share_link(profile: &Profile) -> Result<String> {
         ProtocolConfig::Anytls(cfg) => Ok(encode_anytls(profile, cfg)),
         ProtocolConfig::Shadowtls(cfg) => Ok(encode_shadowtls(profile, cfg)),
     };
-    Ok(append_share_link_params(link?, &profile.share_link_params))
+    Ok(append_share_link_params(link?, &link_params(profile)))
+}
+
+fn link_params(profile: &Profile) -> std::collections::BTreeMap<String, serde_json::Value> {
+    let mut params = profile.share_link_params.clone();
+    if let Some(tls) = profile.config.tls().filter(|tls| tls.ech.is_some()) {
+        let ech_is_dns_query = exported_ech(tls).is_some_and(|ech| ech.config.is_empty());
+        if !ech_is_dns_query {
+            params.remove("ech");
+        }
+    }
+    params
+}
+
+fn exported_ech(tls: &TlsCommon) -> Option<&EchSettings> {
+    tls.ech
+        .as_ref()
+        .filter(|ech| ech.enabled || tls.reality.is_some())
 }
 
 fn append_share_link_params(
@@ -106,6 +123,9 @@ fn append_tls_common_query(pairs: &mut Vec<(&str, String)>, tls: &TlsCommon) {
     if tls.insecure {
         pairs.push(("insecure", "1".to_string()));
     }
+    if let Some(ech) = exported_ech(tls).and_then(EchSettings::link_value) {
+        pairs.push(("ech", ech));
+    }
 }
 
 fn append_effective_sni(
@@ -186,11 +206,15 @@ fn encode_vless(profile: &Profile, cfg: &VlessConfig) -> String {
     )
 }
 
-fn encode_vmess(profile: &Profile, cfg: &VmessConfig) -> String {
+fn encode_vmess(
+    profile: &Profile,
+    cfg: &VmessConfig,
+    params: std::collections::BTreeMap<String, serde_json::Value>,
+) -> String {
     use base64::Engine;
     use serde_json::json;
 
-    let (net, mut object) = vmess_b64_transport_fields(cfg, profile.share_link_params.clone());
+    let (net, mut object) = vmess_b64_transport_fields(cfg, params);
     object.extend(vmess_b64_tls_fields(&cfg.tls, cfg.stream_security.as_ref()));
     let host_would_become_sni = vmess_b64_field_keys(&net).1 == "host";
     if object.get("tls") == Some(&json!("tls"))
@@ -299,6 +323,9 @@ fn vmess_b64_tls_fields(
     }
     if tls.insecure {
         object.insert("insecure".into(), json!("1"));
+    }
+    if let Some(ech) = exported_ech(tls).and_then(EchSettings::link_value) {
+        object.insert("ech".into(), json!(ech));
     }
     object
 }
@@ -514,6 +541,90 @@ mod tests {
         let mut reparsed = parse_share_link(&encode_share_link(&parsed).unwrap()).unwrap();
         reparsed.id = parsed.id;
         assert_eq!(reparsed, parsed, "{link}");
+    }
+
+    #[test]
+    fn encode_ech_config_roundtrip_in_uri_and_vmess_base64() {
+        let tls = TlsCommon {
+            server_name: Some("sni.example".to_string()),
+            ech: Some(EchSettings::from_link_value("AEb+DQBC/w==", true)),
+            ..TlsCommon::default()
+        };
+        assert_roundtrip(Profile {
+            id: Uuid::new_v4(),
+            name: "Trojan ECH".to_string(),
+            address: "t.example".to_string(),
+            port: 443,
+            config: ProtocolConfig::Trojan(TrojanConfig {
+                password: "pw".to_string(),
+                tls: tls.clone(),
+                ..TrojanConfig::default()
+            }),
+            tags: Vec::new(),
+            subscription_id: None,
+            share_link_params: Default::default(),
+        });
+        assert_roundtrip(Profile {
+            id: Uuid::new_v4(),
+            name: "VMess ECH".to_string(),
+            address: "m.example".to_string(),
+            port: 443,
+            config: ProtocolConfig::Vmess(VmessConfig {
+                uuid: "u".to_string(),
+                stream_security: Some(Security::Tls),
+                tls,
+                ..VmessConfig::default()
+            }),
+            tags: Vec::new(),
+            subscription_id: None,
+            share_link_params: Default::default(),
+        });
+    }
+
+    fn ech_of(profile: &Profile) -> Option<EchSettings> {
+        profile.config.tls().and_then(|tls| tls.ech.clone())
+    }
+
+    fn set_ech(profile: &mut Profile, ech: EchSettings) {
+        let ProtocolConfig::Trojan(cfg) = &mut profile.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        cfg.tls.ech = Some(ech);
+    }
+
+    #[test]
+    fn encode_omits_a_disabled_ech_config() {
+        let mut profile = parse_share_link("trojan://pw@t.example:443?ech=AEb%2BDQBC#T").unwrap();
+        set_ech(
+            &mut profile,
+            EchSettings::from_link_value("AEb+DQBC", false),
+        );
+        let link = encode_share_link(&profile).unwrap();
+        assert!(!link.contains("ech="), "{link}");
+    }
+
+    #[test]
+    fn encode_keeps_an_ech_link_param_when_the_profile_has_no_ech_block() {
+        for link in ["trojan://pw@t.example:443#T", "https://u:p@h.example:443#H"] {
+            let mut profile = parse_share_link(link).unwrap();
+            profile
+                .share_link_params
+                .insert("ech".into(), "AEb+DQBC".into());
+            let exported = encode_share_link(&profile).unwrap();
+            assert!(exported.contains("ech=AEb%2BDQBC"), "{exported}");
+        }
+    }
+
+    #[test]
+    fn encode_keeps_the_ech_dns_query_only_while_ech_still_uses_it() {
+        let dns_query = "trojan://pw@t.example:443?ech=https%3A%2F%2F1.1.1.1%2Fdns-query#T";
+        let mut profile = parse_share_link(dns_query).unwrap();
+        assert_roundtrip(profile.clone());
+
+        set_ech(&mut profile, EchSettings::from_link_value("AEb+DQBC", true));
+        let reparsed = parse_share_link(&encode_share_link(&profile).unwrap()).unwrap();
+        assert_eq!(ech_of(&reparsed), ech_of(&profile));
+        assert!(!reparsed.share_link_params.contains_key("ech"));
     }
 
     fn assert_roundtrip(mut profile: Profile) {

@@ -83,6 +83,15 @@ selected DNS preset (see the [configuration guide](configuration.md#dns)):
   your provider must not see them.
 - **The VPN server's own name** is looked up directly, through a copy of your
   main DNS server, because the tunnel does not exist yet when it is needed.
+  The same holds for its Encrypted Client Hello key: a profile whose ECH
+  config comes from DNS asks that copy for the TLS server name's `HTTPS`
+  record, which carries the key. If the active DNS preset has a rule with an
+  IP rule-set (such as `geoip-ru`), sing-box cannot limit the rule to that
+  record, so every lookup of that one name — including your programs' — goes
+  to the copy. That query names the server ECH hides, so over
+  plain DNS (`local`, `udp`, `tcp`) anyone on the path sees it; kvn shows a
+  warning after connecting in that case. A DoH, DoT or DoQ preset, or a link
+  that carries the ECH config itself, avoids it.
 
 Fake-IP adds one more direct path. It is off by default; when it is on, or
 when a DNS rule sends some names to it, programs receive a placeholder address
