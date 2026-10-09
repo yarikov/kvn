@@ -2,6 +2,7 @@ use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model};
 use crate::config::profile::{Profile, SubscriptionAutoUpdate};
 use chrono::Local;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::app::update::config_reload::profile_runtime_changed;
@@ -39,18 +40,19 @@ fn handle_subscription_result_at(
         .connecting_profile_id
         .and_then(|id| model.config.profiles.iter().find(|p| p.id == id).cloned());
 
-    // Capture old dedup_key → UUID mapping before removing subscription profiles,
+    // Capture the subscription's profiles before removing them,
     // so we can reuse UUIDs for servers that survive the update.
-    let old_sub_ids: std::collections::HashMap<String, Uuid> = model
+    let previous_profiles: Vec<Profile> = model
         .config
         .profiles
         .iter()
         .filter(|p| p.subscription_id == Some(id))
-        .map(|p| (p.dedup_key(), p.id))
+        .cloned()
         .collect();
 
     let mut effects = match result {
-        Ok(profiles) => {
+        Ok(mut profiles) => {
+            let reused_ids = reuse_previous_ids(&previous_profiles, &mut profiles);
             if managed {
                 if let Some(sub) = model.config.subscriptions.iter_mut().find(|s| s.id == id) {
                     sub.last_updated = Some(now);
@@ -67,12 +69,11 @@ fn handle_subscription_result_at(
                     .retain(|p| p.subscription_id != Some(id));
             }
             let mut imported = 0;
-            for mut profile in profiles {
+            for (mut profile, reused_id) in profiles.into_iter().zip(reused_ids) {
                 let key = profile.dedup_key();
-                if let Some(&old_id) = old_sub_ids.get(&key) {
+                if reused_id {
                     // Same server was in this subscription before — reuse its UUID so
                     // active_profile_id stays valid across updates.
-                    profile.id = old_id;
                     if managed {
                         profile.subscription_id = Some(id);
                     }
@@ -207,6 +208,54 @@ fn handle_subscription_result_at(
     }
 
     effects
+}
+
+fn reuse_previous_ids(previous: &[Profile], fetched: &mut [Profile]) -> Vec<bool> {
+    let mut unclaimed: HashMap<String, Uuid> =
+        previous.iter().map(|p| (p.dedup_key(), p.id)).collect();
+    let mut claimed_keys = HashSet::new();
+    let mut reused = vec![false; fetched.len()];
+    for (profile, reused) in fetched.iter_mut().zip(&mut reused) {
+        let key = profile.dedup_key();
+        if let Some(old_id) = unclaimed.remove(&key) {
+            profile.id = old_id;
+            *reused = true;
+            claimed_keys.insert(key);
+        }
+    }
+
+    let mut leftovers_by_endpoint: HashMap<String, Vec<Uuid>> = HashMap::new();
+    for old in previous {
+        if unclaimed.get(&old.dedup_key()) == Some(&old.id) {
+            leftovers_by_endpoint
+                .entry(old.endpoint_key())
+                .or_default()
+                .push(old.id);
+        }
+    }
+    let mut arrivals_by_endpoint: HashMap<String, Vec<(String, usize)>> = HashMap::new();
+    for (index, profile) in fetched.iter().enumerate() {
+        let key = profile.dedup_key();
+        if claimed_keys.contains(&key) {
+            continue;
+        }
+        let arrivals = arrivals_by_endpoint
+            .entry(profile.endpoint_key())
+            .or_default();
+        if arrivals.iter().all(|(arrived, _)| *arrived != key) {
+            arrivals.push((key, index));
+        }
+    }
+    for (endpoint, arrivals) in arrivals_by_endpoint {
+        if let ([(_, index)], Some([old_id])) = (
+            arrivals.as_slice(),
+            leftovers_by_endpoint.get(&endpoint).map(Vec::as_slice),
+        ) {
+            fetched[*index].id = *old_id;
+            reused[*index] = true;
+        }
+    }
+    reused
 }
 
 #[cfg(test)]
@@ -358,7 +407,7 @@ mod tests {
 
         let mut fetched = Profile::new_vless(
             "NewName".to_string(),
-            "2.2.2.2".to_string(),
+            "1.1.1.1".to_string(),
             443,
             "u1".to_string(),
         );
@@ -370,7 +419,6 @@ mod tests {
         assert_eq!(model.config.profiles.len(), 1);
         assert_eq!(model.config.profiles[0].id, standalone_id);
         assert_eq!(model.config.profiles[0].name, "NewName");
-        assert_eq!(model.config.profiles[0].address, "2.2.2.2");
         assert_eq!(model.config.profiles[0].subscription_id, Some(sub_id));
         assert_eq!(
             effects,
@@ -729,5 +777,127 @@ mod tests {
             model.config.subscriptions[0].next_auto_update,
             Some(now.date_naive())
         );
+    }
+
+    #[test]
+    fn subscription_update_keeps_one_id_for_a_duplicated_server() {
+        let sub_id = Uuid::new_v4();
+        let server = || {
+            Profile::new_vless(
+                "Server".to_string(),
+                "nl.example.com".to_string(),
+                443,
+                "shared".to_string(),
+            )
+        };
+        let mut existing = server();
+        existing.subscription_id = Some(sub_id);
+        let existing_id = existing.id;
+        let mut model = model_with_profiles(vec![existing]);
+
+        handle_subscription_result(&mut model, sub_id, Ok(vec![server(), server()]));
+
+        let ids: Vec<Uuid> = model.config.profiles.iter().map(|p| p.id).collect();
+        assert_eq!(ids, [existing_id]);
+    }
+
+    fn vless(address: &str, uuid: &str) -> Profile {
+        Profile::new_vless(
+            address.to_string(),
+            address.to_string(),
+            443,
+            uuid.to_string(),
+        )
+    }
+
+    fn ids(profiles: &[Profile]) -> Vec<Uuid> {
+        profiles.iter().map(|p| p.id).collect()
+    }
+
+    #[test]
+    fn reuse_previous_ids_matches_servers_sharing_a_uuid_by_endpoint() {
+        let previous = vec![
+            vless("nl.example.com", "shared"),
+            vless("de.example.com", "shared"),
+        ];
+        let mut fetched = vec![
+            vless("de.example.com", "shared"),
+            vless("nl.example.com", "shared"),
+        ];
+
+        let reused = reuse_previous_ids(&previous, &mut fetched);
+
+        assert_eq!(reused, [true, true]);
+        assert_eq!(ids(&fetched), [previous[1].id, previous[0].id]);
+    }
+
+    #[test]
+    fn reuse_previous_ids_follows_a_rotated_uuid_on_every_server() {
+        let previous = vec![
+            vless("nl.example.com", "old"),
+            vless("de.example.com", "old"),
+        ];
+        let mut fetched = vec![
+            vless("nl.example.com", "new"),
+            vless("de.example.com", "new"),
+        ];
+
+        let reused = reuse_previous_ids(&previous, &mut fetched);
+
+        assert_eq!(reused, [true, true]);
+        assert_eq!(ids(&fetched), ids(&previous));
+    }
+
+    #[test]
+    fn reuse_previous_ids_does_not_follow_an_address_change() {
+        let previous = vec![vless("old.example.com", "shared")];
+        let mut fetched = vec![vless("new.example.com", "shared")];
+
+        let reused = reuse_previous_ids(&previous, &mut fetched);
+
+        assert_eq!(reused, [false]);
+        assert_ne!(fetched[0].id, previous[0].id);
+    }
+
+    #[test]
+    fn reuse_previous_ids_skips_an_ambiguous_endpoint() {
+        let previous = vec![vless("nl.example.com", "a"), vless("nl.example.com", "b")];
+        let mut fetched = vec![vless("nl.example.com", "c")];
+
+        let reused = reuse_previous_ids(&previous, &mut fetched);
+
+        assert_eq!(reused, [false]);
+    }
+
+    #[test]
+    fn reuse_previous_ids_gives_a_repeated_server_no_other_id() {
+        let previous = vec![
+            vless("nl.example.com", "shared"),
+            vless("de.example.com", "shared"),
+        ];
+        let mut fetched = vec![
+            vless("nl.example.com", "shared"),
+            vless("nl.example.com", "shared"),
+        ];
+
+        let reused = reuse_previous_ids(&previous, &mut fetched);
+
+        assert_eq!(reused, [true, false]);
+        assert_eq!(fetched[0].id, previous[0].id);
+        assert!(!ids(&fetched).contains(&previous[1].id));
+    }
+
+    #[test]
+    fn reuse_previous_ids_follows_a_rotated_uuid_on_a_repeated_server() {
+        let previous = vec![vless("nl.example.com", "old")];
+        let mut fetched = vec![
+            vless("nl.example.com", "new"),
+            vless("nl.example.com", "new"),
+        ];
+
+        let reused = reuse_previous_ids(&previous, &mut fetched);
+
+        assert_eq!(reused, [true, false]);
+        assert_eq!(fetched[0].id, previous[0].id);
     }
 }
