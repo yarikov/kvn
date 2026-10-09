@@ -10,6 +10,7 @@ mod encode;
 mod parse;
 
 pub use encode::encode_share_link;
+pub(crate) use parse::decode_b64_lenient;
 pub use parse::parse_share_link;
 
 /// All share-link URI schemes recognised by [`parse_share_link`].
