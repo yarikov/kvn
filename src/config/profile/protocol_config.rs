@@ -380,7 +380,11 @@ impl ProtocolConfig {
             Some(tls) => format!("|tls:{}", tls.server_name.as_deref().unwrap_or("")),
             None => String::new(),
         };
-        let transport_identity = match self {
+        tls_identity + &self.transport_identity()
+    }
+
+    pub(super) fn transport_identity(&self) -> String {
+        match self {
             ProtocolConfig::Vless(VlessConfig {
                 transport: Some(transport),
                 ..
@@ -401,8 +405,7 @@ impl ProtocolConfig {
             ),
             ProtocolConfig::Naive(NaiveConfig { quic: true, .. }) => "|quic".to_string(),
             _ => String::new(),
-        };
-        tls_identity + &transport_identity
+        }
     }
 }
 
