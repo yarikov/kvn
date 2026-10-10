@@ -69,10 +69,6 @@ impl Config {
             self.migrate_v5_to_v6();
             self.schema_version = 6;
         }
-        if self.schema_version == 6 && target_version >= 7 {
-            self.migrate_v6_to_v7();
-            self.schema_version = 7;
-        }
         debug_assert_eq!(self.schema_version, target_version);
         Ok(())
     }
@@ -141,9 +137,25 @@ impl Config {
     fn migrate_v5_to_v6(&mut self) {
         self.settings.dns.migrate_legacy_servers();
         self.settings.dns.strategy = self.settings.dns.strategy.ipv4_counterpart();
+        self.move_flat_vless_transports();
+        self.move_websocket_path_early_data();
     }
 
-    fn migrate_v6_to_v7(&mut self) {
+    fn move_websocket_path_early_data(&mut self) {
+        for profile in &mut self.profiles {
+            let transport = match &mut profile.config {
+                ProtocolConfig::Vless(cfg) => cfg.transport.as_mut(),
+                ProtocolConfig::Vmess(cfg) => cfg.transport.as_mut(),
+                ProtocolConfig::Trojan(cfg) => cfg.transport.as_mut(),
+                _ => None,
+            };
+            if let Some(transport) = transport {
+                transport.take_path_early_data();
+            }
+        }
+    }
+
+    fn move_flat_vless_transports(&mut self) {
         for profile in &mut self.profiles {
             if let ProtocolConfig::Vless(cfg) = &mut profile.config {
                 let service_name = cfg.legacy_transport_service_name.take();
@@ -271,7 +283,32 @@ mod tests {
     }
 
     #[test]
-    fn migrate_v6_moves_flat_vless_transport_into_the_shared_block() {
+    fn migrate_v5_moves_websocket_early_data_out_of_the_path() {
+        let link = "vmess://550e8400-e29b-41d4-a716-446655440001@cdn.example:443?security=tls&type=ws&path=%2Fws%3Fed%3D2048&host=h.example#B";
+        let imported = parse_share_link(link).unwrap();
+        let mut legacy = imported.clone();
+        let ProtocolConfig::Vmess(cfg) = &mut legacy.config else {
+            unreachable!()
+        };
+        let transport = cfg.transport.as_mut().unwrap();
+        transport.path = Some("/ws?ed=2048".into());
+        transport.early_data = None;
+        let mut config = Config {
+            schema_version: 5,
+            profiles: vec![legacy],
+            ..Config::default()
+        };
+
+        config.migrate_to(6).unwrap();
+        let migrated = config.clone();
+        config.migrate_to(6).unwrap();
+
+        assert_eq!(config, migrated);
+        assert_eq!(config.profiles, [imported]);
+    }
+
+    #[test]
+    fn migrate_v5_moves_flat_vless_transport_into_the_shared_block() {
         let mut profile = Profile::new_vless("V".into(), "1.1.1.1".into(), 443, "u".into());
         let ProtocolConfig::Vless(cfg) = &mut profile.config else {
             unreachable!()
@@ -279,14 +316,14 @@ mod tests {
         cfg.legacy_transport_type = Some(TransportType::Grpc);
         cfg.legacy_transport_service_name = Some("svc".into());
         let mut config = Config {
-            schema_version: 6,
+            schema_version: 5,
             profiles: vec![profile],
             ..Config::default()
         };
 
-        config.migrate_to(7).unwrap();
+        config.migrate_to(6).unwrap();
         let migrated = config.clone();
-        config.migrate_to(7).unwrap();
+        config.migrate_to(6).unwrap();
 
         assert_eq!(config, migrated);
         assert_eq!(

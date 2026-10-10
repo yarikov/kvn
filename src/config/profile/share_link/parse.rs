@@ -356,24 +356,8 @@ fn transport_from_params(params: &BTreeMap<String, serde_json::Value>) -> Option
         headers: HashMap::new(),
         early_data: None,
     };
-    if transport.kind == TransportType::Ws {
-        take_path_early_data(&mut transport);
-    }
+    transport.take_path_early_data();
     Some(transport)
-}
-
-fn take_path_early_data(transport: &mut TransportConfig) {
-    let Some(path) = transport.path.as_deref() else {
-        return;
-    };
-    let (path, Some(max_bytes)) = split_path_early_data(path) else {
-        return;
-    };
-    transport.path = Some(path);
-    transport.early_data = Some(WebSocketEarlyData {
-        max_bytes,
-        header_name: EARLY_DATA_PROTOCOL_HEADER.to_string(),
-    });
 }
 
 /// Parse a VLESS URI fragment.
@@ -410,7 +394,7 @@ fn parse_vless(rest: &str) -> Result<Profile> {
 }
 
 /// Parse a VMess share link. Supports both formats:
-/// (a) v2rayN/Shadowrocket: `vmess://<base64 JSON>` with v/ps/add/port/id/aid/scy/net/type/host/path/tls/sni/alpn/fp.
+/// (a) Base64 JSON: `vmess://<base64 JSON>` with v/ps/add/port/id/aid/scy/net/type/host/path/tls/sni/alpn/fp.
 /// (b) Plain URI: `vmess://uuid@host:port?security=tls&type=ws&path=&host=#name`.
 fn parse_vmess(rest: &str) -> Result<Profile> {
     if !rest.contains('@') {
@@ -2017,7 +2001,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_naive_shadowrocket_base64_with_slash_plus_and_at_in_the_password() {
+    fn parse_naive_http2_base64_with_slash_plus_and_at_in_the_password() {
         let p = parse_share_link(
             "http2://YWxpY2U6cEA/Pz8+QG4uZXhhbXBsZTo0NDM=?padding=1&peer=sni.example#S-UI",
         )

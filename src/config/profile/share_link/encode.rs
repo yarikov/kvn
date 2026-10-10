@@ -984,7 +984,7 @@ mod tests {
     }
 
     #[test]
-    fn vmess_base64_insecure_reads_the_v2rayn_and_marzban_fields() {
+    fn vmess_base64_insecure_reads_both_insecure_fields() {
         let insecure = |flag: serde_json::Value| {
             let mut body = serde_json::json!({
                 "add": "v.example", "port": 443, "id": "u", "tls": "tls"
