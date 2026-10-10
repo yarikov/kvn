@@ -69,8 +69,11 @@ Each profile has common fields such as `id`, `name`, `address`, `port`, and
 so exporting the profile reproduces its link; kvn passes none of them to
 sing-box except the Shadowsocks `plugin` and the Hysteria 2 port range `mport`,
 and refuses to connect when one of them names a feature sing-box lacks (for
-example VLESS Encryption, or a Hysteria 2 `obfs` that is not `salamander` or a
-valid `gecko`). A Hysteria 2 link's `fm` (Xray's `finalMask`, sent by Remnawave)
+example VLESS Encryption, a Hysteria 2 `obfs` that is not `salamander` or a
+valid `gecko`, or a `vcn` certificate name other than the SNI: sing-box
+verifies the server certificate only against the SNI, so kvn connects with
+`vcn` only when every name it lists is the SNI, or when the certificate is not
+verified at all — `insecure`, or REALITY). A Hysteria 2 link's `fm` (Xray's `finalMask`, sent by Remnawave)
 is read when imported: its obfuscation, port hopping and Brutal speeds become
 profile fields (`obfs`, `mport`, `hop_interval_secs` / `hop_interval_max_secs`,
 `up_mbps` / `down_mbps`), and only client-side QUIC tuning stays in `fm`, unused
