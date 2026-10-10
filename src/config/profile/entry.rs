@@ -127,6 +127,22 @@ impl Profile {
         format!("{}@{}", self.config.protocol(), self.endpoint())
     }
 
+    pub fn reality_rotation_key(&self) -> Option<String> {
+        let reality = self.config.tls()?.reality.as_ref()?;
+        let flow = match &self.config {
+            ProtocolConfig::Vless(vless) => vless.flow.as_ref(),
+            _ => None,
+        };
+        Some(format!(
+            "{}@{}:{}|reality-key:{}|flow:{flow:?}{}",
+            self.credential_key(),
+            self.address,
+            self.port,
+            reality.public_key,
+            self.config.transport_identity()
+        ))
+    }
+
     fn endpoint(&self) -> String {
         format!(
             "{}:{}{}",

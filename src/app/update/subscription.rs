@@ -255,7 +255,51 @@ fn reuse_previous_ids(previous: &[Profile], fetched: &mut [Profile]) -> Vec<bool
             reused[*index] = true;
         }
     }
+    reuse_ids_across_reality_rotation(previous, fetched, &mut reused);
     reused
+}
+
+fn reuse_ids_across_reality_rotation(
+    previous: &[Profile],
+    fetched: &mut [Profile],
+    reused: &mut [bool],
+) {
+    let matched: Vec<&Profile> = fetched
+        .iter()
+        .zip(reused.iter())
+        .filter(|(_, reused)| **reused)
+        .map(|(profile, _)| profile)
+        .collect();
+    let taken: HashSet<Uuid> = matched.iter().map(|profile| profile.id).collect();
+    let matched_keys: HashSet<String> = matched.iter().map(|profile| profile.dedup_key()).collect();
+    let mut leftovers: HashMap<String, Vec<Uuid>> = HashMap::new();
+    for old in previous.iter().filter(|old| !taken.contains(&old.id)) {
+        if let Some(key) = old.reality_rotation_key() {
+            leftovers.entry(key).or_default().push(old.id);
+        }
+    }
+    let mut arrivals: HashMap<String, Vec<(String, usize)>> = HashMap::new();
+    for (index, profile) in fetched.iter().enumerate() {
+        let dedup_key = profile.dedup_key();
+        if matched_keys.contains(&dedup_key) {
+            continue;
+        }
+        let Some(key) = profile.reality_rotation_key() else {
+            continue;
+        };
+        let servers = arrivals.entry(key).or_default();
+        if servers.iter().all(|(arrived, _)| *arrived != dedup_key) {
+            servers.push((dedup_key, index));
+        }
+    }
+    for (key, servers) in arrivals {
+        if let ([(_, index)], Some([old_id])) =
+            (servers.as_slice(), leftovers.get(&key).map(Vec::as_slice))
+        {
+            fetched[*index].id = *old_id;
+            reused[*index] = true;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -690,6 +734,47 @@ mod tests {
     }
 
     #[test]
+    fn subscription_update_reconnects_a_server_whose_reality_server_name_rotated() {
+        let sub_id = Uuid::new_v4();
+        let mut existing = reality("a.example", "01", "");
+        existing.subscription_id = Some(sub_id);
+        let old_profile_id = existing.id;
+        let mut model = model_with_profiles(vec![existing]);
+        model.config.subscriptions.push(Subscription {
+            id: sub_id,
+            name: "Sub".into(),
+            url: "http://example.com/sub".into(),
+            auto_update: SubscriptionAutoUpdate::Off,
+            last_updated: None,
+            next_auto_update: None,
+            retry_state: None,
+            send_hwid: false,
+            hwid: None,
+        });
+        model.connection = ConnectionState::Connected;
+        model.active_profile_id = Some(old_profile_id);
+
+        let effects = handle_subscription_result(
+            &mut model,
+            sub_id,
+            Ok(vec![reality("b.example", "02", "")]),
+        );
+
+        assert!(!effects.contains(&Effect::Disconnect));
+        assert_eq!(model.connecting_profile_id, Some(old_profile_id));
+        let stored = model
+            .config
+            .profiles
+            .iter()
+            .find(|p| p.id == old_profile_id)
+            .unwrap();
+        assert_eq!(
+            reality_parts(stored),
+            ("b.example".to_string(), "02".to_string())
+        );
+    }
+
+    #[test]
     fn subscription_update_disconnects_when_connecting_profile_is_removed() {
         let sub_id = Uuid::new_v4();
         let mut existing = Profile::new_vless(
@@ -846,6 +931,94 @@ mod tests {
 
         assert_eq!(reused, [true, true]);
         assert_eq!(ids(&fetched), ids(&previous));
+    }
+
+    fn reality_link(sni: &str, sid: &str) -> String {
+        format!(
+            "vless://00000000-0000-4000-8000-000000000001@r.example:443?security=reality&pbk=key&sni={sni}&sid={sid}&type=tcp#R"
+        )
+    }
+
+    fn reality(sni: &str, sid: &str, extra: &str) -> Profile {
+        crate::config::profile::parse_share_link(
+            &reality_link(sni, sid).replace("#R", &format!("{extra}#R")),
+        )
+        .unwrap()
+    }
+
+    fn reality_with(sni: &str, from: &str, to: &str) -> Profile {
+        crate::config::profile::parse_share_link(&reality_link(sni, "01").replace(from, to))
+            .unwrap()
+    }
+
+    fn reality_parts(profile: &Profile) -> (String, String) {
+        let reality = profile.config.tls().unwrap().reality.as_ref().unwrap();
+        (reality.server_name.clone(), reality.short_id.clone())
+    }
+
+    #[test]
+    fn reuse_previous_ids_follows_a_rotated_reality_server_name() {
+        let previous = vec![reality("a.example", "01", "")];
+        let mut fetched = vec![reality("b.example", "02", "")];
+
+        let reused = reuse_previous_ids(&previous, &mut fetched);
+
+        assert_eq!(reused, [true]);
+        assert_eq!(ids(&fetched), ids(&previous));
+    }
+
+    #[test]
+    fn reuse_previous_ids_does_not_follow_a_server_name_change_with_another_change() {
+        let previous = vec![reality("a.example", "01", "")];
+        for changed in [
+            reality_with("b.example", "pbk=key", "pbk=other"),
+            reality_with(
+                "b.example",
+                "00000000-0000-4000-8000-000000000001",
+                "00000000-0000-4000-8000-000000000002",
+            ),
+            reality_with("b.example", "type=tcp", "type=grpc&serviceName=s"),
+            reality("b.example", "01", "&flow=xtls-rprx-vision"),
+        ] {
+            let mut fetched = vec![changed];
+            assert_eq!(reuse_previous_ids(&previous, &mut fetched), [false]);
+        }
+    }
+
+    #[test]
+    fn reuse_previous_ids_gives_a_duplicate_of_a_rotated_credential_no_other_id() {
+        let uuid_one = "00000000-0000-4000-8000-000000000001";
+        let uuid_two = "00000000-0000-4000-8000-000000000002";
+        let previous = vec![
+            reality_with("a.example", uuid_one, uuid_one),
+            reality_with("b.example", uuid_one, uuid_two),
+        ];
+        let mut fetched = vec![
+            reality_with("a.example", uuid_one, uuid_two),
+            reality_with("a.example", uuid_one, uuid_two),
+        ];
+
+        let reused = reuse_previous_ids(&previous, &mut fetched);
+
+        assert_eq!(reused, [true, false]);
+        assert_eq!(fetched[0].id, previous[0].id);
+    }
+
+    #[test]
+    fn reuse_previous_ids_skips_an_ambiguous_reality_rotation() {
+        let previous = vec![
+            reality("a.example", "01", ""),
+            reality("b.example", "01", ""),
+        ];
+        let mut fetched = vec![reality("c.example", "01", "")];
+        assert_eq!(reuse_previous_ids(&previous, &mut fetched), [false]);
+
+        let previous = vec![reality("a.example", "01", "")];
+        let mut fetched = vec![
+            reality("b.example", "01", ""),
+            reality("c.example", "01", ""),
+        ];
+        assert_eq!(reuse_previous_ids(&previous, &mut fetched), [false, false]);
     }
 
     #[test]
