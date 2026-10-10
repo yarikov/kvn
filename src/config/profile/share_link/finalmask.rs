@@ -323,6 +323,46 @@ fn mbps(value: &Value) -> Option<u32> {
     (rate >= 1.0 && rate <= f64::from(u32::MAX)).then_some(rate as u32)
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct StreamFinalMask {
+    pub fragments_tls_hello: bool,
+}
+
+pub(crate) fn read_stream_finalmask(fm: &str, udp_masks_apply: bool) -> Result<StreamFinalMask> {
+    let value: Value = serde_json::from_str(fm).context("fm is not valid JSON")?;
+    let root = value.as_object().context("fm is not a JSON object")?;
+    let mut mask = StreamFinalMask::default();
+    for (key, value) in root {
+        match key.as_str() {
+            "tcp" => {
+                let masks = value.as_array().context("fm TCP masks are not a list")?;
+                for entry in masks {
+                    match entry.get("type").and_then(Value::as_str) {
+                        Some("fragment") => {
+                            mask.fragments_tls_hello |= entry
+                                .pointer("/settings/packets")
+                                .and_then(Value::as_str)
+                                .is_some_and(|packets| packets.eq_ignore_ascii_case("tlshello"));
+                        }
+                        Some(other) => {
+                            bail!("fm TCP mask \"{other}\" is not supported by sing-box")
+                        }
+                        None => bail!("fm TCP mask has no type"),
+                    }
+                }
+            }
+            "udp" if udp_masks_apply => {
+                if let Some(kind) = first_mask_type(value)? {
+                    bail!("fm UDP mask \"{kind}\" is not supported by sing-box");
+                }
+            }
+            "udp" | "quicParams" => {}
+            other => bail!("fm key \"{other}\" is not supported by sing-box"),
+        }
+    }
+    Ok(mask)
+}
+
 pub(crate) fn export_hysteria2_finalmask(
     cfg: &Hysteria2Config,
     ports: Option<&str>,
@@ -556,6 +596,37 @@ mod tests {
             "quicParams": { "udpHop": { "ports": "30000" } },
         });
         assert!(read(fm).is_err());
+    }
+
+    #[test]
+    fn stream_fragment_of_the_tls_hello_is_reproduced_and_other_fragments_kept() {
+        for (packets, fragments) in [("tlshello", true), ("TLSHello", true), ("1-3", false)] {
+            let fm = json!({ "tcp": [{ "type": "fragment", "settings": { "packets": packets, "length": "100-200" } }] });
+            let mask = read_stream_finalmask(&fm.to_string(), false).unwrap();
+            assert_eq!(mask.fragments_tls_hello, fragments, "{packets}");
+        }
+    }
+
+    #[test]
+    fn stream_masks_that_change_the_wire_are_refused_by_name() {
+        for kind in ["header-custom", "sudoku", "xmc"] {
+            let fm = json!({ "tcp": [{ "type": kind, "settings": {} }] });
+            let error = read_stream_finalmask(&fm.to_string(), false)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(&format!("\"{kind}\"")), "{error}");
+        }
+        assert!(read_stream_finalmask(r#"{"other":{}}"#, false).is_err());
+    }
+
+    #[test]
+    fn stream_udp_masks_matter_only_over_udp() {
+        let fm = json!({ "udp": [{ "type": "noise", "settings": {} }], "quicParams": { "congestion": "bbr" } }).to_string();
+        assert_eq!(
+            read_stream_finalmask(&fm, false).unwrap(),
+            StreamFinalMask::default()
+        );
+        assert!(read_stream_finalmask(&fm, true).is_err());
     }
 
     #[test]

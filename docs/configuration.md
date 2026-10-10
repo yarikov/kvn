@@ -78,7 +78,14 @@ is read when imported: its obfuscation, port hopping and Brutal speeds become
 profile fields (`obfs`, `mport`, `hop_interval_secs` / `hop_interval_max_secs`,
 `up_mbps` / `down_mbps`), and only client-side QUIC tuning stays in `fm`, unused
 by sing-box. An `fm` with a mask sing-box cannot reproduce is kept as it is, and
-connecting fails with the mask's name. A certificate fingerprint pin — Hysteria 2
+connecting fails with the mask's name. On other links `fm` stays as it is: a
+`fragment` mask that splits the TLS hello (`packets: "tlshello"`) turns on
+sing-box's TLS `fragment` on TLS over TCP, NaiveProxy excepted, and sing-box
+picks its own split points and delays; other
+fragments and settings that do not change what the server receives are kept
+but unused; `header-custom`, `sudoku` and `xmc`, and a UDP mask on a link that
+runs over UDP or relays UDP straight to the server (Shadowsocks, SOCKS5), make
+connecting fail with the mask's name. A certificate fingerprint pin — Hysteria 2
 `pinSHA256`, or `pcs` on TUIC and AnyTLS links from S-UI — cannot be checked by
 sing-box, which pins public keys rather than certificate fingerprints; kvn shows
 a warning after connecting with such a profile. Protocol-specific fields are stored at the same level and selected by

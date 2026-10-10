@@ -5,8 +5,9 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
 use crate::config::profile::{
-    ActiveDns, DnsRule, DnsServer, DnsStrategy, FakeIpServer, GeoRegion, Profile, ProtocolConfig,
-    RoutedService, RoutingMode, ServiceRoute, Settings,
+    ActiveDns, DnsRule, DnsServer, DnsStrategy, FINALMASK_PARAM, FakeIpServer, GeoRegion,
+    NaiveConfig, Profile, ProtocolConfig, RoutedService, RoutingMode, ServiceRoute, Settings,
+    SocksConfig, SocksVersion, read_stream_finalmask,
 };
 use crate::singbox::outbound::{
     build_anytls_outbound, build_http_outbound, build_hysteria2_outbound, build_naive_outbound,
@@ -709,7 +710,7 @@ fn final_outbound(routing_mode: &RoutingMode) -> &'static str {
 /// single outbound tagged `proxy`; ShadowTLS returns two (the wrapper plus
 /// an inner Shadowsocks detour, with the SS half tagged `proxy`).
 fn build_outbound(profile: &Profile) -> anyhow::Result<Vec<Value>> {
-    let outbounds = match &profile.config {
+    let mut outbounds = match &profile.config {
         ProtocolConfig::Vless(cfg) => vec![build_vless_outbound(profile, cfg)?],
         ProtocolConfig::Vmess(cfg) => vec![build_vmess_outbound(profile, cfg)?],
         ProtocolConfig::Trojan(cfg) => vec![build_trojan_outbound(profile, cfg)?],
@@ -723,6 +724,7 @@ fn build_outbound(profile: &Profile) -> anyhow::Result<Vec<Value>> {
         ProtocolConfig::Http(cfg) => vec![build_http_outbound(profile, cfg)?],
         ProtocolConfig::Ssh(cfg) => vec![build_ssh_outbound(profile, cfg)?],
     };
+    apply_stream_finalmask(profile, &mut outbounds)?;
     refuse_unverifiable_certificate_name(profile, &outbounds)?;
     Ok(outbounds)
 }
@@ -766,6 +768,44 @@ fn refuse_unverifiable_certificate_name(
 
 fn certificate_name(name: &str) -> String {
     name.strip_suffix('.').unwrap_or(name).to_ascii_lowercase()
+}
+
+fn apply_stream_finalmask(profile: &Profile, outbounds: &mut [Value]) -> anyhow::Result<()> {
+    if matches!(profile.config, ProtocolConfig::Hysteria2(_)) {
+        return Ok(());
+    }
+    let fm = match profile.share_link_params.get(FINALMASK_PARAM) {
+        Some(Value::String(fm)) => fm.clone(),
+        Some(fm @ Value::Object(_)) => fm.to_string(),
+        _ => return Ok(()),
+    };
+    let protocol_over_quic = matches!(
+        profile.config,
+        ProtocolConfig::Tuic(_) | ProtocolConfig::Naive(NaiveConfig { quic: true, .. })
+    );
+    let relays_udp_natively = matches!(
+        profile.config,
+        ProtocolConfig::Shadowsocks(_)
+            | ProtocolConfig::Socks(SocksConfig {
+                version: SocksVersion::V5,
+                ..
+            })
+    );
+    let refuses_tls_fragment = matches!(profile.config, ProtocolConfig::Naive(_));
+    for outbound in outbounds {
+        let over_quic =
+            protocol_over_quic || outbound.pointer("/transport/type") == Some(&json!("quic"));
+        let mask = read_stream_finalmask(&fm, over_quic || relays_udp_natively)
+            .map_err(|error| anyhow::anyhow!("{} link: {error:#}", profile.config.protocol()))?;
+        if mask.fragments_tls_hello
+            && !over_quic
+            && !refuses_tls_fragment
+            && let Some(tls) = outbound.get_mut("tls")
+        {
+            tls["fragment"] = json!(true);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1576,6 +1616,111 @@ mod tests {
             transport["early_data_header_name"],
             "Sec-WebSocket-Protocol"
         );
+    }
+
+    fn with_fm(link: &str, fm: serde_json::Value) -> Profile {
+        let fm = urlencoding::encode(&fm.to_string()).into_owned();
+        let separator = if link.contains('?') { '&' } else { '?' };
+        crate::config::profile::parse_share_link(
+            &link.replace("#", &format!("{separator}fm={fm}#")),
+        )
+        .unwrap()
+    }
+
+    fn tls_hello_fragment() -> serde_json::Value {
+        json!({ "tcp": [{ "type": "fragment", "settings": { "packets": "tlshello", "length": "100-200" } }] })
+    }
+
+    #[test]
+    fn stream_fm_fragments_the_tls_hello_when_the_outbound_has_tls() {
+        let vless = "vless://00000000-0000-4000-8000-000000000001@v.example:443?type=tcp&security=tls&sni=v.example#V";
+        let outbound = build_one(&with_fm(vless, tls_hello_fragment()));
+        assert_eq!(outbound["tls"]["fragment"], true);
+
+        let plain = vless.replace("security=tls", "security=none");
+        assert!(
+            build_one(&with_fm(&plain, tls_hello_fragment()))
+                .get("tls")
+                .is_none()
+        );
+
+        let vmess = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            json!({
+                "v": "2", "add": "m.example", "port": "443", "id": "00000000-0000-4000-8000-000000000001",
+                "net": "tcp", "tls": "tls", "fm": tls_hello_fragment(),
+            })
+            .to_string(),
+        );
+        let profile =
+            crate::config::profile::parse_share_link(&format!("vmess://{vmess}")).unwrap();
+        assert_eq!(build_one(&profile)["tls"]["fragment"], true);
+    }
+
+    #[test]
+    fn stream_fm_fragments_only_tcp_tls_that_sing_box_can_split() {
+        let naive = with_fm(
+            "naive+https://u:p@n.example:443?peer=n.example#N",
+            tls_hello_fragment(),
+        );
+        let tuic = with_fm(
+            "tuic://00000000-0000-4000-8000-000000000001:p@t.example:443?sni=t.example#T",
+            tls_hello_fragment(),
+        );
+        for profile in [naive, tuic] {
+            let outbound = build_one(&profile);
+            assert!(outbound["tls"].get("fragment").is_none(), "{outbound}");
+        }
+    }
+
+    #[test]
+    fn stream_fm_refuses_udp_masks_where_udp_goes_straight_to_the_server() {
+        let salamander =
+            json!({ "udp": [{ "type": "salamander", "settings": { "password": "pw" } }] });
+        for link in [
+            "ss://YWVzLTI1Ni1nY206cHc@s.example:8388#S",
+            "socks5://u:p@s.example:1080#K",
+        ] {
+            let error = build_outbound(&with_fm(link, salamander.clone()))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("UDP mask \"salamander\""), "{link}: {error}");
+        }
+        let fragment = with_fm(
+            "ss://YWVzLTI1Ni1nY206cHc@s.example:8388#S",
+            tls_hello_fragment(),
+        );
+        assert!(build_outbound(&fragment).is_ok());
+        for link in [
+            "socks4://u@s.example:1080#K",
+            "socks4a://u@s.example:1080#K",
+        ] {
+            assert!(
+                build_outbound(&with_fm(link, salamander.clone())).is_ok(),
+                "{link}"
+            );
+        }
+    }
+
+    #[test]
+    fn stream_fm_refuses_masks_sing_box_cannot_reproduce() {
+        let vless =
+            "vless://00000000-0000-4000-8000-000000000001@v.example:443?type=tcp&security=tls#V";
+        let error = build_outbound(&with_fm(
+            vless,
+            json!({ "tcp": [{ "type": "header-custom" }] }),
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("TCP mask \"header-custom\""), "{error}");
+
+        let noise = json!({ "udp": [{ "type": "noise", "settings": {} }] });
+        assert!(build_outbound(&with_fm(vless, noise.clone())).is_ok());
+        let tuic = "tuic://00000000-0000-4000-8000-000000000001:p@t.example:443?sni=t.example#T";
+        let error = build_outbound(&with_fm(tuic, noise))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("UDP mask \"noise\""), "{error}");
     }
 
     #[test]
