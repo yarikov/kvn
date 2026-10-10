@@ -5,7 +5,8 @@ use base64::Engine;
 use uuid::Uuid;
 
 use crate::config::profile::{
-    Profile, SUPPORTED_SHARE_SCHEMES, Settings, Subscription, decode_b64_lenient, parse_share_link,
+    Profile, ProtocolConfig, SUPPORTED_SHARE_SCHEMES, Settings, SocksConfig, SocksVersion,
+    Subscription, decode_b64_lenient, parse_share_link,
 };
 
 const KVN_TUI_USER_AGENT: &str = concat!("kvn-tui/", env!("CARGO_PKG_VERSION"));
@@ -177,14 +178,9 @@ fn decode_announce(raw: &str) -> String {
 /// - `Announce: base64:...` — decoded and appended to an HWID rejection, but
 ///   never turns an otherwise successful response into an error on its own.
 pub fn hwid_response_error(headers: &HashMap<String, String>, hwid_sent: bool) -> Option<String> {
-    let header_value = |name: &str| {
-        headers
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.as_str())
-    };
-    let is_true = |name: &str| header_value(name).is_some_and(|v| v.eq_ignore_ascii_case("true"));
-    let announce = header_value("Announce").map(decode_announce);
+    let is_true =
+        |name: &str| header_value(headers, name).is_some_and(|v| v.eq_ignore_ascii_case("true"));
+    let announce = header_value(headers, "Announce").map(decode_announce);
     let with_announce = |msg: String| match &announce {
         Some(text) => format!("{msg}\nProvider announcement: {text}"),
         None => msg,
@@ -207,6 +203,113 @@ pub fn hwid_response_error(headers: &HashMap<String, String>, hwid_sent: bool) -
     // `X-Hwid-Active` and the legacy `X-Hwid-Limit` compatibility flag mean
     // the request was accepted. An announcement alone is advisory.
     None
+}
+
+fn header_value<'a>(headers: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+}
+
+const REMNAWAVE_STUB_UUID: &str = "00000000-0000-0000-0000-000000000000";
+
+fn is_remnawave_status_stub(profile: &Profile) -> bool {
+    matches!(&profile.config, ProtocolConfig::Vless(vless) if vless.uuid == REMNAWAVE_STUB_UUID)
+        && profile.address == "0.0.0.0"
+        && profile.port == 1
+}
+
+fn is_xui_info_node(profile: &Profile) -> bool {
+    matches!(
+        &profile.config,
+        ProtocolConfig::Socks(SocksConfig {
+            version: SocksVersion::V5,
+            username: None,
+            password: None,
+        })
+    ) && profile.address == "127.0.0.1"
+        && profile.port == 1080
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct SubscriptionUserinfo {
+    upload: Option<u64>,
+    download: Option<u64>,
+    total: Option<u64>,
+    expire: Option<u64>,
+}
+
+impl SubscriptionUserinfo {
+    fn parse(value: &str) -> Option<Self> {
+        let mut info = Self::default();
+        for field in value.split(';').map(str::trim).filter(|f| !f.is_empty()) {
+            let (key, value) = field.split_once('=')?;
+            let slot = match key.trim().to_ascii_lowercase().as_str() {
+                "upload" => &mut info.upload,
+                "download" => &mut info.download,
+                "total" => &mut info.total,
+                "expire" => &mut info.expire,
+                _ => continue,
+            };
+            *slot = Some(value.trim().parse().ok()?);
+        }
+        Some(info)
+    }
+
+    fn is_expired(&self, now_unix: u64) -> bool {
+        self.expire
+            .is_some_and(|expire| expire > 0 && expire <= now_unix)
+    }
+
+    fn is_depleted(&self) -> bool {
+        match (self.upload, self.download, self.total) {
+            (Some(upload), Some(download), Some(total)) => {
+                total > 0 && upload.saturating_add(download) >= total
+            }
+            _ => false,
+        }
+    }
+}
+
+fn userinfo_reports_inactive(headers: &HashMap<String, String>, now_unix: u64) -> bool {
+    header_value(headers, "subscription-userinfo")
+        .and_then(SubscriptionUserinfo::parse)
+        .is_some_and(|info| info.is_expired(now_unix) || info.is_depleted())
+}
+
+fn without_status_stubs(
+    body: SubscriptionBody,
+    headers: &HashMap<String, String>,
+    now_unix: u64,
+) -> Result<Vec<Profile>> {
+    let SubscriptionBody {
+        profiles,
+        every_line_parsed,
+    } = body;
+    let xui_info_only = every_line_parsed
+        && profiles.iter().all(is_xui_info_node)
+        && userinfo_reports_inactive(headers, now_unix);
+    let (notices, servers): (Vec<Profile>, Vec<Profile>) = if xui_info_only {
+        (profiles, Vec::new())
+    } else {
+        profiles.into_iter().partition(is_remnawave_status_stub)
+    };
+    if servers.is_empty() && !notices.is_empty() {
+        let names: Vec<&str> = notices.iter().map(|p| p.name.as_str()).collect();
+        anyhow::bail!(
+            "the provider sent no servers, only a notice: {}",
+            names.join("; ")
+        );
+    }
+    for notice in &notices {
+        tracing::warn!("subscription: skipped provider notice: {}", notice.name);
+    }
+    Ok(servers)
+}
+
+fn now_unix() -> u64 {
+    u64::try_from(chrono::Utc::now().timestamp()).unwrap_or(0)
 }
 
 fn http_status_error(status: u16, redacted_url: &str) -> String {
@@ -318,7 +421,7 @@ fn fetch_subscription_after_validation(
         anyhow::bail!("{message}");
     }
 
-    parse_subscription_body(&body)
+    without_status_stubs(parse_subscription_body(&body)?, &resp_headers, now_unix())
 }
 
 /// True when `line` (already trimmed) starts with any supported share-link scheme.
@@ -547,9 +650,15 @@ fn urlencode(s: &str) -> String {
     out
 }
 
+#[derive(Debug)]
+struct SubscriptionBody {
+    profiles: Vec<Profile>,
+    every_line_parsed: bool,
+}
+
 /// Parse a subscription body that is either Base64-encoded or plain text.
 /// Each non-empty line is interpreted as a share link in any supported scheme.
-pub fn parse_subscription_body(body: &str) -> Result<Vec<Profile>> {
+fn parse_subscription_body(body: &str) -> Result<SubscriptionBody> {
     ensure_subscription_size(body.len(), "body")?;
     let trimmed = body.trim();
     if trimmed.is_empty() {
@@ -557,13 +666,17 @@ pub fn parse_subscription_body(body: &str) -> Result<Vec<Profile>> {
     }
 
     if let Some(profiles) = try_parse_xray_json(trimmed) {
-        return Ok(profiles);
+        return Ok(SubscriptionBody {
+            profiles,
+            every_line_parsed: false,
+        });
     }
 
     let decoded = try_decode_base64(trimmed)?;
     let text = decoded.as_deref().unwrap_or(trimmed);
 
     let mut profiles = Vec::new();
+    let mut every_line_parsed = true;
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -571,7 +684,10 @@ pub fn parse_subscription_body(body: &str) -> Result<Vec<Profile>> {
         }
         match parse_share_link(line) {
             Ok(profile) => profiles.push(profile),
-            Err(e) => tracing::warn!("subscription: skipped malformed line: {e}"),
+            Err(e) => {
+                every_line_parsed = false;
+                tracing::warn!("subscription: skipped malformed line: {e}");
+            }
         }
     }
 
@@ -579,7 +695,10 @@ pub fn parse_subscription_body(body: &str) -> Result<Vec<Profile>> {
         anyhow::bail!("No supported share links found in subscription");
     }
 
-    Ok(profiles)
+    Ok(SubscriptionBody {
+        profiles,
+        every_line_parsed,
+    })
 }
 
 /// Attempt to Base64-decode `text`. Returns `Some(decoded)` only when decoding
@@ -614,7 +733,7 @@ mod tests {
     #[test]
     fn parse_plain_body_with_two_links() {
         let body = format!("{}\n{}\n", sample_vless(), sample_vless());
-        let profiles = parse_subscription_body(&body).unwrap();
+        let profiles = parse_subscription_body(&body).unwrap().profiles;
         assert_eq!(profiles.len(), 2);
         assert_eq!(profiles[0].address, "203.0.113.42");
         assert_eq!(profiles[0].name, "Sub-1");
@@ -624,7 +743,7 @@ mod tests {
     fn parse_base64_body() {
         let plain = format!("{}\n{}\n", sample_vless(), sample_vless());
         let encoded = base64::engine::general_purpose::STANDARD.encode(&plain);
-        let profiles = parse_subscription_body(&encoded).unwrap();
+        let profiles = parse_subscription_body(&encoded).unwrap().profiles;
         assert_eq!(profiles.len(), 2);
     }
 
@@ -641,7 +760,11 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\r\n");
         for body in [unpadded, url_safe, wrapped] {
-            assert_eq!(parse_subscription_body(&body).unwrap().len(), 2, "{body}");
+            assert_eq!(
+                parse_subscription_body(&body).unwrap().profiles.len(),
+                2,
+                "{body}"
+            );
         }
     }
 
@@ -649,14 +772,14 @@ mod tests {
     fn parse_base64_body_with_uppercase_scheme() {
         let encoded =
             base64::engine::general_purpose::STANDARD.encode("SOCKS5://proxy.example:1080#Proxy\n");
-        let profiles = parse_subscription_body(&encoded).unwrap();
+        let profiles = parse_subscription_body(&encoded).unwrap().profiles;
         assert_eq!(profiles.len(), 1);
     }
 
     #[test]
     fn parse_body_with_invalid_lines_is_tolerant() {
         let body = format!("not-a-link\n{}\n\nalso-not-a-link\n", sample_vless());
-        let profiles = parse_subscription_body(&body).unwrap();
+        let profiles = parse_subscription_body(&body).unwrap().profiles;
         assert_eq!(profiles.len(), 1);
     }
 
@@ -691,7 +814,7 @@ mod tests {
                     trojan://pw@2.2.2.2:443#T\n\
                     ss://YWVzLTI1Ni1nY206cHc@3.3.3.3:8388#S\n\
                     hysteria2://hp@4.4.4.4:443#H2\n";
-        let profiles = parse_subscription_body(body).unwrap();
+        let profiles = parse_subscription_body(body).unwrap().profiles;
         assert_eq!(profiles.len(), 4);
         let names: Vec<_> = profiles.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["V", "T", "S", "H2"]);
@@ -701,7 +824,7 @@ mod tests {
     fn parse_base64_body_with_multiple_schemes() {
         let body = "vless://uuid@1.1.1.1:443#V\ntrojan://pw@2.2.2.2:443#T\n";
         let encoded = base64::engine::general_purpose::STANDARD.encode(body);
-        let profiles = parse_subscription_body(&encoded).unwrap();
+        let profiles = parse_subscription_body(&encoded).unwrap().profiles;
         assert_eq!(profiles.len(), 2);
     }
 
@@ -1009,7 +1132,7 @@ mod tests {
 
     #[test]
     fn parse_xray_json_object() {
-        let profiles = parse_subscription_body(&xray_json_body()).unwrap();
+        let profiles = parse_subscription_body(&xray_json_body()).unwrap().profiles;
         assert_eq!(profiles.len(), 1);
         assert_eq!(profiles[0].name, "JSON node");
         assert_eq!(profiles[0].address, "198.51.100.7");
@@ -1020,7 +1143,7 @@ mod tests {
     fn parse_xray_json_array() {
         let single = xray_json_body();
         let body = format!("[{}, {}]", single, single);
-        let profiles = parse_subscription_body(&body).unwrap();
+        let profiles = parse_subscription_body(&body).unwrap().profiles;
         assert_eq!(profiles.len(), 2);
     }
 
@@ -1035,7 +1158,7 @@ mod tests {
             .unwrap()
             .remove("id");
         let body = serde_json::json!([out_of_range, without_id, valid]).to_string();
-        let profiles = parse_subscription_body(&body).unwrap();
+        let profiles = parse_subscription_body(&body).unwrap().profiles;
         assert_eq!(profiles.len(), 1);
         assert_eq!(profiles[0].port, 8443);
     }
@@ -1200,5 +1323,132 @@ mod tests {
         let err = fetch_subscription_after_validation(&sub, &settings_with_hwid()).unwrap_err();
         assert!(err.to_string().contains("enable 'send HWID'"), "got: {err}");
         assert!(err.to_string().contains("HTTP 403"), "got: {err}");
+    }
+
+    const NOW: u64 = 1_800_000_000;
+    const REMNAWAVE_STUB: &str = "vless://00000000-0000-0000-0000-000000000000@0.0.0.0:1?encryption=none&type=tcp&security=none#%E2%9B%94%20Subscription%20expired";
+    const XUI_INFO_NODE: &str =
+        "socks://127.0.0.1:1080#%E2%9B%94%20user%20%7C%20Expired%3A%202026-10-01";
+
+    fn body(lines: &[&str]) -> SubscriptionBody {
+        parse_subscription_body(&lines.join("\n")).unwrap()
+    }
+
+    fn userinfo(value: &str) -> HashMap<String, String> {
+        HashMap::from([("subscription-userinfo".to_string(), value.to_string())])
+    }
+
+    #[test]
+    fn remnawave_status_stubs_alone_fail_with_their_notices() {
+        let disabled = REMNAWAVE_STUB.replace("Subscription%20expired", "Disabled");
+        let err = without_status_stubs(body(&[REMNAWAVE_STUB, &disabled]), &HashMap::new(), NOW)
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "the provider sent no servers, only a notice: ⛔ Subscription expired; ⛔ Disabled"
+        );
+    }
+
+    #[test]
+    fn remnawave_status_stubs_next_to_servers_are_dropped() {
+        let kept = without_status_stubs(
+            body(&[REMNAWAVE_STUB, sample_vless()]),
+            &HashMap::new(),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].address, "203.0.113.42");
+    }
+
+    #[test]
+    fn xui_info_node_alone_fails_when_userinfo_reports_inactive() {
+        let expired = format!("upload=1; download=2; total=0; expire={}", NOW - 1);
+        for header in [
+            expired.as_str(),
+            "upload=60; download=40; total=100; expire=0",
+        ] {
+            let err =
+                without_status_stubs(body(&[XUI_INFO_NODE]), &userinfo(header), NOW).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "the provider sent no servers, only a notice: ⛔ user | Expired: 2026-10-01",
+                "{header}"
+            );
+        }
+    }
+
+    #[test]
+    fn local_socks_stays_unless_userinfo_reports_inactive() {
+        let future = format!("upload=0; download=0; total=0; expire={}", NOW + 1);
+        let headers = [
+            HashMap::new(),
+            userinfo("upload=0; download=0; total=0; expire=0"),
+            userinfo(&future),
+            userinfo("upload=60; download=40; total=1000; expire=0"),
+            userinfo("upload=60; total=100"),
+            userinfo("upload=0; download=0; total=0; expire=soon"),
+            userinfo("upload=0; download=0; total=0; expire=-5"),
+            userinfo("expired"),
+        ];
+        for headers in headers {
+            let kept = without_status_stubs(body(&[XUI_INFO_NODE]), &headers, NOW).unwrap();
+            assert_eq!(kept.len(), 1, "{headers:?}");
+        }
+    }
+
+    #[test]
+    fn local_socks_next_to_servers_stays_with_inactive_userinfo() {
+        let expired = userinfo(&format!("expire={}", NOW - 1));
+        let kept =
+            without_status_stubs(body(&[XUI_INFO_NODE, sample_vless()]), &expired, NOW).unwrap();
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn local_socks_next_to_any_other_line_stays_with_inactive_userinfo() {
+        let expired = userinfo(&format!("expire={}", NOW - 1));
+        for other in ["wireguard://key@1.2.3.4:51820#wg", REMNAWAVE_STUB] {
+            let kept = without_status_stubs(body(&[XUI_INFO_NODE, other]), &expired, NOW).unwrap();
+            assert_eq!(kept.len(), 1, "{other}");
+            assert_eq!(kept[0].address, "127.0.0.1", "{other}");
+        }
+    }
+
+    #[test]
+    fn local_socks4_is_never_an_info_node() {
+        let expired = userinfo(&format!("expire={}", NOW - 1));
+        for link in [
+            "socks4://127.0.0.1:1080#Local",
+            "socks4a://127.0.0.1:1080#Local",
+        ] {
+            let kept = without_status_stubs(body(&[link]), &expired, NOW).unwrap();
+            assert_eq!(kept.len(), 1, "{link}");
+        }
+    }
+
+    #[test]
+    fn local_socks_with_credentials_is_never_an_info_node() {
+        let expired = userinfo(&format!("expire={}", NOW - 1));
+        let kept =
+            without_status_stubs(body(&["socks5://u:p@127.0.0.1:1080#Local"]), &expired, NOW)
+                .unwrap();
+        assert_eq!(kept.len(), 1);
+    }
+
+    #[test]
+    fn fetch_reports_an_expired_subscription_instead_of_importing_its_notice() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let (url, _rx) = spawn_http_server(
+            "HTTP/1.1 200 OK",
+            &[(
+                "Subscription-Userinfo",
+                "upload=0; download=0; total=0; expire=1".to_string(),
+            )],
+            XUI_INFO_NODE,
+        );
+        let sub = sub_with(url, false, None);
+        let err = fetch_subscription_after_validation(&sub, &settings_with_hwid()).unwrap_err();
+        assert!(err.to_string().contains("only a notice"), "got: {err}");
     }
 }
