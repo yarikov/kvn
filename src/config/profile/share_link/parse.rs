@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use url::Url;
 use uuid::Uuid;
 
+use super::{FINALMASK_PARAM, read_hysteria2_finalmask};
 use crate::config::profile::*;
 
 /// Parse a share link text into a Profile. Dispatches on URI scheme.
@@ -37,7 +38,51 @@ pub fn parse_share_link(text: &str) -> Result<Profile> {
         let mapped = mapped_query_keys_for(&profile, scheme);
         profile.share_link_params = unmapped_query_params(rest, &mapped);
     }
+    if let ProtocolConfig::Hysteria2(cfg) = &mut profile.config {
+        fold_hysteria2_finalmask(cfg, &mut profile.share_link_params);
+    }
     Ok(profile)
+}
+
+fn fold_hysteria2_finalmask(
+    cfg: &mut Hysteria2Config,
+    params: &mut BTreeMap<String, serde_json::Value>,
+) {
+    let Some(fm) = params
+        .get(FINALMASK_PARAM)
+        .and_then(serde_json::Value::as_str)
+    else {
+        return;
+    };
+    let Ok(mask) = read_hysteria2_finalmask(fm) else {
+        return;
+    };
+    if let Some(obfs) = mask.obfs.clone() {
+        if cfg
+            .obfs
+            .as_ref()
+            .is_some_and(|link_obfs| *link_obfs != obfs)
+        {
+            tracing::warn!("hysteria2 share link: fm obfuscation overrides the obfs parameters");
+        }
+        for key in HYSTERIA2_OBFS_KEYS {
+            params.remove(key);
+        }
+        cfg.obfs = Some(obfs);
+    }
+    if let Some(ports) = &mask.ports {
+        params
+            .entry("mport".to_string())
+            .or_insert_with(|| serde_json::Value::String(ports.clone()));
+    }
+    cfg.hop_interval_secs = mask.hop_interval.secs;
+    cfg.hop_interval_max_secs = mask.hop_interval.max_secs;
+    cfg.up_mbps = mask.up_mbps.or(cfg.up_mbps);
+    cfg.down_mbps = mask.down_mbps.or(cfg.down_mbps);
+    match mask.client_tuning_param() {
+        Some(tuning) => params.insert(FINALMASK_PARAM.to_string(), tuning),
+        None => params.remove(FINALMASK_PARAM),
+    };
 }
 
 fn parse_uri(scheme: &str, rest: &str) -> Result<Url> {
@@ -155,13 +200,13 @@ fn mapped_query_keys_for(profile: &Profile, scheme: &str) -> Vec<&'static str> {
     keys
 }
 
+const HYSTERIA2_OBFS_KEYS: [&str; 4] = ["obfs", "obfs-password", "minPacketSize", "maxPacketSize"];
+
 fn hysteria2_obfs_query_keys(obfs: Option<&Hysteria2Obfs>) -> &'static [&'static str] {
     match obfs.map(|obfs| obfs.kind) {
         None => &[],
-        Some(Hysteria2ObfsType::Salamander) => &["obfs", "obfs-password"],
-        Some(Hysteria2ObfsType::Gecko) => {
-            &["obfs", "obfs-password", "minPacketSize", "maxPacketSize"]
-        }
+        Some(Hysteria2ObfsType::Salamander) => &HYSTERIA2_OBFS_KEYS[..2],
+        Some(Hysteria2ObfsType::Gecko) => &HYSTERIA2_OBFS_KEYS,
     }
 }
 
@@ -680,6 +725,7 @@ fn parse_hysteria2(rest: &str) -> Result<Profile> {
             down_mbps: mbps(&query, "down", "downmbps"),
             obfs,
             tls: extract_tls_common_from_query(&query),
+            ..Default::default()
         }),
         tags: Vec::new(),
         subscription_id: None,
@@ -1727,6 +1773,75 @@ mod tests {
                 "{query}"
             );
         }
+    }
+
+    fn hysteria2_with_fm(
+        query: &str,
+        fm: serde_json::Value,
+    ) -> (Hysteria2Config, BTreeMap<String, serde_json::Value>) {
+        let fm = urlencoding::encode(&fm.to_string()).into_owned();
+        let p =
+            parse_share_link(&format!("hysteria2://hp@hy.example:443/?{query}fm={fm}#R")).unwrap();
+        let ProtocolConfig::Hysteria2(cfg) = p.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        (cfg, p.share_link_params)
+    }
+
+    #[test]
+    fn parse_hysteria2_folds_remnawave_fm_into_the_profile() {
+        let (cfg, params) = hysteria2_with_fm(
+            "obfs=salamander&obfs-password=old&",
+            serde_json::json!({
+                "udp": [
+                    { "type": "salamander", "settings": { "password": "pw", "packetSize": "512-1200" } },
+                    { "type": "udphop", "settings": { "mode": "intervalRemote", "remotePorts": "20000-30000", "interval": "10-20" } },
+                ],
+                "quicParams": { "brutalUp": "50 mbps", "congestion": "bbr" },
+            }),
+        );
+        let obfs = cfg.obfs.unwrap();
+        assert_eq!(
+            (
+                obfs.kind,
+                obfs.password.as_str(),
+                obfs.min_packet_size,
+                obfs.max_packet_size
+            ),
+            (Hysteria2ObfsType::Gecko, "pw", Some(512), Some(1200))
+        );
+        assert_eq!(
+            (cfg.hop_interval_secs, cfg.hop_interval_max_secs),
+            (Some(10), Some(20))
+        );
+        assert_eq!(cfg.up_mbps, Some(52));
+        assert_eq!(params.get("mport"), Some(&serde_json::json!("20000-30000")));
+        assert_eq!(
+            params.get("fm"),
+            Some(&serde_json::json!(r#"{"quicParams":{"congestion":"bbr"}}"#))
+        );
+        assert!(!params.contains_key("obfs") && !params.contains_key("obfs-password"));
+    }
+
+    #[test]
+    fn parse_hysteria2_keeps_the_links_own_port_list() {
+        let (_, params) = hysteria2_with_fm(
+            "mport=40000-50000&",
+            serde_json::json!({ "quicParams": { "udpHop": { "ports": "20000-30000" } } }),
+        );
+        assert_eq!(params.get("mport"), Some(&serde_json::json!("40000-50000")));
+        assert!(!params.contains_key("fm"));
+    }
+
+    #[test]
+    fn parse_hysteria2_keeps_an_fm_it_cannot_reproduce_untouched() {
+        let fm = serde_json::json!({ "udp": [
+            { "type": "salamander", "settings": { "password": "pw" } },
+            { "type": "header-custom", "settings": {} },
+        ] });
+        let (cfg, params) = hysteria2_with_fm("obfs=salamander&obfs-password=link&", fm.clone());
+        assert_eq!(cfg.obfs.unwrap().password, "link");
+        assert_eq!(params.get("fm"), Some(&serde_json::json!(fm.to_string())));
     }
 
     #[test]

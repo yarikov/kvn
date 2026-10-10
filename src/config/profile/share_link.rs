@@ -7,9 +7,11 @@
 //! produces a URI from a [`Profile`](crate::config::profile::Profile).
 
 mod encode;
+mod finalmask;
 mod parse;
 
 pub use encode::encode_share_link;
+pub(crate) use finalmask::{FINALMASK_PARAM, read_hysteria2_finalmask};
 pub(crate) use parse::decode_b64_lenient;
 pub use parse::parse_share_link;
 

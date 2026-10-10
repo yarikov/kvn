@@ -1,5 +1,7 @@
 use anyhow::Result;
 
+use super::FINALMASK_PARAM;
+use super::finalmask::export_hysteria2_finalmask;
 use super::parse::vmess_b64_field_keys;
 use crate::config::profile::*;
 
@@ -32,7 +34,24 @@ fn link_params(profile: &Profile) -> std::collections::BTreeMap<String, serde_js
             params.remove("ech");
         }
     }
+    if let ProtocolConfig::Hysteria2(cfg) = &profile.config {
+        export_finalmask(cfg, &mut params);
+    }
     params
+}
+
+fn export_finalmask(
+    cfg: &Hysteria2Config,
+    params: &mut std::collections::BTreeMap<String, serde_json::Value>,
+) {
+    let stored = params
+        .get(FINALMASK_PARAM)
+        .and_then(serde_json::Value::as_str);
+    let ports = params.get("mport").and_then(serde_json::Value::as_str);
+    match export_hysteria2_finalmask(cfg, ports, stored) {
+        Some(fm) => params.insert(FINALMASK_PARAM.to_string(), serde_json::Value::String(fm)),
+        None => params.remove(FINALMASK_PARAM),
+    };
 }
 
 fn exported_ech(tls: &TlsCommon) -> Option<&EchSettings> {
@@ -1029,6 +1048,7 @@ mod tests {
                     insecure: true,
                     ..TlsCommon::default()
                 },
+                ..Default::default()
             }),
             tags: Vec::new(),
             subscription_id: None,
@@ -1049,6 +1069,107 @@ mod tests {
             "{link}"
         );
         assert_roundtrip(p);
+    }
+
+    fn reparse(profile: &Profile) -> Profile {
+        parse_share_link(&encode_share_link(profile).unwrap()).unwrap()
+    }
+
+    fn hysteria2_cfg(profile: &mut Profile) -> &mut Hysteria2Config {
+        let ProtocolConfig::Hysteria2(cfg) = &mut profile.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        cfg
+    }
+
+    fn remnawave_hysteria2() -> Profile {
+        let fm = serde_json::json!({
+            "udp": [
+                { "type": "salamander", "settings": { "password": "pw", "packetSize": "512-1200" } },
+                { "type": "udphop", "settings": { "mode": "intervalRemote", "remotePorts": "20000-30000", "interval": "10-20" } },
+            ],
+            "quicParams": { "congestion": "bbr" },
+        });
+        let fm = urlencoding::encode(&fm.to_string()).into_owned();
+        parse_share_link(&format!(
+            "hysteria2://hp@hy.example:443/?obfs=salamander&obfs-password=pw&fm={fm}#R"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn encode_hysteria2_edits_survive_a_folded_fm() {
+        let mut p = remnawave_hysteria2();
+        {
+            let cfg = hysteria2_cfg(&mut p);
+            let obfs = cfg.obfs.as_mut().unwrap();
+            obfs.password = "new".into();
+            obfs.min_packet_size = Some(600);
+        }
+        p.share_link_params
+            .insert("mport".into(), serde_json::json!("40000-50000"));
+        let mut back = reparse(&p);
+        let cfg = hysteria2_cfg(&mut back);
+        let obfs = cfg.obfs.clone().unwrap();
+        assert_eq!(
+            (obfs.password.as_str(), obfs.min_packet_size),
+            ("new", Some(600))
+        );
+        assert_eq!(
+            back.share_link_params.get("mport"),
+            Some(&serde_json::json!("40000-50000"))
+        );
+
+        hysteria2_cfg(&mut p).obfs = None;
+        assert_eq!(hysteria2_cfg(&mut reparse(&p)).obfs, None);
+    }
+
+    #[test]
+    fn encode_hysteria2_hop_interval_round_trips() {
+        let mut p = remnawave_hysteria2();
+        {
+            let cfg = hysteria2_cfg(&mut p);
+            cfg.hop_interval_secs = Some(15);
+            cfg.hop_interval_max_secs = Some(25);
+        }
+        let mut back = reparse(&p);
+        let cfg = hysteria2_cfg(&mut back);
+        assert_eq!(
+            (cfg.hop_interval_secs, cfg.hop_interval_max_secs),
+            (Some(15), Some(25))
+        );
+
+        {
+            let cfg = hysteria2_cfg(&mut p);
+            cfg.hop_interval_secs = None;
+            cfg.hop_interval_max_secs = None;
+        }
+        let link = encode_share_link(&p).unwrap();
+        let mut back = reparse(&p);
+        let cfg = hysteria2_cfg(&mut back);
+        assert_eq!(
+            (cfg.hop_interval_secs, cfg.hop_interval_max_secs),
+            (None, None)
+        );
+        assert!(!link.contains("udphop"), "{link}");
+        assert_eq!(
+            back.share_link_params.get("fm"),
+            Some(&serde_json::json!(r#"{"quicParams":{"congestion":"bbr"}}"#))
+        );
+    }
+
+    #[test]
+    fn encode_hysteria2_keeps_an_unsupported_fm_verbatim() {
+        let fm = r#"{"udp":[{"type":"noise","settings":{}}]}"#;
+        let link = format!(
+            "hysteria2://hp@hy.example:443?fm={}#R",
+            urlencoding::encode(fm)
+        );
+        let p = parse_share_link(&link).unwrap();
+        assert_eq!(
+            reparse(&p).share_link_params.get("fm"),
+            Some(&serde_json::json!(fm))
+        );
     }
 
     #[test]

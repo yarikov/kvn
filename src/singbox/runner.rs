@@ -544,6 +544,25 @@ mod tests {
     }
 
     #[test]
+    fn check_config_accepts_hysteria2_port_hopping_interval() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
+        if !sing_box_on_path() {
+            return;
+        }
+        let mut profile = crate::config::profile::parse_share_link(
+            "hysteria2://p@1.1.1.1:443?mport=20000-30000#H",
+        )
+        .unwrap();
+        if let crate::config::profile::ProtocolConfig::Hysteria2(cfg) = &mut profile.config {
+            cfg.hop_interval_secs = Some(10);
+            cfg.hop_interval_max_secs = Some(20);
+        }
+        check_generated_config(&profile).expect("sing-box rejected a hop interval range");
+    }
+
+    #[test]
     fn check_config_accepts_every_generated_transport() {
         use crate::config::profile::{TransportConfig, TransportType};
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
