@@ -56,6 +56,10 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 
 - `e` edits a private snapshot. The TUI keeps terminal input paused until the
   editor session saves successfully or ends with cancellation or a failure.
+  The snapshot is written without validation (`save_editor_snapshot_at`), so a
+  loaded config that no longer validates — for example a HWID a stricter rule
+  now refuses — can still be opened and fixed; the edited result is checked
+  before it is applied, and `profiles.json` itself is never saved invalid.
 - JSON and validation errors offer another editor pass or explicit cancellation.
   Validation is collected, not fail-fast: `Config::diagnostics` returns every
   problem as a `ConfigDiagnostic` with the JSON pointer of the offending value
