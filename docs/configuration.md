@@ -69,7 +69,8 @@ Each profile has common fields such as `id`, `name`, `address`, `port`, and
 so exporting the profile reproduces its link; kvn passes none of them to
 sing-box except the Shadowsocks `plugin` and the Hysteria 2 port range `mport`,
 and refuses to connect when one of them names a feature sing-box lacks (for
-example VLESS Encryption). A certificate fingerprint pin — Hysteria 2
+example VLESS Encryption, or a Hysteria 2 `obfs` that is not `salamander` or a
+valid `gecko`). A certificate fingerprint pin — Hysteria 2
 `pinSHA256`, or `pcs` on TUIC and AnyTLS links from S-UI — cannot be checked by
 sing-box, which pins public keys rather than certificate fingerprints; kvn shows
 a warning after connecting with such a profile. Protocol-specific fields are stored at the same level and selected by

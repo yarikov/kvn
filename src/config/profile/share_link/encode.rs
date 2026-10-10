@@ -380,9 +380,18 @@ fn encode_hysteria2(profile: &Profile, cfg: &Hysteria2Config) -> String {
     if let Some(obfs) = &cfg.obfs {
         let kind = match obfs.kind {
             Hysteria2ObfsType::Salamander => "salamander",
+            Hysteria2ObfsType::Gecko => "gecko",
         };
         pairs.push(("obfs", kind.to_string()));
         pairs.push(("obfs-password", obfs.password.clone()));
+        if obfs.kind == Hysteria2ObfsType::Gecko {
+            if let Some(min) = obfs.min_packet_size {
+                pairs.push(("minPacketSize", min.to_string()));
+            }
+            if let Some(max) = obfs.max_packet_size {
+                pairs.push(("maxPacketSize", max.to_string()));
+            }
+        }
     }
     if let Some(up) = cfg.up_mbps {
         pairs.push(("up", up.to_string()));
@@ -1013,6 +1022,7 @@ mod tests {
                 obfs: Some(Hysteria2Obfs {
                     kind: Hysteria2ObfsType::Salamander,
                     password: "obfs-pw".to_string(),
+                    ..Default::default()
                 }),
                 tls: TlsCommon {
                     server_name: Some("hy.example".to_string()),
@@ -1024,6 +1034,20 @@ mod tests {
             subscription_id: None,
             share_link_params: Default::default(),
         };
+        assert_roundtrip(p);
+    }
+
+    #[test]
+    fn encode_hysteria2_roundtrip_with_gecko() {
+        let p = parse_share_link(
+            "hysteria2://secret@hy.example:443?obfs=gecko&obfs-password=ob&minPacketSize=512&maxPacketSize=1200#Hy2",
+        )
+        .unwrap();
+        let link = encode_share_link(&p).unwrap();
+        assert!(
+            link.contains("obfs=gecko&obfs-password=ob&minPacketSize=512&maxPacketSize=1200"),
+            "{link}"
+        );
         assert_roundtrip(p);
     }
 

@@ -72,14 +72,18 @@ impl ShadowsocksCipher {
     }
 }
 
-/// Hysteria2 obfuscation. Sing-box 1.12+ supports the `salamander` type
-/// (legacy top-level `obfs_password` is rejected).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+/// Hysteria2 obfuscation. Sing-box 1.12+ supports the `salamander` type,
+/// 1.14+ also `gecko` (legacy top-level `obfs_password` is rejected).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Hysteria2Obfs {
     #[serde(rename = "type")]
     pub kind: Hysteria2ObfsType,
     pub password: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_packet_size: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_packet_size: Option<u16>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
@@ -87,6 +91,7 @@ pub struct Hysteria2Obfs {
 pub enum Hysteria2ObfsType {
     #[default]
     Salamander,
+    Gecko,
 }
 
 /// TUIC v5 congestion control algorithm.

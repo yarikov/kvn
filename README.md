@@ -58,7 +58,7 @@ the clipboard using supported share links.
 | Protocol | Share-link scheme(s) | Key support |
 |----------|----------------------|-------------|
 | **VLESS** | `vless://` | REALITY, XTLS Vision, TLS with ECH; gRPC, WebSocket, HTTP, HTTPUpgrade, QUIC |
-| **Hysteria 2** | `hysteria2://`, `hy2://` | QUIC and Salamander obfuscation |
+| **Hysteria 2** | `hysteria2://`, `hy2://` | QUIC, Salamander and Gecko obfuscation |
 | **Trojan** | `trojan://` | TLS with ECH; gRPC, WebSocket, HTTP, HTTPUpgrade, QUIC |
 | **Shadowsocks** | `ss://` | AEAD and AEAD-2022 ciphers; SIP002 and legacy Base64 |
 
