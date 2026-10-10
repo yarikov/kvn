@@ -593,6 +593,24 @@ mod tests {
     }
 
     #[test]
+    fn check_config_accepts_a_fragmented_tls_hello() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
+        if !sing_box_on_path() {
+            return;
+        }
+        let fm = urlencoding::encode(
+            r#"{"tcp":[{"type":"fragment","settings":{"packets":"tlshello"}}]}"#,
+        );
+        let profile = crate::config::profile::parse_share_link(&format!(
+            "vless://00000000-0000-4000-8000-000000000001@1.1.1.1:443?type=tcp&security=tls&sni=v.example&fm={fm}#V"
+        ))
+        .unwrap();
+        check_generated_config(&profile).expect("sing-box rejected a fragmented TLS hello");
+    }
+
+    #[test]
     fn check_config_accepts_every_generated_transport() {
         use crate::config::profile::{TransportConfig, TransportType};
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
