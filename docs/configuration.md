@@ -108,8 +108,14 @@ Every subscription request carries `User-Agent: kvn-tui/<version>`. With
 `settings.hwid`), `X-Device-Os: Linux`, `X-Ver-Os` (the kernel version),
 `X-Device-Model: Desktop`, and `X-Device-Locale` (for example `ru-RU`). Some
 providers require these headers to count devices; leave `send_hwid` off
-otherwise. The HWID must be non-empty, at most 256 bytes, and a valid HTTP
-header value.
+otherwise. The HWID must be 10 to 64 Latin letters, digits, `-` and `=` — the
+format Remnawave accepts, which 3x-ui accepts too — and kvn refuses to save a
+configuration with any other HWID; the generated `lnx-` HWID fits. A
+configuration saved earlier with another HWID still loads and opens with `e`,
+but kvn cannot save it until that HWID is fixed. When a panel
+still rejects the HWID kvn sent, kvn reports that the server did not accept it:
+check the subscription's `hwid` with the provider rather than turning
+`send_hwid` off.
 
 kvn does not change its `User-Agent`. A panel picks the subscription format by
 it, and some providers let only the apps they recommend download the

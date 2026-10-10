@@ -117,24 +117,31 @@ pub(crate) fn save_editor_snapshot_at(
     config: &Config,
     json_schema: Option<String>,
 ) -> Result<()> {
-    let json = serialized_config_with_schema(config, json_schema)?;
+    let json = unchecked_serialized_config(config, json_schema)?;
     crate::atomic_write::write(path, json.as_bytes())?;
     Ok(())
 }
 
 fn serialized_config(config: &Config) -> Result<String> {
-    serialized_config_with_schema(config, None)
+    let serializable = normalized_for_disk(config, None);
+    serializable
+        .validate()
+        .context("Refusing to save invalid config")?;
+    Ok(serde_json::to_string_pretty(&serializable)?)
 }
 
-fn serialized_config_with_schema(config: &Config, json_schema: Option<String>) -> Result<String> {
+fn unchecked_serialized_config(config: &Config, json_schema: Option<String>) -> Result<String> {
+    Ok(serde_json::to_string_pretty(&normalized_for_disk(
+        config,
+        json_schema,
+    ))?)
+}
+
+fn normalized_for_disk(config: &Config, json_schema: Option<String>) -> Config {
     let mut serializable = config.clone();
     serializable.json_schema = json_schema;
     serializable.normalize();
     serializable
-        .validate()
-        .context("Refusing to save invalid config")?;
-
-    Ok(serde_json::to_string_pretty(&serializable)?)
 }
 
 /// Save only if `profiles.json` has not changed since `expected` was read.
@@ -199,6 +206,22 @@ mod tests {
     use std::io::Write;
     use std::path::PathBuf;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn editor_snapshot_keeps_a_config_that_fails_validation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config
+            .subscriptions
+            .push(crate::test_helpers::subscription_with_hwid(
+                true,
+                Some("abc123"),
+            ));
+        assert!(config.validate().is_err());
+
+        save_editor_snapshot_at(&dir.path().join("snapshot.json"), &config, None).unwrap();
+        assert!(save_config_at(&dir.path().join("profiles.json"), &config).is_err());
+    }
 
     #[test]
     fn schema_reference_reaches_only_editor_snapshots() {

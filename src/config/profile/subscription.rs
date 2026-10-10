@@ -101,17 +101,25 @@ impl Subscription {
     }
 }
 
-const MAX_HWID_LEN: usize = 256;
+const HWID_LENGTH: std::ops::RangeInclusive<usize> = 10..=64;
 
 pub(super) fn validate_hwid(hwid: &str) -> anyhow::Result<()> {
     if hwid.trim().is_empty() {
         anyhow::bail!("must not be empty when send_hwid is enabled");
     }
-    if hwid.len() > MAX_HWID_LEN {
-        anyhow::bail!("must not exceed {MAX_HWID_LEN} bytes");
+    if !HWID_LENGTH.contains(&hwid.len()) {
+        anyhow::bail!(
+            "must be {} to {} characters long",
+            HWID_LENGTH.start(),
+            HWID_LENGTH.end()
+        );
     }
-    hwid.parse::<ureq::http::HeaderValue>()
-        .map_err(|_| anyhow::anyhow!("must be a valid HTTP header value"))?;
+    if !hwid
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '=')
+    {
+        anyhow::bail!("may contain only Latin letters, digits, '-' and '='");
+    }
     Ok(())
 }
 
@@ -163,24 +171,37 @@ mod tests {
     }
 
     #[test]
-    fn config_validate_rejects_invalid_http_hwid_value() {
-        let mut config = Config::default();
-        config
-            .subscriptions
-            .push(subscription_with_hwid(true, Some("device\r\ninjected")));
-        let error = config.validate().unwrap_err().to_string();
-        assert!(error.contains("HTTP header value"), "got: {error}");
+    fn config_validate_rejects_a_hwid_with_other_characters() {
+        for hwid in [
+            "device\r\ninjected",
+            "my_laptop_0001",
+            "device 0001x",
+            "устройство01",
+        ] {
+            let mut config = Config::default();
+            config
+                .subscriptions
+                .push(subscription_with_hwid(true, Some(hwid)));
+            let error = config.validate().unwrap_err().to_string();
+            assert!(error.contains("only Latin letters"), "{hwid}: {error}");
+        }
     }
 
     #[test]
-    fn config_validate_rejects_overlong_hwid() {
-        let mut config = Config::default();
-        let hwid = "a".repeat(MAX_HWID_LEN + 1);
-        config
-            .subscriptions
-            .push(subscription_with_hwid(true, Some(&hwid)));
-        let error = config.validate().unwrap_err().to_string();
-        assert!(error.contains("must not exceed"), "got: {error}");
+    fn config_validate_holds_a_hwid_to_10_to_64_characters() {
+        for (hwid, valid) in [
+            ("abc123".to_string(), false),
+            ("a".repeat(9), false),
+            ("abcdef-12=".to_string(), true),
+            ("a".repeat(64), true),
+            ("a".repeat(65), false),
+        ] {
+            let mut config = Config::default();
+            config
+                .subscriptions
+                .push(subscription_with_hwid(true, Some(&hwid)));
+            assert_eq!(config.validate().is_ok(), valid, "{hwid}");
+        }
     }
 
     #[test]

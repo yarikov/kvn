@@ -164,17 +164,21 @@ fn decode_announce(raw: &str) -> String {
         .unwrap_or_else(|| raw.to_string())
 }
 
-/// Inspect the Remnawave HWID response headers *before* parsing the body and
-/// produce the user-facing message when the server rejected the request.
+/// Inspect the Remnawave and 3x-ui HWID response headers *before* parsing the
+/// body and produce the user-facing message when the server rejected the
+/// request.
 ///
 /// Header semantics:
-/// - `X-Hwid-Not-Supported: true` — HWID identification is required but
-///   missing. When the client did not send HWID headers the message asks to
-///   enable `send_hwid`; when it did, the server simply does not support HWID.
+/// - `X-Hwid-Not-Supported: true` — HWID identification is required but no
+///   acceptable HWID arrived. When the client did not send HWID headers the
+///   message asks to enable `send_hwid`; when it did, the panel rejected the
+///   value it got.
 /// - `X-Hwid-Max-Devices-Reached: true` — the device limit for this HWID is
 ///   exhausted.
-/// - `X-Hwid-Active: true` / `X-Hwid-Limit: true` — success/compatibility
-///   markers, nothing to report.
+/// - `X-Hwid-Active: true` — the panel enforces a device limit; nothing to
+///   report. `X-Hwid-Limit: true` comes with every Remnawave rejection and
+///   with 3x-ui's rejections and the success that takes the last slot, so it
+///   never decides the outcome alone.
 /// - `Announce: base64:...` — decoded and appended to an HWID rejection, but
 ///   never turns an otherwise successful response into an error on its own.
 pub fn hwid_response_error(headers: &HashMap<String, String>, hwid_sent: bool) -> Option<String> {
@@ -188,7 +192,7 @@ pub fn hwid_response_error(headers: &HashMap<String, String>, hwid_sent: bool) -
 
     if is_true("X-Hwid-Not-Supported") {
         let msg = if hwid_sent {
-            "Subscription server does not support HWID identification; disable 'send HWID' for this subscription."
+            "Subscription server did not accept the HWID kvn sent; check this subscription's HWID with the provider."
         } else {
             "Subscription requires HWID identification; enable 'send HWID' for this subscription and retry."
         };
@@ -200,8 +204,9 @@ pub fn hwid_response_error(headers: &HashMap<String, String>, hwid_sent: bool) -
                 .to_string(),
         ));
     }
-    // `X-Hwid-Active` and the legacy `X-Hwid-Limit` compatibility flag mean
-    // the request was accepted. An announcement alone is advisory.
+    // `X-Hwid-Active` and `X-Hwid-Limit` alone never reject the request:
+    // 3x-ui sends `X-Hwid-Limit` on the success that takes the last slot. An
+    // announcement alone is advisory.
     None
 }
 
@@ -1035,13 +1040,14 @@ mod tests {
     }
 
     #[test]
-    fn hwid_response_error_not_supported_with_hwid_sent_reports_unsupported() {
+    fn hwid_response_error_not_supported_with_hwid_sent_asks_to_check_the_hwid() {
         let headers = HashMap::from([
             ("X-Hwid-Not-Supported".to_string(), "true".to_string()),
             ("X-Hwid-Active".to_string(), "false".to_string()),
         ]);
         let msg = hwid_response_error(&headers, true).unwrap();
-        assert!(msg.contains("does not support HWID"), "got: {msg}");
+        assert!(msg.contains("did not accept the HWID"), "got: {msg}");
+        assert!(!msg.contains("disable"), "got: {msg}");
     }
 
     #[test]
@@ -1053,7 +1059,7 @@ mod tests {
     }
 
     #[test]
-    fn hwid_response_error_limit_header_is_compatibility_success() {
+    fn hwid_response_error_limit_header_alone_is_not_a_rejection() {
         let headers = HashMap::from([("X-Hwid-Limit".to_string(), "true".to_string())]);
         assert!(hwid_response_error(&headers, true).is_none());
     }

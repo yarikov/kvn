@@ -546,7 +546,7 @@ mod tests {
                 "url": "https://sub.example/s", "auto_update": "every_1d",
                 "last_updated": "2026-01-01T00:00:00+03:00", "next_auto_update": "2026-01-02",
                 "retry_state": { "consecutive_failures": 1, "retry_at": "2026-01-01T01:00:00+03:00", "attempt_date": "2026-01-01" },
-                "send_hwid": true, "hwid": "device"
+                "send_hwid": true, "hwid": "device-0001"
             }],
             "settings": {
                 "last_connected_profile": uuid,
