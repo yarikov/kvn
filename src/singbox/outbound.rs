@@ -19,6 +19,7 @@ use crate::config::profile::{
     SocksConfig, SocksVersion, SshConfig, TlsCommon, TransportConfig, TransportType, TrojanConfig,
     TuicConfig, VlessConfig, VmessConfig,
 };
+use crate::config::profile::{FINALMASK_PARAM, read_hysteria2_finalmask};
 
 /// Render the sing-box 1.12 `tls` block from [`TlsCommon`].
 /// `default_sni` is used when `tls.server_name` is unset (typically the
@@ -321,6 +322,15 @@ pub(super) fn build_hysteria2_outbound(
             "sing-box cannot use the link's Hysteria 2 obfuscation (obfs={kind}): it supports salamander and gecko, with an obfs-password and gecko packet sizes from 1 to 2048"
         );
     }
+    if let Some(fm) = enabled_option(&profile.share_link_params, FINALMASK_PARAM) {
+        let mask = read_hysteria2_finalmask(fm)
+            .map_err(|error| anyhow::anyhow!("Hysteria 2 link: {error:#}"))?;
+        if mask.carries_link_settings() {
+            anyhow::bail!(
+                "Hysteria 2 link: the stored fm carries obfuscation or port hopping that was not imported; re-import the share link"
+            );
+        }
+    }
     if let Some(obfs) = cfg.obfs.as_ref() {
         outbound["obfs"] = hysteria2_obfs(obfs);
     }
@@ -332,6 +342,12 @@ pub(super) fn build_hysteria2_outbound(
             object.remove("server_port");
         }
         outbound["server_ports"] = json!(port_ranges);
+        if let Some(secs) = cfg.hop_interval_secs {
+            outbound["hop_interval"] = json!(format!("{secs}s"));
+        }
+        if let Some(secs) = cfg.hop_interval_max_secs {
+            outbound["hop_interval_max"] = json!(format!("{secs}s"));
+        }
     }
     Ok(outbound)
 }

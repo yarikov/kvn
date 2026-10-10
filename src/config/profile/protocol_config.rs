@@ -85,6 +85,12 @@ pub struct Hysteria2Config {
     pub down_mbps: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub obfs: Option<Hysteria2Obfs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 5))]
+    pub hop_interval_secs: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 5))]
+    pub hop_interval_max_secs: Option<u32>,
     #[serde(default, flatten)]
     pub tls: TlsCommon,
 }

@@ -1431,6 +1431,36 @@ mod tests {
     }
 
     #[test]
+    fn hysteria2_outbound_emits_the_hop_interval_with_server_ports() {
+        let mut profile = hysteria2(&[("mport", "20000-30000")]);
+        if let ProtocolConfig::Hysteria2(cfg) = &mut profile.config {
+            cfg.hop_interval_secs = Some(10);
+            cfg.hop_interval_max_secs = Some(20);
+        }
+        let outbound = build_one(&profile);
+        assert_eq!(outbound["hop_interval"], "10s");
+        assert_eq!(outbound["hop_interval_max"], "20s");
+    }
+
+    #[test]
+    fn hysteria2_outbound_checks_the_stored_fm() {
+        let tuning = r#"{"quicParams":{"congestion":"bbr"}}"#;
+        assert!(build_outbound(&hysteria2(&[("fm", tuning)])).is_ok());
+
+        let noise = r#"{"udp":[{"type":"noise","settings":{}}]}"#;
+        let error = build_outbound(&hysteria2(&[("fm", noise)]))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("UDP mask \"noise\""), "{error}");
+
+        let salamander = r#"{"udp":[{"type":"salamander","settings":{"password":"pw"}}]}"#;
+        let error = build_outbound(&hysteria2(&[("fm", salamander)]))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("re-import"), "{error}");
+    }
+
+    #[test]
     fn tuic_outbound_shape() {
         use crate::config::profile::{TuicConfig, TuicCongestion, TuicUdpRelayMode};
         let profile = profile_with(
