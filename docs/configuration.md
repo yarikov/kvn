@@ -111,6 +111,19 @@ subscription: Remnawave, for example, answers `403` when its response rules
 block the client or no rule matches it. kvn then reports that the server
 refuses this client; ask the provider to allow kvn.
 
+When a subscription has expired, been disabled or run out of traffic, some
+panels still answer with a list that holds only a notice dressed as a server.
+kvn does not import those entries. If the answer has nothing else, the update
+fails with the notice's text and the subscription keeps its current servers;
+otherwise the notice is skipped and logged. kvn recognises:
+
+- Remnawave's notice: a VLESS link to `0.0.0.0:1` with the all-zero UUID;
+- 3x-ui's info node: a SOCKS5 `socks://127.0.0.1:1080` without credentials
+  that is the only line of the answer, and only when the `subscription-userinfo` header says the subscription has
+  expired (`expire` in the past and not `0`) or used up its traffic
+  (`upload + download` reaching a non-zero `total`). A local SOCKS proxy in any
+  other answer is imported as usual.
+
 ## Settings
 
 | Field | Default | Description |
