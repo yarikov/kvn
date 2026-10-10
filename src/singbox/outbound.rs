@@ -14,9 +14,10 @@ use std::collections::{BTreeMap, HashMap};
 use serde_json::{Map, Value, json};
 
 use crate::config::profile::{
-    AnytlsConfig, HttpConfig, Hysteria2Config, NaiveConfig, Profile, ProtocolConfig, Security,
-    ShadowsocksConfig, ShadowtlsConfig, ShadowtlsVersion, SocksConfig, SocksVersion, SshConfig,
-    TlsCommon, TransportConfig, TransportType, TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
+    AnytlsConfig, HttpConfig, Hysteria2Config, Hysteria2Obfs, Hysteria2ObfsType, NaiveConfig,
+    Profile, ProtocolConfig, Security, ShadowsocksConfig, ShadowtlsConfig, ShadowtlsVersion,
+    SocksConfig, SocksVersion, SshConfig, TlsCommon, TransportConfig, TransportType, TrojanConfig,
+    TuicConfig, VlessConfig, VmessConfig,
 };
 
 /// Render the sing-box 1.12 `tls` block from [`TlsCommon`].
@@ -315,12 +316,13 @@ pub(super) fn build_hysteria2_outbound(
     if let Some(down) = cfg.down_mbps {
         outbound["down_mbps"] = json!(down);
     }
+    if let Some(kind) = enabled_option(&profile.share_link_params, "obfs") {
+        anyhow::bail!(
+            "sing-box cannot use the link's Hysteria 2 obfuscation (obfs={kind}): it supports salamander and gecko, with an obfs-password and gecko packet sizes from 1 to 2048"
+        );
+    }
     if let Some(obfs) = cfg.obfs.as_ref() {
-        outbound["obfs"] = json!({
-            "type": "salamander",
-            "password": obfs.password,
-        });
-        let _ = &obfs.kind; // single supported type today; kept for forward compat
+        outbound["obfs"] = hysteria2_obfs(obfs);
     }
     let port_ranges = enabled_option(&profile.share_link_params, "mport")
         .map(hysteria2_port_ranges)
@@ -332,6 +334,26 @@ pub(super) fn build_hysteria2_outbound(
         outbound["server_ports"] = json!(port_ranges);
     }
     Ok(outbound)
+}
+
+fn hysteria2_obfs(obfs: &Hysteria2Obfs) -> Value {
+    let kind = match obfs.kind {
+        Hysteria2ObfsType::Salamander => "salamander",
+        Hysteria2ObfsType::Gecko => "gecko",
+    };
+    let mut block = json!({
+        "type": kind,
+        "password": obfs.password,
+    });
+    if obfs.kind == Hysteria2ObfsType::Gecko {
+        if let Some(min) = obfs.min_packet_size {
+            block["min_packet_size"] = json!(min);
+        }
+        if let Some(max) = obfs.max_packet_size {
+            block["max_packet_size"] = json!(max);
+        }
+    }
+    block
 }
 
 fn hysteria2_port_ranges(ports: &str) -> Vec<String> {

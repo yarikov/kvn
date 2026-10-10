@@ -1371,6 +1371,7 @@ mod tests {
                 obfs: Some(Hysteria2Obfs {
                     kind: Hysteria2ObfsType::Salamander,
                     password: "obfs-pass".into(),
+                    ..Default::default()
                 }),
                 ..Default::default()
             }),
@@ -1388,6 +1389,45 @@ mod tests {
         assert!(outbound.get("obfs_password").is_none());
         // Hysteria2 is QUIC-based — ALPN defaults to h3 when not set.
         assert_eq!(outbound["tls"]["alpn"][0], "h3");
+    }
+
+    #[test]
+    fn hysteria2_outbound_emits_gecko_packet_sizes() {
+        use crate::config::profile::{Hysteria2Config, Hysteria2Obfs, Hysteria2ObfsType};
+        let profile = profile_with(
+            ProtocolConfig::Hysteria2(Hysteria2Config {
+                password: "hy2-pass".into(),
+                obfs: Some(Hysteria2Obfs {
+                    kind: Hysteria2ObfsType::Gecko,
+                    password: "obfs-pass".into(),
+                    min_packet_size: Some(512),
+                    max_packet_size: Some(1200),
+                }),
+                ..Default::default()
+            }),
+            "hy2.example",
+            443,
+        );
+        assert_eq!(
+            build_one(&profile)["obfs"],
+            json!({
+                "type": "gecko",
+                "password": "obfs-pass",
+                "min_packet_size": 512,
+                "max_packet_size": 1200,
+            })
+        );
+    }
+
+    #[test]
+    fn hysteria2_outbound_refuses_obfuscation_the_link_could_not_model() {
+        let error = build_outbound(&hysteria2(&[("obfs", "other"), ("obfs-password", "ob")]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("Hysteria 2 obfuscation (obfs=other)"),
+            "{error}"
+        );
     }
 
     #[test]

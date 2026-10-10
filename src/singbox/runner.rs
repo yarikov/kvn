@@ -529,6 +529,21 @@ mod tests {
     }
 
     #[test]
+    fn check_config_accepts_hysteria2_gecko() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
+        if !sing_box_on_path() {
+            return;
+        }
+        let profile = crate::config::profile::parse_share_link(
+            "hysteria2://p@1.1.1.1:443?obfs=gecko&obfs-password=ob&minPacketSize=512&maxPacketSize=1200#G",
+        )
+        .unwrap();
+        check_generated_config(&profile).expect("sing-box rejected a gecko hysteria2 profile");
+    }
+
+    #[test]
     fn check_config_accepts_every_generated_transport() {
         use crate::config::profile::{TransportConfig, TransportType};
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();

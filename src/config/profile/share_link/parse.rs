@@ -34,7 +34,8 @@ pub fn parse_share_link(text: &str) -> Result<Profile> {
     }?;
     let vmess_base64 = scheme == "vmess" && !rest.contains('@');
     if !vmess_base64 {
-        profile.share_link_params = unmapped_query_params(rest, scheme);
+        let mapped = mapped_query_keys_for(&profile, scheme);
+        profile.share_link_params = unmapped_query_params(rest, &mapped);
     }
     Ok(profile)
 }
@@ -106,11 +107,7 @@ fn mapped_query_keys(scheme: &str) -> Vec<&'static str> {
         "vless" => (true, true, &["flow", "security"]),
         "vmess" => (true, true, &["scy", "encryption", "security", "aid"]),
         "trojan" => (true, true, &[]),
-        "hysteria2" | "hy2" => (
-            true,
-            false,
-            &["obfs", "obfs-password", "up", "down", "upmbps", "downmbps"],
-        ),
+        "hysteria2" | "hy2" => (true, false, &["up", "down", "upmbps", "downmbps"]),
         "tuic" => (
             true,
             false,
@@ -150,14 +147,31 @@ fn mapped_query_keys(scheme: &str) -> Vec<&'static str> {
     keys
 }
 
-fn unmapped_query_params(rest: &str, scheme: &str) -> BTreeMap<String, serde_json::Value> {
+fn mapped_query_keys_for(profile: &Profile, scheme: &str) -> Vec<&'static str> {
+    let mut keys = mapped_query_keys(scheme);
+    if let ProtocolConfig::Hysteria2(cfg) = &profile.config {
+        keys.extend(hysteria2_obfs_query_keys(cfg.obfs.as_ref()));
+    }
+    keys
+}
+
+fn hysteria2_obfs_query_keys(obfs: Option<&Hysteria2Obfs>) -> &'static [&'static str] {
+    match obfs.map(|obfs| obfs.kind) {
+        None => &[],
+        Some(Hysteria2ObfsType::Salamander) => &["obfs", "obfs-password"],
+        Some(Hysteria2ObfsType::Gecko) => {
+            &["obfs", "obfs-password", "minPacketSize", "maxPacketSize"]
+        }
+    }
+}
+
+fn unmapped_query_params(rest: &str, mapped: &[&str]) -> BTreeMap<String, serde_json::Value> {
     let without_fragment = rest.split_once('#').map_or(rest, |(body, _)| body);
     let Some((_, query)) = without_fragment.split_once('?') else {
         return BTreeMap::new();
     };
-    let mapped = mapped_query_keys(scheme);
     url::form_urlencoded::parse(query.as_bytes())
-        .filter(|(key, value)| !is_mapped_param(&mapped, key, value))
+        .filter(|(key, value)| !is_mapped_param(mapped, key, value))
         .map(|(key, value)| {
             (
                 key.into_owned(),
@@ -653,13 +667,7 @@ fn parse_hysteria2(rest: &str) -> Result<Profile> {
     let name = fragment_name(&url, &host)?;
     let query = query_map(&url);
 
-    let obfs = match (query.get("obfs"), query.get("obfs-password")) {
-        (Some(kind), Some(p)) if kind == "salamander" => Some(Hysteria2Obfs {
-            kind: Hysteria2ObfsType::Salamander,
-            password: p.clone(),
-        }),
-        _ => None,
-    };
+    let obfs = hysteria2_obfs(&query);
 
     Ok(Profile {
         id: Uuid::new_v4(),
@@ -677,6 +685,48 @@ fn parse_hysteria2(rest: &str) -> Result<Profile> {
         subscription_id: None,
         share_link_params: Default::default(),
     })
+}
+
+fn hysteria2_obfs(query: &HashMap<String, String>) -> Option<Hysteria2Obfs> {
+    let password = query.get("obfs-password")?.clone();
+    match query.get("obfs")?.as_str() {
+        "salamander" => Some(Hysteria2Obfs {
+            kind: Hysteria2ObfsType::Salamander,
+            password,
+            ..Default::default()
+        }),
+        "gecko" => {
+            let min_packet_size = gecko_packet_size(query, "minPacketSize")?;
+            let max_packet_size = gecko_packet_size(query, "maxPacketSize")?;
+            if min_packet_size.unwrap_or(GECKO_DEFAULT_MIN_PACKET_SIZE)
+                > max_packet_size.unwrap_or(GECKO_DEFAULT_MAX_PACKET_SIZE)
+            {
+                return None;
+            }
+            Some(Hysteria2Obfs {
+                kind: Hysteria2ObfsType::Gecko,
+                password,
+                min_packet_size,
+                max_packet_size,
+            })
+        }
+        _ => None,
+    }
+}
+
+const GECKO_PACKET_SIZES: std::ops::RangeInclusive<u16> = 1..=2048;
+const GECKO_DEFAULT_MIN_PACKET_SIZE: u16 = 512;
+const GECKO_DEFAULT_MAX_PACKET_SIZE: u16 = 1200;
+
+fn gecko_packet_size(query: &HashMap<String, String>, key: &str) -> Option<Option<u16>> {
+    let Some(value) = query.get(key) else {
+        return Some(None);
+    };
+    value
+        .parse()
+        .ok()
+        .filter(|size| GECKO_PACKET_SIZES.contains(size))
+        .map(Some)
 }
 
 fn mbps(query: &HashMap<String, String>, key: &str, alias: &str) -> Option<u32> {
@@ -1613,6 +1663,70 @@ mod tests {
         assert_eq!(cfg.tls.server_name.as_deref(), Some("sni.example"));
         assert!(cfg.tls.insecure);
         assert_eq!(cfg.tls.alpn, vec!["h3".to_string()]);
+    }
+
+    #[test]
+    fn parse_hysteria2_reads_gecko() {
+        let p = parse_share_link("hysteria2://hp@hy.example:443?obfs=gecko&obfs-password=ob&minPacketSize=512&maxPacketSize=1200&sni=hy.example#G").unwrap();
+        let ProtocolConfig::Hysteria2(cfg) = &p.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        assert_eq!(
+            cfg.obfs,
+            Some(Hysteria2Obfs {
+                kind: Hysteria2ObfsType::Gecko,
+                password: "ob".into(),
+                min_packet_size: Some(512),
+                max_packet_size: Some(1200),
+            })
+        );
+        assert!(p.share_link_params.is_empty());
+    }
+
+    #[test]
+    fn parse_hysteria2_reads_gecko_without_packet_sizes() {
+        let p = parse_share_link("hysteria2://hp@hy.example:443?obfs=gecko&obfs-password=ob#G")
+            .unwrap();
+        let ProtocolConfig::Hysteria2(cfg) = &p.config else {
+            panic!("ProtocolConfig variant mismatch")
+        };
+        let obfs = cfg.obfs.as_ref().unwrap();
+        assert_eq!(obfs.kind, Hysteria2ObfsType::Gecko);
+        assert_eq!((obfs.min_packet_size, obfs.max_packet_size), (None, None));
+    }
+
+    #[test]
+    fn parse_hysteria2_keeps_obfuscation_it_cannot_model_in_link_params() {
+        for query in [
+            "obfs=other&obfs-password=ob",
+            "obfs=salamander",
+            "obfs=gecko&obfs-password=ob&minPacketSize=0",
+            "obfs=gecko&obfs-password=ob&maxPacketSize=4096",
+            "obfs=gecko&obfs-password=ob&minPacketSize=1200&maxPacketSize=512",
+            "obfs=gecko&obfs-password=ob&minPacketSize=1500",
+            "obfs=gecko&obfs-password=ob&maxPacketSize=100",
+            "obfs=gecko&obfs-password=ob&minPacketSize=big",
+        ] {
+            let link = format!("hysteria2://hp@hy.example:443?{query}#H");
+            let p = parse_share_link(&link).unwrap();
+            let ProtocolConfig::Hysteria2(cfg) = &p.config else {
+                panic!("ProtocolConfig variant mismatch")
+            };
+            assert_eq!(cfg.obfs, None, "{query}");
+            let kept: Vec<String> = query
+                .split('&')
+                .map(|pair| pair.split_once('=').unwrap().0.to_string())
+                .collect();
+            assert_eq!(
+                p.share_link_params.keys().cloned().collect::<Vec<_>>(),
+                {
+                    let mut keys = kept;
+                    keys.sort();
+                    keys
+                },
+                "{query}"
+            );
+        }
     }
 
     #[test]
