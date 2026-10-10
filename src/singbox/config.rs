@@ -759,6 +759,7 @@ mod tests {
                 host: None,
                 service_name: None,
                 headers: Default::default(),
+                early_data: None,
             });
             cfg.tls.utls_fingerprint = Some("chrome".to_string());
         }
@@ -1056,6 +1057,7 @@ mod tests {
                     host: Some("example.com".into()),
                     service_name: None,
                     headers: Default::default(),
+                    early_data: None,
                 }),
                 ..Default::default()
             }),
@@ -1089,6 +1091,7 @@ mod tests {
             host: Some("link.example.com".into()),
             service_name: None,
             headers: [("host".to_string(), "edited.example.com".to_string())].into(),
+            early_data: None,
         });
         let outbound = build_one(&profile);
         assert_eq!(
@@ -1105,6 +1108,7 @@ mod tests {
             host: Some("cdn.example.com".into()),
             service_name: None,
             headers: Default::default(),
+            early_data: None,
         });
         let quic = vmess_with_transport(TransportConfig {
             kind: TransportType::Quic,
@@ -1112,6 +1116,7 @@ mod tests {
             host: Some("ignored.example.com".into()),
             service_name: None,
             headers: Default::default(),
+            early_data: None,
         });
         assert_eq!(
             build_one(&httpupgrade)["transport"],
@@ -1135,6 +1140,7 @@ mod tests {
             host: host.map(Into::into),
             service_name: None,
             headers: Default::default(),
+            early_data: None,
         }
     }
 
@@ -1221,6 +1227,7 @@ mod tests {
             host: Some("a.example.com, b.example.com".into()),
             service_name: Some("ignored".into()),
             headers: Default::default(),
+            early_data: None,
         });
         let outbound = build_one(&profile);
         assert_eq!(
@@ -1458,6 +1465,32 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("re-import"), "{error}");
+    }
+
+    #[test]
+    fn tls_block_disables_sni_and_keeps_the_name_for_verification() {
+        let profile = crate::config::profile::parse_share_link(
+            "trojan://pw@t.example:443?security=tls&sni=cover.example&disable_sni=1#T",
+        )
+        .unwrap();
+        let tls = &build_one(&profile)["tls"];
+        assert_eq!(tls["disable_sni"], true);
+        assert_eq!(tls["server_name"], "cover.example");
+    }
+
+    #[test]
+    fn websocket_transport_emits_early_data() {
+        let profile = crate::config::profile::parse_share_link(
+            "vless://00000000-0000-4000-8000-000000000001@v.example:443?type=ws&security=tls&path=%2Fws%3Fed%3D2048#S",
+        )
+        .unwrap();
+        let transport = &build_one(&profile)["transport"];
+        assert_eq!(transport["path"], "/ws");
+        assert_eq!(transport["max_early_data"], 2048);
+        assert_eq!(
+            transport["early_data_header_name"],
+            "Sec-WebSocket-Protocol"
+        );
     }
 
     #[test]

@@ -563,6 +563,36 @@ mod tests {
     }
 
     #[test]
+    fn check_config_accepts_disable_sni() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
+        if !sing_box_on_path() {
+            return;
+        }
+        let profile = crate::config::profile::parse_share_link(
+            "trojan://pw@1.1.1.1:443?security=tls&sni=cover.example&disable_sni=1#T",
+        )
+        .unwrap();
+        check_generated_config(&profile).expect("sing-box rejected disable_sni");
+    }
+
+    #[test]
+    fn check_config_accepts_websocket_early_data() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
+        if !sing_box_on_path() {
+            return;
+        }
+        let profile = crate::config::profile::parse_share_link(
+            "vless://00000000-0000-4000-8000-000000000001@1.1.1.1:443?type=ws&security=tls&sni=v.example&path=%2Fws%3Fed%3D2048#S",
+        )
+        .unwrap();
+        check_generated_config(&profile).expect("sing-box rejected websocket early data");
+    }
+
+    #[test]
     fn check_config_accepts_every_generated_transport() {
         use crate::config::profile::{TransportConfig, TransportType};
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
@@ -584,6 +614,7 @@ mod tests {
                 host: Some("h.example.com".to_string()),
                 service_name: Some("svc".to_string()),
                 headers: Default::default(),
+                early_data: None,
             });
             check_generated_config(&profile)
                 .unwrap_or_else(|error| panic!("sing-box rejected {kind:?}: {error:#}"));
@@ -664,6 +695,7 @@ mod tests {
                 host: Some("h.example.com".to_string()),
                 service_name: None,
                 headers: Default::default(),
+                early_data: None,
             });
             if let ProtocolConfig::Vmess(cfg) = &mut profile.config {
                 cfg.stream_security = Some(Security::None);
@@ -690,6 +722,7 @@ mod tests {
             host: None,
             service_name: None,
             headers: Default::default(),
+            early_data: None,
         });
 
         let error = check_generated_config(&profile).unwrap_err().to_string();

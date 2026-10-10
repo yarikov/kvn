@@ -399,7 +399,7 @@ impl ProtocolConfig {
             }) => format!(
                 "|{}:{}:{}:{}",
                 transport.kind.as_str(),
-                transport.path.as_deref().unwrap_or(""),
+                transport.identity_path(),
                 transport.host.as_deref().unwrap_or(""),
                 transport.service_name.as_deref().unwrap_or("")
             ),
@@ -491,6 +491,7 @@ mod tests {
                 host: None,
                 service_name: Some("svc".to_string()),
                 headers: Default::default(),
+                early_data: None,
             })
         );
         assert!(cfg.legacy_transport_type.is_none());

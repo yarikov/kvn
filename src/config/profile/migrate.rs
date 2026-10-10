@@ -156,6 +156,7 @@ impl Config {
                         host: None,
                         service_name,
                         headers: Default::default(),
+                        early_data: None,
                     });
                 }
             }
@@ -296,6 +297,7 @@ mod tests {
                 host: None,
                 service_name: Some("svc".into()),
                 headers: Default::default(),
+                early_data: None,
             })
         );
     }

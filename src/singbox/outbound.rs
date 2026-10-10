@@ -33,6 +33,9 @@ fn build_tls_block(default_sni: &str, default_alpn: &[&str], tls: &TlsCommon) ->
     if tls.insecure {
         block.insert("insecure".to_string(), json!(true));
     }
+    if tls.disable_sni {
+        block.insert("disable_sni".to_string(), json!(true));
+    }
     let alpn: Vec<&str> = if tls.alpn.is_empty() {
         default_alpn.to_vec()
     } else {
@@ -83,6 +86,13 @@ fn build_transport_block(
         TransportType::Ws => {
             insert_path(&mut obj, t);
             insert_headers(&mut obj, headers_with_host(t));
+            if let Some(early) = &t.early_data {
+                obj.insert("max_early_data".to_string(), json!(early.max_bytes));
+                obj.insert(
+                    "early_data_header_name".to_string(),
+                    json!(early.header_name),
+                );
+            }
         }
         TransportType::Http => {
             let hosts = t.host.as_deref().map(split_hosts).unwrap_or_default();

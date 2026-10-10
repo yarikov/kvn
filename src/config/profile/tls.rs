@@ -119,6 +119,8 @@ pub struct TlsCommon {
     pub server_name: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub insecure: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disable_sni: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub alpn: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -135,6 +137,7 @@ impl TlsCommon {
     pub fn is_configured(&self) -> bool {
         self.server_name.is_some()
             || self.insecure
+            || self.disable_sni
             || !self.alpn.is_empty()
             || self.utls_fingerprint.is_some()
             || self.reality.is_some()
@@ -168,6 +171,82 @@ pub struct TransportConfig {
     pub service_name: Option<String>,
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub headers: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub early_data: Option<WebSocketEarlyData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WebSocketEarlyData {
+    pub max_bytes: u32,
+    pub header_name: String,
+}
+
+const EARLY_DATA_PATH_KEY: &str = "ed";
+pub(crate) const EARLY_DATA_PROTOCOL_HEADER: &str = "Sec-WebSocket-Protocol";
+
+pub(crate) fn split_path_early_data(path: &str) -> (String, Option<u32>) {
+    let Some((base, query)) = path.split_once('?') else {
+        return (path.to_string(), None);
+    };
+    let mut max_bytes = None;
+    let rest: Vec<&str> = query
+        .split('&')
+        .filter(|pair| match pair.split_once('=') {
+            Some((EARLY_DATA_PATH_KEY, value)) if max_bytes.is_none() => {
+                max_bytes = value.parse::<u32>().ok();
+                max_bytes.is_none()
+            }
+            _ => true,
+        })
+        .collect();
+    if max_bytes.is_none() {
+        return (path.to_string(), None);
+    }
+    let path = if rest.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}?{}", rest.join("&"))
+    };
+    (path, max_bytes)
+}
+
+impl TransportConfig {
+    pub(crate) fn identity_path(&self) -> String {
+        let path = self.path.as_deref().unwrap_or("");
+        if self.kind != TransportType::Ws {
+            return path.to_string();
+        }
+        let (path, early_in_path) = split_path_early_data(path);
+        let early = self
+            .early_data
+            .as_ref()
+            .filter(|early| early.header_name == EARLY_DATA_PROTOCOL_HEADER)
+            .map(|early| early.max_bytes)
+            .or(early_in_path);
+        match early {
+            Some(max_bytes) => format!("{path}|{EARLY_DATA_PATH_KEY}={max_bytes}"),
+            None => path,
+        }
+    }
+
+    pub fn link_path(&self) -> Option<String> {
+        let early_data = self
+            .early_data
+            .as_ref()
+            .filter(|early| early.header_name == EARLY_DATA_PROTOCOL_HEADER);
+        match (self.path.as_deref(), early_data) {
+            (path, None) => path.map(str::to_string),
+            (path, Some(early)) => {
+                let path = path.unwrap_or("/");
+                let separator = if path.contains('?') { '&' } else { '?' };
+                Some(format!(
+                    "{path}{separator}{EARLY_DATA_PATH_KEY}={}",
+                    early.max_bytes
+                ))
+            }
+        }
+    }
 }
 
 #[cfg(test)]

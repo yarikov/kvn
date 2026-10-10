@@ -132,14 +132,18 @@ fn parse_transport_type(s: &str) -> Option<TransportType> {
     })
 }
 
-const TLS_QUERY_KEYS: [&str; 10] = [
+const INSECURE_QUERY_KEYS: [&str; 3] = ["insecure", "allowInsecure", "allow_insecure"];
+
+const TLS_QUERY_KEYS: [&str; 12] = [
     "ech",
+    "disable_sni",
     "sni",
     "host",
     "alpn",
     "fp",
-    "allowInsecure",
-    "insecure",
+    INSECURE_QUERY_KEYS[0],
+    INSECURE_QUERY_KEYS[1],
+    INSECURE_QUERY_KEYS[2],
     "pbk",
     "sid",
     "spx",
@@ -230,8 +234,9 @@ fn is_mapped_param(mapped: &[&str], key: &str, value: &str) -> bool {
     mapped.contains(&key) && !(key == "ech" && EchSettings::is_dns_query_link_value(value))
 }
 
-const VMESS_B64_MAPPED_FIELDS: [&str; 21] = [
+const VMESS_B64_MAPPED_FIELDS: [&str; 22] = [
     "ech",
+    "disable_sni",
     "v",
     "ps",
     "add",
@@ -290,15 +295,15 @@ fn extract_tls_common_from_query(q: &std::collections::HashMap<String, String>) 
     if let Some(fp) = q.get("fp") {
         tls.utls_fingerprint = Some(fp.clone());
     }
-    if q.get("allowInsecure")
-        .map(|s| parse_bool_param(s))
-        .unwrap_or(false)
-        || q.get("insecure")
-            .map(|s| parse_bool_param(s))
-            .unwrap_or(false)
+    if INSECURE_QUERY_KEYS
+        .iter()
+        .any(|key| q.get(*key).is_some_and(|value| parse_bool_param(value)))
     {
         tls.insecure = true;
     }
+    tls.disable_sni = q
+        .get("disable_sni")
+        .is_some_and(|value| parse_bool_param(value));
     if let Some(pbk) = q.get("pbk") {
         tls.reality = Some(RealitySettings {
             public_key: pbk.clone(),
@@ -343,13 +348,32 @@ fn transport_from_params(params: &BTreeMap<String, serde_json::Value>) -> Option
             Some(_) => TransportType::Other("tcp".to_string()),
         },
     };
-    Some(TransportConfig {
+    let mut transport = TransportConfig {
         kind,
         path: text("path"),
         host: text("host"),
         service_name: text("serviceName"),
         headers: HashMap::new(),
-    })
+        early_data: None,
+    };
+    if transport.kind == TransportType::Ws {
+        take_path_early_data(&mut transport);
+    }
+    Some(transport)
+}
+
+fn take_path_early_data(transport: &mut TransportConfig) {
+    let Some(path) = transport.path.as_deref() else {
+        return;
+    };
+    let (path, Some(max_bytes)) = split_path_early_data(path) else {
+        return;
+    };
+    transport.path = Some(path);
+    transport.early_data = Some(WebSocketEarlyData {
+        max_bytes,
+        header_name: EARLY_DATA_PROTOCOL_HEADER.to_string(),
+    });
 }
 
 /// Parse a VLESS URI fragment.
@@ -522,6 +546,7 @@ fn vmess_b64_tls(v: &serde_json::Value) -> TlsCommon {
     tls.insecure = ["insecure", "allowInsecure"]
         .iter()
         .any(|field| json_flag(&v[*field]));
+    tls.disable_sni = json_flag(&v["disable_sni"]);
     if mode == Some("reality") || text("pbk").is_some() {
         tls.reality = Some(RealitySettings {
             public_key: text("pbk").unwrap_or_default(),
@@ -1226,6 +1251,7 @@ mod tests {
                 host: Some("nl.example.com".into()),
                 service_name: None,
                 headers: HashMap::new(),
+                early_data: None,
             })
         );
     }
@@ -1255,6 +1281,7 @@ mod tests {
             host: Some("cdn.example".into()),
             service_name: None,
             headers: HashMap::new(),
+            early_data: None,
         });
         assert_eq!(trojan.transport, httpupgrade);
         assert_eq!(vmess.transport, httpupgrade);
@@ -1301,6 +1328,7 @@ mod tests {
                 host: None,
                 service_name: None,
                 headers: HashMap::new(),
+                early_data: None,
             })
         );
         assert_eq!(xhttp.share_link_params, params(&[("mode", "auto".into())]));
@@ -1419,6 +1447,7 @@ mod tests {
                 host: Some("a.example".into()),
                 service_name: None,
                 headers: HashMap::new(),
+                early_data: None,
             })
         );
         assert_eq!(
@@ -2170,6 +2199,107 @@ mod tests {
     #[test]
     fn parse_hysteria2_rejects_empty_password() {
         assert!(parse_share_link("hysteria2://@hy.example:443#X").is_err());
+    }
+
+    fn ws_transport(link: &str) -> TransportConfig {
+        let p = parse_share_link(link).unwrap();
+        match p.config {
+            ProtocolConfig::Vless(cfg) => cfg.transport.unwrap(),
+            ProtocolConfig::Vmess(cfg) => cfg.transport.unwrap(),
+            _ => panic!("ProtocolConfig variant mismatch"),
+        }
+    }
+
+    #[test]
+    fn parse_moves_websocket_early_data_out_of_the_path() {
+        let vless =
+            "vless://00000000-0000-4000-8000-000000000001@v.example:443?type=ws&security=tls&path=";
+        for (path, clean) in [
+            ("%2Fws%3Fed%3D2048", "/ws"),
+            ("%2Fws%3Fx%3D1%26ed%3D2048", "/ws?x=1"),
+        ] {
+            let transport = ws_transport(&format!("{vless}{path}#S"));
+            assert_eq!(transport.path.as_deref(), Some(clean), "{path}");
+            assert_eq!(
+                transport.early_data,
+                Some(WebSocketEarlyData {
+                    max_bytes: 2048,
+                    header_name: "Sec-WebSocket-Protocol".into(),
+                }),
+                "{path}"
+            );
+        }
+        let vmess = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            r#"{"v":"2","add":"m.example","port":"443","id":"00000000-0000-4000-8000-000000000001","net":"ws","path":"/ws?ed=2048","tls":"tls"}"#,
+        );
+        let transport = ws_transport(&format!("vmess://{vmess}"));
+        assert_eq!(transport.path.as_deref(), Some("/ws"));
+        assert_eq!(
+            transport.early_data.map(|early| early.max_bytes),
+            Some(2048)
+        );
+    }
+
+    #[test]
+    fn parse_leaves_other_early_data_shapes_in_the_path() {
+        let base = "vless://00000000-0000-4000-8000-000000000001@v.example:443?security=tls";
+        for (query, path) in [
+            ("&type=ws&path=%2Fws%3Fed%3Dbig", "/ws?ed=big"),
+            ("&type=httpupgrade&path=%2Fup%3Fed%3D2048", "/up?ed=2048"),
+        ] {
+            let p = parse_share_link(&format!("{base}{query}#S")).unwrap();
+            let ProtocolConfig::Vless(cfg) = p.config else {
+                panic!("ProtocolConfig variant mismatch")
+            };
+            let transport = cfg.transport.unwrap();
+            assert_eq!(transport.path.as_deref(), Some(path), "{query}");
+            assert_eq!(transport.early_data, None, "{query}");
+        }
+    }
+
+    #[test]
+    fn websocket_early_data_keeps_the_server_key_of_a_profile_saved_with_it_in_the_path() {
+        for (link_path, saved_path) in [
+            ("%2Fws%3Fed%3D2048", "/ws?ed=2048"),
+            ("%2Fws%3Fed%3D2048%26token%3Dabc", "/ws?ed=2048&token=abc"),
+        ] {
+            let link = format!(
+                "vless://00000000-0000-4000-8000-000000000001@v.example:443?type=ws&security=tls&path={link_path}#S"
+            );
+            let parsed = parse_share_link(&link).unwrap();
+            let mut saved_before = parsed.clone();
+            if let ProtocolConfig::Vless(cfg) = &mut saved_before.config {
+                let transport = cfg.transport.as_mut().unwrap();
+                transport.path = Some(saved_path.into());
+                transport.early_data = None;
+            }
+            assert_eq!(parsed.dedup_key(), saved_before.dedup_key(), "{saved_path}");
+        }
+    }
+
+    #[test]
+    fn parse_tuic_reads_the_3x_ui_allow_insecure_key() {
+        for (value, insecure) in [("1", true), ("0", false)] {
+            let p = parse_share_link(&format!(
+                "tuic://u:p@tuic.example:443?allow_insecure={value}&sni=t.example#T"
+            ))
+            .unwrap();
+            assert_eq!(p.config.tls().unwrap().insecure, insecure, "{value}");
+            assert!(p.share_link_params.is_empty(), "{value}");
+        }
+    }
+
+    #[test]
+    fn parse_reads_s_ui_disable_sni() {
+        let p = parse_share_link(
+            "vless://00000000-0000-4000-8000-000000000001@v.example:443?type=ws&path=%2Fws&security=tls&disable_sni=1&sni=cover.example#S",
+        )
+        .unwrap();
+        let tls = p.config.tls().unwrap();
+        assert!(tls.disable_sni);
+        assert_eq!(tls.server_name.as_deref(), Some("cover.example"));
+        assert!(!p.share_link_params.contains_key("disable_sni"));
     }
 
     #[test]

@@ -46,6 +46,8 @@ pub use share_link::{
 pub use subscription::Subscription;
 #[cfg(test)]
 pub use subscription::SubscriptionRetryState;
+pub(crate) use tls::{EARLY_DATA_PROTOCOL_HEADER, split_path_early_data};
 pub use tls::{
     EchSettings, Flow, RealitySettings, Security, TlsCommon, TransportConfig, TransportType,
+    WebSocketEarlyData,
 };
