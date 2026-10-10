@@ -468,6 +468,7 @@ mod tests {
                     host: None,
                     service_name: None,
                     headers: Default::default(),
+                    early_data: None,
                 }),
             }),
             tags: Vec::new(),

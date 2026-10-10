@@ -143,6 +143,9 @@ fn append_tls_common_query(pairs: &mut Vec<(&str, String)>, tls: &TlsCommon) {
     if tls.insecure {
         pairs.push(("insecure", "1".to_string()));
     }
+    if tls.disable_sni {
+        pairs.push(("disable_sni", "1".to_string()));
+    }
     if let Some(ech) = exported_ech(tls).and_then(EchSettings::link_value) {
         pairs.push(("ech", ech));
     }
@@ -166,8 +169,8 @@ fn append_transport_query(
     params: &std::collections::BTreeMap<String, serde_json::Value>,
 ) {
     pairs.push(("type", share_link_transport_type(t, params).to_string()));
-    if let Some(p) = &t.path {
-        pairs.push(("path", p.clone()));
+    if let Some(p) = t.link_path() {
+        pairs.push(("path", p));
     }
     if let Some(h) = &t.host {
         pairs.push(("host", h.clone()));
@@ -275,7 +278,7 @@ fn vmess_b64_transport_fields(
         let t = cfg.transport.as_ref()?;
         match key {
             "host" => t.host.clone(),
-            "path" => t.path.clone(),
+            "path" => t.link_path(),
             "serviceName" => t.service_name.clone(),
             _ => None,
         }
@@ -343,6 +346,9 @@ fn vmess_b64_tls_fields(
     }
     if tls.insecure {
         object.insert("insecure".into(), json!("1"));
+    }
+    if tls.disable_sni {
+        object.insert("disable_sni".into(), json!("1"));
     }
     if let Some(ech) = exported_ech(tls).and_then(EchSettings::link_value) {
         object.insert("ech".into(), json!(ech));
@@ -744,6 +750,7 @@ mod tests {
             host: None,
             service_name: Some("svc".to_string()),
             headers: Default::default(),
+            early_data: None,
         });
         assert_roundtrip(p);
     }
@@ -772,6 +779,7 @@ mod tests {
                     host: Some("host.example".to_string()),
                     service_name: None,
                     headers: HashMap::new(),
+                    early_data: None,
                 }),
                 ..VmessConfig::default()
             }),
@@ -823,6 +831,7 @@ mod tests {
                     host: Some("cdn.example".to_string()),
                     service_name: None,
                     headers: Default::default(),
+                    early_data: None,
                 }),
             }),
             tags: Vec::new(),
@@ -929,6 +938,7 @@ mod tests {
             host: Some("cdn.example".to_string()),
             service_name: None,
             headers: HashMap::new(),
+            early_data: None,
         });
         let profile = |config: ProtocolConfig| Profile {
             id: Uuid::new_v4(),
@@ -1170,6 +1180,29 @@ mod tests {
             reparse(&p).share_link_params.get("fm"),
             Some(&serde_json::json!(fm))
         );
+    }
+
+    #[test]
+    fn encode_keeps_disable_sni() {
+        for link in [
+            "trojan://pw@t.example:443?security=tls&sni=cover.example&disable_sni=1#T",
+            "vmess://00000000-0000-4000-8000-000000000001@m.example:443?security=tls&type=tcp&sni=cover.example&disable_sni=1#M",
+        ] {
+            let p = parse_share_link(link).unwrap();
+            assert!(p.config.tls().unwrap().disable_sni, "{link}");
+            assert_roundtrip(p);
+        }
+    }
+
+    #[test]
+    fn encode_puts_websocket_early_data_back_into_the_path() {
+        let p = parse_share_link(
+            "vless://00000000-0000-4000-8000-000000000001@v.example:443?type=ws&security=tls&path=%2Fws%3Fed%3D2048#S",
+        )
+        .unwrap();
+        let link = encode_share_link(&p).unwrap();
+        assert!(link.contains("path=%2Fws%3Fed%3D2048"), "{link}");
+        assert_roundtrip(p);
     }
 
     #[test]
