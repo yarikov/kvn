@@ -183,9 +183,9 @@ pub struct WebSocketEarlyData {
 }
 
 const EARLY_DATA_PATH_KEY: &str = "ed";
-pub(crate) const EARLY_DATA_PROTOCOL_HEADER: &str = "Sec-WebSocket-Protocol";
+const EARLY_DATA_PROTOCOL_HEADER: &str = "Sec-WebSocket-Protocol";
 
-pub(crate) fn split_path_early_data(path: &str) -> (String, Option<u32>) {
+fn split_path_early_data(path: &str) -> (String, Option<u32>) {
     let Some((base, query)) = path.split_once('?') else {
         return (path.to_string(), None);
     };
@@ -212,6 +212,23 @@ pub(crate) fn split_path_early_data(path: &str) -> (String, Option<u32>) {
 }
 
 impl TransportConfig {
+    pub(crate) fn take_path_early_data(&mut self) {
+        if self.kind != TransportType::Ws || self.early_data.is_some() {
+            return;
+        }
+        let Some(path) = self.path.as_deref() else {
+            return;
+        };
+        let (path, Some(max_bytes)) = split_path_early_data(path) else {
+            return;
+        };
+        self.path = Some(path);
+        self.early_data = Some(WebSocketEarlyData {
+            max_bytes,
+            header_name: EARLY_DATA_PROTOCOL_HEADER.to_string(),
+        });
+    }
+
     pub(crate) fn identity_path(&self) -> String {
         let path = self.path.as_deref().unwrap_or("");
         if self.kind != TransportType::Ws {

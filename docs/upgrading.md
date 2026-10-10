@@ -23,6 +23,12 @@ time it loads it and keeps the previous file in `~/.config/kvn-tui/recovery/`:
   reported as errors from then on. See [DNS](configuration.md#dns).
 - The DNS strategies `prefer_ipv6` and `ipv6_only` become `prefer_ipv4` and
   `ipv4_only`, because the tunnel carries IPv4 only.
+- VLESS profiles keep their transport in a `transport` block, like VMess and
+  Trojan. The former `transport_type` and `transport_service_name` fields are
+  reported as errors from then on.
+- WebSocket early data written in a profile's path (`/ws?ed=2048`) moves out
+  of the path, so sing-box sends it as early data, as it does for newly
+  imported links.
 
 An older kvn cannot read a v6 configuration. The sing-box cache now lives in
 `~/.local/state/kvn/singbox-cache.db`; a `cache.db` that earlier versions left

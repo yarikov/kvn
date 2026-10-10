@@ -11,7 +11,7 @@ use super::{
 
 /// Current schema version for `profiles.json`. Bumped on every breaking
 /// change to the persisted shape; new migrations go in `Config::migrate`.
-pub const CURRENT_SCHEMA_VERSION: u32 = 7;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 
 fn default_schema_version() -> u32 {
     // Files written before the version was introduced are treated as v0 by
