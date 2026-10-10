@@ -723,7 +723,49 @@ fn build_outbound(profile: &Profile) -> anyhow::Result<Vec<Value>> {
         ProtocolConfig::Http(cfg) => vec![build_http_outbound(profile, cfg)?],
         ProtocolConfig::Ssh(cfg) => vec![build_ssh_outbound(profile, cfg)?],
     };
+    refuse_unverifiable_certificate_name(profile, &outbounds)?;
     Ok(outbounds)
+}
+
+fn refuse_unverifiable_certificate_name(
+    profile: &Profile,
+    outbounds: &[Value],
+) -> anyhow::Result<()> {
+    let Some(vcn) = profile.share_link_params.get("vcn").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let names: Vec<&str> = vcn
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect();
+    for outbound in outbounds {
+        let Some(tls) = outbound.get("tls") else {
+            continue;
+        };
+        if tls.get("insecure") == Some(&Value::Bool(true)) || tls.get("reality").is_some() {
+            continue;
+        }
+        let sni = tls
+            .get("server_name")
+            .and_then(Value::as_str)
+            .filter(|name| !name.is_empty())
+            .or_else(|| outbound.get("server").and_then(Value::as_str))
+            .unwrap_or("");
+        if let Some(name) = names
+            .iter()
+            .find(|name| certificate_name(name) != certificate_name(sni))
+        {
+            anyhow::bail!(
+                "sing-box verifies the server certificate only against the SNI {sni:?}, but the link asks to verify it as {name:?} (vcn={vcn}), so the connection would fail certificate verification"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn certificate_name(name: &str) -> String {
+    name.strip_suffix('.').unwrap_or(name).to_ascii_lowercase()
 }
 
 #[cfg(test)]
@@ -1465,6 +1507,49 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("re-import"), "{error}");
+    }
+
+    fn vcn_profile(query: &str) -> Profile {
+        crate::config::profile::parse_share_link(&format!(
+            "vless://00000000-0000-4000-8000-000000000001@a.example:443?type=tcp&{query}#V"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn certificate_name_the_sni_covers_is_accepted() {
+        for query in [
+            "security=tls&sni=a.example&vcn=a.example",
+            "security=tls&sni=a.example&vcn=A.Example,a.example",
+            "security=tls&vcn=a.example",
+            "security=tls&sni=&vcn=a.example",
+            "security=tls&sni=a.example.&vcn=a.example",
+            "security=tls&sni=a.example&vcn=a.example.",
+            "security=tls&sni=a.example&vcn=",
+            "security=tls&sni=a.example&allowInsecure=1&vcn=b.example",
+            "security=reality&pbk=key&sni=a.example&vcn=b.example",
+            "security=none&vcn=b.example",
+        ] {
+            assert!(build_outbound(&vcn_profile(query)).is_ok(), "{query}");
+        }
+    }
+
+    #[test]
+    fn certificate_name_the_sni_does_not_cover_is_refused() {
+        for (query, name) in [
+            ("security=tls&sni=a.example&vcn=b.example", "b.example"),
+            (
+                "security=tls&sni=a.example&vcn=a.example,b.example",
+                "b.example",
+            ),
+            ("security=tls&sni=a.example&vcn=a.example..", "a.example.."),
+        ] {
+            let error = build_outbound(&vcn_profile(query)).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!("verify it as \"{name}\"")),
+                "{query}: {error}"
+            );
+        }
     }
 
     #[test]
