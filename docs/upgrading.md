@@ -12,7 +12,7 @@ Pending migrations run on the next `kvn` launch, or explicitly with
 Use `kvn migrate --pending` to check pending migrations and `kvn doctor` if an
 upgrade needs attention.
 
-## Next release (unreleased)
+## v0.34.0
 
 The configuration moves to schema v6. kvn converts it automatically the first
 time it loads it and keeps the previous file in `~/.config/kvn-tui/recovery/`:
