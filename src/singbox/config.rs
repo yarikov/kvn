@@ -1,4 +1,4 @@
-use anyhow::{Context, bail};
+use anyhow::Context;
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
@@ -127,7 +127,7 @@ pub fn generate_config(
         &settings.dns.strategy,
         &available_rule_sets,
         &ech_dns_lookup_names(&proxy_outbounds),
-    )?;
+    );
 
     let mut cache_file = json!({ "enabled": true });
     if let Some(path) = crate::paths::singbox_cache_path() {
@@ -185,7 +185,7 @@ fn build_dns(
     strategy: &DnsStrategy,
     available_rule_sets: &HashSet<&str>,
     ech_lookup_names: &[String],
-) -> anyhow::Result<Value> {
+) -> Value {
     let active = &upstreams.active;
     let mut servers: Vec<Value> = active
         .servers
@@ -200,25 +200,25 @@ fn build_dns(
         .collect();
     servers.extend(active.fakeip.as_ref().map(fakeip_server_value));
     let active_rules = active_dns_rules(active, available_rule_sets);
-    let ech_rule = ech_lookup_rule(
-        ech_lookup_names,
-        &bootstrap.tag,
-        uses_ip_rule_set(&active_rules),
-    );
+    let ech_rule = ech_lookup_rule(ech_lookup_names, &bootstrap.tag);
     servers.extend(bootstrap.server);
     let mut block = Map::new();
     block.insert("servers".to_string(), Value::Array(servers));
 
     let mut rules: Vec<Value> = ech_rule.into_iter().collect();
-    rules.extend(active_rules.iter().map(|(_, rule)| build_dns_rule(rule)));
-    rules.extend(fakeip_catch_all_rule(active, &active_rules)?);
+    rules.extend(
+        active_rules
+            .iter()
+            .flat_map(|(idx, rule)| dns_rule_values(*idx, rule, &active.final_server)),
+    );
+    rules.extend(fakeip_catch_all_rule(active, &active_rules));
     if !rules.is_empty() {
         block.insert("rules".to_string(), Value::Array(rules));
     }
 
     block.insert("final".to_string(), json!(active.final_server));
     block.insert("strategy".to_string(), json!(strategy.as_str()));
-    Ok(Value::Object(block))
+    Value::Object(block)
 }
 
 fn ech_dns_lookup_names(outbounds: &[Value]) -> Vec<String> {
@@ -232,29 +232,13 @@ fn ech_dns_lookup_names(outbounds: &[Value]) -> Vec<String> {
         .collect()
 }
 
-fn ech_lookup_rule(
-    names: &[String],
-    bootstrap_tag: &str,
-    legacy_address_filters: bool,
-) -> Option<Value> {
-    if names.is_empty() {
-        return None;
-    }
-    let mut rule = json!({
-        "domain": names,
-        "server": bootstrap_tag,
-    });
-    if !legacy_address_filters {
-        rule["query_type"] = json!(["HTTPS"]);
-    }
-    Some(rule)
-}
-
-fn uses_ip_rule_set(active_rules: &[(usize, &DnsRule)]) -> bool {
-    active_rules.iter().any(|(_, rule)| {
-        rule.rule_set
-            .iter()
-            .any(|tag| crate::geo::is_ip_rule_set_tag(tag))
+fn ech_lookup_rule(names: &[String], bootstrap_tag: &str) -> Option<Value> {
+    (!names.is_empty()).then(|| {
+        json!({
+            "query_type": ["HTTPS"],
+            "domain": names,
+            "server": bootstrap_tag,
+        })
     })
 }
 
@@ -274,37 +258,21 @@ fn active_dns_rules<'a>(
         .collect()
 }
 
-fn fakeip_catch_all_rule(
-    active: &ActiveDns,
-    active_rules: &[(usize, &DnsRule)],
-) -> anyhow::Result<Option<Value>> {
-    let Some(fakeip) = active.fakeip.as_ref().filter(|_| active.fakeip_catch_all) else {
-        return Ok(None);
-    };
+const ADDRESS_QUERY_TYPES: [&str; 2] = ["A", "AAAA"];
+
+fn fakeip_catch_all_rule(active: &ActiveDns, active_rules: &[(usize, &DnsRule)]) -> Option<Value> {
+    let fakeip = active.fakeip.as_ref().filter(|_| active.fakeip_catch_all)?;
     let fakeip_tag = fakeip.tag.as_str();
     if active_rules
         .iter()
         .any(|(_, rule)| rule.server == fakeip_tag)
     {
-        return Ok(None);
+        return None;
     }
-    // TODO: translate IP rule-set DNS rules to `evaluate` + `match_response`
-    // before supporting sing-box 1.16, which removes legacy address filters.
-    let ip_rule_set = active_rules.iter().find_map(|(idx, rule)| {
-        rule.rule_set
-            .iter()
-            .find(|tag| crate::geo::is_ip_rule_set_tag(tag))
-            .map(|tag| (idx, tag))
-    });
-    if let Some((idx, tag)) = ip_rule_set {
-        bail!(
-            "rules[{idx}] of the active DNS preset uses the IP rule-set {tag:?}, which sing-box cannot combine with the automatic fake-IP rule; add a rule with \"server\": {fakeip_tag:?} to that preset, or remove {tag:?} from the rule"
-        );
-    }
-    Ok(Some(json!({
-        "query_type": ["A", "AAAA"],
+    Some(json!({
+        "query_type": ADDRESS_QUERY_TYPES,
         "server": fakeip_tag,
-    })))
+    }))
 }
 
 struct DnsUpstreams {
@@ -523,7 +491,79 @@ fn server_with_port(
     Value::Object(obj)
 }
 
-fn build_dns_rule(rule: &DnsRule) -> Value {
+fn dns_rule_values(idx: usize, rule: &DnsRule, pre_resolver: &str) -> Vec<Value> {
+    let (ip_rule_sets, domain_rule_sets): (Vec<&String>, Vec<&String>) = rule
+        .rule_set
+        .iter()
+        .partition(|tag| crate::geo::is_ip_rule_set_tag(tag));
+    if ip_rule_sets.is_empty() {
+        let condition = any_domain_condition(rule, &domain_rule_sets, &[]);
+        return vec![with_server(
+            Value::Object(condition),
+            &rule.server,
+            rule.disable_cache,
+        )];
+    }
+    let response_tag = format!("kvn-rule-{idx}");
+    let mut pre_resolve = Value::Object(any_domain_condition(
+        rule,
+        &domain_rule_sets,
+        &ADDRESS_QUERY_TYPES,
+    ));
+    pre_resolve["action"] = json!("evaluate");
+    pre_resolve["tag"] = json!(response_tag);
+    let route_on_match = json!({
+        "match_response": response_tag,
+        "response_rcode": "NOERROR",
+        "rule_set": ip_rule_sets,
+        "action": "route",
+    });
+    vec![
+        with_server(pre_resolve, pre_resolver, rule.disable_cache),
+        with_server(route_on_match, &rule.server, rule.disable_cache),
+    ]
+}
+
+fn with_server(mut rule: Value, server: &str, disable_cache: bool) -> Value {
+    rule["server"] = json!(server);
+    if disable_cache {
+        rule["disable_cache"] = json!(true);
+    }
+    rule
+}
+
+fn any_domain_condition(
+    rule: &DnsRule,
+    domain_rule_sets: &[&String],
+    query_types: &[&str],
+) -> Map<String, Value> {
+    let rule_set_condition = (!domain_rule_sets.is_empty())
+        .then(|| Map::from_iter([("rule_set".to_string(), json!(domain_rule_sets))]));
+    let mut alternatives: Vec<Map<String, Value>> = Some(domain_name_condition(rule))
+        .filter(|condition| !condition.is_empty())
+        .into_iter()
+        .chain(rule_set_condition)
+        .map(|condition| with_query_types(condition, query_types))
+        .collect();
+    match alternatives.len() {
+        0 => with_query_types(Map::new(), query_types),
+        1 => alternatives.remove(0),
+        _ => Map::from_iter([
+            ("type".to_string(), json!("logical")),
+            ("mode".to_string(), json!("or")),
+            ("rules".to_string(), json!(alternatives)),
+        ]),
+    }
+}
+
+fn with_query_types(mut condition: Map<String, Value>, query_types: &[&str]) -> Map<String, Value> {
+    if !query_types.is_empty() {
+        condition.insert("query_type".to_string(), json!(query_types));
+    }
+    condition
+}
+
+fn domain_name_condition(rule: &DnsRule) -> Map<String, Value> {
     let mut obj = Map::new();
     if !rule.domain.is_empty() {
         obj.insert("domain".to_string(), json!(rule.domain));
@@ -537,14 +577,7 @@ fn build_dns_rule(rule: &DnsRule) -> Value {
     if !rule.domain_regex.is_empty() {
         obj.insert("domain_regex".to_string(), json!(rule.domain_regex));
     }
-    if !rule.rule_set.is_empty() {
-        obj.insert("rule_set".to_string(), json!(rule.rule_set));
-    }
-    obj.insert("server".to_string(), json!(rule.server));
-    if rule.disable_cache {
-        obj.insert("disable_cache".to_string(), json!(true));
-    }
-    Value::Object(obj)
+    obj
 }
 
 struct RouteResolvers {
@@ -2012,10 +2045,7 @@ mod tests {
         }
     }
 
-    fn build(
-        upstreams: &DnsUpstreams,
-        available_rule_sets: &HashSet<&str>,
-    ) -> anyhow::Result<Value> {
+    fn build(upstreams: &DnsUpstreams, available_rule_sets: &HashSet<&str>) -> Value {
         build_dns(
             upstreams,
             upstreams.bootstrap(),
@@ -2119,7 +2149,7 @@ mod tests {
 
     #[test]
     fn default_dns_block_matches_legacy_layout() {
-        let dns = build(&direct(default_active()), &HashSet::new()).unwrap();
+        let dns = build(&direct(default_active()), &HashSet::new());
         let servers = dns["servers"].as_array().unwrap();
         assert_eq!(servers.len(), 2);
         assert_eq!(servers[0]["tag"], "local");
@@ -2148,7 +2178,7 @@ mod tests {
             ],
             "google-dot",
         );
-        let block = build(&direct(dns), &HashSet::new()).unwrap();
+        let block = build(&direct(dns), &HashSet::new());
         let s = &block["servers"].as_array().unwrap()[1];
         assert_eq!(s["type"], "tls");
         assert_eq!(s["server"], "8.8.8.8");
@@ -2164,7 +2194,7 @@ mod tests {
             ..Default::default()
         };
         let dns = with_fakeip(active(vec![local()], "local"), vec![lan_rule]);
-        let block = build(&direct(dns), &HashSet::new()).unwrap();
+        let block = build(&direct(dns), &HashSet::new());
         // Sing-box 1.12 no longer accepts the top-level `dns.fakeip` block;
         // the ranges live inside the server entry instead.
         assert!(block.get("fakeip").is_none());
@@ -2199,7 +2229,7 @@ mod tests {
             ..Default::default()
         };
         let dns = with_fakeip(active(vec![local()], "local"), vec![user_rule]);
-        let block = build(&direct(dns), &HashSet::new()).unwrap();
+        let block = build(&direct(dns), &HashSet::new());
         let rules = block["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["domain_suffix"][0], "example.com");
@@ -2215,7 +2245,7 @@ mod tests {
         };
         let mut dns = with_fakeip(active(vec![local()], "local"), vec![user_rule]);
         dns.fakeip_catch_all = false;
-        let block = build(&direct(dns), &HashSet::new()).unwrap();
+        let block = build(&direct(dns), &HashSet::new());
         let servers = block["servers"].as_array().unwrap();
         assert!(servers.iter().any(|server| server["type"] == "fakeip"));
         let rules = block["rules"].as_array().unwrap();
@@ -2236,12 +2266,12 @@ mod tests {
         ];
         let upstreams = direct(dns);
 
-        let block = build(&upstreams, &HashSet::new()).unwrap();
+        let block = build(&upstreams, &HashSet::new());
         let rules = block["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["domain_suffix"][0], "lan");
 
-        let block = build(&upstreams, &HashSet::from(["geosite-category-ru"])).unwrap();
+        let block = build(&upstreams, &HashSet::from(["geosite-category-ru"]));
         assert_eq!(block["rules"].as_array().unwrap().len(), 2);
     }
 
@@ -2251,7 +2281,7 @@ mod tests {
             active(vec![local()], "local"),
             vec![rule_set_rule("geosite-category-ru", "fakeip")],
         );
-        let block = build(&direct(dns), &HashSet::new()).unwrap();
+        let block = build(&direct(dns), &HashSet::new());
         let rules = block["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["query_type"][0], "A");
@@ -2259,31 +2289,106 @@ mod tests {
     }
 
     #[test]
-    fn build_dns_rejects_ip_rule_set_alongside_the_automatic_fakeip_rule() {
-        let dns = with_fakeip(
-            active(vec![local()], "local"),
-            vec![rule_set_rule("geoip-ru", "local")],
+    fn build_dns_pre_resolves_an_ip_rule_set_rule_through_the_final_server() {
+        let mut dns = active(vec![local(), doh("remote", "1.1.1.1")], "remote");
+        dns.rules = vec![
+            rule_set_rule("geoip-ru", "local"),
+            DnsRule {
+                domain: vec!["a.example".into()],
+                domain_suffix: vec!["b.example".into()],
+                rule_set: vec![
+                    "geosite-category-ru".into(),
+                    "geoip-ru".into(),
+                    "geoip-telegram".into(),
+                ],
+                server: "local".into(),
+                disable_cache: true,
+                ..Default::default()
+            },
+            DnsRule {
+                rule_set: vec!["geosite-category-ru".into(), "geoip-ru".into()],
+                server: "local".into(),
+                ..Default::default()
+            },
+        ];
+        let available = HashSet::from(["geoip-ru", "geoip-telegram", "geosite-category-ru"]);
+
+        let block = build(&through_proxy(dns), &available);
+
+        assert_eq!(
+            block["rules"],
+            json!([
+                {
+                    "query_type": ["A", "AAAA"],
+                    "server": "remote",
+                    "action": "evaluate",
+                    "tag": "kvn-rule-0",
+                },
+                {
+                    "match_response": "kvn-rule-0",
+                    "response_rcode": "NOERROR",
+                    "rule_set": ["geoip-ru"],
+                    "action": "route",
+                    "server": "local",
+                },
+                {
+                    "type": "logical",
+                    "mode": "or",
+                    "rules": [
+                        {
+                            "domain": ["a.example"],
+                            "domain_suffix": ["b.example"],
+                            "query_type": ["A", "AAAA"],
+                        },
+                        {
+                            "rule_set": ["geosite-category-ru"],
+                            "query_type": ["A", "AAAA"],
+                        },
+                    ],
+                    "server": "remote",
+                    "disable_cache": true,
+                    "action": "evaluate",
+                    "tag": "kvn-rule-1",
+                },
+                {
+                    "match_response": "kvn-rule-1",
+                    "response_rcode": "NOERROR",
+                    "rule_set": ["geoip-ru", "geoip-telegram"],
+                    "action": "route",
+                    "server": "local",
+                    "disable_cache": true,
+                },
+                {
+                    "rule_set": ["geosite-category-ru"],
+                    "query_type": ["A", "AAAA"],
+                    "action": "evaluate",
+                    "server": "remote",
+                    "tag": "kvn-rule-2",
+                },
+                {
+                    "match_response": "kvn-rule-2",
+                    "response_rcode": "NOERROR",
+                    "rule_set": ["geoip-ru"],
+                    "action": "route",
+                    "server": "local",
+                },
+            ])
         );
-        let error = build(&direct(dns), &HashSet::from(["geoip-ru"])).unwrap_err();
-        assert!(error.to_string().contains("rules[0]"));
-        assert!(error.to_string().contains("geoip-ru"));
     }
 
     #[test]
-    fn build_dns_accepts_rule_sets_that_cannot_conflict_with_fakeip() {
-        let explicit_fakeip_rule = DnsRule {
-            domain_suffix: vec!["example.com".to_string()],
-            server: "fakeip".to_string(),
-            ..Default::default()
-        };
-        for rules in [
-            vec![rule_set_rule("geoip-ru", "local"), explicit_fakeip_rule],
-            vec![rule_set_rule("geosite-category-ru", "local")],
-        ] {
-            let available = HashSet::from(["geoip-ru", "geosite-category-ru"]);
-            let dns = with_fakeip(active(vec![local()], "local"), rules);
-            assert!(build(&direct(dns), &available).is_ok());
-        }
+    fn build_dns_keeps_the_automatic_fakeip_rule_next_to_an_ip_rule_set_rule() {
+        let dns = with_fakeip(
+            active(vec![local(), doh("remote", "1.1.1.1")], "remote"),
+            vec![rule_set_rule("geoip-ru", "local")],
+        );
+        let block = build(&through_proxy(dns), &HashSet::from(["geoip-ru"]));
+        let rules = block["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 3);
+        assert_eq!(
+            rules[2],
+            json!({ "query_type": ["A", "AAAA"], "server": "fakeip" })
+        );
     }
 
     #[test]
@@ -2294,7 +2399,7 @@ mod tests {
             server: "local".to_string(),
             ..Default::default()
         }];
-        let block = build(&direct(dns), &HashSet::new()).unwrap();
+        let block = build(&direct(dns), &HashSet::new());
         let rules = block["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["domain_suffix"][0], "example.com");
@@ -2437,8 +2542,7 @@ mod tests {
                 &DnsStrategy::PreferIpv4,
                 &HashSet::from(["geoip-ru"]),
                 &["ech.example".to_string()],
-            )
-            .unwrap()["rules"][0]
+            )["rules"][0]
                 .clone()
         };
         assert_eq!(
@@ -2454,7 +2558,7 @@ mod tests {
         }];
         assert_eq!(
             ech_rule(with_ip_rule_set),
-            json!({ "domain": ["ech.example"], "server": "bootstrap" })
+            json!({ "query_type": ["HTTPS"], "domain": ["ech.example"], "server": "bootstrap" })
         );
     }
 
@@ -2523,7 +2627,7 @@ mod tests {
             ],
             "remote",
         );
-        let block = build(&through_proxy(dns), &HashSet::new()).unwrap();
+        let block = build(&through_proxy(dns), &HashSet::new());
         let servers = block["servers"].as_array().unwrap();
         let tags: Vec<&str> = servers.iter().map(|s| s["tag"].as_str().unwrap()).collect();
         assert_eq!(tags, ["local", "remote", "router", "bootstrap"]);
@@ -2543,7 +2647,7 @@ mod tests {
             ],
             "remote",
         );
-        let block = build(&direct(dns), &HashSet::new()).unwrap();
+        let block = build(&direct(dns), &HashSet::new());
         let servers = block["servers"].as_array().unwrap();
         assert_eq!(servers.len(), 3);
         assert_eq!(servers[1]["domain_resolver"], "local");
@@ -3059,16 +3163,20 @@ mod tests {
         assert_eq!(v["inet6_range"], "fc00::/18");
     }
 
-    // ---- build_dns_rule branches ----
+    // ---- plain DNS rule branches ----
+
+    fn plain_rule(rule: &DnsRule) -> Value {
+        dns_rule_values(0, rule, "final").remove(0)
+    }
 
     #[test]
-    fn build_dns_rule_emits_only_populated_fields() {
+    fn plain_dns_rule_emits_only_populated_fields() {
         let rule = DnsRule {
             domain: vec!["a.example".to_string()],
             server: "remote".to_string(),
             ..DnsRule::default()
         };
-        let v = build_dns_rule(&rule);
+        let v = plain_rule(&rule);
         assert!(v.get("domain").is_some());
         assert!(v.get("domain_suffix").is_none());
         assert!(v.get("domain_keyword").is_none());
@@ -3078,29 +3186,39 @@ mod tests {
     }
 
     #[test]
-    fn build_dns_rule_includes_domain_keyword_regex_and_ruleset() {
+    fn plain_dns_rule_matches_any_domain_field_or_rule_set() {
         let rule = DnsRule {
             domain_keyword: vec!["youtube".to_string()],
             domain_regex: vec!["^ads\\.".to_string()],
             rule_set: vec!["geosite-ads".to_string()],
             server: "remote".to_string(),
+            disable_cache: true,
             ..DnsRule::default()
         };
-        let v = build_dns_rule(&rule);
-        assert_eq!(v["domain_keyword"], json!(["youtube"]));
-        assert_eq!(v["domain_regex"], json!(["^ads\\."]));
-        assert_eq!(v["rule_set"], json!(["geosite-ads"]));
+        assert_eq!(
+            plain_rule(&rule),
+            json!({
+                "type": "logical",
+                "mode": "or",
+                "rules": [
+                    { "domain_keyword": ["youtube"], "domain_regex": ["^ads\\."] },
+                    { "rule_set": ["geosite-ads"] },
+                ],
+                "server": "remote",
+                "disable_cache": true,
+            })
+        );
     }
 
     #[test]
-    fn build_dns_rule_emits_disable_cache_when_set() {
+    fn plain_dns_rule_emits_disable_cache_when_set() {
         let rule = DnsRule {
             domain: vec!["x.test".to_string()],
             server: "remote".to_string(),
             disable_cache: true,
             ..DnsRule::default()
         };
-        let v = build_dns_rule(&rule);
+        let v = plain_rule(&rule);
         assert_eq!(v["disable_cache"], true);
     }
 

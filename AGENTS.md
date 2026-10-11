@@ -306,7 +306,6 @@ Rules of thumb:
   - **Documented exceptions**: `theme_picker_slugs()` (`update/key/theme.rs`, used by the theme picker and the Interface page's Theme row) calls `omarchy::detect_omarchy_theme()`, which does a single small `fs::read_to_string` of the Omarchy state theme path to decide whether to show the Auto entry; `model::show_omarchy_card()` adds `omarchy::omakvn_plugin_installed()`, one more small read of the plugin manifest, while the model is constructed.
   - Cheap, deterministic, and scoped to a key press; promoted to "OK" because the alternative (caching in `Model`) costs more clarity than it saves.
   - The full `Theme` resolution stays out of `update`: the picker handler only mutates `theme_draft`/`settings.theme`, and the TUI client recomputes `model.theme` via `resolve_active` on snapshot apply.
-  - `geo::is_ip_rule_set_tag` (used by the DNS overlay's fake-IP warning) is a pure lookup in the static rule-set asset table and does no I/O.
 - `Model::set_status` is pure (mutates only in-memory state). Any message that should also be persisted to the application log must return `Effect::AppendAppLog`.
 - `Model::new` is allowed to perform initialization I/O (load config, read `state.json`, etc.).
 - `singbox::config::generate_config` is pure: it receives geo file availability (`GeoAvailability`) from the caller and does not touch the file system.

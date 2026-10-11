@@ -85,12 +85,9 @@ selected DNS preset (see the [configuration guide](configuration.md#dns)):
   main DNS server, because the tunnel does not exist yet when it is needed.
   The same holds for its Encrypted Client Hello key: a profile whose ECH
   config comes from DNS asks that copy for the TLS server name's `HTTPS`
-  record, which carries the key. If the active DNS preset has a rule with an
-  IP rule-set (such as `geoip-ru`), sing-box cannot limit the rule to that
-  record, so every lookup of that one name — including your programs' — goes
-  to the copy. That query names the server ECH hides, so over
-  plain DNS (`local`, `udp`, `tcp`) anyone on the path sees it; kvn shows a
-  warning after connecting in that case. A DoH, DoT or DoQ preset, or a link
+  record, which carries the key. That query names the server ECH hides, so
+  over plain DNS (`local`, `udp`, `tcp`) anyone on the path sees it; kvn shows
+  a warning after connecting in that case. A DoH, DoT or DoQ preset, or a link
   that carries the ECH config itself, avoids it.
 
 Fake-IP adds one more direct path. It is off by default; when it is on, or
@@ -118,6 +115,19 @@ Global and Bypass, and the direct connection needs no lookup of its own.
 Encrypted DNS (`https`, `tls`, `quic`) hides the questions even when they are
 sent directly; plain DNS (`udp`, `tcp`) shows them to anyone on the path. The
 built-in presets other than System local use encrypted DNS.
+
+A custom DNS rule with an IP rule-set (such as `geoip-ru`) asks the preset's
+main DNS server first and sends the question on to the rule's server only
+when the answer is an address in that rule-set. The rule's server — often a
+local one — therefore gets only the names that pass this check, unless it is
+the main server itself. The main server gets every name the rule's other
+conditions match, whichever way it is reached. That first question travels
+like any other question to the main server: through the tunnel in Global and
+Bypass, directly in Only, and directly when the main server is local or uses
+`udp` or `quic` on a profile that cannot carry UDP. Through the tunnel your
+local network does not see it; sent directly over plain DNS, it can see the
+name. The rule does not hide every name, and names it does catch are looked
+up twice.
 
 HTTP, SSH, ShadowTLS, NaiveProxy and SOCKS 4/4a profiles cannot carry UDP
 through the tunnel. In Global and Bypass modes kvn therefore sends a public `udp` or
@@ -226,9 +236,6 @@ is up.
 
 - Plain `udp` DNS servers are not encrypted. In Only mode, and for local
   servers, their questions are visible on the network they travel through.
-- With fake-IP on, a DNS rule that uses an IP rule-set (`geoip-*`) prevents
-  connecting until a rule sends queries to the fake-IP server; see the
-  [configuration guide](configuration.md#dns).
 - Settings › DNS applies to programs that use the system resolver. A browser
   with secure DNS enabled sends its own encrypted DNS requests: kvn routes them
   like any other traffic, but your DNS servers, rules and fake-IP do not apply
