@@ -41,7 +41,7 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
 - **Profiles & subscriptions** — manage profiles and keep subscriptions automatically up to date
 - **Geo & service routing** — choose country-based routing modes and ready-made overrides for selected services
 - **Kill switch** — block outbound traffic if the VPN connection drops
-- **DNS presets** — built-in Cloudflare and Quad9 DoH, Google DoT, and system resolver presets, your own presets with per-domain rules, strategy, and fake-IP
+- **DNS presets** — built-in Cloudflare and Quad9 DoH, Google DoT, and system resolver presets, custom presets with per-domain rules, and fake-IP
 - **Auto-connect & resume** — restore the last connection on startup and after system resume
 - **Persistent daemon** — keep the VPN and background services running after detaching the TUI
 - **Live insights** — traffic rates, totals, active connections, and combined logs
@@ -76,18 +76,7 @@ the clipboard using supported share links.
 | **HTTP proxy** | `http://`, `https://` | HTTP CONNECT with optional TLS and authentication |
 | **SSH** | `ssh://` | Password and private-key authentication |
 
-A pasted `http(s)://` URL is a proxy link when it has no path beyond `/` or
-query and has credentials, a non-empty `#name`, or (for `http://` only) a
-non-default port. Otherwise it is a subscription.
-
 </details>
-
-> [!TIP]
-> sing-box does not implement the XHTTP and mKCP transports. Such links are
-> still imported with all their parameters, but sing-box refuses the profile
-> when it connects; with the kill switch on, the network stays blocked until
-> you pick another profile. Use VLESS over gRPC with REALITY or another
-> supported transport instead.
 
 ---
 
@@ -104,9 +93,8 @@ yay -S kvn-tui-bin \
   && systemctl --user enable --now kvn-tui.service
 ```
 
-`sing-box` is installed automatically. The user service keeps the daemon
-available after login. The package also restores the TUN capabilities on
-`/usr/bin/sing-box` automatically after pacman upgrades it.
+The package pulls in `sing-box` as a dependency and restores the TUN
+capabilities on `/usr/bin/sing-box` each time pacman upgrades it.
 
 ### Getting started
 
@@ -122,8 +110,8 @@ You’ll need a VPN share link or subscription URL from your provider.
 ### Polkit setup (optional)
 
 > [!IMPORTANT]
-> This setup and the kill switch setup below both add you to the dedicated
-> `kvn-tui` group; reboot once afterwards to activate it.
+> This setup and the kill switch setup below both add your user to the
+> dedicated `kvn-tui` group; reboot once afterwards to activate it.
 
 Polkit lets kvn auto-connect and reconnect without authentication prompts. Set
 it up:
@@ -139,8 +127,8 @@ After setup and a reboot, toggle it with `Shift+A`. See
 ### Kill switch setup (optional)
 
 > [!WARNING]
-> If the daemon crashes or cannot start while the kill switch is enabled, use
-> the emergency command below to restore network access.
+> If the daemon crashes or cannot start while the kill switch is enabled, run
+> this command to restore network access:
 >
 > ```bash
 > kvn disable --killswitch
