@@ -135,32 +135,7 @@ fn commit_dns_drafts(model: &mut Model) -> Vec<Effect> {
             AppStatus::Info("DNS changed — reconnecting…".into()),
         );
     }
-    if !previous.fakeip_enabled
-        && let Some(tag) = fakeip_conflicting_rule_set(&model.config.settings.dns)
-    {
-        push_status(
-            &mut effects,
-            model,
-            AppStatus::Info(format!(
-                "Fake-IP is on: connecting fails while the {tag:?} DNS rule is active, unless the preset has a rule with \"server\": \"fakeip\""
-            )),
-        );
-    }
     effects
-}
-
-fn fakeip_conflicting_rule_set(dns: &crate::config::profile::DnsConfig) -> Option<String> {
-    let active = dns.active()?;
-    let fakeip_tag = active.fakeip.as_ref()?.tag.as_str();
-    if active.rules.iter().any(|rule| rule.server == fakeip_tag) {
-        return None;
-    }
-    active
-        .rules
-        .iter()
-        .flat_map(|rule| &rule.rule_set)
-        .find(|tag| crate::geo::is_ip_rule_set_tag(tag))
-        .cloned()
 }
 
 fn apply_dns_drafts(model: &mut Model) {
@@ -454,34 +429,6 @@ mod tests {
         assert!(
             matches!(&model.status, Some(AppStatus::Error(message)) if message.contains("removed"))
         );
-    }
-
-    #[test]
-    fn dns_settings_warns_when_fakeip_meets_an_ip_rule_set_rule() {
-        for (rule_set, warns) in [("geoip-ru", true), ("geosite-category-ru", false)] {
-            let mut model = with_dns_overlay();
-            model
-                .config
-                .settings
-                .dns
-                .custom_presets
-                .push(home_preset(vec![DnsRule {
-                    rule_set: vec![rule_set.into()],
-                    server: "local".into(),
-                    ..Default::default()
-                }]));
-            model.config.settings.dns.current_preset = "home".into();
-            model.dns_fakeip_draft = Some(true);
-
-            handle_dns_settings(&mut model, enter());
-
-            assert!(model.config.settings.dns.fakeip_enabled);
-            assert_eq!(
-                matches!(&model.status, Some(AppStatus::Info(message)) if message.contains(rule_set)),
-                warns,
-                "{rule_set}"
-            );
-        }
     }
 
     #[test]

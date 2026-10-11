@@ -315,7 +315,10 @@ the old `servers`, `rules` and `final_server` fields are reported as errors
 rather than ignored; move them into a custom preset.
 
 DNS rules can match `domain`, `domain_suffix`, `domain_keyword`,
-`domain_regex`, or `rule_set`; each rule may also set `disable_cache`.
+`domain_regex`, or `rule_set`; each rule may also set `disable_cache`. A rule
+matches a name when any of its domain conditions does: any entry of the
+`domain*` fields or any domain rule-set such as `geosite-*`. A rule without an
+IP rule-set applies to every query type.
 `domain_regex` uses Go RE2 syntax and is checked by sing-box when connecting.
 
 A `rule_set` entry names one of the rule-sets kvn downloads, such as
@@ -324,13 +327,22 @@ service route. A rule is skipped while any of its rule-sets is not in use,
 because the routing mode does not use that region, the service route is
 disabled, or the file has not been downloaded yet.
 
+A rule with an IP rule-set (`geoip-*`) works in two steps, for `A` and
+`AAAA` queries only. kvn first asks the preset's `final_server`; only when
+that answer has an address in the rule-set does it send the query to the
+rule's `server`, and the program gets that server's answer. The rule's domain
+conditions decide whether the first step runs, and without them it runs for
+every name; any one IP rule-set is enough for the second step. An error,
+an empty answer or an address outside the rule-set moves the query on to the
+next rule and then to `final_server`; an error from the rule's own server is
+returned as it is. `disable_cache` applies to both steps. Names that match
+are resolved twice, and the two servers may answer differently: a name that
+your `final_server` resolves outside the region is not caught by the rule.
+[What kvn protects](privacy.md#dns) shows what each server sees.
+
 With fake-IP on and no active rule already targeting `fakeip`, kvn adds a rule
 that sends every remaining `A` and `AAAA` query to its fake-IP server, after
-the active preset's rules. sing-box cannot combine that rule with a DNS rule
-using an IP rule-set (`geoip-*`), so connecting fails while such a rule is
-active. Add a rule with `"server": "fakeip"` to the preset, or match by domain
-(`geosite-*`) instead. sing-box 1.16 will stop accepting IP rule-sets in DNS
-rules altogether.
+the active preset's rules.
 
 In Global and Bypass modes, DNS queries to public servers go through the
 tunnel; [what kvn protects](privacy.md#dns) summarizes where every query goes.
