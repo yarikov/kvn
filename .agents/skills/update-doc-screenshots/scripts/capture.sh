@@ -184,6 +184,12 @@ launch_preview() {
   sleep 0.5
 }
 
+make_preview_opaque() {
+  dispatch "hl.dsp.window.set_prop({ window = \"address:$preview_address\", prop = \"opaque\", value = \"true\" })"
+  [[ $(hyprctl getprop "address:$preview_address" opaque) == true ]] || { echo "preview window could not be made opaque" >&2; exit 1; }
+  sleep 0.2
+}
+
 capture_window() {
   local output=$1 geometry legacy_output
   legacy_output="${output%.webp}.png"
@@ -196,7 +202,7 @@ capture_window() {
 }
 
 if [[ $mode == --all || $mode == --themes ]]; then
-  for theme in "${themes[@]}"; do echo "capturing $theme"; launch_preview "$theme"; capture_window "$gallery_dir/$theme.webp"; done
+  for theme in "${themes[@]}"; do echo "capturing $theme"; launch_preview "$theme"; make_preview_opaque; capture_window "$gallery_dir/$theme.webp"; done
 fi
 if [[ $mode == --all || $mode == --readme ]]; then
   if [[ $original_system_theme != "Tokyo Night" ]]; then
