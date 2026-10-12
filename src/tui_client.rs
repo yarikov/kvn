@@ -365,14 +365,10 @@ fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
     model.dns_preset_draft = snapshot.dns_preset_draft.clone();
     model.dns_strategy_draft = snapshot.dns_strategy_draft;
     model.dns_fakeip_draft = snapshot.dns_fakeip_draft;
-    model.theme_selected = snapshot.theme_selected;
     model.theme_draft = snapshot.theme_draft.clone();
-    model.service_routing_selected = snapshot.service_routing_selected;
-    model.service_routing_draft = snapshot.service_routing_draft;
     model.onboarding.awaiting = snapshot.onboarding_awaiting;
     model.onboarding.include_omarchy_card = snapshot.onboarding_omarchy;
     model.integration_setup = snapshot.integration_setup;
-    model.settings_menu_return = snapshot.settings_menu_return;
     model.settings_menu_selected = snapshot.settings_menu_selected;
     model.routing_settings_draft = snapshot.routing_settings_draft;
     model.connection_settings_draft = snapshot.connection_settings_draft;

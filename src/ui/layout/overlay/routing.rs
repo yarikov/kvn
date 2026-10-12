@@ -1,15 +1,11 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::app::model::Model;
 use crate::onboarding::OnboardingStep;
-use crate::ui::layout::text::visual_width;
 
-use super::popup::{draw_selection_modal, settings_content_sized_rect};
-use super::settings_row::{settings_value_layout, settings_value_line};
-use super::{APPLY_ACTION, overlay_footer, settings_overlay_footer};
+use super::popup::draw_selection_modal;
+use super::{APPLY_ACTION, overlay_footer};
 
 /// Draw the routing mode selection modal.
 pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
@@ -32,11 +28,7 @@ pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
         model.routing_selected,
         model.overlay_scroll,
         active,
-        if awaits(model, OnboardingStep::Routing) {
-            overlay_footer(model, Some(APPLY_ACTION), false, false)
-        } else {
-            settings_overlay_footer(model)
-        },
+        overlay_footer(model, Some(APPLY_ACTION), false, false),
     );
 }
 
@@ -63,20 +55,12 @@ pub(super) fn draw_region(frame: &mut Frame, model: &Model, area: Rect) {
         model.geo_region_selected,
         model.overlay_scroll,
         active,
-        if awaits(model, OnboardingStep::Region) {
-            overlay_footer(model, Some(APPLY_ACTION), false, false)
-        } else if model.settings_menu_return.is_some() {
-            settings_overlay_footer(model)
-        } else if model.config.settings.geo_routing.current_region.is_some() {
-            overlay_footer(model, Some(APPLY_ACTION), true, false)
-        } else {
-            overlay_footer(model, Some(APPLY_ACTION), false, false)
-        },
+        overlay_footer(model, Some(APPLY_ACTION), false, false),
     );
 }
 
-/// These pickers refuse `q`/`Esc` while the tour waits on them, so the footer
-/// must not offer a way out that does nothing.
+/// While the tour waits on a picker the user is choosing for the first time,
+/// so no row is marked as already active.
 fn awaits(model: &Model, step: OnboardingStep) -> bool {
     model.onboarding.awaiting == Some(step)
 }
@@ -92,63 +76,6 @@ pub(super) fn geo_region_label(region: crate::config::profile::GeoRegion) -> &'s
     }
 }
 
-pub(super) fn draw_services(frame: &mut Frame, model: &Model, area: Rect) {
-    use crate::config::profile::RoutedService;
-
-    let theme = &model.theme;
-    let committed = &model.config.settings.geo_routing.service_routes;
-
-    let heading = "Settings › Routing › Services";
-    let footer = settings_overlay_footer(model);
-    let mut lines: Vec<Line> = vec![
-        Line::from(Span::styled(heading, theme.accent())).centered(),
-        Line::from(""),
-    ];
-
-    let settings = RoutedService::ALL.map(|service| {
-        let saved = committed.get(&service).copied().unwrap_or_default();
-        let shown = match model.service_routing_draft.as_ref() {
-            Some(draft) => draft.get(&service).copied().unwrap_or_default(),
-            None => saved,
-        };
-        (service.label(), shown.label().to_string(), shown != saved)
-    });
-    let stable_value_width = ["Disabled", "Proxy", "Direct"]
-        .into_iter()
-        .map(visual_width)
-        .max()
-        .unwrap_or(0);
-    let layout = settings_value_layout(
-        &settings,
-        stable_value_width,
-        area,
-        &[visual_width(heading), visual_width(&footer)],
-    );
-    for (index, (name, value, dirty)) in settings.into_iter().enumerate() {
-        lines.push(settings_value_line(
-            name,
-            &value,
-            dirty,
-            index == model.service_routing_selected,
-            layout,
-            theme,
-        ));
-    }
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(footer).centered());
-
-    let popup_area = settings_content_sized_rect(area, layout.popup_width, &lines);
-    frame.render_widget(Clear, popup_area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(theme.accent())
-        .style(theme.popup_bg());
-    let inner = block.inner(popup_area);
-    frame.render_widget(block, popup_area);
-    frame.render_widget(Paragraph::new(lines).style(theme.normal()), inner);
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -159,7 +86,7 @@ mod tests {
     use crate::ui::layout::{MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
 
     #[test]
-    fn the_tour_pickers_drop_the_close_action_and_the_active_highlight() {
+    fn the_tour_pickers_drop_the_active_highlight() {
         use crate::onboarding::OnboardingStep;
 
         for (step, overlay) in [
@@ -173,16 +100,8 @@ mod tests {
                 .geo_routing
                 .set_region(crate::config::profile::GeoRegion::Ru);
             model.overlay = overlay;
-
-            let free = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
-            assert!(free.contains("close"), "{step:?} outside the tour");
-
             model.onboarding.awaiting = Some(step);
-            let held = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
-            assert!(!held.contains("close"), "{step:?} during the tour");
 
-            // Nothing is "already active" during the tour: the user is choosing
-            // for the first time, so the green marker only misleads.
             insta::with_settings!({snapshot_suffix => format!("{step:?}").to_lowercase()}, {
                 insta::assert_snapshot!(snapshot_styles(
                     &model,
@@ -247,67 +166,6 @@ mod tests {
             MIN_TERMINAL_WIDTH,
             MIN_TERMINAL_HEIGHT
         ));
-    }
-
-    #[test]
-    fn geo_region_footer_only_offers_close_after_initial_selection() {
-        let mut model = model_with_profiles(vec![]);
-        model.overlay = Overlay::GeoRegions;
-
-        let required = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
-        assert!(required.contains("󰌑 apply"));
-        assert!(!required.contains("q/󱊷 close"));
-        assert!(!required.contains("j/k navigate"));
-
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(crate::config::profile::GeoRegion::Ru);
-        let optional = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
-        assert!(optional.contains("󰌑 apply · q/󱊷 close"));
-        assert!(!optional.contains("j/k navigate"));
-    }
-
-    /// Service routing overlay with the cursor on the second row and an
-    /// uncommitted draft change (`*`). Covers the Direct and Proxy
-    /// renderings; Disabled is pinned by the `_no_edits` snapshot below.
-    #[test]
-    fn draw_service_routing_overlay_snapshot() {
-        use crate::config::profile::{RoutedService, ServiceRoute};
-        use std::collections::HashMap;
-
-        let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
-        model.overlay = Overlay::ServiceRouting;
-        model.service_routing_selected = 1;
-        // Steam is committed as Direct; the Telegram→Proxy edit is
-        // draft-only, so its row carries the dirty marker.
-        model
-            .config
-            .settings
-            .geo_routing
-            .service_routes
-            .insert(RoutedService::Steam, ServiceRoute::Direct);
-        model.service_routing_draft = Some(HashMap::from([
-            (RoutedService::Steam, ServiceRoute::Direct),
-            (RoutedService::Telegram, ServiceRoute::Proxy),
-        ]));
-        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
-    }
-
-    /// Freshly opened overlay with no committed routes: every row renders
-    /// Disabled (an absent draft entry), no dirty markers.
-    #[test]
-    fn draw_service_routing_overlay_no_edits_snapshot() {
-        use std::collections::HashMap;
-
-        let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
-        model.overlay = Overlay::ServiceRouting;
-        model.service_routing_selected = 0;
-        model.service_routing_draft = Some(HashMap::new());
-        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
     /// Routing-mode overlay in Global region: `available_modes()` returns a

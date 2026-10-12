@@ -9,7 +9,6 @@ mod routing;
 mod settings_menu;
 mod settings_row;
 mod support;
-mod theme;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -30,8 +29,6 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         Overlay::RoutingMode => routing::draw_mode(frame, model, area),
         Overlay::GeoRegions => routing::draw_region(frame, model, area),
         Overlay::DnsSettings => dns::draw(frame, model, area),
-        Overlay::ThemeSettings => theme::draw(frame, model, area),
-        Overlay::ServiceRouting => routing::draw_services(frame, model, area),
         Overlay::Support => support::draw(frame, model, area),
         Overlay::Onboarding(step) => onboarding::draw(frame, model, step, area),
         Overlay::RestartRequired => restart_required::draw(frame, model, area),
@@ -57,15 +54,6 @@ pub(super) fn overlay_footer(
         actions.push(BACK_ACTION.to_string());
     }
     actions.join(" · ")
-}
-
-pub(super) fn settings_overlay_footer(model: &Model) -> String {
-    overlay_footer(
-        model,
-        Some(APPLY_ACTION),
-        true,
-        model.settings_menu_return.is_some(),
-    )
 }
 
 #[cfg(test)]
@@ -105,10 +93,6 @@ mod tests {
             ("dns-settings", |model: &mut Model| {
                 model.overlay = Overlay::DnsSettings;
                 model.dns_selected = 1;
-            }),
-            ("service-routing", |model: &mut Model| {
-                model.overlay = Overlay::ServiceRouting;
-                model.service_routing_selected = 1;
             }),
             ("restart-required", |model: &mut Model| {
                 model.overlay = Overlay::RestartRequired;

@@ -3,7 +3,6 @@ use crate::app::model::{Model, Overlay};
 use crate::config::profile::GeoRegion;
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::update::key::settings_menu::{finish_settings_overlay, return_to_settings_menu};
 use crate::app::update::routing::{commit_geo_region, commit_routing_mode};
 
 pub(in crate::app::update) fn handle_routing_mode(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
@@ -20,17 +19,9 @@ pub(in crate::app::update) fn handle_routing_mode(model: &mut Model, key: KeyEve
         }
         KeyCode::Enter => {
             if let Some(&mode) = available.get(model.routing_selected) {
-                finish_settings_overlay(model);
+                model.overlay = Overlay::None;
                 return commit_routing_mode(model, mode);
             }
-        }
-        KeyCode::Backspace if return_to_settings_menu(model) => {}
-        // Like the region picker, the tour's mode step ends only by choosing.
-        KeyCode::Char('q') | KeyCode::Esc
-            if model.onboarding.awaiting != Some(crate::onboarding::OnboardingStep::Routing) =>
-        {
-            model.settings_menu_return = None;
-            model.overlay = Overlay::None;
         }
         _ => {}
     }
@@ -51,23 +42,33 @@ pub(in crate::app::update) fn handle_geo_region(model: &mut Model, key: KeyEvent
         }
         KeyCode::Enter => {
             if let Some(&region) = regions.get(model.geo_region_selected) {
-                finish_settings_overlay(model);
+                model.overlay = Overlay::None;
                 return commit_geo_region(model, region);
             }
-        }
-        KeyCode::Backspace if return_to_settings_menu(model) => {}
-        // Unescapable without a region, and unescapable during the tour even
-        // with one: the tour's region step ends only by choosing a region.
-        KeyCode::Char('q') | KeyCode::Esc
-            if model.config.settings.geo_routing.current_region.is_some()
-                && model.onboarding.awaiting != Some(crate::onboarding::OnboardingStep::Region) =>
-        {
-            model.settings_menu_return = None;
-            model.overlay = Overlay::None;
         }
         _ => {}
     }
     vec![]
+}
+
+pub(in crate::app::update) fn open_routing_mode(model: &mut Model) {
+    model.overlay = Overlay::RoutingMode;
+    let available = model.config.settings.geo_routing.available_modes();
+    model.routing_selected = available
+        .iter()
+        .position(|m| *m == model.config.settings.geo_routing.mode())
+        .unwrap_or(0);
+}
+
+pub(in crate::app::update) fn open_geo_region(model: &mut Model) {
+    model.overlay = Overlay::GeoRegions;
+    model.geo_region_selected = model
+        .config
+        .settings
+        .geo_routing
+        .current_region
+        .and_then(|r| GeoRegion::ALL.iter().position(|x| *x == r))
+        .unwrap_or(0);
 }
 
 #[cfg(test)]
@@ -144,17 +145,6 @@ mod tests {
     }
 
     #[test]
-    fn routing_mode_esc_cancels() {
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.overlay = Overlay::RoutingMode;
-        model.routing_selected = 2;
-        let effects = handle_routing_mode(&mut model, KeyEvent::from(KeyCode::Esc));
-        assert_eq!(model.overlay, Overlay::None);
-        assert!(effects.is_empty());
-    }
-
-    #[test]
     fn geo_region_navigates() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::GeoRegions;
@@ -227,27 +217,6 @@ mod tests {
         handle_geo_region(&mut model, KeyEvent::from(KeyCode::Enter));
 
         assert_eq!(model.connecting_profile_id, Some(active_id));
-    }
-
-    #[test]
-    fn geo_region_esc_blocked_when_none() {
-        let mut model = model_with_profiles(vec![]);
-        model.overlay = Overlay::GeoRegions;
-
-        let effects = handle_geo_region(&mut model, KeyEvent::from(KeyCode::Esc));
-        assert_eq!(model.overlay, Overlay::GeoRegions);
-        assert!(effects.is_empty());
-    }
-
-    #[test]
-    fn geo_region_esc_allowed_when_some() {
-        let mut model = model_with_profiles(vec![]);
-        model.overlay = Overlay::GeoRegions;
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-
-        let effects = handle_geo_region(&mut model, KeyEvent::from(KeyCode::Esc));
-        assert_eq!(model.overlay, Overlay::None);
-        assert!(effects.is_empty());
     }
 
     #[test]
@@ -359,42 +328,6 @@ mod tests {
     }
 
     #[test]
-    fn geo_region_triggers_auto_connect_after_selection() {
-        let mut model = model_with_profiles(vec![Profile::new_vless(
-            "Auto".to_string(),
-            "1.1.1.1".to_string(),
-            443,
-            "u1".to_string(),
-        )]);
-        let id = model.config.profiles[0].id;
-        model.config.settings.auto_connect = true;
-        model.config.settings.last_connected_profile = Some(id);
-        model.overlay = Overlay::GeoRegions;
-        model.geo_region_selected = 0; // Ru
-
-        let effects = handle_geo_region(&mut model, KeyEvent::from(KeyCode::Enter));
-        assert_eq!(
-            model.config.settings.geo_routing.current_region,
-            Some(GeoRegion::Ru)
-        );
-        assert_eq!(model.connection, ConnectionState::Connecting);
-        assert_eq!(model.connecting_profile_id, Some(id));
-        assert_eq!(model.selected, 0);
-        assert!(model.status_text().contains("Auto-connecting"));
-        assert_eq!(
-            effects,
-            vec![
-                Effect::SaveConfig,
-                Effect::RefreshGeoLastUpdated,
-                app_log_info("Geo region selected: ru"),
-                app_log_info("Checking geo databases..."),
-                Effect::DownloadGeoIfMissing,
-                app_log_info("Auto-connecting to Auto…")
-            ]
-        );
-    }
-
-    #[test]
     fn geo_region_same_region_does_not_refresh_last_updated() {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Cn);
@@ -423,5 +356,37 @@ mod tests {
         );
         assert!(!effects.contains(&Effect::DownloadGeoIfMissing));
         assert!(!model.status_text().contains("Checking geo databases"));
+    }
+
+    #[test]
+    fn routing_mode_picker_opens_on_the_current_mode() {
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .config
+            .settings
+            .geo_routing
+            .set_mode(RoutingMode::Bypass(GeoRegion::Ru));
+        open_routing_mode(&mut model);
+        assert_eq!(model.overlay, Overlay::RoutingMode);
+        assert_eq!(model.routing_selected, 1);
+    }
+
+    #[test]
+    fn region_picker_opens_on_the_current_region() {
+        for (region, selected) in [
+            (Some(GeoRegion::Cn), 1),
+            (Some(GeoRegion::Ir), 2),
+            (Some(GeoRegion::Global), 3),
+            (None, 0),
+        ] {
+            let mut model = model_with_profiles(vec![]);
+            if let Some(region) = region {
+                model.config.settings.geo_routing.set_region(region);
+            }
+            open_geo_region(&mut model);
+            assert_eq!(model.overlay, Overlay::GeoRegions);
+            assert_eq!(model.geo_region_selected, selected);
+        }
     }
 }

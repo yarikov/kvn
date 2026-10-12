@@ -26,7 +26,6 @@ use tick::handle_tick;
 use traffic::handle_traffic_stats_updated;
 
 pub(crate) use config_reload::handle_config_reloaded;
-pub use key::theme::{shorten_theme_name, theme_picker_labels, theme_picker_slugs};
 
 /// Pure function: Model + Msg → updated Model + list of Effects.
 /// No I/O, no threads, no system calls.

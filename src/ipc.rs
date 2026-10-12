@@ -448,14 +448,10 @@ mod tests {
             dns_preset_draft: None,
             dns_strategy_draft: None,
             dns_fakeip_draft: None,
-            theme_selected: 0,
             theme_draft: None,
-            service_routing_selected: 0,
-            service_routing_draft: None,
             onboarding_awaiting: None,
             onboarding_omarchy: false,
             integration_setup: crate::onboarding::IntegrationSetup::default(),
-            settings_menu_return: None,
             settings_menu_selected: 0,
             routing_settings_draft: None,
             connection_settings_draft: None,
@@ -476,25 +472,6 @@ mod tests {
             profile_latencies: Default::default(),
             testing_profiles: Default::default(),
         }
-    }
-
-    #[test]
-    fn settings_menu_return_is_optional_and_roundtrips() {
-        let mut snapshot = sample_snapshot();
-        snapshot.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Routing);
-        let mut value = serde_json::to_value(&snapshot).unwrap();
-        let restored: StateSnapshot = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(
-            restored.settings_menu_return,
-            Some(crate::app::model::SettingsMenuPage::Routing)
-        );
-
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("settings_menu_return");
-        let legacy: StateSnapshot = serde_json::from_value(value).unwrap();
-        assert_eq!(legacy.settings_menu_return, None);
     }
 
     /// End-to-end: client → server command, server → client broadcast.

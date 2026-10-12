@@ -73,17 +73,6 @@ mod tests {
     }
 
     #[test]
-    fn deprecated_a_behaves_like_shift_a() {
-        let mut model = model_with_auto_connect(true);
-        let effects = handle_sources(&mut model, key('a'));
-        assert!(effects.is_empty());
-        assert_eq!(
-            model.overlay,
-            Overlay::ConfirmDisable(DisableTarget::AutoConnect)
-        );
-    }
-
-    #[test]
     fn confirming_disables_auto_connect() {
         for confirm in [key('y'), enter()] {
             let mut model = model_with_auto_connect(true);

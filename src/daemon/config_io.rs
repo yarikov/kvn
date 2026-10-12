@@ -215,8 +215,7 @@ pub(super) fn persist_onboarding(
 /// `awaiting` is cleared rather than restored: the handed-off screen has closed
 /// by now and will never report again, so keeping it would strand the tour.
 /// The `recovery` says where the card belongs, which the post-transition
-/// `model.overlay` can no longer tell us — without it a `finish` that opened the
-/// mandatory region picker would leave the user on a screen they cannot leave.
+/// `model.overlay` can no longer tell us.
 pub(super) fn restore_onboarding_after_failure(
     model: &mut Model,
     previous: OnboardingProgress,
@@ -431,24 +430,6 @@ mod tests {
             model.config.settings.geo_routing.current_region,
             Some(GeoRegion::Ru)
         );
-    }
-
-    #[test]
-    fn a_failed_finish_never_strands_the_user_on_the_region_picker() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let _state_home = unwritable_state_home(dir.path());
-
-        // Finishing without a region hands off to the picker, which refuses
-        // Esc while none is set. A failed write must not leave the user there.
-        let mut model = tour_at(OnboardingStep::Finish);
-        model.config.settings.geo_routing.current_region = None;
-        let effects = update(&mut model, Msg::Key(enter()));
-        assert_eq!(model.overlay, Overlay::GeoRegions);
-        apply_onboarding_writes(&mut model, effects);
-
-        assert_eq!(model.overlay, Overlay::Onboarding(OnboardingStep::Finish));
-        assert!(!model.onboarding.is_complete());
     }
 
     #[test]

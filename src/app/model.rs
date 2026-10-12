@@ -22,8 +22,6 @@ pub enum Overlay {
     RoutingMode,
     GeoRegions,
     DnsSettings,
-    ThemeSettings,
-    ServiceRouting,
     Support,
     Onboarding(crate::onboarding::OnboardingStep),
     RestartRequired,
@@ -108,8 +106,6 @@ pub enum HelpContext {
     RoutingMode,
     GeoRegions,
     DnsSettings,
-    ThemeSettings,
-    ServiceRouting,
     Support,
     Onboarding(crate::onboarding::OnboardingStep),
 }
@@ -124,8 +120,6 @@ impl HelpContext {
             Self::RoutingMode => Overlay::RoutingMode,
             Self::GeoRegions => Overlay::GeoRegions,
             Self::DnsSettings => Overlay::DnsSettings,
-            Self::ThemeSettings => Overlay::ThemeSettings,
-            Self::ServiceRouting => Overlay::ServiceRouting,
             Self::Support => Overlay::Support,
             Self::Onboarding(step) => Overlay::Onboarding(step),
         }
@@ -284,7 +278,6 @@ pub(crate) fn row_for_subscription_header(config: &Config, sub_idx: usize) -> us
 /// Application data model — no side effects.
 pub struct Model {
     pub overlay: Overlay,
-    pub settings_menu_return: Option<SettingsMenuPage>,
     pub settings_menu_selected: usize,
     pub routing_settings_draft: Option<RoutingSettingsDraft>,
     pub connection_settings_draft: Option<ConnectionSettingsDraft>,
@@ -343,14 +336,6 @@ pub struct Model {
     /// Pending Fake-IP preview while the DNS overlay is open. Set by `h`/`l`
     /// on the Fake-IP row, committed by Enter, discarded by Esc.
     pub dns_fakeip_draft: Option<bool>,
-    /// Cursor position inside the service routing overlay (index into
-    /// `RoutedService::ALL`).
-    pub service_routing_selected: usize,
-    /// Draft copy of `geo_routing.service_routes` while the service routing
-    /// overlay is open. Committed as a whole by Enter, discarded by Esc — a
-    /// separate map keeps partially edited routes out of the running
-    /// configuration until the user confirms them.
-    pub service_routing_draft: Option<HashMap<RoutedService, ServiceRoute>>,
     /// Set when a service-routing commit is waiting for its rule-sets to be
     /// fetched using the currently available network; `Msg::ServiceRuleSetsReady`
     /// consumes it and triggers the reconnect. Downloading BEFORE the
@@ -407,10 +392,8 @@ pub struct Model {
     /// On Omarchy systems the client resolves it from `theme.name` at
     /// startup and updates it on file change.
     pub theme: Theme,
-    /// Cursor position inside the theme picker overlay.
-    pub theme_selected: usize,
-    /// Live-preview theme slug while the theme picker is open. `None`
-    /// outside the overlay; cleared on Enter/Esc.
+    /// Live-preview theme slug while Settings › Interface holds an unsaved
+    /// theme. `None` otherwise; cleared on Enter, Esc and Backspace.
     pub theme_draft: Option<String>,
     /// Latency results from profile tests. `Some(ms)` = success, `None` = error.
     /// Absent key = not yet tested. Transient — never persisted to disk.
@@ -553,18 +536,12 @@ impl Model {
             show_omarchy_card(),
         );
         let support_prompt = crate::support_prompt::load_for_daemon(onboarding.state.completed_at);
-        let (mut connection, selected, mut status) =
+        let (mut connection, selected, status) =
             Self::resolve_startup_state(&config, default_selected);
         if stale_cleanup_failed {
             // Never launch a second sing-box while the stale process may still
             // own the TUN interface or Clash API port.
             connection = ConnectionState::Idle;
-        }
-
-        // Block auto-connect until the user has picked a geo region.
-        if config.settings.geo_routing.current_region.is_none() {
-            connection = ConnectionState::Idle;
-            status = None;
         }
         let connecting_profile_id = (connection == ConnectionState::Connecting)
             .then_some(config.settings.last_connected_profile)
@@ -606,7 +583,6 @@ impl Model {
 
         let mut model = Self {
             overlay: Overlay::None,
-            settings_menu_return: None,
             settings_menu_selected: 0,
             routing_settings_draft: None,
             connection_settings_draft: None,
@@ -639,8 +615,6 @@ impl Model {
             dns_preset_draft: None,
             dns_strategy_draft: None,
             dns_fakeip_draft: None,
-            service_routing_selected: 0,
-            service_routing_draft: None,
             pending_service_reconnect: false,
             pending_geo_reconnect: false,
             logs: VecDeque::new(),
@@ -669,7 +643,6 @@ impl Model {
             last_integration_check_at: None,
             integration_check_pending: false,
             theme: Theme::legacy(),
-            theme_selected: 0,
             theme_draft: None,
             profile_latencies: HashMap::new(),
             testing_profiles: HashSet::new(),
@@ -677,8 +650,6 @@ impl Model {
         };
         if !model.onboarding.is_complete() {
             model.overlay = Overlay::Onboarding(model.onboarding.step());
-        } else if model.config.settings.geo_routing.current_region.is_none() {
-            model.overlay = Overlay::GeoRegions;
         }
         if let Some(status) = status {
             model.set_status(status);
@@ -732,9 +703,8 @@ impl Model {
             .map(|g| g.service_next_updates())
             .unwrap_or_default();
 
-        let mut model = Self {
+        Self {
             overlay: Overlay::None,
-            settings_menu_return: None,
             settings_menu_selected: 0,
             routing_settings_draft: None,
             connection_settings_draft: None,
@@ -770,8 +740,6 @@ impl Model {
             dns_preset_draft: None,
             dns_strategy_draft: None,
             dns_fakeip_draft: None,
-            service_routing_selected: 0,
-            service_routing_draft: None,
             pending_service_reconnect: false,
             pending_geo_reconnect: false,
             logs: VecDeque::new(),
@@ -800,16 +768,11 @@ impl Model {
             last_integration_check_at: None,
             integration_check_pending: false,
             theme: Theme::legacy(),
-            theme_selected: 0,
             theme_draft: None,
             profile_latencies: HashMap::new(),
             testing_profiles: HashSet::new(),
             pending_tests: VecDeque::new(),
-        };
-        if model.config.settings.geo_routing.current_region.is_none() {
-            model.overlay = Overlay::GeoRegions;
         }
-        model
     }
 
     /// Determine connection state, selection and status on startup.
@@ -1023,7 +986,6 @@ impl Model {
         let selected = 0;
         Self {
             overlay: Overlay::None,
-            settings_menu_return: None,
             settings_menu_selected: 0,
             routing_settings_draft: None,
             connection_settings_draft: None,
@@ -1056,8 +1018,6 @@ impl Model {
             dns_preset_draft: None,
             dns_strategy_draft: None,
             dns_fakeip_draft: None,
-            service_routing_selected: 0,
-            service_routing_draft: None,
             pending_service_reconnect: false,
             pending_geo_reconnect: false,
             logs: VecDeque::new(),
@@ -1086,7 +1046,6 @@ impl Model {
             last_integration_check_at: None,
             integration_check_pending: false,
             theme: Theme::legacy(),
-            theme_selected: 0,
             theme_draft: None,
             profile_latencies: HashMap::new(),
             testing_profiles: HashSet::new(),
@@ -1324,44 +1283,20 @@ mod tests {
     }
 
     #[test]
-    fn new_blocks_auto_connect_when_geo_region_none() {
+    fn a_completed_tour_without_a_region_opens_the_main_screen() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-
-        let mut config = Config::default();
-        let profile = Profile::new_vless(
-            "Auto".to_string(),
-            "1.1.1.1".to_string(),
-            443,
-            crate::test_helpers::TEST_UUID.to_string(),
-        );
-        let id = profile.id;
-        config.profiles.push(profile);
-        config.settings.auto_connect = true;
-        config.settings.last_connected_profile = Some(id);
-        // current_region is None → overlay must be shown and auto-connect blocked
-
-        crate::config::save_config(&config).unwrap();
-
+        let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
         let state_dir = tempfile::tempdir().unwrap();
         let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", state_dir.path());
 
-        let model = Model::new().unwrap();
-        assert_eq!(model.connection, ConnectionState::Idle);
-        assert_eq!(
-            model.overlay,
-            Overlay::Onboarding(crate::onboarding::OnboardingStep::Welcome)
-        );
-
-        // A completed tour still leaves the region mandatory.
         let mut ended = crate::onboarding::OnboardingState::default();
         ended.complete(chrono::Utc::now());
         crate::onboarding::save_at(&crate::paths::onboarding_path().unwrap(), &ended).unwrap();
 
         let model = Model::new().unwrap();
-        assert_eq!(model.connection, ConnectionState::Idle);
-        assert_eq!(model.overlay, Overlay::GeoRegions);
+        assert_eq!(model.config.settings.geo_routing.current_region, None);
+        assert_eq!(model.overlay, Overlay::None);
     }
 
     #[test]
