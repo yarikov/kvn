@@ -46,13 +46,12 @@ pub(in crate::app::update) fn handoff(model: &mut Model, step: OnboardingStep) -
     model.onboarding.card_pending = false;
     match screen {
         HandoffScreen::GeoRegions => {
-            crate::app::update::key::settings_menu::open_geo_region(model, None);
+            crate::app::update::key::regions::open_geo_region(model);
         }
         HandoffScreen::RoutingMode => {
-            crate::app::update::key::settings_menu::open_routing_mode(model, None);
+            crate::app::update::key::regions::open_routing_mode(model);
         }
         HandoffScreen::MainScreen => {
-            model.settings_menu_return = None;
             model.overlay = Overlay::None;
         }
     }
@@ -146,12 +145,7 @@ pub(in crate::app::update) fn finish(model: &mut Model) -> Vec<Effect> {
     model.onboarding.state.complete(chrono::Utc::now());
     model.onboarding.awaiting = None;
     model.onboarding.card_pending = false;
-    if model.config.settings.geo_routing.current_region.is_none() {
-        crate::app::update::key::settings_menu::open_geo_region(model, None);
-    } else {
-        model.settings_menu_return = None;
-        model.overlay = Overlay::None;
-    }
+    model.overlay = Overlay::None;
     vec![Effect::PersistOnboarding {
         previous,
         recovery: OnboardingRecovery::RestoreCard,
@@ -192,7 +186,6 @@ pub(in crate::app::update) fn open_when_idle(model: &mut Model) -> Vec<Effect> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::profile::GeoRegion;
     use crate::test_helpers::model_with_profiles;
 
     fn tour_at(step: OnboardingStep) -> Model {
@@ -424,11 +417,11 @@ mod tests {
     }
 
     #[test]
-    fn finish_forces_the_region_picker_when_no_region_is_set() {
+    fn finish_completes_the_tour_and_frees_the_screen() {
         let mut model = tour_at(OnboardingStep::Finish);
         let effects = finish(&mut model);
         assert!(model.onboarding.is_complete());
-        assert_eq!(model.overlay, Overlay::GeoRegions);
+        assert_eq!(model.overlay, Overlay::None);
         assert!(matches!(
             effects.as_slice(),
             [Effect::PersistOnboarding {
@@ -436,10 +429,5 @@ mod tests {
                 ..
             }]
         ));
-
-        let mut model = tour_at(OnboardingStep::Finish);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        finish(&mut model);
-        assert_eq!(model.overlay, Overlay::None);
     }
 }

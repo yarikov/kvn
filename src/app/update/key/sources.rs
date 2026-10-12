@@ -5,10 +5,6 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::update::connection::queue_connect;
 use crate::app::update::key::confirm_disable::{toggle_auto_connect, toggle_kill_switch};
-use crate::app::update::key::settings_menu::{
-    open_dns_settings, open_geo_region, open_routing_mode, open_service_routing,
-    open_theme_settings,
-};
 use crate::app::update::status::{
     DownloadKind, download_allowed, push_download_blocked, push_status,
 };
@@ -38,9 +34,6 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 return effects;
             }
             model.overlay = Overlay::ConfirmDelete;
-        }
-        KeyCode::Char('m') => {
-            open_routing_mode(model, None);
         }
         KeyCode::Char('u') => return update_selected_subscription(model),
         KeyCode::Char('U') => return update_geo(model),
@@ -88,9 +81,6 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 return effects;
             }
         }
-        KeyCode::Char('o') => {
-            open_geo_region(model, None);
-        }
         KeyCode::Char('r') if model.connection != ConnectionState::Idle => {
             let restarted_profile = match model.connection {
                 ConnectionState::Connected => model.active_profile_id,
@@ -119,17 +109,11 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
         KeyCode::Char('s') if model.connection != ConnectionState::Idle => {
             return vec![Effect::Disconnect];
         }
-        KeyCode::Char('A') | KeyCode::Char('a') => {
+        KeyCode::Char('A') => {
             return toggle_auto_connect(model);
         }
         KeyCode::Char('K') => {
             return toggle_kill_switch(model);
-        }
-        KeyCode::Char('D') => {
-            open_dns_settings(model, None);
-        }
-        KeyCode::Char('S') => {
-            open_service_routing(model, None);
         }
         KeyCode::Char('t') => {
             if !model.config.settings.connectivity_probe.enabled {
@@ -166,10 +150,6 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 }
             }
         }
-        KeyCode::Char('C') => {
-            open_theme_settings(model, None);
-        }
-
         _ => {}
     }
     effects
@@ -339,9 +319,7 @@ mod tests {
     use crate::app::update::key::ipc::handle_ipc_command;
     use crate::app::update::tick::handle_tick;
     use crate::app::update::update;
-    use crate::config::profile::{
-        DnsStrategy, GeoAutoUpdate, Profile, RoutedService, RoutingMode, Subscription,
-    };
+    use crate::config::profile::{GeoAutoUpdate, Profile, RoutedService, Subscription};
     use crate::test_helpers::*;
     use chrono::Local;
     use uuid::Uuid;
@@ -473,21 +451,6 @@ mod tests {
         )]);
         let effects = handle_sources(&mut model, key('d'));
         assert_eq!(model.overlay, Overlay::ConfirmDelete);
-        assert!(effects.is_empty());
-    }
-
-    #[test]
-    fn normal_mode_m_opens_routing() {
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_mode(RoutingMode::Bypass(GeoRegion::Ru));
-        let effects = handle_sources(&mut model, key('m'));
-        assert_eq!(model.overlay, Overlay::RoutingMode);
-        assert_eq!(model.routing_selected, 1);
         assert!(effects.is_empty());
     }
 
@@ -963,53 +926,6 @@ mod tests {
         assert_eq!(model.overlay, Overlay::None);
         assert_eq!(model.status_text(), "Delete failed: disconnect first");
         assert!(!effects.contains(&Effect::SaveConfig));
-    }
-
-    #[test]
-    fn sources_o_opens_geo_regions_preselecting_current() {
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Cn);
-        let _ = handle_sources(&mut model, key('o'));
-        assert_eq!(model.overlay, Overlay::GeoRegions);
-        assert_eq!(model.geo_region_selected, 1);
-    }
-
-    #[test]
-    fn sources_o_preselects_ir_and_global_and_falls_back_to_zero() {
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ir);
-        let _ = handle_sources(&mut model, key('o'));
-        assert_eq!(model.geo_region_selected, 2);
-
-        let mut model = model_with_profiles(vec![]);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(GeoRegion::Global);
-        let _ = handle_sources(&mut model, key('o'));
-        assert_eq!(model.geo_region_selected, 3);
-
-        // No region set → defaults to 0.
-        let mut model = model_with_profiles(vec![]);
-        let _ = handle_sources(&mut model, key('o'));
-        assert_eq!(model.geo_region_selected, 0);
-    }
-
-    #[test]
-    fn sources_capital_d_opens_dns_settings_and_resets_draft() {
-        let mut model = model_with_profiles(vec![]);
-        model.dns_selected = 4;
-        model.dns_preset_draft = Some("google_dot".to_string());
-        model.dns_strategy_draft = Some(DnsStrategy::OnlyIpv4);
-        model.dns_fakeip_draft = Some(true);
-        let effects = handle_sources(&mut model, key('D'));
-        assert!(effects.is_empty());
-        assert_eq!(model.overlay, Overlay::DnsSettings);
-        assert_eq!(model.dns_selected, 0);
-        assert!(model.dns_preset_draft.is_none());
-        assert!(model.dns_strategy_draft.is_none());
-        assert!(model.dns_fakeip_draft.is_none());
     }
 
     #[test]

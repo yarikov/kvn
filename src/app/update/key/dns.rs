@@ -1,9 +1,8 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, Model, Overlay};
+use crate::app::model::{AppStatus, Model, Overlay, SettingsMenuPage};
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::update::connection::reconnect_with_new_settings;
-use crate::app::update::key::settings_menu::{finish_settings_overlay, return_to_settings_menu};
 use crate::app::update::status::push_status;
 
 /// Items in the DNS settings overlay, in display order.
@@ -69,17 +68,16 @@ pub(in crate::app::update) fn handle_dns_settings(model: &mut Model, key: KeyEve
         }
         KeyCode::Enter => return commit_dns_drafts(model),
         KeyCode::Char('q') | KeyCode::Esc => {
-            model.settings_menu_return = None;
             model.overlay = Overlay::None;
             model.dns_preset_draft = None;
             model.dns_strategy_draft = None;
             model.dns_fakeip_draft = None;
         }
-        KeyCode::Backspace if model.settings_menu_return.is_some() => {
+        KeyCode::Backspace => {
             model.dns_preset_draft = None;
             model.dns_strategy_draft = None;
             model.dns_fakeip_draft = None;
-            return_to_settings_menu(model);
+            model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         }
         _ => {}
     }
@@ -116,9 +114,6 @@ fn commit_dns_drafts(model: &mut Model) -> Vec<Effect> {
     }
     let previous = model.config.settings.dns.clone();
     apply_dns_drafts(model);
-    if model.settings_menu_return.is_none() {
-        finish_settings_overlay(model);
-    }
     if model.config.settings.dns == previous {
         return vec![];
     }
@@ -268,7 +263,7 @@ mod tests {
         let effects = handle_dns_settings(&mut model, enter());
         assert!(effects.is_empty());
         assert_eq!(model.config.settings.dns.strategy, before);
-        assert_eq!(model.overlay, Overlay::None);
+        assert_eq!(model.overlay, Overlay::DnsSettings);
     }
 
     #[test]
@@ -287,7 +282,7 @@ mod tests {
         assert!(model.dns_preset_draft.is_none());
         assert!(model.dns_strategy_draft.is_none());
         assert!(model.dns_fakeip_draft.is_none());
-        assert_eq!(model.overlay, Overlay::None);
+        assert_eq!(model.overlay, Overlay::DnsSettings);
     }
 
     #[test]
@@ -300,7 +295,7 @@ mod tests {
         assert!(effects.is_empty());
         assert!(model.dns_strategy_draft.is_none());
         assert_eq!(model.config.settings.dns.strategy, same);
-        assert_eq!(model.overlay, Overlay::None);
+        assert_eq!(model.overlay, Overlay::DnsSettings);
     }
 
     #[test]
@@ -315,7 +310,7 @@ mod tests {
         assert!(effects.contains(&Effect::SaveConfig));
         assert_eq!(model.config.settings.dns.current_preset, "home");
         assert_eq!(model.config.settings.dns.custom_presets, [home]);
-        assert_eq!(model.overlay, Overlay::None);
+        assert_eq!(model.overlay, Overlay::DnsSettings);
     }
 
     #[test]

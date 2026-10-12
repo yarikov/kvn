@@ -39,10 +39,9 @@ pub(crate) fn wheel_window(
                 visible,
             ));
         }
-        Overlay::ThemeSettings
-        | Overlay::GeoRegions
-        | Overlay::RoutingMode
-        | Overlay::DnsSettings => overlay::popup::selection_visible(area, rows.len()),
+        Overlay::GeoRegions | Overlay::RoutingMode | Overlay::DnsSettings => {
+            overlay::popup::selection_visible(area, rows.len())
+        }
         _ => rows.len(),
     };
     Some((
@@ -259,38 +258,6 @@ mod tests {
             assert_eq!(wheel_window(&model, area).unwrap().0, 0);
             assert_eq!(model.overlay_scroll, offset);
         }
-    }
-
-    #[test]
-    fn overlay_keyboard_navigation_retains_and_advances_the_scroll_offset() {
-        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let mut model = crate::test_helpers::model_with_profiles(vec![]);
-        model.overlay = crate::app::model::Overlay::ThemeSettings;
-        model.overlay_scroll = Some(8);
-        crate::app::scroll::select(&mut model, 8);
-        let area = Rect::new(0, 0, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT);
-        let (_, visible) = wheel_window(&model, area).unwrap();
-        for step in 1..=visible {
-            crate::app::update::update(
-                &mut model,
-                crate::app::msg::Msg::Key(crossterm::event::KeyEvent::from(
-                    crossterm::event::KeyCode::Char('j'),
-                )),
-            );
-            sync_overlay_scroll(&mut model, area);
-            assert_eq!(
-                model.overlay_scroll,
-                Some(if step < visible { 8 } else { 9 })
-            );
-        }
-        crate::app::update::update(
-            &mut model,
-            crate::app::msg::Msg::Key(crossterm::event::KeyEvent::from(
-                crossterm::event::KeyCode::Char('k'),
-            )),
-        );
-        sync_overlay_scroll(&mut model, area);
-        assert_eq!(model.overlay_scroll, Some(9));
     }
 
     #[test]

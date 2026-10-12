@@ -798,7 +798,7 @@ mod tests {
     #[test]
     fn auto_connect_polkit_failure_keeps_it_disabled_and_logs_error() {
         let mut model = model_with_profiles(vec![]);
-        handle_sources(&mut model, key('a'));
+        handle_sources(&mut model, key('A'));
 
         let effects = update(
             &mut model,
@@ -830,7 +830,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         assert!(update(&mut model, Msg::AutoConnectPolkitChecked { error: None }).is_empty());
 
-        handle_sources(&mut model, key('a'));
+        handle_sources(&mut model, key('A'));
         let mut effects = handle_ipc_command(
             &mut model,
             crate::app::msg::IpcCommand::SetAutoConnect { enabled: false },

@@ -179,7 +179,7 @@ mod tests {
         let mut queue = ScrollQueue {
             pending: Some(PendingScroll {
                 id,
-                context: Overlay::ThemeSettings,
+                context: Overlay::GeoRegions,
                 sent_at: Instant::now(),
             }),
             ..Default::default()

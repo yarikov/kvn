@@ -478,18 +478,7 @@ pub struct StateSnapshot {
     #[serde(default)]
     pub dns_fakeip_draft: Option<bool>,
     #[serde(default)]
-    pub theme_selected: usize,
-    #[serde(default)]
     pub theme_draft: Option<String>,
-    #[serde(default)]
-    pub service_routing_selected: usize,
-    #[serde(default)]
-    pub service_routing_draft: Option<
-        std::collections::HashMap<
-            crate::config::profile::RoutedService,
-            crate::config::profile::ServiceRoute,
-        >,
-    >,
     /// Step whose real screen the first-run tour is waiting on. The pickers
     /// render differently while it is set, so it has to reach the client.
     #[serde(default)]
@@ -502,8 +491,6 @@ pub struct StateSnapshot {
     /// Setup state of the privileged integrations the protection cards ask for.
     #[serde(default)]
     pub integration_setup: crate::onboarding::IntegrationSetup,
-    #[serde(default)]
-    pub settings_menu_return: Option<crate::app::model::SettingsMenuPage>,
     #[serde(default)]
     pub settings_menu_selected: usize,
     #[serde(default)]

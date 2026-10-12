@@ -6,8 +6,8 @@ use crate::config::profile::DnsStrategy;
 use crate::ui::layout::text::{fit_to_visual_width, visual_width};
 
 use super::popup::draw_selection_modal;
-use super::settings_overlay_footer;
 use super::settings_row::{settings_value_layout, settings_value_text};
+use super::{APPLY_ACTION, overlay_footer};
 
 fn preset_label(name: &str) -> &str {
     use crate::config::profile::DnsPreset;
@@ -77,7 +77,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         model.dns_selected,
         model.overlay_scroll,
         None,
-        settings_overlay_footer(model),
+        overlay_footer(model, Some(APPLY_ACTION), true, true),
     );
 }
 
@@ -94,7 +94,6 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::DnsSettings;
-        model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Root);
         model.dns_selected = 1;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }

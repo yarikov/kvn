@@ -126,8 +126,6 @@ fn relevant_groups(context: HelpContext) -> &'static [HelpGroup] {
         | HelpContext::RoutingMode
         | HelpContext::GeoRegions
         | HelpContext::DnsSettings
-        | HelpContext::ThemeSettings
-        | HelpContext::ServiceRouting
         | HelpContext::Support => &[HelpGroup::Dialogs],
         // The tour has no shortcuts of its own worth a section; `?` shows the
         // same map as the rest of the app.
@@ -273,8 +271,6 @@ mod tests {
             HelpContext::RoutingMode,
             HelpContext::GeoRegions,
             HelpContext::DnsSettings,
-            HelpContext::ThemeSettings,
-            HelpContext::ServiceRouting,
             HelpContext::Support,
         ] {
             let headings = headings(context);

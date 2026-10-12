@@ -22,7 +22,7 @@ expression: "snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                       │           Bypass RU           │                                       │
 │                                       │           Only RU             │                                       │
 │                                       │                               │                                       │
-│                                       │      󰌑 apply · q/󱊷 close      │                                       │
+│                                       │            󰌑 apply            │                                       │
 │                                       └───────────────────────────────┘                                       │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

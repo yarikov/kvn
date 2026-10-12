@@ -12,10 +12,8 @@ pub(super) mod dns;
 pub(super) mod ipc;
 pub(super) mod onboarding;
 pub(super) mod regions;
-pub(super) mod service_routing;
 pub(super) mod settings_menu;
 pub(super) mod sources;
-pub(super) mod theme;
 
 use crate::app::effect::Effect;
 use crate::app::model::{HelpContext, HelpState, MainPaneFocus, Model, Overlay, SettingsMenuPage};
@@ -25,10 +23,8 @@ use crossterm::event::{KeyCode, KeyEvent};
 use dns::handle_dns_settings;
 use onboarding::handle_onboarding;
 use regions::{handle_geo_region, handle_routing_mode};
-use service_routing::handle_service_routing;
 use settings_menu::handle_settings_menu;
 use sources::handle_sources;
-use theme::handle_theme_picker;
 
 pub(in crate::app::update) fn handle_key(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
     if model.overlay == Overlay::RestartRequired {
@@ -39,7 +35,6 @@ pub(in crate::app::update) fn handle_key(model: &mut Model, key: KeyEvent) -> Ve
         return vec![];
     }
     if key.code == KeyCode::Char(' ') && model.overlay == Overlay::None {
-        model.settings_menu_return = None;
         model.settings_menu_selected = 0;
         model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         return vec![];
@@ -56,8 +51,6 @@ pub(in crate::app::update) fn handle_key(model: &mut Model, key: KeyEvent) -> Ve
         Overlay::RoutingMode => handle_routing_mode(model, key),
         Overlay::GeoRegions => handle_geo_region(model, key),
         Overlay::DnsSettings => handle_dns_settings(model, key),
-        Overlay::ThemeSettings => handle_theme_picker(model, key),
-        Overlay::ServiceRouting => handle_service_routing(model, key),
         Overlay::Onboarding(step) => handle_onboarding(model, step, key),
         // Navigation and activation are client-local because the selected
         // action may need to launch a browser in that client's GUI session.
@@ -68,13 +61,7 @@ pub(in crate::app::update) fn handle_key(model: &mut Model, key: KeyEvent) -> Ve
 
 fn handle_logs(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
     match key.code {
-        KeyCode::Char('m')
-        | KeyCode::Char('o')
-        | KeyCode::Char('D')
-        | KeyCode::Char('S')
-        | KeyCode::Char('C')
-        | KeyCode::Char('A')
-        | KeyCode::Char('a')
+        KeyCode::Char('A')
         | KeyCode::Char('K')
         | KeyCode::Char('r')
         | KeyCode::Char('s')
@@ -96,8 +83,6 @@ fn open_help(model: &mut Model) {
         Overlay::RoutingMode => HelpContext::RoutingMode,
         Overlay::GeoRegions => HelpContext::GeoRegions,
         Overlay::DnsSettings => HelpContext::DnsSettings,
-        Overlay::ThemeSettings => HelpContext::ThemeSettings,
-        Overlay::ServiceRouting => HelpContext::ServiceRouting,
         Overlay::Support => HelpContext::Support,
         Overlay::Onboarding(step) => HelpContext::Onboarding(step),
         Overlay::RestartRequired => return,
@@ -216,11 +201,7 @@ mod tests {
         assert!(handle_key(&mut model, enter()).is_empty());
         assert_eq!(model.connection, ConnectionState::Idle);
 
-        handle_key(&mut model, key('D'));
-        assert_eq!(model.overlay, Overlay::DnsSettings);
-        model.overlay = Overlay::None;
-
-        let effects = handle_key(&mut model, key('a'));
+        let effects = handle_key(&mut model, key('A'));
         assert!(model.auto_connect_pending);
         assert_eq!(effects, vec![Effect::CheckAutoConnectPolkit]);
 

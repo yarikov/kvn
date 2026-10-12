@@ -30,7 +30,6 @@ pub(in crate::app::update) fn handle_onboarding(
         // the tour is not finished until Enter.
         KeyCode::Char(' ') if step == OnboardingStep::Finish => {
             model.onboarding.card_pending = true;
-            model.settings_menu_return = None;
             model.settings_menu_selected = 0;
             model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
             vec![]
@@ -139,12 +138,9 @@ mod tests {
             assert_eq!(model.onboarding.awaiting, Some(OnboardingStep::Routing));
         }
 
-        // Outside the tour it closes as before.
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.overlay = Overlay::RoutingMode;
+        model.onboarding.awaiting = None;
         handle_key(&mut model, esc());
-        assert_eq!(model.overlay, Overlay::None);
+        assert_eq!(model.overlay, Overlay::RoutingMode);
     }
 
     #[test]
@@ -326,12 +322,11 @@ mod tests {
             }
         }
 
-        // Outside the tour the picker closes again once a region is set.
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.overlay = Overlay::GeoRegions;
+        let mut model = tour_at(OnboardingStep::Region);
+        handle_key(&mut model, enter());
+        model.onboarding.awaiting = None;
         handle_key(&mut model, esc());
-        assert_eq!(model.overlay, Overlay::None);
+        assert_eq!(model.overlay, Overlay::GeoRegions);
     }
 
     #[test]

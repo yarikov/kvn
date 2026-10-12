@@ -6,8 +6,8 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 - `settings.geo_routing.current_region` (`Option<GeoRegion>`) controls which country rule-sets are downloaded and which routing modes are shown.
 - `GeoRegion::Ru` / `Cn` / `Ir` — download that country's geoip/geosite, enable `Global` / `Bypass(region)` / `Only(region)`.
 - `GeoRegion::Global` — skip geo downloads, only `Global` mode is available.
-- A region is mandatory: while `geo_routing.current_region` is `None` the region picker refuses `q`/`Esc`, so the main UI stays unreachable. On a brand-new install the first-run tour (see § First-Run Onboarding) owns that first choice and hands off to the same picker; the bare picker is still forced directly once the tour is complete but no region was chosen.
-- The region can be changed at runtime on Settings › Routing (`Space r`; the deprecated `o` still opens the picker). When the region changes, the previous region's mode is saved into `geo_routing.selected_region_modes` and the new region's previously stored mode is restored (falling back to `Global`).
+- The first-run tour (see § First-Run Onboarding) owns the first region choice: its `Region` card hands off to the region picker, and the mode and region pickers open from nowhere else. Both end only by choosing — they ignore `q`/`Esc` and offer no close action. A region or mode set over IPC while a picker is open leaves it on screen with that value marked active, and `Enter` confirms or replaces it. A completed tour with no region stored opens the main screen and behaves as `Global`.
+- The region can be changed at runtime on Settings › Routing (`Space r`). When the region changes, the previous region's mode is saved into `geo_routing.selected_region_modes` and the new region's previously stored mode is restored (falling back to `Global`).
 
 ## First-Run Onboarding
 
@@ -30,7 +30,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   and an installed plugin makes it `false` — decided
   once per process by `model::show_omarchy_card()` —
   `omarchy::detect_omarchy_theme().is_some() && !omarchy::omakvn_plugin_installed()`,
-  two cheap file reads of the kind `theme_picker_slugs` already does. It is an
+  two cheap file reads of the kind `theme_slugs` already does. It is an
   environment fact and never persisted, but it *is* sent over IPC as
   `StateSnapshot::onboarding_omarchy`: the card's own command installs the plugin
   that removes the card, so a client started after `kvn setup --omarchy` would
@@ -145,8 +145,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   `draw_selection_modal` while the tour awaits them, so no entry is painted with
   `Theme::success()`. In a forward-only tour every card on screen is one the user
   has yet to complete; a "done" marker could only come from state that predates
-  the tour, which misleads rather than informs. Those two pickers also drop the
-  `q/esc close` action from their footer while awaited, since they refuse it.
+  the tour, which misleads rather than informs.
 - **Handoff and resume.** `update/onboarding.rs` owns six transitions.
   `handoff` opens the real screen through the existing `open_*` helpers (which
   seed the drafts those pages `take()`) and persists nothing, so it cannot fail.
@@ -177,14 +176,12 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   connected with one — standalone or from a subscription, either way. Since
   there is no way to skip a card, the tour cannot be finished before the app has
   been shown to work once.
-- **The region and mode steps cannot be abandoned.** `handle_geo_region` refuses
-  `q`/`Esc` while no region is set — unchanged — and additionally while
-  `onboarding.awaiting == Some(Region)`; `handle_routing_mode` refuses them while
-  `awaiting == Some(Routing)`. Both steps therefore end only by committing, which
-  advances the card.
+- **The region and mode steps cannot be abandoned.** `handle_geo_region` and
+  `handle_routing_mode` have no `q`/`Esc` branch, so both steps end only by
+  committing, which advances the card.
 - **`Routing` hands off only where there is a choice.**
   `OnboardingStep::handoff_screen` takes the `Config`: under a country region it
-  returns `HandoffScreen::RoutingMode` (the `m` picker, not the full `Space r`
+  returns `HandoffScreen::RoutingMode` (the mode picker, not the full `Space r`
   page), and under `Global` or no region it returns `None`, so `Enter` just moves
   the card on. The card's title and primary action branch the same way. The
   trigger lives in `commit_routing_mode`, placed after its availability check so
@@ -199,9 +196,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   `awaiting` (the handed-off screen is gone and will never report again) and
   either restores the card directly or sets `card_pending`;
   `config_io::onboarding_transition` hands the same value to the `SaveConfig`
-  error path. It is what makes a failed `finish` recoverable: `finish` may
-  navigate to the unescapable region picker, so the card must come back at the
-  originating step. Settings the same update already
+  error path. Settings the same update already
   committed are never rolled back. On the `SaveConfig` error path in
   `daemon/config_io.rs`, the revert is gated on `config_io::onboarding_transition`, read
   before the effect list is filtered — an unrelated failed save must not reopen
@@ -220,7 +215,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 
 ## Disable Confirmation
 
-- Turning auto-connect or the kill switch **off from the main-screen keybinding** (`Shift+A`, the deprecated `a`, `Shift+K`) opens `Overlay::ConfirmDisable(DisableTarget)` instead of applying immediately: both are protections a stray key press should not remove. Turning them **on** applies right away.
+- Turning auto-connect or the kill switch **off from the main-screen keybinding** (`Shift+A`, `Shift+K`) opens `Overlay::ConfirmDisable(DisableTarget)` instead of applying immediately: both are protections a stray key press should not remove. Turning them **on** applies right away.
 - `update/key/confirm_disable.rs` owns both halves: `toggle_auto_connect` / `toggle_kill_switch` open the dialog when the setting is on and no apply is in flight, and `handle_confirm_disable` commits on `y`/`Enter` (delegating to the unchanged `set_auto_connect` / `set_kill_switch` reducers) or closes on `n`/`q`/`Esc`.
 - Every other path bypasses the dialog and calls the `set_*` reducers directly: the Connection settings screen (`Space c`, already an explicit two-step edit), IPC `SetAutoConnect` / `SetKillSwitch` (the Omarchy plugin, `kvn disable --killswitch`, `sudo kvn clean --polkit/--killswitch`), and startup reconciliation — headless callers must never block on a TUI dialog.
 
@@ -228,7 +223,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 - `settings.auto_connect` (persisted in `profiles.json`) controls whether the app reconnects to the last used profile on startup.
 - `settings.last_connected_profile` stores the UUID of the most recently connected profile. It is updated in `update/connection.rs` on `Msg::Connected` and saved via `Effect::PersistConfirmedState`.
 - `Model::new()` calls `resolve_startup_state()` to check `auto_connect` + `last_connected_profile`. If both are set and the profile exists, the model starts in `ConnectionState::Connecting` with that profile pre-selected, and the status bar shows `Auto-connecting to {name}…`.
-- The user can toggle `auto_connect` at runtime with the `Shift+A` keybinding (the legacy `a` still works and shows a deprecation toast from `tui_client::handler::key::deprecated_settings_shortcut_message`), the Connection settings overlay, or IPC `SetAutoConnect`. Disabling saves immediately. Enabling first emits `Effect::CheckAutoConnectPolkit` (with `Model::auto_connect_pending` set): the daemon runs `doctor::polkit_readiness()` and replies with `Msg::AutoConnectPolkitChecked`. The flag is flipped and saved only when passwordless polkit is set up and the `kvn-tui` group is active in the daemon's session; otherwise auto-connect stays off and the reason is shown as an error toast and written to the app log.
+- The user can toggle `auto_connect` at runtime with the `Shift+A` keybinding, the Connection settings overlay, or IPC `SetAutoConnect`. Disabling saves immediately. Enabling first emits `Effect::CheckAutoConnectPolkit` (with `Model::auto_connect_pending` set): the daemon runs `doctor::polkit_readiness()` and replies with `Msg::AutoConnectPolkitChecked`. The flag is flipped and saved only when passwordless polkit is set up and the `kvn-tui` group is active in the daemon's session; otherwise auto-connect stays off and the reason is shown as an error toast and written to the app log.
 - `sudo kvn clean --polkit` / `--killswitch` connect to the invoking user's daemon (`/run/user/$SUDO_UID/kvn-tui.sock`) and send `SetAutoConnect`/`SetKillSwitch { enabled: false }`, so the daemon saves the config as the user. If the daemon is not running, startup reconciliation handles it: `reconcile_kill_switch_state` for the kill switch, and `reconcile_auto_connect_state` turns auto-connect off (before the first tick connects) when `doctor::polkit_authorization_denied()`.
 
 ## Mouse Wheel Viewports
@@ -246,4 +241,4 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 ## Module Layout
 
 - **`update` submodules** (`src/app/update/{status,connection,traffic,config_reload,tick,routing,geo,subscription,paste,onboarding}.rs`): Non-keyboard message handlers: status/download-blocked helpers, connect lifecycle + kill-switch/polkit results, Clash-API traffic sampling, `ConfigReloaded`, the 250 ms tick and its auto-update schedules, routing-mode / geo-region / service-routing commits, geo download results, subscription fetch results, clipboard paste → profile or subscription, and the first-run tour's `handoff` / `advance` / `outcome` / `finish` / `open_when_idle` / `resume` transitions plus its `integration_setup_checked` probe result
-- **`update::key`** (`src/app/update/key.rs` + `src/app/update/key/`): Keyboard input: `handle_key` routes by `Model.overlay` to `sources`, `confirm_delete`, `confirm_disable`, `settings_menu`, `regions`, `dns`, `service_routing`, `theme`, `onboarding`; `key/ipc.rs` (+ `ipc/{semantic,support}.rs`) handles `IpcCommand` for non-TUI clients
+- **`update::key`** (`src/app/update/key.rs` + `src/app/update/key/`): Keyboard input: `handle_key` routes by `Model.overlay` to `sources`, `confirm_delete`, `confirm_disable`, `settings_menu`, `regions`, `dns`, `onboarding`; `key/ipc.rs` (+ `ipc/{semantic,support}.rs`) handles `IpcCommand` for non-TUI clients
