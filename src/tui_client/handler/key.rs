@@ -5,8 +5,6 @@ mod onboarding;
 mod quit;
 mod support;
 
-use std::time::Instant;
-
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -23,10 +21,6 @@ pub(super) fn handle(state: &mut ClientLoop, key: KeyEvent) -> Result<Flow> {
         return quit::handle_unsupported_size(state, key);
     }
     let completes_go_first = state.go_first_sequence.feed(&key.code);
-    if let Some(message) = deprecated_settings_shortcut_message(&key, state.model.overlay) {
-        state.toast.show_info(message, Instant::now());
-        state.needs_redraw = true;
-    }
     if quit::is_interrupt(&key) {
         return Ok(quit::stop_daemon(state));
     }
@@ -60,7 +54,7 @@ fn main_screen(state: &mut ClientLoop, key: KeyEvent, completes_go_first: bool) 
         }
         KeyCode::Char('q') | KeyCode::Esc => quit::detach(state),
         _ => match pane_focus_shortcut(&key) {
-            Some(shortcut) => focus_shortcut(state, shortcut),
+            Some(focus) => focus_shortcut(state, focus),
             None => match state.pane_focus {
                 MainPaneFocus::Logs => log_pane::handle(state, key),
                 MainPaneFocus::Sources => sources(state, key),
@@ -98,11 +92,8 @@ fn sources(state: &mut ClientLoop, key: KeyEvent) -> Result<Flow> {
     Ok(Flow::Continue)
 }
 
-fn focus_shortcut(state: &mut ClientLoop, shortcut: PaneFocusShortcut) -> Result<Flow> {
-    if let Some(message) = shortcut.deprecation {
-        state.toast.show_info(message, Instant::now());
-    }
-    match shortcut.focus {
+fn focus_shortcut(state: &mut ClientLoop, focus: MainPaneFocus) -> Result<Flow> {
+    match focus {
         MainPaneFocus::Sources => state.focus_pane(MainPaneFocus::Sources)?,
         MainPaneFocus::Logs => {
             if crate::ui::layout::logs_visible(state.terminal_area()?) {
@@ -113,11 +104,6 @@ fn focus_shortcut(state: &mut ClientLoop, shortcut: PaneFocusShortcut) -> Result
     state.needs_redraw = true;
     Ok(Flow::Continue)
 }
-
-pub(super) const DEPRECATED_PANE_FOCUS_MESSAGE: &str =
-    "h/l pane switching is deprecated; use Ctrl+h/← or Ctrl+l/→";
-const DEPRECATED_ARROW_PANE_FOCUS_MESSAGE: &str =
-    "←/→ pane switching is deprecated; use Ctrl+h/← or Ctrl+l/→";
 
 #[derive(Debug, Default)]
 pub(super) struct GoFirstSequence {
@@ -142,64 +128,18 @@ impl GoFirstSequence {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PaneFocusShortcut {
-    focus: crate::app::model::MainPaneFocus,
-    deprecation: Option<&'static str>,
-}
-
-fn pane_focus_shortcut(key: &crossterm::event::KeyEvent) -> Option<PaneFocusShortcut> {
+fn pane_focus_shortcut(
+    key: &crossterm::event::KeyEvent,
+) -> Option<crate::app::model::MainPaneFocus> {
     use crate::app::model::MainPaneFocus;
     use crossterm::event::{KeyCode, KeyModifiers};
 
-    let (focus, deprecation) = match key.code {
-        KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            (MainPaneFocus::Sources, None)
-        }
-        KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            (MainPaneFocus::Logs, None)
-        }
-        KeyCode::Left => (
-            MainPaneFocus::Sources,
-            Some(DEPRECATED_ARROW_PANE_FOCUS_MESSAGE),
-        ),
-        KeyCode::Right => (
-            MainPaneFocus::Logs,
-            Some(DEPRECATED_ARROW_PANE_FOCUS_MESSAGE),
-        ),
-        KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            (MainPaneFocus::Sources, None)
-        }
-        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            (MainPaneFocus::Logs, None)
-        }
-        KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => {
-            (MainPaneFocus::Sources, Some(DEPRECATED_PANE_FOCUS_MESSAGE))
-        }
-        KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => {
-            (MainPaneFocus::Logs, Some(DEPRECATED_PANE_FOCUS_MESSAGE))
-        }
-        _ => return None,
-    };
-    Some(PaneFocusShortcut { focus, deprecation })
-}
-
-fn deprecated_settings_shortcut_message(
-    key: &crossterm::event::KeyEvent,
-    overlay: crate::app::model::Overlay,
-) -> Option<&'static str> {
-    use crossterm::event::KeyCode;
-
-    if overlay != crate::app::model::Overlay::None {
+    if !key.modifiers.contains(KeyModifiers::CONTROL) {
         return None;
     }
     match key.code {
-        KeyCode::Char('m') => Some("m is deprecated; use Space r"),
-        KeyCode::Char('o') => Some("o is deprecated; use Space r"),
-        KeyCode::Char('D') => Some("D is deprecated; use Space d"),
-        KeyCode::Char('S') => Some("S is deprecated; use Space r"),
-        KeyCode::Char('C') => Some("C is deprecated; use Space i"),
-        KeyCode::Char('a') => Some("a is deprecated; use Shift+A"),
+        KeyCode::Left | KeyCode::Char('h') => Some(MainPaneFocus::Sources),
+        KeyCode::Right | KeyCode::Char('l') => Some(MainPaneFocus::Logs),
         _ => None,
     }
 }
@@ -210,107 +150,21 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
-    fn pane_focus_shortcuts_deprecate_plain_h_and_l() {
+    fn pane_focus_shortcuts_require_ctrl() {
         use crate::app::model::MainPaneFocus;
 
-        assert_eq!(
-            pane_focus_shortcut(&KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL)),
-            Some(PaneFocusShortcut {
-                focus: MainPaneFocus::Sources,
-                deprecation: None,
-            })
-        );
-        assert_eq!(
-            pane_focus_shortcut(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
-            Some(PaneFocusShortcut {
-                focus: MainPaneFocus::Logs,
-                deprecation: None,
-            })
-        );
-        assert_eq!(
-            pane_focus_shortcut(&KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE)),
-            Some(PaneFocusShortcut {
-                focus: MainPaneFocus::Sources,
-                deprecation: Some(DEPRECATED_PANE_FOCUS_MESSAGE),
-            })
-        );
-        assert_eq!(
-            pane_focus_shortcut(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE)),
-            Some(PaneFocusShortcut {
-                focus: MainPaneFocus::Logs,
-                deprecation: Some(DEPRECATED_PANE_FOCUS_MESSAGE),
-            })
-        );
-        assert_eq!(
-            pane_focus_shortcut(&KeyEvent::new(KeyCode::Char('h'), KeyModifiers::ALT)),
-            None
-        );
-    }
-
-    #[test]
-    fn arrow_keys_focus_main_panes_with_deprecation_notice() {
-        use crate::app::model::MainPaneFocus;
-
-        assert_eq!(
-            pane_focus_shortcut(&KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
-            Some(PaneFocusShortcut {
-                focus: MainPaneFocus::Sources,
-                deprecation: Some(DEPRECATED_ARROW_PANE_FOCUS_MESSAGE),
-            })
-        );
-        assert_eq!(
-            pane_focus_shortcut(&KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
-            Some(PaneFocusShortcut {
-                focus: MainPaneFocus::Logs,
-                deprecation: Some(DEPRECATED_ARROW_PANE_FOCUS_MESSAGE),
-            })
-        );
-        assert_eq!(
-            pane_focus_shortcut(&KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL)),
-            Some(PaneFocusShortcut {
-                focus: MainPaneFocus::Sources,
-                deprecation: None,
-            })
-        );
-        assert_eq!(
-            pane_focus_shortcut(&KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL)),
-            Some(PaneFocusShortcut {
-                focus: MainPaneFocus::Logs,
-                deprecation: None,
-            })
-        );
-    }
-
-    #[test]
-    fn legacy_settings_shortcuts_point_to_space_menu_only_on_main_screen() {
-        use crate::app::model::{Overlay, SettingsMenuPage};
-
-        for (key, expected) in [
-            ('m', "m is deprecated; use Space r"),
-            ('o', "o is deprecated; use Space r"),
-            ('D', "D is deprecated; use Space d"),
-            ('S', "S is deprecated; use Space r"),
-            ('C', "C is deprecated; use Space i"),
-            ('a', "a is deprecated; use Shift+A"),
+        for (code, focus) in [
+            (KeyCode::Char('h'), MainPaneFocus::Sources),
+            (KeyCode::Left, MainPaneFocus::Sources),
+            (KeyCode::Char('l'), MainPaneFocus::Logs),
+            (KeyCode::Right, MainPaneFocus::Logs),
         ] {
-            let event = KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE);
             assert_eq!(
-                deprecated_settings_shortcut_message(&event, Overlay::None),
-                Some(expected)
+                pane_focus_shortcut(&KeyEvent::new(code, KeyModifiers::CONTROL)),
+                Some(focus)
             );
             assert_eq!(
-                deprecated_settings_shortcut_message(
-                    &event,
-                    Overlay::SettingsMenu(SettingsMenuPage::Root)
-                ),
-                None
-            );
-        }
-
-        for key in ['x', 'A', 'K'] {
-            let event = KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE);
-            assert_eq!(
-                deprecated_settings_shortcut_message(&event, Overlay::None),
+                pane_focus_shortcut(&KeyEvent::new(code, KeyModifiers::NONE)),
                 None
             );
         }

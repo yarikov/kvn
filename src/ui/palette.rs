@@ -88,8 +88,8 @@ impl Palette {
         BUNDLED.iter().find(|(n, _)| *n == name).map(|(_, p)| *p)
     }
 
-    /// Names of every bundled palette, sorted alphabetically. Used by the
-    /// in-TUI theme picker to build its menu.
+    /// Names of every bundled palette, sorted alphabetically. Used by
+    /// Settings › Interface to build its theme list.
     pub fn bundled_names() -> Vec<&'static str> {
         BUNDLED.iter().map(|(n, _)| *n).collect()
     }

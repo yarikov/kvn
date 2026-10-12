@@ -300,28 +300,6 @@ pub(in crate::app::update) fn commit_geo_region(
         }
     }
 
-    // Trigger auto-connect immediately after picking a region
-    // so the user does not have to restart the app.
-    if model.connection == ConnectionState::Idle
-        && model.config.settings.auto_connect
-        && let Some(profile_id) = model.config.settings.last_connected_profile
-        && let Some(idx) = model
-            .config
-            .profiles
-            .iter()
-            .position(|p| p.id == profile_id)
-    {
-        model.selected = crate::app::model::row_for_profile(&model.config, idx);
-        queue_connect(model, profile_id);
-        if let Some(profile) = model.config.profiles.get(idx) {
-            push_status(
-                &mut effects,
-                model,
-                AppStatus::Info(format!("Auto-connecting to {}…", profile.name)),
-            );
-        }
-    }
-
     if changed
         && model.connection == ConnectionState::Connected
         && let Some(active_id) = model.active_profile_id

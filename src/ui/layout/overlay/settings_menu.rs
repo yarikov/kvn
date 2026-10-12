@@ -195,7 +195,7 @@ pub(super) fn draw(
             let settings = [
                 (
                     "Theme",
-                    crate::app::update::shorten_theme_name(theme_value_label(shown_theme)),
+                    shorten_theme_name(theme_value_label(shown_theme)),
                     shown_theme != model.config.settings.theme,
                 ),
                 (
@@ -206,7 +206,7 @@ pub(super) fn draw(
             ];
             let stable_value_width = crate::ui::palette::Palette::bundled_names()
                 .into_iter()
-                .map(crate::app::update::shorten_theme_name)
+                .map(shorten_theme_name)
                 .chain(
                     [
                         AUTO_THEME_LABEL,
@@ -247,6 +247,16 @@ pub(super) fn draw(
 }
 
 pub(super) const AUTO_THEME_LABEL: &str = "auto";
+
+const MAX_THEME_NAME_CHARS: usize = 12;
+
+fn shorten_theme_name(name: &str) -> String {
+    if name.chars().count() <= MAX_THEME_NAME_CHARS {
+        return name.to_string();
+    }
+    let kept: String = name.chars().take(MAX_THEME_NAME_CHARS - 1).collect();
+    format!("{kept}…")
+}
 
 pub(super) fn theme_value_label(slug: &str) -> &str {
     if slug == crate::tui_client::theme_watch::OMARCHY_SENTINEL {
@@ -319,23 +329,5 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Connection);
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
-    }
-
-    #[test]
-    fn settings_overlays_show_back_only_for_menu_navigation() {
-        let mut model = model_with_profiles(vec![]);
-        model.overlay = Overlay::DnsSettings;
-
-        let direct = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
-        assert!(!direct.contains("⌫ back"));
-
-        model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Root);
-        let from_menu = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
-        assert!(from_menu.contains("󰌑 apply · q/󱊷 close · ⌫ back"));
-
-        model.overlay = Overlay::ServiceRouting;
-        model.settings_menu_return = Some(crate::app::model::SettingsMenuPage::Routing);
-        let services = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
-        assert!(services.contains("󰌑 apply · q/󱊷 close · ⌫ back"));
     }
 }

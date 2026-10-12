@@ -1,5 +1,5 @@
 use crate::app::model::{Model, Overlay, RoutingSettingsItem, SettingsMenuPage, SourceRow};
-use crate::config::profile::{GeoRegion, RoutedService};
+use crate::config::profile::GeoRegion;
 
 pub(crate) fn context(overlay: Overlay) -> Overlay {
     match overlay {
@@ -43,17 +43,12 @@ pub(crate) fn list(model: &Model) -> Option<(Vec<Option<usize>>, usize)> {
                 .collect();
             return Some((rows, state.selected));
         }
-        Overlay::ThemeSettings => (
-            crate::app::update::theme_picker_slugs().len(),
-            model.theme_selected,
-        ),
         Overlay::RoutingMode => (
             model.config.settings.geo_routing.available_modes().len(),
             model.routing_selected,
         ),
         Overlay::GeoRegions => (GeoRegion::ALL.len(), model.geo_region_selected),
         Overlay::DnsSettings => (3, model.dns_selected),
-        Overlay::ServiceRouting => (RoutedService::ALL.len(), model.service_routing_selected),
         Overlay::SettingsMenu(page) => {
             let len = match page {
                 SettingsMenuPage::Root => 4,
@@ -74,16 +69,9 @@ pub(crate) fn select(model: &mut Model, selected: usize) {
     match &mut model.overlay {
         Overlay::None => model.selected = selected,
         Overlay::Help(state) => state.selected = selected,
-        Overlay::ThemeSettings => {
-            model.theme_selected = selected;
-            model.theme_draft = crate::app::update::theme_picker_slugs()
-                .get(selected)
-                .cloned();
-        }
         Overlay::RoutingMode => model.routing_selected = selected,
         Overlay::GeoRegions => model.geo_region_selected = selected,
         Overlay::DnsSettings => model.dns_selected = selected,
-        Overlay::ServiceRouting => model.service_routing_selected = selected,
         Overlay::SettingsMenu(_) => model.settings_menu_selected = selected,
         Overlay::Support => model.support_selected = selected,
         _ => {}
@@ -108,8 +96,6 @@ mod tests {
             Overlay::GeoRegions,
             Overlay::RoutingMode,
             Overlay::DnsSettings,
-            Overlay::ServiceRouting,
-            Overlay::ThemeSettings,
             Overlay::SettingsMenu(SettingsMenuPage::Root),
             Overlay::SettingsMenu(SettingsMenuPage::Routing),
             Overlay::SettingsMenu(SettingsMenuPage::Connection),
@@ -123,12 +109,6 @@ mod tests {
             select(&mut model, last);
             assert_eq!(list(&model).unwrap().1, last);
         }
-        model.overlay = Overlay::ThemeSettings;
-        select(&mut model, 1);
-        assert_eq!(
-            model.theme_draft,
-            crate::app::update::theme_picker_slugs().get(1).cloned()
-        );
         model.overlay = Overlay::ConfirmDelete;
         assert!(list(&model).is_none());
         select(&mut model, 1);

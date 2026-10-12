@@ -6,7 +6,6 @@ use crate::app::model::{AppStatus, Model, Overlay};
 
 use crate::app::update::key::handle_key;
 use crate::app::update::key::settings_menu::{set_auto_connect, set_kill_switch};
-use crate::app::update::key::theme::theme_picker_slugs;
 use crate::app::update::onboarding;
 use crate::app::update::paste::handle_clipboard_text;
 use crate::app::update::routing::{commit_geo_region, commit_routing_mode};
@@ -138,13 +137,6 @@ pub(in crate::app::update) fn handle_go_first(model: &mut Model) -> Vec<Effect> 
         Overlay::RoutingMode => crate::ui::nav::select_first(&mut model.routing_selected),
         Overlay::GeoRegions => crate::ui::nav::select_first(&mut model.geo_region_selected),
         Overlay::DnsSettings => crate::ui::nav::select_first(&mut model.dns_selected),
-        Overlay::ThemeSettings => {
-            crate::ui::nav::select_first(&mut model.theme_selected);
-            model.theme_draft = theme_picker_slugs().first().cloned();
-        }
-        Overlay::ServiceRouting => {
-            crate::ui::nav::select_first(&mut model.service_routing_selected);
-        }
         Overlay::Support => crate::ui::nav::select_first(&mut model.support_selected),
         Overlay::Onboarding(_) => {}
         Overlay::Help(mut state) => {
@@ -699,17 +691,6 @@ mod tests {
         model.dns_selected = DnsSettingsItem::ALL.len() - 1;
         handle_ipc_command(&mut model, crate::app::msg::IpcCommand::GoFirst);
         assert_eq!(model.dns_selected, 0);
-
-        model.overlay = Overlay::ThemeSettings;
-        model.theme_selected = theme_picker_slugs().len().saturating_sub(1);
-        handle_ipc_command(&mut model, crate::app::msg::IpcCommand::GoFirst);
-        assert_eq!(model.theme_selected, 0);
-        assert_eq!(model.theme_draft, theme_picker_slugs().first().cloned());
-
-        model.overlay = Overlay::ServiceRouting;
-        model.service_routing_selected = 1;
-        handle_ipc_command(&mut model, crate::app::msg::IpcCommand::GoFirst);
-        assert_eq!(model.service_routing_selected, 0);
     }
 
     #[test]

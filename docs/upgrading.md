@@ -12,6 +12,19 @@ Pending migrations run on the next `kvn` launch, or explicitly with
 Use `kvn migrate --pending` to check pending migrations and `kvn doctor` if an
 upgrade needs attention.
 
+## Next release (unreleased)
+
+The shortcuts that have shown a deprecation notice since v0.30.0–v0.32.0 are
+removed:
+
+| Removed | Use instead |
+|---------|-------------|
+| `h` / `l`, `←` / `→` to switch panes | `Ctrl+h` / `Ctrl+←`, `Ctrl+l` / `Ctrl+→` |
+| `m`, `o`, `S` | `Space r` (Settings › Routing) |
+| `D` | `Space d` (Settings › DNS) |
+| `C` | `Space i` (Settings › Interface) |
+| `a` | `Shift+A` |
+
 ## v0.34.0
 
 The configuration moves to schema v6. kvn converts it automatically the first

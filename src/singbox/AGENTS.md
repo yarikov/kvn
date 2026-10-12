@@ -28,4 +28,4 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   - They are fetched *through the tunnel* (`Effect::DownloadServiceRuleSetsIfMissing`) — never pre-connect, where the kill switch or ISP blocks would stall the fetch — and refreshed with the periodic geo updates.
   - Two triggers: after `Msg::Connected` (backstop), and on a service-routing commit while connected, where the reconnect is DEFERRED until the download pass reports back (`Model::pending_service_reconnect` → `Msg::ServiceRuleSetsReady`) so a first-enabled service's rules are live on the very next connection rather than requiring a second reconnect.
   - Missing files degrade to "no rule for that service", never a failed connection.
-  - Edited on Settings › Routing (`Space r`; the deprecated `S` still opens `Overlay::ServiceRouting`) (draft map in `Model::service_routing_draft`; cycling a route back to `Disabled` removes its entry — absent = Disabled — so a full cycle commits as a no-op; committed atomically on Enter).
+  - Edited on Settings › Routing (`Space r`): changed routes are drafted in `Model::routing_settings_draft` and committed atomically on Enter.

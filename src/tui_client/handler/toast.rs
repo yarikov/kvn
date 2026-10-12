@@ -86,7 +86,6 @@ impl ToastState {
 
 #[cfg(test)]
 mod tests {
-    use super::super::key::DEPRECATED_PANE_FOCUS_MESSAGE;
     use super::*;
 
     #[test]
@@ -112,12 +111,9 @@ mod tests {
         let start = Instant::now();
         let mut toast = ToastState::new(4);
 
-        toast.show_info(DEPRECATED_PANE_FOCUS_MESSAGE, start);
+        toast.show_info("Copied", start);
         let first_deadline = toast.expires_at.unwrap();
-        toast.show_info(
-            DEPRECATED_PANE_FOCUS_MESSAGE,
-            start + Duration::from_secs(1),
-        );
+        toast.show_info("Copied", start + Duration::from_secs(1));
         assert_eq!(
             toast.observe(
                 4,
@@ -128,10 +124,7 @@ mod tests {
         );
 
         assert_eq!(toast.last_revision, 4);
-        assert_eq!(
-            toast.current().map(AppStatus::text),
-            Some(DEPRECATED_PANE_FOCUS_MESSAGE)
-        );
+        assert_eq!(toast.current().map(AppStatus::text), Some("Copied"));
         assert!(toast.expires_at.unwrap() > first_deadline);
     }
 
