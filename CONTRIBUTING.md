@@ -79,10 +79,9 @@ The description must explain:
 - important design and security decisions;
 - related issues, when applicable.
 
-Only the **Summary** and **Changes** sections of the template are required.
-The **Testing** section and the contribution checklist are optional for every
-pull request; leaving them out does not waive the checks in
-[Tests and Quality Checks](#tests-and-quality-checks).
+Fill the **Summary** and **Changes** sections of the template. The checks in
+[Tests and Quality Checks](#tests-and-quality-checks) apply to every pull
+request.
 
 Update the pull request when its scope changes. Reviewers should not have to
 infer important behavior from the diff.
