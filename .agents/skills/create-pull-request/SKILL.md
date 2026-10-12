@@ -1,6 +1,6 @@
 ---
 name: create-pull-request
-description: Create a GitHub pull request for kvn-tui after validating the branch, diff, repository rules, and the quality gates the user did not skip. Use when asked to open, create, or publish a PR; do not use for merely drafting PR text or reviewing an existing PR.
+description: Create a GitHub pull request for kvn-tui after validating the branch, diff, and repository rules. Use when asked to open, create, or publish a PR; do not use for merely drafting PR text or reviewing an existing PR.
 ---
 
 # Create Pull Request
@@ -9,10 +9,10 @@ Open a reviewable GitHub pull request from the current branch into `develop`. De
 
 ## Read the repository rules
 
-Before deriving the PR title, description, or checks, read:
+Before deriving the PR title or description, read:
 
 - `AGENTS.md` for architecture and project constraints, and the nested `src/*/AGENTS.md` guide of every subsystem the diff touches;
-- `CONTRIBUTING.md` for branch, commit, PR, and validation requirements;
+- `CONTRIBUTING.md` for branch, commit, and PR requirements;
 - `.github/pull_request_template.md` for the required description structure;
 - `.agents/skills/conventional-commit/SKILL.md` for title formatting.
 
@@ -43,40 +43,24 @@ Review `origin/develop...HEAD`, including the changed file list, full diff, and 
 - Look for secrets, tokens, credentials, real subscription URLs, server addresses, and device identifiers in added content. Stop and identify the affected files if anything suspicious is found; never reproduce a secret in the response.
 - Derive all claims from the actual diff and available user context. Do not invent motivation, issue references, tests, security properties, or user-visible behavior.
 
-## Run the quality gates
+## Check documentation changes
 
-First classify the diff. It is documentation-only when every file in `git diff --name-only origin/develop...HEAD` is a Markdown file or an image under `assets/` (see "Documentation-Only Pull Requests" in `CONTRIBUTING.md`).
+Do not run the Rust quality gates (`cargo fmt`, `clippy`, `test`, `insta`, `llvm-cov`, `deny`); CI runs them on every pull request.
 
-For a documentation-only PR, skip the Rust gates by default: tell the user they will be skipped and ask whether any should run anyway; run only the ones the user asks for. For any other PR, run the Rust gates by default: before starting, list them and ask whether any may be skipped, run every check the user does not explicitly skip, and before honoring a skip warn that `CONTRIBUTING.md` requires the gates and CI enforces them. Never report a skipped check as passed.
+When the diff changes Markdown files, require that every relative link and anchor added or changed in the diff resolves (use `lychee --offline --include-fragments` on the changed files when it is installed, otherwise check each one by hand), and that each changed claim about behavior, commands, paths, or configuration matches the current source. CI does not cover these checks.
 
-Run the Rust gates from the repository root and stop on any failure:
-
-```bash
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --locked
-cargo insta test --check --unreferenced=reject
-cargo llvm-cov --locked --summary-only
-cargo deny check all
-```
-
-For coverage, inspect the `TOTAL` row and require both region and line coverage to be at least 85%. If `cargo-llvm-cov`, its LLVM tooling, `cargo-insta`, or `cargo-deny` is unavailable, report the missing prerequisite and stop; do not claim the coverage checkbox passes.
-
-For a documentation-only PR, additionally require that `git diff --check` passes (already run above), that every relative link and anchor added or changed in the diff resolves (use `lychee --offline --include-fragments` on the changed files when it is installed, otherwise check each one by hand), and that each changed claim about behavior, commands, paths, or configuration matches the current source. These checks are never skipped.
-
-Do not edit code, regenerate snapshots, run a formatter that rewrites files, or otherwise fix failures within this workflow. Report the failing command and a concise diagnosis so the user can address it separately.
+Do not edit files to fix a failure within this workflow. Report it with a concise diagnosis so the user can address it separately.
 
 ## Prepare the PR
 
-Create an English title and description after all gates that were run pass.
+Create an English title and description.
 
 - Format the title as `type(scope): imperative description` according to the conventional-commit skill and make it suitable for generated release notes.
-- Fill the template's required Summary and Changes sections with the user-visible motivation, complete scope, and important design or security decisions.
-- Include the optional Testing section and contribution checklist by default. In Testing, list the exact commands run and name every skipped check as skipped. Mark a checklist item complete only when it was actually verified; leave conditional items unchecked when they do not apply or cannot be established.
+- Fill the template's Summary and Changes sections with the user-visible motivation, complete scope, and important design or security decisions.
 - Include related issues only when the user or repository history provides a real issue reference.
 - Recheck that title and body describe the complete diff rather than only the latest commit.
 
-Show the user the base branch, head branch, draft/ready status, proposed title, and complete body, and ask whether the Testing section and the contribution checklist should be removed. Obtain explicit confirmation immediately before pushing or calling the GitHub API. Treat edits requested at this point as changes to the proposal and reconfirm the final version.
+Show the user the base branch, head branch, draft/ready status, proposed title, and complete body. Obtain explicit confirmation immediately before pushing or calling the GitHub API. Treat edits requested at this point as changes to the proposal and reconfirm the final version.
 
 ## Publish
 
