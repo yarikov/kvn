@@ -348,6 +348,10 @@ In Global and Bypass modes, DNS queries to public servers go through the
 tunnel; [what kvn protects](privacy.md#dns) summarizes where every query goes.
 Servers on a local address, such as a router at `192.168.1.1` or a resolver on
 `127.0.0.1`, are always queried directly, and so is every server in Only mode.
+Names on a rule-set that is routed directly — the region's sites in Bypass, a
+service set to `direct` — are asked from a direct copy of `final_server`, so
+that a content network answers for your real location; a rule of the active
+preset for the same rule-set takes precedence.
 Profiles whose protocol cannot carry UDP (HTTP, SSH, ShadowTLS, and SOCKS
 4/4a) query a public `udp` or `quic` server directly in Global and Bypass
 modes, so its queries bypass the VPN; kvn shows a warning after connecting.
@@ -355,6 +359,29 @@ Use an `https`, `tls` or `tcp` server with these profiles to keep DNS in the
 tunnel. kvn resolves the VPN
 server's own hostname through a direct copy of the active preset's
 `final_server`, so connecting never depends on the tunnel being up.
+
+To resolve a region's sites through a DNS service inside that region instead,
+give the preset a server for it and a rule for the region's list. The
+service's resolvers are in the region, so a content network answers for the
+region whichever way the query travels: through the tunnel in Bypass, where
+your provider does not see it, and directly in Only. The rule replaces the
+direct lookup described above, and is skipped in Global mode, where the list
+is not in use. For Russia with Yandex DNS:
+
+```json
+{
+  "name": "ru-yandex",
+  "servers": [
+    { "type": "https", "tag": "remote", "server": "1.1.1.1", "path": "/dns-query" },
+    { "type": "https", "tag": "yandex", "server": "77.88.8.8", "path": "/dns-query" }
+  ],
+  "rules": [{ "rule_set": ["geosite-category-ru"], "server": "yandex" }],
+  "final_server": "remote"
+}
+```
+
+The regional service sees the names of the region's sites you visit, together
+with the VPN server's address in Bypass and your own in Only.
 
 ## Geo and service routing
 

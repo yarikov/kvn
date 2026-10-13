@@ -72,6 +72,17 @@ selected DNS preset (see the [configuration guide](configuration.md#dns)):
 
 - **Global and Bypass:** questions to public DNS servers travel through the
   tunnel. Your provider does not see them.
+- **Sites sent directly because of their name** — on the region's list in
+  Bypass, or on the list of a service set to `direct` in any mode — are the
+  exception: kvn asks a direct copy of your main DNS server about them, past
+  the tunnel. A content network answers with the servers nearest to whoever
+  asks, so a question sent through the VPN would return servers chosen for the
+  VPN's location, which the direct connection may not reach. Your DNS provider
+  then sees these names together with your real IP address. The site itself
+  sees that address anyway, and your provider sees the connection either way.
+  A custom preset keeps them in the tunnel with a rule that sends the list to
+  its main server, for example
+  `{ "rule_set": ["geosite-category-ru"], "server": "remote" }`.
 - **Only:** every DNS question is sent directly, like the rest of the traffic
   outside the region.
 - **Local DNS servers** — a router such as `192.168.1.1`, a resolver on
@@ -96,12 +107,8 @@ for those names, and kvn looks up the real one only when it opens the
 connection. Which way that lookup goes depends on the rule that
 matched:
 
-- **A site sent directly because of its name** — on the region's list in
-  Bypass, or on the list of a service set to `direct` in any mode — is looked
-  up through the direct copy of your main DNS server, past the tunnel. Your
-  DNS provider then sees these names together with your real IP address. The
-  site itself sees that address anyway, and your provider sees the connection
-  either way.
+- **A site sent directly because of its name** is looked up through the
+  direct copy of your main DNS server, as it is without fake-IP.
 - **A site sent directly because of its address** is looked up through the
   tunnel first.
 - **While a Steam or Telegram override is on**, kvn looks every other name up
@@ -109,8 +116,9 @@ matched:
   longer take the first path; the service's own names still do when it is set
   to `direct`.
 
-Without fake-IP, programs get real addresses from kvn, through the tunnel in
-Global and Bypass, and the direct connection needs no lookup of its own.
+Without fake-IP, programs get real addresses from kvn — through the tunnel in
+Global and Bypass, except for the sites sent directly because of their name —
+and the direct connection needs no lookup of its own.
 
 Encrypted DNS (`https`, `tls`, `quic`) hides the questions even when they are
 sent directly; plain DNS (`udp`, `tcp`) shows them to anyone on the path. The
@@ -189,7 +197,8 @@ The tunnel carries IPv4 only. While kvn is connected:
   an IPv6 address, or a name with only an IPv6 address, cannot connect.
 - **DNS servers that kvn queries directly must be reachable over IPv4**: in
   Only mode, local servers, and the copy of the main server used to look up
-  the VPN server's name. In Global and Bypass modes a public DNS server is
+  the VPN server's name and the sites sent directly because of their name. In
+  Global and Bypass modes a public DNS server is
   queried through the tunnel, so an IPv6 address works there if the VPN
   server itself has IPv6.
 - **Direct traffic is IPv4 too**: Bypass and Only destinations and `direct`
