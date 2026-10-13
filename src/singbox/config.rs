@@ -126,6 +126,7 @@ pub fn generate_config(
         bootstrap,
         &settings.dns.strategy,
         &available_rule_sets,
+        &domain_rule_set_outbounds(&route),
         &ech_dns_lookup_names(&proxy_outbounds),
     );
 
@@ -184,6 +185,7 @@ fn build_dns(
     bootstrap: BootstrapResolver,
     strategy: &DnsStrategy,
     available_rule_sets: &HashSet<&str>,
+    domain_routes: &[(&str, &str)],
     ech_lookup_names: &[String],
 ) -> Value {
     let active = &upstreams.active;
@@ -201,6 +203,8 @@ fn build_dns(
     servers.extend(active.fakeip.as_ref().map(fakeip_server_value));
     let active_rules = active_dns_rules(active, available_rule_sets);
     let ech_rule = ech_lookup_rule(ech_lookup_names, &bootstrap.tag);
+    let direct_destination_rules =
+        direct_destination_rules(domain_routes, &active.final_server, &bootstrap);
     servers.extend(bootstrap.server);
     let mut block = Map::new();
     block.insert("servers".to_string(), Value::Array(servers));
@@ -212,6 +216,7 @@ fn build_dns(
             .flat_map(|(idx, rule)| dns_rule_values(*idx, rule, &active.final_server)),
     );
     rules.extend(fakeip_catch_all_rule(active, &active_rules));
+    rules.extend(direct_destination_rules);
     if !rules.is_empty() {
         block.insert("rules".to_string(), Value::Array(rules));
     }
@@ -240,6 +245,41 @@ fn ech_lookup_rule(names: &[String], bootstrap_tag: &str) -> Option<Value> {
             "server": bootstrap_tag,
         })
     })
+}
+
+fn domain_rule_set_outbounds(route: &Value) -> Vec<(&str, &str)> {
+    route["rules"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|rule| Some((rule["rule_set"][0].as_str()?, rule["outbound"].as_str()?)))
+        .filter(|(tag, _)| !crate::geo::is_ip_rule_set_tag(tag))
+        .collect()
+}
+
+fn direct_destination_rules(
+    domain_routes: &[(&str, &str)],
+    final_server: &str,
+    bootstrap: &BootstrapResolver,
+) -> Vec<Value> {
+    if bootstrap.server.is_none() {
+        return Vec::new();
+    }
+    let mirrored_routes = domain_routes
+        .iter()
+        .rposition(|(_, outbound)| *outbound == "direct")
+        .map_or(0, |last_direct| last_direct + 1);
+    domain_routes[..mirrored_routes]
+        .iter()
+        .map(|(tag, outbound)| {
+            let server = if *outbound == "direct" {
+                bootstrap.tag.as_str()
+            } else {
+                final_server
+            };
+            json!({ "rule_set": [tag], "server": server })
+        })
+        .collect()
 }
 
 fn active_dns_rules<'a>(
@@ -2052,6 +2092,7 @@ mod tests {
             &DnsStrategy::PreferIpv4,
             available_rule_sets,
             &[],
+            &[],
         )
     }
 
@@ -2541,6 +2582,7 @@ mod tests {
                 upstreams.bootstrap(),
                 &DnsStrategy::PreferIpv4,
                 &HashSet::from(["geoip-ru"]),
+                &[],
                 &["ech.example".to_string()],
             )["rules"][0]
                 .clone()
@@ -2615,6 +2657,78 @@ mod tests {
             assert_eq!(bootstrap.tag, final_server);
             assert!(bootstrap.server.is_none());
         }
+    }
+
+    #[test]
+    fn direct_destination_rules_mirror_domain_routes_up_to_the_last_direct_one() {
+        let bootstrap = through_proxy(active(vec![doh("remote", "1.1.1.1")], "remote")).bootstrap();
+        let routes = [
+            ("geosite-telegram", "proxy"),
+            ("geosite-category-ru", "direct"),
+            ("geosite-steam", "proxy"),
+        ];
+        assert_eq!(
+            direct_destination_rules(&routes, "remote", &bootstrap),
+            vec![
+                json!({ "rule_set": ["geosite-telegram"], "server": "remote" }),
+                json!({ "rule_set": ["geosite-category-ru"], "server": "bootstrap" }),
+            ]
+        );
+        assert!(direct_destination_rules(&routes[2..], "remote", &bootstrap).is_empty());
+    }
+
+    #[test]
+    fn direct_destination_rules_are_empty_when_the_final_server_stays_direct() {
+        let bootstrap = through_proxy(active(vec![local()], "local")).bootstrap();
+        let routes = [("geosite-category-ru", "direct")];
+        assert!(direct_destination_rules(&routes, "local", &bootstrap).is_empty());
+    }
+
+    #[test]
+    fn build_dns_puts_direct_destination_rules_after_the_fakeip_catch_all() {
+        let mut dns = active(vec![doh("remote", "1.1.1.1")], "remote");
+        dns.fakeip = Some(FakeIpServer {
+            tag: "fakeip".to_string(),
+            ranges: Default::default(),
+        });
+        dns.fakeip_catch_all = true;
+        let upstreams = through_proxy(dns);
+        let block = build_dns(
+            &upstreams,
+            upstreams.bootstrap(),
+            &DnsStrategy::PreferIpv4,
+            &HashSet::new(),
+            &[("geosite-category-ru", "direct")],
+            &[],
+        );
+        assert_eq!(
+            block["rules"],
+            json!([
+                { "query_type": ["A", "AAAA"], "server": "fakeip" },
+                { "rule_set": ["geosite-category-ru"], "server": "bootstrap" },
+            ])
+        );
+    }
+
+    #[test]
+    fn generated_config_resolves_bypassed_region_domains_directly() {
+        let mut settings = Settings::default();
+        settings.geo_routing.current_region = Some(GeoRegion::Ru);
+        settings
+            .geo_routing
+            .selected_region_modes
+            .insert(GeoRegion::Ru, RoutingMode::Bypass(GeoRegion::Ru));
+        let config = generate_config(
+            &test_profile(),
+            &settings,
+            &GeoAvailability::all(),
+            TEST_CLASH_PORT,
+        )
+        .unwrap();
+        assert_eq!(
+            config["dns"]["rules"],
+            json!([{ "rule_set": ["geosite-category-ru"], "server": "bootstrap" }])
+        );
     }
 
     #[test]
