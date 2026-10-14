@@ -85,7 +85,10 @@ pub(super) fn connect(
         drop(last_pruned);
         let cancelled = || !is_current_attempt(&slot, attempt_id);
         match crate::singbox::runner::start(&profile, &settings, &cancelled) {
-            Ok(handle) => {
+            Ok(crate::singbox::runner::StartedSingBox {
+                handle,
+                routing_fallback,
+            }) => {
                 let pid = handle.pid;
                 let stale_handle = {
                     let mut slot = lock_process_slot(&slot);
@@ -104,6 +107,7 @@ pub(super) fn connect(
                     pid,
                     profile_id: profile.id,
                     attempt_id,
+                    routing_fallback,
                 });
             }
             Err(_) if cancelled() => {}
@@ -136,6 +140,8 @@ pub(super) fn disconnect(model: &mut Model, shared: &DaemonShared) {
     model.active_profile_id = None;
     model.connecting_profile_id = None;
     model.singbox_pid = None;
+    model.routing_fallback = None;
+    model.region_download_deferred = false;
     model.traffic = TrafficStats::default();
     model.last_traffic_sample_at_ms = 0;
     model.traffic_request_id = 0;

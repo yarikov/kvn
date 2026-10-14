@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Widget, Wrap};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::model::{AppStatus, ConnectionState, Model};
-use crate::config::profile::GeoRegion;
+use crate::config::profile::{GeoRegion, RoutingMode};
 
 const RULE_SET_STALE_GRACE_MINUTES: u64 = 60;
 
@@ -228,11 +228,15 @@ impl<'a> Widget for StatusBar<'a> {
             right.push(("Auto".to_string(), self.model.theme.accent(), 0));
         }
         right.push((dns_label, self.model.theme.accent(), 1_u8));
-        right.push((
-            self.model.config.settings.geo_routing.mode().to_string(),
-            self.model.theme.accent(),
-            3,
-        ));
+        let routing_mode = self.model.config.settings.geo_routing.mode();
+        right.push(match self.model.routing_fallback {
+            Some(fallback) if routing_mode != RoutingMode::Global => (
+                format!("{routing_mode} → {fallback}"),
+                self.model.theme.error(),
+                3,
+            ),
+            _ => (routing_mode.to_string(), self.model.theme.accent(), 3),
+        });
         if let Some((label, style)) = rule_set_badge(self.model, chrono::Local::now()) {
             right.push((label, style, 2));
         }
@@ -550,6 +554,26 @@ mod tests {
         let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
         StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         insta::assert_snapshot!(buffer_to_string(&buf));
+    }
+
+    #[test]
+    fn status_bar_marks_the_global_fallback_of_a_regional_mode() {
+        let mut model = model_with_profiles(vec![Profile::new_vless(
+            "Alpha".to_string(),
+            "1.1.1.1".to_string(),
+            443,
+            "u1".to_string(),
+        )]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .config
+            .settings
+            .geo_routing
+            .set_mode(crate::config::profile::RoutingMode::Bypass(GeoRegion::Ru));
+        model.connection = ConnectionState::Connected;
+        model.active_profile_id = Some(model.config.profiles[0].id);
+        model.routing_fallback = Some(crate::config::profile::RoutingFallback::Global);
+        insta::assert_snapshot!(status_bar_styles(&model));
     }
 
     #[test]

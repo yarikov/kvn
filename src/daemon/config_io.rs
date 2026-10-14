@@ -570,6 +570,7 @@ mod tests {
                 pid: 42,
                 profile_id,
                 attempt_id: 0,
+                routing_fallback: None,
             },
         );
 
@@ -595,6 +596,7 @@ mod tests {
                 pid: 42,
                 profile_id,
                 attempt_id: 0,
+                routing_fallback: None,
             },
         );
 

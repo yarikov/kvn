@@ -55,7 +55,10 @@ pub enum Msg {
     Paste(String),
     Tick,
     Resize,
-    GeoUpdated(GeoResult),
+    GeoUpdated {
+        result: GeoResult,
+        region_ready: bool,
+    },
     GeoMetadataRefreshed {
         last_updated: Option<String>,
         last_checked_at: Option<chrono::DateTime<chrono::Local>>,
@@ -70,6 +73,7 @@ pub enum Msg {
         /// flow because the cursor may have moved since the connect was
         /// issued — attribution must not depend on the selection.
         profile_id: Uuid,
+        routing_fallback: Option<crate::config::profile::RoutingFallback>,
     },
     ConnectFailed {
         attempt_id: u64,
@@ -502,6 +506,8 @@ pub struct StateSnapshot {
     #[serde(default)]
     pub interface_settings_draft: Option<crate::config::profile::IconSet>,
     pub geo_updating: bool,
+    #[serde(default)]
+    pub routing_fallback: Option<crate::config::profile::RoutingFallback>,
     pub geo_last_updated: Option<String>,
     /// Last successful check of the active regional rule sets.
     #[serde(default)]

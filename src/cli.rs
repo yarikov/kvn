@@ -1816,6 +1816,7 @@ esac
             kill_switch_pending: None,
             interface_settings_draft: None,
             geo_updating: false,
+            routing_fallback: None,
             geo_last_updated: None,
             geo_last_checked_at: None,
             service_checked_at: Default::default(),

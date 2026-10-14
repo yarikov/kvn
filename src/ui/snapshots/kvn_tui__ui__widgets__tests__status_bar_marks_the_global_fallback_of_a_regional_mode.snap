@@ -1,0 +1,13 @@
+---
+source: src/ui/widgets.rs
+expression: status_bar_styles(&model)
+---
+ CONNECTED  Alpha                                                        DoH  Bypass RU → Global    (off) never 
+[113x1]
+--- styles ---
+aaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcccbbddddddddddddddddddbbeeeeeeeeeeeeeee
+a fg=Black bg=Green BOLD
+b fg=Gray bg=Rgb(14, 14, 14)
+c fg=Cyan bg=Rgb(14, 14, 14) BOLD
+d fg=Red bg=Rgb(14, 14, 14) BOLD
+e fg=Black bg=Red BOLD
