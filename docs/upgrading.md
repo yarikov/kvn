@@ -25,6 +25,15 @@ removed:
 | `C` | `Space i` (Settings › Interface) |
 | `a` | `Shift+A` |
 
+The configuration moves to schema v7. kvn converts it automatically the first
+time it loads it and keeps the previous file in `~/.config/kvn-tui/recovery/`:
+
+- The DNS strategy setting is removed from `dns` and from Settings › DNS. kvn
+  always answers IPv6 address lookups with no addresses, as `ipv4_only` did,
+  because the tunnel carries IPv4 only.
+
+An older kvn cannot read a v7 configuration.
+
 ## v0.34.0
 
 The configuration moves to schema v6. kvn converts it automatically the first

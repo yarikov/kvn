@@ -2,7 +2,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{ConfigDiagnostic, DnsConfig, DnsStrategy, GeoRouting};
+use super::dns::DnsStrategy;
+use super::{ConfigDiagnostic, DnsConfig, GeoRouting};
 
 /// Per-file on-disk log line limits.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]

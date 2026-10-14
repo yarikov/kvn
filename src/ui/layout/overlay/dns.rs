@@ -2,7 +2,6 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use crate::app::model::Model;
-use crate::config::profile::DnsStrategy;
 use crate::ui::layout::text::{fit_to_visual_width, visual_width};
 
 use super::popup::draw_selection_modal;
@@ -20,7 +19,7 @@ fn preset_label(name: &str) -> &str {
     }
 }
 
-/// Draw the DNS settings overlay: preset, strategy, and fake-IP selectors.
+/// Draw the DNS settings overlay: preset and fake-IP selectors.
 /// Custom presets are written in profiles.json and selected here.
 pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
     let dns = &model.config.settings.dns;
@@ -29,23 +28,11 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         .as_deref()
         .unwrap_or(&dns.current_preset);
     let preset_dirty = displayed_preset != dns.current_preset;
-    let strategy = model.dns_strategy_draft.as_ref().unwrap_or(&dns.strategy);
-    let strategy_dirty = model
-        .dns_strategy_draft
-        .as_ref()
-        .is_some_and(|draft| *draft != dns.strategy);
     let fakeip = model.dns_fakeip_draft.unwrap_or(dns.fakeip_enabled);
     let fakeip_dirty = model.dns_fakeip_draft.is_some() && fakeip != dns.fakeip_enabled;
     let preset_value = preset_label(displayed_preset);
-    let strategy_label = match strategy {
-        DnsStrategy::PreferIpv4 => "Prefer IPv4",
-        DnsStrategy::PreferIpv6 => "Prefer IPv6",
-        DnsStrategy::OnlyIpv4 => "IPv4 only",
-        DnsStrategy::OnlyIpv6 => "IPv6 only",
-    };
     let settings = [
         ("Preset", preset_value.to_string(), preset_dirty),
-        ("Strategy", strategy_label.to_string(), strategy_dirty),
         (
             "Fake-IP",
             if fakeip { "on" } else { "off" }.to_string(),
@@ -56,7 +43,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         .preset_names()
         .into_iter()
         .map(preset_label)
-        .chain(["Prefer IPv4", "IPv4 only", "on", "off"])
+        .chain(["on", "off"])
         .map(visual_width)
         .max()
         .unwrap_or(0);
@@ -127,7 +114,7 @@ mod tests {
         model.config.settings.dns.fakeip_enabled = true;
         model.dns_preset_draft = Some("system_local".to_string());
         model.overlay = Overlay::DnsSettings;
-        model.dns_selected = 2;
+        model.dns_selected = 1;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 }

@@ -262,10 +262,6 @@ mod tests {
             assert!(config.profiles.is_empty());
             assert_eq!(config.settings.tun_interface, "kvn0");
             assert_eq!(
-                config.settings.dns.strategy,
-                profile::DnsStrategy::PreferIpv4
-            );
-            assert_eq!(
                 config.settings.geo_routing.auto_update,
                 profile::GeoAutoUpdate::Every7d
             );

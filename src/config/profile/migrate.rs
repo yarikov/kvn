@@ -1,10 +1,11 @@
 use chrono::{Local, NaiveDate};
 
+use super::dns::DnsStrategy;
 use super::schedule::next_update_window_date;
 use super::settings::default_tun_interface;
 use super::{
-    CURRENT_SCHEMA_VERSION, Config, ConnectivityProbeConfig, DnsStrategy, GeoAutoUpdate,
-    ProtocolConfig, SubscriptionAutoUpdate, TransportConfig,
+    CURRENT_SCHEMA_VERSION, Config, ConnectivityProbeConfig, GeoAutoUpdate, ProtocolConfig,
+    SubscriptionAutoUpdate, TransportConfig,
 };
 
 impl Config {
@@ -69,6 +70,10 @@ impl Config {
             self.migrate_v5_to_v6();
             self.schema_version = 6;
         }
+        if self.schema_version == 6 && target_version >= 7 {
+            self.migrate_v6_to_v7();
+            self.schema_version = 7;
+        }
         debug_assert_eq!(self.schema_version, target_version);
         Ok(())
     }
@@ -77,9 +82,14 @@ impl Config {
     /// `Settings.dns.strategy`. Idempotent.
     fn migrate_v0_to_v1(&mut self) {
         if let Some(legacy) = self.settings.legacy_dns_strategy.take()
-            && self.settings.dns.strategy == DnsStrategy::default()
+            && self
+                .settings
+                .dns
+                .legacy_strategy
+                .as_ref()
+                .is_none_or(|strategy| *strategy == DnsStrategy::default())
         {
-            self.settings.dns.strategy = legacy;
+            self.settings.dns.legacy_strategy = Some(legacy);
         }
     }
 
@@ -136,9 +146,22 @@ impl Config {
 
     fn migrate_v5_to_v6(&mut self) {
         self.settings.dns.migrate_legacy_servers();
-        self.settings.dns.strategy = self.settings.dns.strategy.ipv4_counterpart();
+        self.settings.dns.legacy_strategy =
+            self.settings
+                .dns
+                .legacy_strategy
+                .as_ref()
+                .map(|strategy| match strategy {
+                    DnsStrategy::PreferIpv4 | DnsStrategy::PreferIpv6 => DnsStrategy::PreferIpv4,
+                    DnsStrategy::OnlyIpv4 | DnsStrategy::OnlyIpv6 => DnsStrategy::OnlyIpv4,
+                });
         self.move_flat_vless_transports();
         self.move_websocket_path_early_data();
+    }
+
+    fn migrate_v6_to_v7(&mut self) {
+        self.settings.legacy_dns_strategy = None;
+        self.settings.dns.legacy_strategy = None;
     }
 
     fn move_websocket_path_early_data(&mut self) {
@@ -178,6 +201,7 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
+    use super::DnsStrategy;
     use crate::config::profile::*;
     use crate::test_helpers::vless_cfg;
     use uuid::Uuid;
@@ -252,10 +276,13 @@ mod tests {
         };
         // Legacy field set, new field at default → promote.
         cfg.settings.legacy_dns_strategy = Some(DnsStrategy::OnlyIpv4);
-        cfg.settings.dns.strategy = DnsStrategy::default(); // PreferIpv4
-        cfg.migrate().unwrap();
-        assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);
-        assert_eq!(cfg.settings.dns.strategy, DnsStrategy::OnlyIpv4);
+        cfg.settings.dns.legacy_strategy = None;
+        cfg.migrate_to(1).unwrap();
+        assert_eq!(cfg.schema_version, 1);
+        assert_eq!(
+            cfg.settings.dns.legacy_strategy,
+            Some(DnsStrategy::OnlyIpv4)
+        );
         assert!(cfg.settings.legacy_dns_strategy.is_none());
     }
 
@@ -271,10 +298,10 @@ mod tests {
                 schema_version: 5,
                 ..Config::default()
             };
-            cfg.settings.dns.strategy = before.clone();
+            cfg.settings.dns.legacy_strategy = Some(before.clone());
             cfg.migrate_to(6).unwrap();
             assert_eq!(cfg.schema_version, 6);
-            assert_eq!(cfg.settings.dns.strategy, after, "{before:?}");
+            assert_eq!(cfg.settings.dns.legacy_strategy, Some(after), "{before:?}");
 
             let once = cfg.clone();
             cfg.migrate_to(6).unwrap();
@@ -345,11 +372,14 @@ mod tests {
             schema_version: 0,
             ..Config::default()
         };
-        cfg.settings.dns.strategy = DnsStrategy::OnlyIpv4;
+        cfg.settings.dns.legacy_strategy = Some(DnsStrategy::OnlyIpv4);
         cfg.settings.legacy_dns_strategy = Some(DnsStrategy::default());
-        cfg.migrate().unwrap();
+        cfg.migrate_to(1).unwrap();
         // New field wins.
-        assert_eq!(cfg.settings.dns.strategy, DnsStrategy::OnlyIpv4);
+        assert_eq!(
+            cfg.settings.dns.legacy_strategy,
+            Some(DnsStrategy::OnlyIpv4)
+        );
     }
 
     #[test]
@@ -359,10 +389,13 @@ mod tests {
             ..Config::default()
         };
         cfg.settings.legacy_dns_strategy = Some(DnsStrategy::OnlyIpv6);
-        cfg.settings.dns.strategy = DnsStrategy::OnlyIpv4;
+        cfg.settings.dns.legacy_strategy = Some(DnsStrategy::OnlyIpv4);
         cfg.migrate().unwrap();
         // No promotion when schema_version != 0.
-        assert_eq!(cfg.settings.dns.strategy, DnsStrategy::OnlyIpv4);
+        assert_eq!(
+            cfg.settings.dns.legacy_strategy,
+            Some(DnsStrategy::OnlyIpv4)
+        );
     }
 
     #[test]
@@ -372,11 +405,14 @@ mod tests {
             ..Config::default()
         };
         cfg.settings.legacy_dns_strategy = Some(DnsStrategy::OnlyIpv4);
-        cfg.migrate().unwrap();
+        cfg.migrate_to(1).unwrap();
         let after_first = cfg.clone();
-        cfg.migrate().unwrap();
+        cfg.migrate_to(1).unwrap();
         assert_eq!(cfg.schema_version, after_first.schema_version);
-        assert_eq!(cfg.settings.dns.strategy, after_first.settings.dns.strategy);
+        assert_eq!(
+            cfg.settings.dns.legacy_strategy,
+            after_first.settings.dns.legacy_strategy
+        );
     }
 
     fn vless_profile_with_legacy_fingerprint(fp: &str) -> Profile {
@@ -495,6 +531,25 @@ mod tests {
     }
 
     #[test]
+    fn migrate_v6_drops_the_dns_strategy() {
+        for strategy in ["prefer_ipv4", "ipv4_only", "prefer_ipv6", "ipv6_only"] {
+            let json = format!(
+                r#"{{ "schema_version": 6, "settings": {{ "dns_strategy": "{strategy}", "dns": {{ "strategy": "{strategy}" }} }} }}"#
+            );
+            let mut cfg: Config = serde_json::from_str(&json).unwrap();
+
+            cfg.migrate_to(7).unwrap();
+
+            assert_eq!(cfg.schema_version, 7);
+            assert!(cfg.settings.legacy_dns_strategy.is_none(), "{strategy}");
+            assert_eq!(cfg.settings.dns, DnsConfig::default(), "{strategy}");
+            let saved = serde_json::to_value(&cfg).unwrap();
+            assert!(saved["settings"].get("dns_strategy").is_none());
+            assert!(saved["settings"]["dns"].get("strategy").is_none());
+        }
+    }
+
+    #[test]
     fn migrate_v3_to_v4_nests_legacy_log_level() {
         let mut cfg = Config {
             schema_version: 3,
@@ -561,7 +616,8 @@ mod tests {
             .push(vless_profile_with_legacy_fingerprint("chrome"));
         cfg.migrate().unwrap();
         assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);
-        assert_eq!(cfg.settings.dns.strategy, DnsStrategy::OnlyIpv4);
+        assert!(cfg.settings.legacy_dns_strategy.is_none());
+        assert!(cfg.settings.dns.legacy_strategy.is_none());
         assert!(cfg.settings.allow_insecure_http_subscriptions);
         let vc = vless_cfg(&cfg.profiles[0]);
         assert_eq!(vc.tls.utls_fingerprint.as_deref(), Some("chrome"));

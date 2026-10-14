@@ -204,9 +204,8 @@ The tunnel carries IPv4 only. While kvn is connected:
 - **Direct traffic is IPv4 too**: Bypass and Only destinations and `direct`
   service routes cannot be reached over IPv6.
 
-Settings › DNS therefore offers only the IPv4 strategies. `Prefer IPv4` (the
-default) still hands programs IPv6 addresses they cannot use, so they try them
-first and fall back; `IPv4 only` stops that and avoids the failed attempts.
+kvn therefore answers IPv6 address lookups with no addresses, so programs do
+not try IPv6 addresses they cannot use.
 
 ## What the network still sees
 

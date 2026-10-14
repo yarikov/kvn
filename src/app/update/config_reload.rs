@@ -364,11 +364,11 @@ mod tests {
 
     #[test]
     fn connection_settings_comparison_covers_singbox_inputs() {
-        use crate::config::profile::{DnsStrategy, GeoRegion, RoutedService, ServiceRoute};
+        use crate::config::profile::{GeoRegion, RoutedService, ServiceRoute};
 
         let original = crate::config::profile::Settings::default();
         let mut changed = original.clone();
-        changed.dns.strategy = DnsStrategy::OnlyIpv4;
+        changed.dns.fakeip_enabled = true;
         assert!(connection_settings_changed(&original, &changed));
 
         let mut changed = original.clone();

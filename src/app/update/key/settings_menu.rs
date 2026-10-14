@@ -326,7 +326,6 @@ pub(in crate::app::update) fn open_dns_settings(model: &mut Model) {
     model.overlay = Overlay::DnsSettings;
     model.dns_selected = 0;
     model.dns_preset_draft = None;
-    model.dns_strategy_draft = None;
     model.dns_fakeip_draft = None;
 }
 
@@ -338,9 +337,7 @@ mod tests {
     use crate::app::update::key::handle_key;
     use crate::app::update::key::sources::handle_sources;
     use crate::app::update::update;
-    use crate::config::profile::{
-        DnsStrategy, IconSet, Profile, RoutedService, RoutingMode, ServiceRoute,
-    };
+    use crate::config::profile::{IconSet, Profile, RoutedService, RoutingMode, ServiceRoute};
     use crate::test_helpers::*;
 
     #[test]
@@ -665,7 +662,6 @@ mod tests {
         model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         model.dns_selected = 2;
         model.dns_preset_draft = Some("google_dot".to_string());
-        model.dns_strategy_draft = Some(DnsStrategy::OnlyIpv4);
         model.dns_fakeip_draft = Some(true);
 
         handle_key(&mut model, key('d'));
@@ -673,7 +669,6 @@ mod tests {
         assert_eq!(model.overlay, Overlay::DnsSettings);
         assert_eq!(model.dns_selected, 0);
         assert_eq!(model.dns_preset_draft, None);
-        assert_eq!(model.dns_strategy_draft, None);
         assert_eq!(model.dns_fakeip_draft, None);
     }
 
@@ -812,12 +807,10 @@ mod tests {
         dns.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         handle_key(&mut dns, key('d'));
         dns.dns_preset_draft = Some("google_dot".to_string());
-        dns.dns_strategy_draft = Some(DnsStrategy::OnlyIpv4);
         dns.dns_fakeip_draft = Some(true);
         handle_key(&mut dns, KeyEvent::from(KeyCode::Backspace));
         assert_eq!(dns.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
         assert_eq!(dns.dns_preset_draft, None);
-        assert_eq!(dns.dns_strategy_draft, None);
         assert_eq!(dns.dns_fakeip_draft, None);
         assert_eq!(dns.settings_menu_selected, 1);
 

@@ -8,12 +8,12 @@ expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ┌ Profiles ───────┌───────────────────────────────┐──────────────────┐
 │ └ Alpha         │        Settings › DNS         │less  1.1.1.1:443 │
 │                 │                               │                  │
-│                 │ Preset   ‹ Cloudflare DoH ›   │                  │
-│                 │ Strategy ‹ Prefer IPv4 ›      │                  │
-│                 │ Fake-IP  ‹ off ›              │                  │
+│                 │ Preset  ‹ Cloudflare DoH ›    │                  │
+│                 │ Fake-IP ‹ off ›               │                  │
 │                 │                               │                  │
 │                 │ 󰌑 apply · q/󱊷 close · ⌫ back  │                  │
 │                 └───────────────────────────────┘                  │
+│                                                                    │
 │                                                                    │
 └────────────────────────────────────────────────────────────────────┘
  DISCONNECTED                                              DoH  Global
