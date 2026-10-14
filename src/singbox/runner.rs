@@ -428,8 +428,8 @@ mod tests {
         let mut written = Vec::new();
         for region in [GeoRegion::Ru, GeoRegion::Cn, GeoRegion::Ir] {
             let (geoip, geosite) = gm.local_paths(region).unwrap();
-            fs::write(&geoip, b"x").unwrap();
-            fs::write(&geosite, b"x").unwrap();
+            fs::write(&geoip, crate::test_helpers::RULE_SET_BYTES).unwrap();
+            fs::write(&geosite, crate::test_helpers::RULE_SET_BYTES).unwrap();
             written.push(region);
 
             let geo = collect_geo_availability();
@@ -453,7 +453,7 @@ mod tests {
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = crate::geo::GeoManager::new().unwrap();
         let (geoip_ru, _) = gm.local_paths(GeoRegion::Ru).unwrap();
-        fs::write(&geoip_ru, b"x").unwrap();
+        fs::write(&geoip_ru, crate::test_helpers::RULE_SET_BYTES).unwrap();
         // geosite missing → Ru must stay absent.
         let geo = collect_geo_availability();
         assert!(!geo.regions.contains_key(&GeoRegion::Ru));
@@ -474,14 +474,14 @@ mod tests {
                 .services
                 .contains_key(&RoutedService::Steam)
         );
-        fs::write(&paths[0].1, b"x").unwrap();
+        fs::write(&paths[0].1, crate::test_helpers::RULE_SET_BYTES).unwrap();
         assert!(
             !collect_geo_availability()
                 .services
                 .contains_key(&RoutedService::Steam),
             "geoip missing"
         );
-        fs::write(&paths[1].1, b"x").unwrap();
+        fs::write(&paths[1].1, crate::test_helpers::RULE_SET_BYTES).unwrap();
         assert_eq!(
             collect_geo_availability()
                 .services

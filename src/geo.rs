@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -12,6 +13,19 @@ use crate::config::profile::{GeoRegion, RoutedService};
 
 const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 const GEO_BATCH_TIMEOUT: Duration = Duration::from_mins(3);
+const RULE_SET_MAGIC: &[u8] = b"SRS";
+
+fn is_rule_set(bytes: &[u8]) -> bool {
+    bytes.len() > RULE_SET_MAGIC.len() && bytes.starts_with(RULE_SET_MAGIC)
+}
+
+fn rule_set_usable(path: &Path) -> bool {
+    let mut header = [0u8; 4];
+    fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .is_ok()
+        && is_rule_set(&header)
+}
 
 /// One downloadable rule-set file (geoip *or* geosite) for a region.
 pub(crate) struct GeoAsset {
@@ -328,8 +342,8 @@ impl GeoManager {
         match region_assets(region) {
             None => true,
             Some(a) => {
-                self.geo_dir.join(a.geoip.filename).exists()
-                    && self.geo_dir.join(a.geosite.filename).exists()
+                rule_set_usable(&self.geo_dir.join(a.geoip.filename))
+                    && rule_set_usable(&self.geo_dir.join(a.geosite.filename))
             }
         }
     }
@@ -352,7 +366,7 @@ impl GeoManager {
     pub fn has_service_databases(&self, service: RoutedService) -> bool {
         self.service_local_paths(service)
             .iter()
-            .all(|(_, path)| path.exists())
+            .all(|(_, path)| rule_set_usable(path))
     }
 
     /// Check and, if stale or missing, download `service`'s rule-sets.
@@ -383,21 +397,16 @@ impl GeoManager {
         let mut first_err: Option<anyhow::Error> = None;
         for asset in assets {
             let dest = self.geo_dir.join(asset.filename);
-            let needed = if dest.exists() {
-                match self.check_single(
-                    asset.url,
-                    saved_etags.get(asset.filename).map(String::as_str),
-                ) {
-                    Ok(n) => n,
-                    Err(e) => {
-                        if first_err.is_none() {
-                            first_err = Some(e);
-                        }
-                        continue;
+            let needed = match self
+                .asset_needs_download(asset, saved_etags.get(asset.filename).map(String::as_str))
+            {
+                Ok(n) => n,
+                Err(e) => {
+                    if first_err.is_none() {
+                        first_err = Some(e);
                     }
+                    continue;
                 }
-            } else {
-                true
             };
             if !needed {
                 continue;
@@ -651,14 +660,7 @@ impl GeoManager {
     fn check_update_available(&self, assets: &RegionAssets) -> Result<(bool, bool)> {
         let meta = self.load_metadata().unwrap_or_default();
         let needs = |asset: &GeoAsset| -> Result<bool> {
-            let local = self.geo_dir.join(asset.filename);
-            if !local.exists() {
-                return Ok(true);
-            }
-            self.check_single(
-                asset.url,
-                meta.etags.get(asset.filename).map(String::as_str),
-            )
+            self.asset_needs_download(asset, meta.etags.get(asset.filename).map(String::as_str))
         };
         Ok((needs(&assets.geoip)?, needs(&assets.geosite)?))
     }
@@ -776,6 +778,13 @@ impl GeoManager {
         Ok(())
     }
 
+    fn asset_needs_download(&self, asset: &GeoAsset, saved_etag: Option<&str>) -> Result<bool> {
+        if !rule_set_usable(&self.geo_dir.join(asset.filename)) {
+            return Ok(true);
+        }
+        self.check_single(asset.url, saved_etag)
+    }
+
     fn check_single(&self, url: &str, saved_etag: Option<&str>) -> Result<bool> {
         let timeout = self.request_timeout()?;
         let resp = self
@@ -826,6 +835,10 @@ impl GeoManager {
             .into_body()
             .read_to_vec()
             .context("Failed to read response body")?;
+        anyhow::ensure!(
+            is_rule_set(&bytes),
+            "{url} did not return a sing-box rule-set"
+        );
         self.write_atomic(dest, &bytes)?;
         Ok(etag)
     }
@@ -1009,12 +1022,12 @@ mod tests {
         assert!(paths.iter().all(|(_, p)| p.starts_with(&gm.geo_dir)));
 
         assert!(!gm.has_service_databases(RoutedService::Steam));
-        fs::write(&paths[0].1, b"x").unwrap();
+        fs::write(&paths[0].1, crate::test_helpers::RULE_SET_BYTES).unwrap();
         assert!(
             !gm.has_service_databases(RoutedService::Steam),
             "only geosite present"
         );
-        fs::write(&paths[1].1, b"x").unwrap();
+        fs::write(&paths[1].1, crate::test_helpers::RULE_SET_BYTES).unwrap();
         assert!(gm.has_service_databases(RoutedService::Steam));
     }
 
@@ -1090,7 +1103,7 @@ mod tests {
         let gm = GeoManager::new().unwrap();
         let base = spawn_stub_http(4, |_, path| {
             if path == "/geoip" {
-                (200, Some("etag-ok".to_string()), b"AAA".to_vec())
+                (200, Some("etag-ok".to_string()), b"SRS\x01AAA".to_vec())
             } else {
                 (500, None, Vec::new())
             }
@@ -1118,18 +1131,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = GeoManager::new().unwrap();
-        let base = spawn_stub_http(8, |_, _| (200, Some("same".to_string()), b"DATA".to_vec()));
+        let base = spawn_stub_http(8, |_, _| {
+            (200, Some("same".to_string()), b"SRS\x01DATA".to_vec())
+        });
         let assets = stub_assets(&base);
 
         let refs: Vec<&GeoAsset> = assets.iter().collect();
         assert!(gm.update_assets_if_needed(&refs).unwrap());
         assert_eq!(
             fs::read(gm.geo_dir.join("geoip-stub.srs")).unwrap(),
-            b"DATA"
+            b"SRS\x01DATA"
         );
         assert_eq!(
             fs::read(gm.geo_dir.join("geosite-stub.srs")).unwrap(),
-            b"DATA"
+            b"SRS\x01DATA"
         );
         // Second run: files exist and ETags match — HEAD only, no downloads.
         assert!(!gm.update_assets_if_needed(&refs).unwrap());
@@ -1148,7 +1163,7 @@ mod tests {
         let base = spawn_stub_http(2, move |_, _| {
             let _ = entered_tx.send(());
             let _ = release_rx.lock().unwrap().recv();
-            (200, Some("etag".to_string()), b"DATA".to_vec())
+            (200, Some("etag".to_string()), b"SRS\x01DATA".to_vec())
         });
 
         std::thread::scope(|scope| {
@@ -1193,7 +1208,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = GeoManager::new().unwrap();
-        let base = spawn_stub_http(2, |_, _| (200, Some("e1".to_string()), b"NEW".to_vec()));
+        let base = spawn_stub_http(2, |_, _| {
+            (200, Some("e1".to_string()), b"SRS\x01NEW".to_vec())
+        });
         let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
         // First asset: file present, but its HEAD check fails at transport
         // level (closed port). Second asset: file missing, live server.
@@ -1207,7 +1224,7 @@ mod tests {
                 url: leak(format!("{base}/geosite")),
             },
         ];
-        fs::write(gm.geo_dir.join("geoip-stub.srs"), b"OLD").unwrap();
+        fs::write(gm.geo_dir.join("geoip-stub.srs"), b"SRS\x01OLD").unwrap();
 
         let refs: Vec<&GeoAsset> = assets.iter().collect();
         // The check error is surfaced…
@@ -1216,13 +1233,114 @@ mod tests {
         // …but the missing sibling was still fetched this same cycle.
         assert_eq!(
             fs::read(gm.geo_dir.join("geosite-stub.srs")).unwrap(),
-            b"NEW"
+            b"SRS\x01NEW"
         );
         let meta = gm.load_metadata().unwrap();
         assert_eq!(
             meta.etags.get("geosite-stub.srs").map(String::as_str),
             Some("e1")
         );
+    }
+
+    const CAPTIVE_PORTAL_PAGE: &[u8] = b"<html>Sign in to the network</html>";
+
+    fn with_corrupt_cache_and_unchanged_etags(
+        refresh: impl FnOnce(&GeoManager, &[GeoAsset]) -> Result<bool>,
+    ) {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
+        let gm = GeoManager::new().unwrap();
+        let base = spawn_stub_http(4, |_, _| {
+            (200, Some("same".to_string()), b"SRS\x01NEW".to_vec())
+        });
+        let assets = stub_assets(&base);
+        for asset in &assets {
+            fs::write(gm.geo_dir.join(asset.filename), CAPTIVE_PORTAL_PAGE).unwrap();
+        }
+        gm.update_metadata(|meta| {
+            for asset in &assets {
+                meta.etags
+                    .insert(asset.filename.to_string(), "same".to_string());
+            }
+            true
+        })
+        .unwrap();
+
+        assert!(refresh(&gm, &assets).unwrap());
+        for asset in &assets {
+            assert_eq!(
+                fs::read(gm.geo_dir.join(asset.filename)).unwrap(),
+                b"SRS\x01NEW"
+            );
+        }
+    }
+
+    #[test]
+    fn region_refresh_replaces_a_corrupt_cache_despite_an_unchanged_etag() {
+        with_corrupt_cache_and_unchanged_etags(|gm, assets| {
+            let assets = RegionAssets {
+                geoip: GeoAsset { ..assets[0] },
+                geosite: GeoAsset { ..assets[1] },
+            };
+            gm.update_region_assets(GeoRegion::Ru, &assets)
+                .map(|result| matches!(result, RegionUpdate::Updated { .. }))
+        });
+    }
+
+    #[test]
+    fn service_refresh_replaces_a_corrupt_cache_despite_an_unchanged_etag() {
+        with_corrupt_cache_and_unchanged_etags(|gm, assets| {
+            let refs: Vec<&GeoAsset> = assets.iter().collect();
+            gm.update_service_assets(RoutedService::Steam, &refs)
+        });
+    }
+
+    #[test]
+    fn a_response_without_the_rule_set_header_is_not_written() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
+        let gm = GeoManager::new().unwrap();
+        let base = spawn_stub_http(2, |_, _| {
+            (
+                200,
+                Some("portal".to_string()),
+                CAPTIVE_PORTAL_PAGE.to_vec(),
+            )
+        });
+        let assets = stub_assets(&base);
+        let geoip = gm.geo_dir.join(assets[0].filename);
+        fs::write(&geoip, crate::test_helpers::RULE_SET_BYTES).unwrap();
+
+        let err = gm
+            .update_assets_if_needed(&[&assets[0]])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("geoip-stub.srs"), "{err}");
+        assert_eq!(
+            fs::read(&geoip).unwrap(),
+            crate::test_helpers::RULE_SET_BYTES
+        );
+        assert!(gm.load_metadata().unwrap().etags.is_empty());
+    }
+
+    #[test]
+    fn a_file_without_the_rule_set_header_does_not_count_as_downloaded() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
+        let gm = GeoManager::new().unwrap();
+        let (geoip, geosite) = gm.local_paths(GeoRegion::Ru).unwrap();
+        fs::write(&geoip, crate::test_helpers::RULE_SET_BYTES).unwrap();
+        fs::write(&geosite, CAPTIVE_PORTAL_PAGE).unwrap();
+        assert!(!gm.has_databases(GeoRegion::Ru));
+
+        for (_, path) in gm.service_local_paths(RoutedService::Steam) {
+            fs::write(path, b"SRS").unwrap();
+        }
+        assert!(!gm.has_service_databases(RoutedService::Steam));
     }
 
     #[test]
@@ -1487,13 +1605,13 @@ mod tests {
             let _ = fs::remove_file(&geosite);
 
             assert!(!gm.has_databases(region), "missing files: {:?}", region);
-            fs::write(&geoip, b"x").unwrap();
+            fs::write(&geoip, crate::test_helpers::RULE_SET_BYTES).unwrap();
             assert!(
                 !gm.has_databases(region),
                 "only geoip present: {:?}",
                 region
             );
-            fs::write(&geosite, b"x").unwrap();
+            fs::write(&geosite, crate::test_helpers::RULE_SET_BYTES).unwrap();
             assert!(gm.has_databases(region), "both present: {:?}", region);
 
             let _ = fs::remove_file(&geoip);

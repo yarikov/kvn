@@ -422,6 +422,11 @@ Settings › Routing while connected downloads its files and reconnects
 automatically. Files that were missing when a connection started are
 downloaded once it is up, but take effect only on the next connection.
 
+A downloaded file is kept only when it is a sing-box rule-set: a captive
+portal or error page is rejected and the previous file stays. A damaged
+rule-set file counts as missing and is downloaded again on the next update,
+even when the server reports it unchanged.
+
 ## Themes and logging
 
 Open **Settings › Interface** (`Space i`) and change **Theme** to choose one of
