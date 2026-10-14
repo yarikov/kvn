@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::dns::DnsStrategy;
-use super::{ConfigDiagnostic, DnsConfig, GeoRouting};
+use super::{ConfigDiagnostic, DnsConfig, GeoRouting, RoutingMode};
 
 /// Per-file on-disk log line limits.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
@@ -256,6 +256,12 @@ fn is_safe_slug_char(c: char) -> bool {
 }
 
 impl Settings {
+    pub fn with_global_routing(&self) -> Self {
+        let mut settings = self.clone();
+        settings.geo_routing.set_mode(RoutingMode::Global);
+        settings
+    }
+
     pub fn for_this_desktop() -> Self {
         Self {
             icons: IconSet::for_this_desktop(),

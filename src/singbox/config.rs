@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use crate::config::profile::{
     ActiveDns, DnsRule, DnsServer, FINALMASK_PARAM, FakeIpServer, GeoRegion, NaiveConfig, Profile,
-    ProtocolConfig, RoutedService, RoutingMode, ServiceRoute, Settings, SocksConfig, SocksVersion,
-    read_stream_finalmask,
+    ProtocolConfig, RoutedService, RoutingFallback, RoutingMode, ServiceRoute, Settings,
+    SocksConfig, SocksVersion, read_stream_finalmask,
 };
 use crate::singbox::outbound::{
     build_anytls_outbound, build_http_outbound, build_hysteria2_outbound, build_naive_outbound,
@@ -34,6 +34,20 @@ pub struct GeoAvailability {
 impl GeoAvailability {
     pub fn get(&self, region: GeoRegion) -> Option<&(PathBuf, PathBuf)> {
         self.regions.get(&region)
+    }
+
+    pub fn lacks_region_rule_sets(&self, routing_mode: &RoutingMode) -> bool {
+        match routing_mode {
+            RoutingMode::Global => false,
+            RoutingMode::Bypass(region) | RoutingMode::Only(region) => {
+                crate::geo::region_assets(*region).is_some() && self.get(*region).is_none()
+            }
+        }
+    }
+
+    pub fn routing_fallback(&self, routing_mode: RoutingMode) -> Option<RoutingFallback> {
+        self.lacks_region_rule_sets(&routing_mode)
+            .then(|| RoutingFallback::for_mode(routing_mode))
     }
 
     /// All rule-sets available with dummy paths under `/geo/`, for tests.
@@ -87,6 +101,33 @@ pub fn generate_test_config(profile: &Profile, socks_port: u16) -> anyhow::Resul
 /// Generate a complete sing-box JSON configuration from a profile.
 /// Uses the sing-box 1.14+ format.
 pub fn generate_config(
+    profile: &Profile,
+    settings: &Settings,
+    geo: &GeoAvailability,
+    clash_api_port: u16,
+    fallback: Option<RoutingFallback>,
+) -> anyhow::Result<Value> {
+    match fallback {
+        Some(RoutingFallback::Global) => build_config(
+            profile,
+            &settings.with_global_routing(),
+            geo,
+            clash_api_port,
+        ),
+        Some(RoutingFallback::Direct) => build_config(profile, settings, geo, clash_api_port),
+        None => {
+            let routing_mode = settings.geo_routing.mode();
+            if geo.lacks_region_rule_sets(&routing_mode) {
+                anyhow::bail!(
+                    "{routing_mode} routing needs its region rule-sets, which are not downloaded"
+                );
+            }
+            build_config(profile, settings, geo, clash_api_port)
+        }
+    }
+}
+
+fn build_config(
     profile: &Profile,
     settings: &Settings,
     geo: &GeoAvailability,
@@ -943,6 +984,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
 
@@ -963,6 +1005,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         assert_eq!(config["log"]["level"].as_str(), Some("info"));
@@ -978,6 +1021,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         assert_eq!(config["log"]["level"].as_str(), Some("debug"));
@@ -993,6 +1037,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         assert_eq!(config["log"]["level"].as_str(), Some("info"));
@@ -1007,6 +1052,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -1022,7 +1068,7 @@ mod tests {
         let settings = Settings::default();
         for port in [31234u16, 45678u16] {
             let config =
-                generate_config(&profile, &settings, &GeoAvailability::all(), port).unwrap();
+                generate_config(&profile, &settings, &GeoAvailability::all(), port, None).unwrap();
             assert_eq!(
                 config["experimental"]["clash_api"]["external_controller"],
                 format!("127.0.0.1:{port}")
@@ -1039,6 +1085,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         let controller = config["experimental"]["clash_api"]["external_controller"]
@@ -1992,6 +2039,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         let outbounds = config["outbounds"].as_array().unwrap();
@@ -2609,6 +2657,7 @@ mod tests {
             &Settings::default(),
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         let rule = &config["dns"]["rules"][0];
@@ -2719,6 +2768,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -2807,6 +2857,7 @@ mod tests {
                 &settings,
                 &GeoAvailability::all(),
                 TEST_CLASH_PORT,
+                None,
             )
             .unwrap();
             config["dns"].get("rules").is_some()
@@ -2824,6 +2875,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -2842,6 +2894,7 @@ mod tests {
             &Settings::default(),
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -2863,6 +2916,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         assert!(
@@ -2884,6 +2938,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         assert_eq!(config["dns"]["final"], "quad9");
@@ -2911,6 +2966,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         let servers = config["dns"]["servers"].as_array().unwrap();
@@ -2971,50 +3027,80 @@ mod tests {
         assert_eq!(rule_sets.len(), 2);
     }
 
-    // ---- Geo availability missing: rule_sets must stay empty ----
-
     #[test]
-    fn build_route_bypass_ru_without_geo_emits_no_rule_sets() {
-        let (_route, rule_sets) = build_route(
-            &RoutingMode::Bypass(GeoRegion::Ru),
-            default_resolver(),
-            &GeoAvailability::default(),
-            &no_services(),
-        );
-        assert!(rule_sets.is_empty());
+    fn generate_config_refuses_a_regional_mode_without_its_rule_sets() {
+        for mode in [
+            RoutingMode::Bypass(GeoRegion::Ru),
+            RoutingMode::Only(GeoRegion::Ru),
+        ] {
+            let mut settings = Settings::default();
+            settings.geo_routing.set_region(GeoRegion::Ru);
+            settings.geo_routing.set_mode(mode);
+            let error = generate_config(
+                &test_profile(),
+                &settings,
+                &GeoAvailability::default(),
+                TEST_CLASH_PORT,
+                None,
+            )
+            .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                format!("{mode} routing needs its region rule-sets, which are not downloaded")
+            );
+        }
     }
 
     #[test]
-    fn build_route_only_cn_without_geo_emits_no_rule_sets() {
-        let (_route, rule_sets) = build_route(
-            &RoutingMode::Only(GeoRegion::Cn),
-            default_resolver(),
-            &GeoAvailability::default(),
-            &no_services(),
+    fn a_regional_mode_without_its_files_falls_back_by_its_own_default() {
+        let missing = GeoAvailability::default();
+        assert_eq!(
+            missing.routing_fallback(RoutingMode::Bypass(GeoRegion::Cn)),
+            Some(RoutingFallback::Global)
         );
-        assert!(rule_sets.is_empty());
+        assert_eq!(
+            missing.routing_fallback(RoutingMode::Only(GeoRegion::Ir)),
+            Some(RoutingFallback::Direct)
+        );
+        assert_eq!(missing.routing_fallback(RoutingMode::Global), None);
+        assert_eq!(
+            missing.routing_fallback(RoutingMode::Only(GeoRegion::Global)),
+            None
+        );
+        assert_eq!(
+            GeoAvailability::all().routing_fallback(RoutingMode::Only(GeoRegion::Ir)),
+            None
+        );
     }
 
     #[test]
-    fn build_route_bypass_ir_without_geo_emits_no_rule_sets() {
-        let (_route, rule_sets) = build_route(
-            &RoutingMode::Bypass(GeoRegion::Ir),
-            default_resolver(),
-            &GeoAvailability::default(),
-            &no_services(),
-        );
-        assert!(rule_sets.is_empty());
-    }
-
-    #[test]
-    fn build_route_only_ir_without_geo_emits_no_rule_sets() {
-        let (_route, rule_sets) = build_route(
-            &RoutingMode::Only(GeoRegion::Ir),
-            default_resolver(),
-            &GeoAvailability::default(),
-            &no_services(),
-        );
-        assert!(rule_sets.is_empty());
+    fn fallback_config_routes_everything_by_the_fallback() {
+        for (mode, fallback, final_outbound) in [
+            (
+                RoutingMode::Bypass(GeoRegion::Ru),
+                RoutingFallback::Global,
+                "proxy",
+            ),
+            (
+                RoutingMode::Only(GeoRegion::Ru),
+                RoutingFallback::Direct,
+                "direct",
+            ),
+        ] {
+            let mut settings = Settings::default();
+            settings.geo_routing.set_region(GeoRegion::Ru);
+            settings.geo_routing.set_mode(mode);
+            let config = generate_config(
+                &test_profile(),
+                &settings,
+                &GeoAvailability::default(),
+                TEST_CLASH_PORT,
+                Some(fallback),
+            )
+            .unwrap();
+            assert_eq!(config["route"]["final"], final_outbound);
+            assert!(config["route"].get("rule_set").is_none());
+        }
     }
 
     // ---- Per-service routing overrides ----
@@ -3190,6 +3276,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         let tags: Vec<&str> = config["route"]["rule_set"]
@@ -3211,6 +3298,7 @@ mod tests {
             &settings,
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
+            None,
         )
         .unwrap();
         assert!(config["route"].get("rule_set").is_none());

@@ -20,7 +20,8 @@ pub(in crate::app::update) fn on_service_rule_sets_ready(
     if let Some(schedule) = schedule {
         model.apply_service_schedule(schedule);
     }
-    let mut effects = Vec::new();
+    let mut effects =
+        crate::app::update::geo::start_deferred_region_download(model).unwrap_or_default();
     for part in updated_parts {
         effects.push(Effect::AppendAppLog {
             level: "INFO".to_string(),
@@ -359,12 +360,15 @@ mod tests {
     #[test]
     fn routing_reconnect_waits_for_geo_and_service_downloads_in_any_order() {
         fn geo_ready() -> Msg {
-            Msg::GeoUpdated(GeoResult::UpToDate {
-                checked_at: Some(Local::now()),
-                service_checked_at: Default::default(),
-                schedule: None,
-                warnings: Vec::new(),
-            })
+            Msg::GeoUpdated {
+                result: GeoResult::UpToDate {
+                    checked_at: Some(Local::now()),
+                    service_checked_at: Default::default(),
+                    schedule: None,
+                    warnings: Vec::new(),
+                },
+                region_ready: true,
+            }
         }
 
         fn services_ready() -> Msg {

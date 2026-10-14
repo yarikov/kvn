@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::config::profile::{Profile, Settings};
+use crate::config::profile::{Profile, RoutingFallback, Settings};
 use crate::singbox::config::{GeoAvailability, generate_config};
 use crate::singbox::process_handle::ProcessHandle;
 
@@ -57,9 +57,10 @@ fn write_config(
     profile: &Profile,
     settings: &Settings,
     geo: &GeoAvailability,
+    fallback: Option<RoutingFallback>,
     clash_api_port: u16,
 ) -> Result<PathBuf> {
-    let config = generate_config(profile, settings, geo, clash_api_port)
+    let config = generate_config(profile, settings, geo, clash_api_port, fallback)
         .context("Failed to generate sing-box config")?;
     crate::paths::ensure_runtime_dir()?;
     if let Some(state_dir) = crate::paths::state_dir() {
@@ -139,7 +140,7 @@ fn collect_geo_availability() -> GeoAvailability {
         let Some((geoip, geosite)) = gm.local_paths(region) else {
             continue;
         };
-        if geoip.exists() && geosite.exists() {
+        if gm.has_databases(region) {
             geo.regions.insert(region, (geoip, geosite));
         }
     }
@@ -154,20 +155,27 @@ fn collect_geo_availability() -> GeoAvailability {
 
 const CLASH_API_START_ATTEMPTS: usize = 3;
 
+pub struct StartedSingBox {
+    pub handle: ProcessHandle,
+    pub routing_fallback: Option<RoutingFallback>,
+}
+
 /// Start the sing-box process with the given profile.
 /// Validates config first, then spawns the process and verifies it stays alive.
 pub fn start(
     profile: &Profile,
     settings: &Settings,
     cancelled: &dyn Fn() -> bool,
-) -> Result<ProcessHandle> {
+) -> Result<StartedSingBox> {
     let geo = collect_geo_availability();
+    let routing_fallback = geo.routing_fallback(settings.geo_routing.mode());
     let mut config_validated = false;
-    start_with(
+    let handle = start_with(
         CLASH_API_START_ATTEMPTS,
         crate::net::allocate_loopback_port,
         |clash_api_port| {
-            let config_path = write_config(profile, settings, &geo, clash_api_port)?;
+            let config_path =
+                write_config(profile, settings, &geo, routing_fallback, clash_api_port)?;
             if !config_validated {
                 check_config(&config_path, cancelled)?;
                 config_validated = true;
@@ -177,7 +185,11 @@ pub fn start(
             }
             spawn_and_wait(&config_path, clash_api_port, cancelled)
         },
-    )
+    )?;
+    Ok(StartedSingBox {
+        handle,
+        routing_fallback,
+    })
 }
 
 fn start_with<T>(
@@ -371,6 +383,7 @@ mod tests {
             &profile,
             &settings,
             &GeoAvailability::default(),
+            None,
             TEST_CLASH_PORT,
         )
         .unwrap();
@@ -493,6 +506,7 @@ mod tests {
             profile,
             &Settings::default(),
             &GeoAvailability::default(),
+            None,
             TEST_CLASH_PORT,
         )?;
         let result = check_config(&path, &|| false);

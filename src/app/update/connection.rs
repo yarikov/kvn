@@ -1,5 +1,6 @@
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model, TrafficStats};
+use crate::config::profile::RoutingFallback;
 use uuid::Uuid;
 
 use crate::app::update::status::push_status;
@@ -9,11 +10,14 @@ pub(in crate::app::update) fn on_connected(
     pid: u32,
     profile_id: Uuid,
     attempt_id: u64,
+    routing_fallback: Option<RoutingFallback>,
 ) -> Vec<Effect> {
     if attempt_id != model.connect_attempt_id {
         return vec![];
     }
     model.singbox_pid = Some(pid);
+    model.routing_fallback = routing_fallback;
+    model.region_download_deferred = false;
     model.connection = ConnectionState::Connected;
     model.connecting_profile_id = None;
     // Fresh sing-box → fresh counters. Drop the previous sample so the
@@ -27,13 +31,15 @@ pub(in crate::app::update) fn on_connected(
     // The tunnel is up — fetch rule-sets for enabled service routes
     // through it if any are still missing (they apply on the next
     // reconnect).
-    if !model
-        .config
-        .settings
-        .geo_routing
-        .enabled_services()
-        .is_empty()
+    if routing_fallback.is_none()
+        && !model
+            .config
+            .settings
+            .geo_routing
+            .enabled_services()
+            .is_empty()
     {
+        model.geo_updating = true;
         effects.push(Effect::DownloadServiceRuleSetsIfMissing);
     }
     // Attribute the connection to the profile that actually connected
@@ -42,12 +48,15 @@ pub(in crate::app::update) fn on_connected(
     model.active_profile_id = Some(profile_id);
     let profile = model.config.profiles.iter().find(|p| p.id == profile_id);
     let profile_name = profile.map(|p| p.name.clone());
+    let fallback_settings = (routing_fallback == Some(RoutingFallback::Global))
+        .then(|| model.config.settings.with_global_routing());
+    let running_settings = fallback_settings.as_ref().unwrap_or(&model.config.settings);
     let warnings: Vec<String> = profile
         .map(|p| {
             [
-                crate::singbox::config::dns_bypass_warning(p, &model.config.settings),
+                crate::singbox::config::dns_bypass_warning(p, running_settings),
                 crate::singbox::config::certificate_pin_warning(p),
-                crate::singbox::config::ech_dns_warning(p, &model.config.settings),
+                crate::singbox::config::ech_dns_warning(p, running_settings),
             ]
             .into_iter()
             .flatten()
@@ -63,6 +72,11 @@ pub(in crate::app::update) fn on_connected(
             None => "Connected".to_string(),
         }),
     );
+    if let Some(fallback) = routing_fallback {
+        effects.extend(crate::app::update::geo::fetch_region_rule_sets(
+            model, fallback,
+        ));
+    }
     for warning in warnings {
         push_status(&mut effects, model, AppStatus::Error(warning));
     }
@@ -144,6 +158,8 @@ fn clear_connection(model: &mut Model) {
     model.connecting_profile_id = None;
     model.singbox_pid = None;
     model.active_profile_id = None;
+    model.routing_fallback = None;
+    model.region_download_deferred = false;
     reset_traffic_state(model);
 }
 
@@ -481,6 +497,7 @@ mod tests {
                 pid: 42,
                 profile_id: Uuid::new_v4(),
                 attempt_id: 1,
+                routing_fallback: None,
             },
         );
 
@@ -522,6 +539,7 @@ mod tests {
                 pid: 12345,
                 profile_id: id,
                 attempt_id: 0,
+                routing_fallback: None,
             },
         );
         assert_eq!(model.connection, ConnectionState::Connected);
@@ -551,6 +569,7 @@ mod tests {
                 pid: 12345,
                 profile_id: uuid::Uuid::new_v4(),
                 attempt_id: 0,
+                routing_fallback: None,
             },
         );
 
@@ -583,6 +602,7 @@ mod tests {
                 pid: 1,
                 profile_id: a_id,
                 attempt_id: 0,
+                routing_fallback: None,
             },
         );
         assert_eq!(model.active_profile_id, Some(a_id));
@@ -650,6 +670,7 @@ mod tests {
                 pid: 1,
                 profile_id: uuid::Uuid::new_v4(),
                 attempt_id: 0,
+                routing_fallback: None,
             },
         );
         assert!(
@@ -671,6 +692,7 @@ mod tests {
                 pid: 1,
                 profile_id: uuid::Uuid::new_v4(),
                 attempt_id: 0,
+                routing_fallback: None,
             },
         );
         assert!(effects.contains(&Effect::DownloadServiceRuleSetsIfMissing));
@@ -690,9 +712,58 @@ mod tests {
                 pid: 1,
                 profile_id: uuid::Uuid::new_v4(),
                 attempt_id: 0,
+                routing_fallback: None,
             },
         );
         assert!(!effects.contains(&Effect::DownloadServiceRuleSetsIfMissing));
+    }
+
+    #[test]
+    fn fallback_connection_warns_about_dns_as_global_routing_runs_it() {
+        use crate::config::profile::{
+            CustomDnsPreset, DnsServer, GeoRegion, ProtocolConfig, RoutingMode,
+        };
+
+        let profile = Profile {
+            config: ProtocolConfig::Http(Default::default()),
+            ..Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into())
+        };
+        let profile_id = profile.id;
+        let dns_warned = |routing_fallback: Option<RoutingFallback>| {
+            let mut model = model_with_profiles(vec![profile.clone()]);
+            let settings = &mut model.config.settings;
+            settings.dns.custom_presets = vec![CustomDnsPreset {
+                name: "home".to_string(),
+                servers: vec![DnsServer::Udp {
+                    tag: "plain".to_string(),
+                    server: "8.8.8.8".to_string(),
+                    server_port: None,
+                }],
+                rules: Vec::new(),
+                final_server: "plain".to_string(),
+            }];
+            settings.dns.current_preset = "home".to_string();
+            settings.geo_routing.set_region(GeoRegion::Ru);
+            settings
+                .geo_routing
+                .set_mode(RoutingMode::Only(GeoRegion::Ru));
+            model.connection = ConnectionState::ConnectPending;
+            update(
+                &mut model,
+                Msg::Connected {
+                    pid: 1,
+                    profile_id,
+                    attempt_id: 0,
+                    routing_fallback,
+                },
+            )
+            .iter()
+            .any(|effect| {
+                matches!(effect, Effect::AppendAppLog { message, .. } if message.contains("\"plain\" (UDP)"))
+            })
+        };
+        assert!(dns_warned(Some(RoutingFallback::Global)));
+        assert!(!dns_warned(Some(RoutingFallback::Direct)));
     }
 
     #[test]
@@ -711,6 +782,7 @@ mod tests {
                 pid: 12345,
                 profile_id: id,
                 attempt_id: 0,
+                routing_fallback: None,
             },
         );
         assert_eq!(model.connection, ConnectionState::Connected);
@@ -749,7 +821,7 @@ mod tests {
         let warning =
             crate::singbox::config::ech_dns_warning(&profile, &model.config.settings).unwrap();
 
-        on_connected(&mut model, 1, profile.id, 0);
+        on_connected(&mut model, 1, profile.id, 0, None);
 
         assert_eq!(model.status, Some(AppStatus::Error(warning)));
     }
@@ -763,7 +835,7 @@ mod tests {
         let mut model = model_with_profiles(vec![profile.clone()]);
         let warning = crate::singbox::config::certificate_pin_warning(&profile).unwrap();
 
-        let effects = on_connected(&mut model, 1, profile.id, 0);
+        let effects = on_connected(&mut model, 1, profile.id, 0, None);
 
         assert_eq!(model.status, Some(AppStatus::Error(warning.clone())));
         assert!(effects.contains(&app_log_error(&warning)));
@@ -789,7 +861,7 @@ mod tests {
         dns.current_preset = "plain".into();
         let warning =
             crate::singbox::config::dns_bypass_warning(&profile, &model.config.settings).unwrap();
-        let effects = on_connected(&mut model, 1, profile.id, 0);
+        let effects = on_connected(&mut model, 1, profile.id, 0, None);
         assert_eq!(model.connection, ConnectionState::Connected);
         assert_eq!(model.status, Some(AppStatus::Error(warning.clone())));
         assert!(effects.contains(&app_log_error(&warning)));
@@ -937,6 +1009,7 @@ mod tests {
                 pid: 1234,
                 profile_id: id,
                 attempt_id: 0,
+                routing_fallback: None,
             },
         );
         assert_eq!(model.traffic, TrafficStats::default());

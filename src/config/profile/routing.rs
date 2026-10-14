@@ -71,6 +71,31 @@ impl RoutingMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutingFallback {
+    Global,
+    Direct,
+}
+
+impl RoutingFallback {
+    pub fn for_mode(mode: RoutingMode) -> Self {
+        match mode {
+            RoutingMode::Only(_) => Self::Direct,
+            RoutingMode::Global | RoutingMode::Bypass(_) => Self::Global,
+        }
+    }
+}
+
+impl std::fmt::Display for RoutingFallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Global => f.write_str("Global"),
+            Self::Direct => f.write_str("Direct"),
+        }
+    }
+}
+
 impl std::fmt::Display for RoutingMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -225,6 +250,7 @@ impl GeoRouting {
     pub fn mode(&self) -> RoutingMode {
         self.current_region
             .and_then(|r| self.selected_region_modes.get(&r).copied())
+            .filter(|mode| self.available_modes().contains(mode))
             .unwrap_or(RoutingMode::Global)
     }
 
@@ -267,6 +293,18 @@ impl GeoRouting {
 mod tests {
     use super::*;
     use crate::config::profile::*;
+
+    #[test]
+    fn a_mode_stored_for_another_region_reads_as_global() {
+        let mut routing = GeoRouting::default();
+        routing.set_region(GeoRegion::Ru);
+        routing.set_mode(RoutingMode::Bypass(GeoRegion::Cn));
+        assert_eq!(routing.mode(), RoutingMode::Global);
+
+        routing.set_region(GeoRegion::Global);
+        routing.set_mode(RoutingMode::Only(GeoRegion::Ru));
+        assert_eq!(routing.mode(), RoutingMode::Global);
+    }
 
     #[test]
     fn routing_mode_display() {

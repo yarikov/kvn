@@ -33,7 +33,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     match msg {
         Msg::Key(key) => handle_key(model, key),
         Msg::Tick => handle_tick(model),
-        Msg::GeoUpdated(result) => handle_geo_result(model, result),
+        Msg::GeoUpdated {
+            result,
+            region_ready,
+        } => handle_geo_result(model, result, region_ready),
         Msg::GeoMetadataRefreshed {
             last_updated,
             last_checked_at,
@@ -54,7 +57,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             pid,
             profile_id,
             attempt_id,
-        } => on_connected(model, pid, profile_id, attempt_id),
+            routing_fallback,
+        } => on_connected(model, pid, profile_id, attempt_id, routing_fallback),
         Msg::SubscriptionFetched { id, result } => {
             let mut effects = handle_subscription_result(model, id, result);
             effects.push(Effect::BroadcastState);

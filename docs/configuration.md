@@ -382,6 +382,9 @@ Open **Settings › Routing** (`Space r`) and set **Region** to `ru`, `cn`,
 `ir`, or `global`, then pick the **Mode**. Country regions offer Global,
 Bypass, and Only modes; `global` skips country rule-set downloads and offers
 Global mode only. The last mode selected for each country is retained.
+Bypass and Only need the country's rule-sets: without them a connection runs
+Bypass as Global and Only as Direct, downloads the files and reconnects in the
+chosen mode (see [Routing modes](privacy.md#routing-modes)).
 
 The following snippet belongs inside `settings`:
 

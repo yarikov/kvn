@@ -350,6 +350,7 @@ pub(crate) fn build_snapshot(
         kill_switch_pending: model.kill_switch_pending,
         interface_settings_draft: model.interface_settings_draft,
         geo_updating: model.geo_updating,
+        routing_fallback: model.routing_fallback,
         geo_last_updated: model.geo_last_updated.clone(),
         geo_last_checked_at: model.geo_last_checked_at,
         service_checked_at: model.service_checked_at.clone(),

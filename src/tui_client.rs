@@ -375,6 +375,7 @@ fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
     model.kill_switch_pending = snapshot.kill_switch_pending;
     model.interface_settings_draft = snapshot.interface_settings_draft;
     model.geo_updating = snapshot.geo_updating;
+    model.routing_fallback = snapshot.routing_fallback;
     model.geo_last_updated = snapshot.geo_last_updated;
     model.geo_last_checked_at = snapshot.geo_last_checked_at;
     model.service_checked_at = snapshot.service_checked_at;

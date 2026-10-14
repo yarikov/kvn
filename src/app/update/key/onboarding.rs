@@ -436,6 +436,7 @@ mod tests {
                 pid: 1,
                 profile_id,
                 attempt_id,
+                routing_fallback: None,
             },
         );
         assert_eq!(model.onboarding.awaiting, None);

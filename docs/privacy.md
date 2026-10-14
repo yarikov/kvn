@@ -32,11 +32,21 @@ neither uses the tunnel in Bypass and goes directly in Only. To compare an
 address with the list, kvn may look the name up again through your main DNS
 server, along the same path as your other DNS questions.
 
-The region's lists are files kvn downloads. Until they are on disk, a
-connection still starts but without the region's rules: the local network
-still goes directly in Bypass and Only, and service overrides whose files are
-present still apply, but everything else follows the mode's default — the
-tunnel in Bypass, and directly in Only, including the region's own sites.
+The region's lists are files kvn downloads. Bypass and Only never run without
+them. Until they are on disk, a connection starts with the mode's default for
+all traffic instead, and the status bar shows the substitution:
+
+- Bypass becomes Global (`Bypass RU → Global`): all traffic uses the tunnel,
+  and the lists download through it, which works where the download site is
+  blocked directly.
+- Only becomes Direct (`Only RU → Direct`): nothing uses the tunnel, and the
+  lists download directly. Only is meant for use abroad with a server inside
+  the region, so the tunnel would carry all your traffic into that country.
+
+Either way the download also works with the kill switch on, and kvn reconnects
+in the chosen mode once the lists are on disk. If the download fails, the
+connection keeps the substitute until a scheduled geo update or a manual one
+(`U`) brings the lists.
 
 The local network your computer is directly connected to — for example
 `192.168.1.0/24` with your router — is reached directly in every mode: the

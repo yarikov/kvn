@@ -19,12 +19,15 @@ pub(super) fn download(tx: &Sender<Msg>, model: &mut Model) {
         let gm = match crate::geo::GeoManager::new() {
             Ok(gm) => gm,
             Err(e) => {
-                let _ = tx.send(Msg::GeoUpdated(GeoResult::Error {
-                    message: e.to_string(),
-                    service_checked_at: existing_service_checked_at,
-                    schedule: None,
-                    updated_parts: Vec::new(),
-                }));
+                let _ = tx.send(Msg::GeoUpdated {
+                    result: GeoResult::Error {
+                        message: e.to_string(),
+                        service_checked_at: existing_service_checked_at,
+                        schedule: None,
+                        updated_parts: Vec::new(),
+                    },
+                    region_ready: false,
+                });
                 return;
             }
         };
@@ -47,7 +50,10 @@ pub(super) fn download(tx: &Sender<Msg>, model: &mut Model) {
                 epoch: schedule_epoch,
             },
         );
-        let _ = tx.send(Msg::GeoUpdated(result));
+        let _ = tx.send(Msg::GeoUpdated {
+            result,
+            region_ready: gm.has_databases(region),
+        });
     });
 }
 
@@ -108,7 +114,7 @@ pub(super) fn retry_service_rule_sets(
     let interval_days = interval_days(model);
     let schedule_epoch = model.geo_schedule_epoch;
     thread::spawn(move || {
-        let result = match crate::geo::GeoManager::new() {
+        let (result, region_ready) = match crate::geo::GeoManager::new() {
             Ok(gm) => {
                 let checked_at = gm.last_checked_at(region);
                 let services = refresh_service_rule_sets(
@@ -117,7 +123,7 @@ pub(super) fn retry_service_rule_sets(
                     automatic.then_some(interval_days),
                     schedule_epoch,
                 );
-                finalize_geo_result(
+                let result = finalize_geo_result(
                     &gm,
                     region,
                     Ok(RegionUpdate::UpToDate { checked_at }),
@@ -128,16 +134,23 @@ pub(super) fn retry_service_rule_sets(
                         interval_days,
                         epoch: schedule_epoch,
                     },
-                )
+                );
+                (result, gm.has_databases(region))
             }
-            Err(e) => GeoResult::Error {
-                message: e.to_string(),
-                service_checked_at: existing_service_checked_at,
-                schedule: None,
-                updated_parts: Vec::new(),
-            },
+            Err(e) => (
+                GeoResult::Error {
+                    message: e.to_string(),
+                    service_checked_at: existing_service_checked_at,
+                    schedule: None,
+                    updated_parts: Vec::new(),
+                },
+                false,
+            ),
         };
-        let _ = tx.send(Msg::GeoUpdated(result));
+        let _ = tx.send(Msg::GeoUpdated {
+            result,
+            region_ready,
+        });
     });
 }
 
@@ -195,9 +208,9 @@ pub(super) fn download_if_missing(tx: &Sender<Msg>, model: &mut Model) {
     let interval_days = interval_days(model);
     let schedule_epoch = model.geo_schedule_epoch;
     thread::spawn(move || {
-        let result = match crate::geo::GeoManager::new() {
+        let (result, region_ready) = match crate::geo::GeoManager::new() {
             Ok(gm) => {
-                if gm.has_databases(region) {
+                let result = if gm.has_databases(region) {
                     let _ = gm.clear_retry_state(region);
                     GeoResult::UpToDate {
                         checked_at: gm.last_checked_at(region),
@@ -218,16 +231,23 @@ pub(super) fn download_if_missing(tx: &Sender<Msg>, model: &mut Model) {
                             epoch: schedule_epoch,
                         },
                     )
-                }
+                };
+                (result, gm.has_databases(region))
             }
-            Err(e) => GeoResult::Error {
-                message: e.to_string(),
-                service_checked_at: Default::default(),
-                schedule: None,
-                updated_parts: Vec::new(),
-            },
+            Err(e) => (
+                GeoResult::Error {
+                    message: e.to_string(),
+                    service_checked_at: Default::default(),
+                    schedule: None,
+                    updated_parts: Vec::new(),
+                },
+                false,
+            ),
         };
-        let _ = tx.send(Msg::GeoUpdated(result));
+        let _ = tx.send(Msg::GeoUpdated {
+            result,
+            region_ready,
+        });
     });
 }
 
