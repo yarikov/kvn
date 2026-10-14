@@ -9,16 +9,11 @@ use crate::app::update::status::push_status;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::app::update) enum DnsSettingsItem {
     Preset,
-    CycleStrategy,
     ToggleFakeIp,
 }
 
 impl DnsSettingsItem {
-    pub const ALL: [DnsSettingsItem; 3] = [
-        DnsSettingsItem::Preset,
-        DnsSettingsItem::CycleStrategy,
-        DnsSettingsItem::ToggleFakeIp,
-    ];
+    pub const ALL: [DnsSettingsItem; 2] = [DnsSettingsItem::Preset, DnsSettingsItem::ToggleFakeIp];
 
     pub fn from_index(idx: usize) -> Option<Self> {
         Self::ALL.get(idx).copied()
@@ -29,8 +24,6 @@ pub(in crate::app::update) fn handle_dns_settings(model: &mut Model, key: KeyEve
     let len = DnsSettingsItem::ALL.len();
     let on_preset =
         DnsSettingsItem::from_index(model.dns_selected) == Some(DnsSettingsItem::Preset);
-    let on_strategy =
-        DnsSettingsItem::from_index(model.dns_selected) == Some(DnsSettingsItem::CycleStrategy);
     let on_fakeip =
         DnsSettingsItem::from_index(model.dns_selected) == Some(DnsSettingsItem::ToggleFakeIp);
     match key.code {
@@ -46,13 +39,6 @@ pub(in crate::app::update) fn handle_dns_settings(model: &mut Model, key: KeyEve
         }
         KeyCode::Char('h') | KeyCode::Left if on_preset => {
             model.dns_preset_draft = Some(adjacent_preset(model, -1));
-        }
-        KeyCode::Char('l') | KeyCode::Right | KeyCode::Char('h') | KeyCode::Left if on_strategy => {
-            let base = model
-                .dns_strategy_draft
-                .clone()
-                .unwrap_or_else(|| model.config.settings.dns.strategy.clone());
-            model.dns_strategy_draft = Some(base.toggled());
         }
         KeyCode::Char('l') | KeyCode::Right if on_fakeip => {
             let current = model
@@ -70,12 +56,10 @@ pub(in crate::app::update) fn handle_dns_settings(model: &mut Model, key: KeyEve
         KeyCode::Char('q') | KeyCode::Esc => {
             model.overlay = Overlay::None;
             model.dns_preset_draft = None;
-            model.dns_strategy_draft = None;
             model.dns_fakeip_draft = None;
         }
         KeyCode::Backspace => {
             model.dns_preset_draft = None;
-            model.dns_strategy_draft = None;
             model.dns_fakeip_draft = None;
             model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         }
@@ -137,9 +121,6 @@ fn apply_dns_drafts(model: &mut Model) {
     if let Some(draft) = model.dns_preset_draft.take() {
         model.config.settings.dns.current_preset = draft;
     }
-    if let Some(draft) = model.dns_strategy_draft.take() {
-        model.config.settings.dns.strategy = draft;
-    }
     if let Some(enabled) = model.dns_fakeip_draft.take() {
         model.config.settings.dns.fakeip_enabled = enabled;
     }
@@ -150,7 +131,7 @@ mod tests {
     use super::*;
     use crate::app::model::ConnectionState;
     use crate::app::update::key::ipc::handle_go_first;
-    use crate::config::profile::{CustomDnsPreset, DnsRule, DnsServer, DnsStrategy, Profile};
+    use crate::config::profile::{CustomDnsPreset, DnsRule, DnsServer, Profile};
     use crate::test_helpers::*;
 
     fn with_dns_overlay() -> Model {
@@ -238,63 +219,17 @@ mod tests {
     }
 
     #[test]
-    fn dns_settings_strategy_keys_toggle_the_ipv4_strategies() {
-        for (forward, backward) in [
-            (key('l'), key('h')),
-            (
-                KeyEvent::from(KeyCode::Right),
-                KeyEvent::from(KeyCode::Left),
-            ),
-        ] {
-            let mut model = with_dns_overlay();
-            select(&mut model, DnsSettingsItem::CycleStrategy);
-            handle_dns_settings(&mut model, forward);
-            assert_eq!(model.dns_strategy_draft, Some(DnsStrategy::OnlyIpv4));
-            handle_dns_settings(&mut model, backward);
-            assert_eq!(model.dns_strategy_draft, Some(DnsStrategy::PreferIpv4));
-        }
-    }
-
-    #[test]
-    fn dns_settings_enter_strategy_no_draft_is_noop() {
-        let mut model = with_dns_overlay();
-        select(&mut model, DnsSettingsItem::CycleStrategy);
-        let before = model.config.settings.dns.strategy.clone();
-        let effects = handle_dns_settings(&mut model, enter());
-        assert!(effects.is_empty());
-        assert_eq!(model.config.settings.dns.strategy, before);
-        assert_eq!(model.overlay, Overlay::DnsSettings);
-    }
-
-    #[test]
     fn dns_settings_enter_commits_every_draft() {
         let mut model = with_dns_overlay();
-        select(&mut model, DnsSettingsItem::CycleStrategy);
-        model.dns_strategy_draft = Some(DnsStrategy::OnlyIpv4);
         model.dns_preset_draft = Some("google_dot".into());
         model.dns_fakeip_draft = Some(true);
         let effects = handle_dns_settings(&mut model, enter());
-        assert_eq!(model.config.settings.dns.strategy, DnsStrategy::OnlyIpv4);
         assert_eq!(model.config.settings.dns.current_preset, "google_dot");
         assert!(model.config.settings.dns.fakeip_enabled);
         assert!(effects.contains(&Effect::SaveConfig));
         assert!(effects.contains(&Effect::BroadcastState));
         assert!(model.dns_preset_draft.is_none());
-        assert!(model.dns_strategy_draft.is_none());
         assert!(model.dns_fakeip_draft.is_none());
-        assert_eq!(model.overlay, Overlay::DnsSettings);
-    }
-
-    #[test]
-    fn dns_settings_enter_strategy_same_value_is_noop() {
-        let mut model = with_dns_overlay();
-        select(&mut model, DnsSettingsItem::CycleStrategy);
-        let same = model.config.settings.dns.strategy.clone();
-        model.dns_strategy_draft = Some(same.clone());
-        let effects = handle_dns_settings(&mut model, enter());
-        assert!(effects.is_empty());
-        assert!(model.dns_strategy_draft.is_none());
-        assert_eq!(model.config.settings.dns.strategy, same);
         assert_eq!(model.overlay, Overlay::DnsSettings);
     }
 
@@ -349,15 +284,12 @@ mod tests {
     #[test]
     fn dns_settings_esc_clears_draft_and_closes_overlay() {
         let mut model = with_dns_overlay();
-        select(&mut model, DnsSettingsItem::CycleStrategy);
-        model.dns_strategy_draft = Some(DnsStrategy::OnlyIpv4);
         model.dns_preset_draft = Some("google_dot".into());
         model.dns_fakeip_draft = Some(true);
         let effects = handle_dns_settings(&mut model, esc());
         assert!(effects.is_empty());
         assert_eq!(model.overlay, Overlay::None);
         assert!(model.dns_preset_draft.is_none());
-        assert!(model.dns_strategy_draft.is_none());
         assert!(model.dns_fakeip_draft.is_none());
     }
 

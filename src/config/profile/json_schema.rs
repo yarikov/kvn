@@ -575,7 +575,7 @@ mod tests {
                         "rules": [{ "server": "local", "domain_suffix": ["lan"], "disable_cache": true }],
                         "final_server": "https"
                     }],
-                    "strategy": "ipv4_only", "fakeip_enabled": true,
+                    "fakeip_enabled": true,
                     "fakeip_ranges": { "inet4_range": "198.19.0.0/16", "inet6_range": "fc00::/18" }
                 }
             }
@@ -768,8 +768,7 @@ mod tests {
                 "dns": {
                     "custom_presets": [
                         { "name": "", "servers": [{ "type": "local", "tag": "l" }], "final_server": "l" }
-                    ],
-                    "strategy": "ipv6_only"
+                    ]
                 }
             }
         });
@@ -788,7 +787,6 @@ mod tests {
                 "/profiles/0/password: must not be empty",
                 "/profiles/1/ss_password: must not be empty",
                 "/settings/dns/custom_presets/0/name: must not be empty",
-                "/settings/dns/strategy: must be one of \"prefer_ipv4\", \"ipv4_only\"",
                 "/settings/logs/level: must be one of \"trace\", \"debug\", \"info\", \"warn\", \"error\"",
                 "/settings/logs/line_retention/app: value is less than the minimum of 1000",
             ]

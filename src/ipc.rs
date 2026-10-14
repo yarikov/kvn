@@ -446,7 +446,6 @@ mod tests {
             geo_region_selected: 0,
             dns_selected: 0,
             dns_preset_draft: None,
-            dns_strategy_draft: None,
             dns_fakeip_draft: None,
             theme_draft: None,
             onboarding_awaiting: None,

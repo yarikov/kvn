@@ -338,7 +338,6 @@ pub(crate) fn build_snapshot(
         geo_region_selected: model.geo_region_selected,
         dns_selected: model.dns_selected,
         dns_preset_draft: model.dns_preset_draft.clone(),
-        dns_strategy_draft: model.dns_strategy_draft.clone(),
         dns_fakeip_draft: model.dns_fakeip_draft,
         theme_draft: model.theme_draft.clone(),
         onboarding_awaiting: model.onboarding.awaiting,

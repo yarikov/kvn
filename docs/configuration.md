@@ -50,11 +50,11 @@ replace a valid configuration with a partial file.
 
 ## File structure
 
-The current schema version is 6. A minimal configuration is:
+The current schema version is 7. A minimal configuration is:
 
 ```json
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "profiles": [],
   "subscriptions": [],
   "settings": {}
@@ -151,7 +151,7 @@ otherwise the notice is skipped and logged. kvn recognises:
 | Field | Default | Description |
 |-------|---------|-------------|
 | `tun_interface` | `kvn0` | Name of the sing-box TUN interface; must start with `kvn` |
-| `dns` | Cloudflare DoH | DNS presets, the active preset, strategy, and fake-IP state |
+| `dns` | Cloudflare DoH | DNS presets, the active preset, and fake-IP state |
 | `geo_routing` | no region; `auto_update` every 7 days on a new installation, `off` when the field or section is absent (`I` changes it at any time) | Country modes, rule-set updates, and service overrides |
 | `auto_connect` | `false` | Connect to `last_connected_profile` at startup |
 | `kill_switch` | `false` | Persisted kill-switch state |
@@ -207,8 +207,8 @@ logging. sing-box still uses `logs.level`.
 DNS settings are organized in presets. A preset is a set of DNS servers, the
 rules that send some domains to a particular server, and the `final_server`
 that answers everything else. One preset is active at a time; choose it in
-**Settings › DNS** (`Space d`), next to the strategy and the fake-IP toggle,
-or set `current_preset` directly.
+**Settings › DNS** (`Space d`), next to the fake-IP toggle, or set
+`current_preset` directly.
 
 kvn ships four built-in presets: `cloudflare_doh` (the default), `google_dot`,
 `quad9_doh`, and `system_local`. Write your own under `custom_presets`; they
@@ -231,7 +231,6 @@ snippet belongs inside `settings`:
         "final_server": "adguard"
       }
     ],
-    "strategy": "prefer_ipv4",
     "fakeip_enabled": false
   }
 }
@@ -284,15 +283,9 @@ be addressed by hostname (`"server": "dns.google"`) only when the preset also
 has a `local` server, which resolves it; servers given by IP address need no
 `local` server. Preset names must be unique and cannot reuse a built-in name.
 
-Supported strategies are `prefer_ipv4` and `ipv4_only`; the strategy and
-fake-IP apply to whichever preset is active. `prefer_ipv4` does not filter
-answers: programs still get IPv6 addresses, and the preference only orders the
-addresses kvn itself connects to. `ipv4_only` answers IPv6 lookups with no
-addresses. Because the tunnel carries IPv4 only (see
-[what kvn protects](privacy.md#ipv4-only)), `ipv4_only` avoids IPv6 attempts
-that cannot succeed. The former `prefer_ipv6` and `ipv6_only` are converted to
-`prefer_ipv4` and `ipv4_only` when kvn loads an older configuration, and are
-reported as errors afterwards.
+Fake-IP applies to whichever preset is active. kvn answers IPv6 address
+lookups with no addresses, because the tunnel carries IPv4 only (see
+[what kvn protects](privacy.md#ipv4-only)).
 
 Fake-IP answers address lookups with addresses from `fakeip_ranges`
 (`198.18.0.0/15` and `fc00::/18` unless set). A rule can send particular
@@ -458,8 +451,8 @@ reported at once. Validation checks:
 - unique profile and subscription IDs, required profile values, and that each
   profile's `subscription_id` names an existing subscription;
 - the HWID of every subscription with `send_hwid`;
-- DNS presets, server tags and references, fake-IP range syntax, the strategy,
-  and leftover pre-preset DNS fields;
+- DNS presets, server tags and references, fake-IP range syntax, and leftover
+  pre-preset DNS fields;
 - the TUN interface, theme slug, log level, and minimum log limits;
 - `connectivity_probe.url` while the probe is enabled: an `http` or `https`
   URL with a host, without credentials or a fragment, at most 2048 bytes.

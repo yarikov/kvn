@@ -5,9 +5,9 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
 use crate::config::profile::{
-    ActiveDns, DnsRule, DnsServer, DnsStrategy, FINALMASK_PARAM, FakeIpServer, GeoRegion,
-    NaiveConfig, Profile, ProtocolConfig, RoutedService, RoutingMode, ServiceRoute, Settings,
-    SocksConfig, SocksVersion, read_stream_finalmask,
+    ActiveDns, DnsRule, DnsServer, FINALMASK_PARAM, FakeIpServer, GeoRegion, NaiveConfig, Profile,
+    ProtocolConfig, RoutedService, RoutingMode, ServiceRoute, Settings, SocksConfig, SocksVersion,
+    read_stream_finalmask,
 };
 use crate::singbox::outbound::{
     build_anytls_outbound, build_http_outbound, build_hysteria2_outbound, build_naive_outbound,
@@ -15,6 +15,8 @@ use crate::singbox::outbound::{
     build_ssh_outbound, build_trojan_outbound, build_tuic_outbound, build_vless_outbound,
     build_vmess_outbound, proxy_carries_udp,
 };
+
+const DNS_STRATEGY: &str = "ipv4_only";
 
 /// Availability of local geoip/geosite rule-sets used when building routes.
 /// A region is present only when both its files exist.
@@ -104,11 +106,11 @@ pub fn generate_config(
     let resolvers = RouteResolvers {
         default_domain: json!({
             "server": bootstrap.tag,
-            "strategy": settings.dns.strategy.as_str(),
+            "strategy": DNS_STRATEGY,
         }),
         destination: json!({
             "server": upstreams.active.final_server,
-            "strategy": settings.dns.strategy.as_str(),
+            "strategy": DNS_STRATEGY,
         }),
     };
     let (route, rule_sets) = build_route(
@@ -124,7 +126,6 @@ pub fn generate_config(
     let dns = build_dns(
         &upstreams,
         bootstrap,
-        &settings.dns.strategy,
         &available_rule_sets,
         &domain_rule_set_outbounds(&route),
         &ech_dns_lookup_names(&proxy_outbounds),
@@ -183,7 +184,6 @@ pub fn generate_config(
 fn build_dns(
     upstreams: &DnsUpstreams,
     bootstrap: BootstrapResolver,
-    strategy: &DnsStrategy,
     available_rule_sets: &HashSet<&str>,
     domain_routes: &[(&str, &str)],
     ech_lookup_names: &[String],
@@ -222,7 +222,7 @@ fn build_dns(
     }
 
     block.insert("final".to_string(), json!(active.final_server));
-    block.insert("strategy".to_string(), json!(strategy.as_str()));
+    block.insert("strategy".to_string(), json!(DNS_STRATEGY));
     Value::Object(block)
 }
 
@@ -885,9 +885,8 @@ fn apply_stream_finalmask(profile: &Profile, outbounds: &mut [Value]) -> anyhow:
 mod tests {
     use super::*;
     use crate::config::profile::{
-        CustomDnsPreset, DnsConfig, DnsRule, DnsStrategy, GeoRegion, Profile, ProtocolConfig,
-        RealitySettings, ShadowtlsVersion, TransportConfig, TransportType, VlessConfig,
-        VmessConfig,
+        CustomDnsPreset, DnsConfig, DnsRule, GeoRegion, Profile, ProtocolConfig, RealitySettings,
+        ShadowtlsVersion, TransportConfig, TransportType, VlessConfig, VmessConfig,
     };
     use serde_json::json;
 
@@ -2002,8 +2001,8 @@ mod tests {
 
     fn default_resolver() -> RouteResolvers {
         RouteResolvers {
-            default_domain: json!({ "server": "bootstrap", "strategy": "prefer_ipv4" }),
-            destination: json!({ "server": "remote", "strategy": "prefer_ipv4" }),
+            default_domain: json!({ "server": "bootstrap", "strategy": DNS_STRATEGY }),
+            destination: json!({ "server": "remote", "strategy": DNS_STRATEGY }),
         }
     }
 
@@ -2089,7 +2088,6 @@ mod tests {
         build_dns(
             upstreams,
             upstreams.bootstrap(),
-            &DnsStrategy::PreferIpv4,
             available_rule_sets,
             &[],
             &[],
@@ -2201,7 +2199,7 @@ mod tests {
         assert_eq!(servers[1]["path"], "/dns-query");
         assert!(servers[1].get("server_port").is_none());
         assert_eq!(dns["final"], "remote");
-        assert_eq!(dns["strategy"], "prefer_ipv4");
+        assert_eq!(dns["strategy"], "ipv4_only");
         assert!(dns.get("rules").is_none());
         assert!(dns.get("fakeip").is_none());
     }
@@ -2580,7 +2578,6 @@ mod tests {
             build_dns(
                 &upstreams,
                 upstreams.bootstrap(),
-                &DnsStrategy::PreferIpv4,
                 &HashSet::from(["geoip-ru"]),
                 &[],
                 &["ech.example".to_string()],
@@ -2696,7 +2693,6 @@ mod tests {
         let block = build_dns(
             &upstreams,
             upstreams.bootstrap(),
-            &DnsStrategy::PreferIpv4,
             &HashSet::new(),
             &[("geosite-category-ru", "direct")],
             &[],

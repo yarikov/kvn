@@ -18,12 +18,12 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                       ┌───────────────────────────────┐                                       │
 │                                       │        Settings › DNS         │                                       │
 │                                       │                               │                                       │
-│                                       │ Preset   ‹ home-adguard ›     │                                       │
-│                                       │ Strategy ‹ Prefer IPv4 ›      │                                       │
-│                                       │ Fake-IP  ‹ off ›              │                                       │
+│                                       │ Preset  ‹ home-adguard ›      │                                       │
+│                                       │ Fake-IP ‹ off ›               │                                       │
 │                                       │                               │                                       │
 │                                       │ 󰌑 apply · q/󱊷 close · ⌫ back  │                                       │
 │                                       └───────────────────────────────┘                                       │
+│                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

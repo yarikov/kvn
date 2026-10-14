@@ -4,9 +4,7 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use crate::config::load_config;
-use crate::config::profile::{
-    Config, DnsStrategy, GeoRegion, Profile, RoutedService, ServiceRoute,
-};
+use crate::config::profile::{Config, GeoRegion, Profile, RoutedService, ServiceRoute};
 use crate::ui::styles::Theme;
 use chrono::{DateTime, Local};
 
@@ -330,9 +328,6 @@ pub struct Model {
     /// Pending built-in DNS preset preview while the DNS overlay is open.
     /// `None` means the persisted DNS configuration is being displayed.
     pub dns_preset_draft: Option<String>,
-    /// Pending DNS strategy preview while the DNS overlay is open. Set by
-    /// `h`/`l` on the Strategy row, committed by Enter, discarded by Esc.
-    pub dns_strategy_draft: Option<DnsStrategy>,
     /// Pending Fake-IP preview while the DNS overlay is open. Set by `h`/`l`
     /// on the Fake-IP row, committed by Enter, discarded by Esc.
     pub dns_fakeip_draft: Option<bool>,
@@ -613,7 +608,6 @@ impl Model {
             geo_region_selected: 0,
             dns_selected: 0,
             dns_preset_draft: None,
-            dns_strategy_draft: None,
             dns_fakeip_draft: None,
             pending_service_reconnect: false,
             pending_geo_reconnect: false,
@@ -738,7 +732,6 @@ impl Model {
             geo_region_selected: 0,
             dns_selected: 0,
             dns_preset_draft: None,
-            dns_strategy_draft: None,
             dns_fakeip_draft: None,
             pending_service_reconnect: false,
             pending_geo_reconnect: false,
@@ -1016,7 +1009,6 @@ impl Model {
             geo_region_selected: 0,
             dns_selected: 0,
             dns_preset_draft: None,
-            dns_strategy_draft: None,
             dns_fakeip_draft: None,
             pending_service_reconnect: false,
             pending_geo_reconnect: false,

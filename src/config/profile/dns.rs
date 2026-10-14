@@ -1,4 +1,4 @@
-//! DNS configuration: strategy, servers, rules, and validation.
+//! DNS configuration: servers, rules, and validation.
 //!
 //! `DnsConfig` is the source of truth used both by sing-box config generation
 //! (`singbox::config`) and by the TUI's settings overlay.
@@ -14,8 +14,8 @@ use super::ConfigDiagnostic;
 pub const FAKEIP_SERVER_TAG: &str = "fakeip";
 
 // (body appended by sed)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
-pub enum DnsStrategy {
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
+pub(crate) enum DnsStrategy {
     #[default]
     #[serde(rename = "prefer_ipv4")]
     PreferIpv4,
@@ -25,31 +25,6 @@ pub enum DnsStrategy {
     OnlyIpv4,
     #[serde(rename = "ipv6_only")]
     OnlyIpv6,
-}
-
-impl DnsStrategy {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            DnsStrategy::PreferIpv4 => "prefer_ipv4",
-            DnsStrategy::PreferIpv6 => "prefer_ipv6",
-            DnsStrategy::OnlyIpv4 => "ipv4_only",
-            DnsStrategy::OnlyIpv6 => "ipv6_only",
-        }
-    }
-
-    pub fn toggled(&self) -> Self {
-        match self.ipv4_counterpart() {
-            DnsStrategy::PreferIpv4 => DnsStrategy::OnlyIpv4,
-            _ => DnsStrategy::PreferIpv4,
-        }
-    }
-
-    pub fn ipv4_counterpart(&self) -> Self {
-        match self {
-            DnsStrategy::PreferIpv4 | DnsStrategy::PreferIpv6 => DnsStrategy::PreferIpv4,
-            DnsStrategy::OnlyIpv4 | DnsStrategy::OnlyIpv6 => DnsStrategy::OnlyIpv4,
-        }
-    }
 }
 
 /// Built-in DNS server presets exposed by the TUI settings overlay.
@@ -311,13 +286,13 @@ pub struct DnsConfig {
     pub current_preset: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_presets: Vec<CustomDnsPreset>,
-    #[serde(default)]
-    #[schemars(extend("enum" = ["prefer_ipv4", "ipv4_only"]))]
-    pub strategy: DnsStrategy,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fakeip_enabled: bool,
     #[serde(default, skip_serializing_if = "FakeIpRanges::is_default")]
     pub fakeip_ranges: FakeIpRanges,
+    #[serde(default, rename = "strategy", skip_serializing)]
+    #[schemars(skip)]
+    pub(super) legacy_strategy: Option<DnsStrategy>,
     #[serde(default, rename = "servers", skip_serializing)]
     #[schemars(skip)]
     pub(super) legacy_servers: Option<Vec<LegacyDnsServer>>,
@@ -334,9 +309,9 @@ impl Default for DnsConfig {
         Self {
             current_preset: default_current_preset(),
             custom_presets: Vec::new(),
-            strategy: DnsStrategy::default(),
             fakeip_enabled: false,
             fakeip_ranges: FakeIpRanges::default(),
+            legacy_strategy: None,
             legacy_servers: None,
             legacy_rules: None,
             legacy_final_server: None,
@@ -467,15 +442,6 @@ impl DnsConfig {
 
     pub fn diagnostics(&self) -> Vec<ConfigDiagnostic> {
         let mut diagnostics = Vec::new();
-        if self.strategy != self.strategy.ipv4_counterpart() {
-            diagnostics.push(ConfigDiagnostic::new(
-                "/strategy",
-                format!(
-                    "dns.strategy {:?} is not supported: the tunnel carries IPv4 only; use \"prefer_ipv4\" or \"ipv4_only\"",
-                    self.strategy.as_str()
-                ),
-            ));
-        }
         for (field, present) in [
             ("servers", self.legacy_servers.is_some()),
             ("rules", self.legacy_rules.is_some()),
@@ -842,67 +808,6 @@ mod tests {
     }
 
     #[test]
-    fn strategy_toggles_between_the_ipv4_strategies() {
-        assert_eq!(DnsStrategy::PreferIpv4.toggled(), DnsStrategy::OnlyIpv4);
-        assert_eq!(DnsStrategy::OnlyIpv4.toggled(), DnsStrategy::PreferIpv4);
-    }
-
-    #[test]
-    fn strategy_ipv4_counterpart_maps_ipv6_strategies() {
-        assert_eq!(
-            DnsStrategy::PreferIpv6.ipv4_counterpart(),
-            DnsStrategy::PreferIpv4
-        );
-        assert_eq!(
-            DnsStrategy::OnlyIpv6.ipv4_counterpart(),
-            DnsStrategy::OnlyIpv4
-        );
-        assert_eq!(
-            DnsStrategy::PreferIpv4.ipv4_counterpart(),
-            DnsStrategy::PreferIpv4
-        );
-        assert_eq!(
-            DnsStrategy::OnlyIpv4.ipv4_counterpart(),
-            DnsStrategy::OnlyIpv4
-        );
-    }
-
-    #[test]
-    fn diagnostics_rejects_ipv6_strategies() {
-        for strategy in [DnsStrategy::PreferIpv6, DnsStrategy::OnlyIpv6] {
-            let dns = DnsConfig {
-                strategy,
-                ..DnsConfig::default()
-            };
-            let diagnostic = crate::test_helpers::single_diagnostic(dns.diagnostics());
-            assert_eq!(diagnostic.pointer, "/strategy");
-            assert!(diagnostic.message.contains("ipv4_only"));
-        }
-    }
-
-    #[test]
-    fn strategy_as_str_uses_singbox_wire_format() {
-        assert_eq!(DnsStrategy::PreferIpv4.as_str(), "prefer_ipv4");
-        assert_eq!(DnsStrategy::PreferIpv6.as_str(), "prefer_ipv6");
-        assert_eq!(DnsStrategy::OnlyIpv4.as_str(), "ipv4_only");
-        assert_eq!(DnsStrategy::OnlyIpv6.as_str(), "ipv6_only");
-    }
-
-    #[test]
-    fn strategy_serde_roundtrip() {
-        for s in [
-            DnsStrategy::PreferIpv4,
-            DnsStrategy::PreferIpv6,
-            DnsStrategy::OnlyIpv4,
-            DnsStrategy::OnlyIpv6,
-        ] {
-            let json = serde_json::to_string(&s).unwrap();
-            let back: DnsStrategy = serde_json::from_str(&json).unwrap();
-            assert_eq!(s, back);
-        }
-    }
-
-    #[test]
     fn server_tag_and_kind_label_for_each_variant() {
         let servers = [
             DnsServer::Local { tag: "l".into() },
@@ -956,7 +861,6 @@ mod tests {
     fn dns_config_default_is_cloudflare_doh() {
         let cfg = DnsConfig::default();
         assert_eq!(cfg.current_preset, "cloudflare_doh");
-        assert!(matches!(cfg.strategy, DnsStrategy::PreferIpv4));
         assert!(!cfg.fakeip_enabled);
         assert_eq!(cfg.diagnostics(), []);
     }
