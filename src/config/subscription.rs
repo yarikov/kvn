@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, process::Command};
+use std::{collections::HashMap, env, process::Command, time::Duration};
 
 use anyhow::{Context, Result};
 use base64::Engine;
@@ -11,6 +11,17 @@ use crate::config::profile::{
 
 const KVN_TUI_USER_AGENT: &str = concat!("kvn-tui/", env!("CARGO_PKG_VERSION"));
 const MAX_SUBSCRIPTION_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Clone, Copy)]
+struct FetchTimeouts {
+    connect: Duration,
+    total: Duration,
+}
+
+const FETCH_TIMEOUTS: FetchTimeouts = FetchTimeouts {
+    connect: Duration::from_secs(15),
+    total: Duration::from_secs(60),
+};
 
 fn ensure_subscription_size(bytes: usize, kind: &str) -> Result<()> {
     if bytes > MAX_SUBSCRIPTION_BYTES {
@@ -326,33 +337,56 @@ fn http_status_error(status: u16, redacted_url: &str) -> String {
     }
 }
 
+fn timeout_error(
+    timeout: ureq::Timeout,
+    redacted_url: &str,
+    timeouts: FetchTimeouts,
+) -> anyhow::Error {
+    let limit = match timeout {
+        ureq::Timeout::Resolve | ureq::Timeout::Connect => timeouts.connect,
+        _ => timeouts.total,
+    };
+    anyhow::anyhow!("GET {redacted_url} timed out after {limit:?}")
+}
+
 fn fetch_response(
     url: &str,
     headers: &HashMap<String, String>,
+    timeouts: FetchTimeouts,
 ) -> Result<(String, HashMap<String, String>)> {
     let redacted_url = crate::redaction::redact_url_for_log(url);
     let agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
+        .timeout_resolve(Some(timeouts.connect))
+        .timeout_connect(Some(timeouts.connect))
         .build()
         .new_agent();
-    let mut req = agent.get(url);
-
-    if let Some(headers_map) = req.headers_mut() {
-        for (name, value) in headers {
-            if let (Ok(n), Ok(v)) = (
-                ureq::http::HeaderName::from_bytes(name.as_bytes()),
-                ureq::http::HeaderValue::from_str(value),
-            ) {
-                headers_map.insert(n, v);
-            }
-        }
-    }
+    let deadline = std::time::Instant::now() + timeouts.total;
 
     // Do not retain ureq's error as a source: its Display output may contain
     // the complete request URL, including subscription credentials.
-    let resp = req
-        .call()
-        .map_err(|_| anyhow::anyhow!("GET {redacted_url} failed"))?;
+    let resp = crate::http::retry_interrupted(deadline, |remaining| {
+        let mut req = agent
+            .get(url)
+            .config()
+            .timeout_global(Some(remaining))
+            .build();
+        if let Some(headers_map) = req.headers_mut() {
+            for (name, value) in headers {
+                if let (Ok(n), Ok(v)) = (
+                    ureq::http::HeaderName::from_bytes(name.as_bytes()),
+                    ureq::http::HeaderValue::from_str(value),
+                ) {
+                    headers_map.insert(n, v);
+                }
+            }
+        }
+        req.call()
+    })
+    .map_err(|error| match error {
+        ureq::Error::Timeout(timeout) => timeout_error(timeout, &redacted_url, timeouts),
+        _ => anyhow::anyhow!("GET {redacted_url} failed"),
+    })?;
 
     let mut resp_headers = HashMap::new();
     for (name, value) in resp.headers() {
@@ -391,6 +425,7 @@ fn fetch_response(
                 "Subscription response exceeds the {} MiB limit",
                 MAX_SUBSCRIPTION_BYTES / (1024 * 1024)
             ),
+            ureq::Error::Timeout(timeout) => timeout_error(timeout, &redacted_url, timeouts),
             error => anyhow::Error::new(error).context("Failed to read subscription body"),
         })?;
     ensure_subscription_size(body.len(), "response")?;
@@ -420,7 +455,7 @@ fn fetch_subscription_after_validation(
     let hwid_sent = sub.effective_hwid(settings).is_some();
     let env = DeviceEnv::detect();
     let headers = build_request_headers(sub, settings, &env);
-    let (body, resp_headers) = fetch_response(&sub.url, &headers)?;
+    let (body, resp_headers) = fetch_response(&sub.url, &headers, FETCH_TIMEOUTS)?;
 
     if let Some(message) = hwid_response_error(&resp_headers, hwid_sent) {
         anyhow::bail!("{message}");
@@ -1329,6 +1364,50 @@ mod tests {
         let err = fetch_subscription_after_validation(&sub, &settings_with_hwid()).unwrap_err();
         assert!(err.to_string().contains("enable 'send HWID'"), "got: {err}");
         assert!(err.to_string().contains("HTTP 403"), "got: {err}");
+    }
+
+    const SHORT_TIMEOUTS: FetchTimeouts = FetchTimeouts {
+        connect: Duration::from_millis(200),
+        total: Duration::from_millis(300),
+    };
+
+    fn spawn_stalling_server(response_prefix: &'static [u8]) -> String {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let _ = stream.read(&mut [0u8; 4096]);
+            let _ = stream.write_all(response_prefix);
+            std::thread::sleep(Duration::from_secs(5));
+        });
+        format!("http://{addr}/sub")
+    }
+
+    fn assert_fetch_times_out(url: &str) {
+        let started = std::time::Instant::now();
+        let err = fetch_response(url, &HashMap::new(), SHORT_TIMEOUTS).unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(
+            err.to_string().contains("timed out after 300ms"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn fetch_times_out_when_the_server_never_sends_headers() {
+        assert_fetch_times_out(&spawn_stalling_server(b""));
+    }
+
+    #[test]
+    fn fetch_times_out_when_the_server_stalls_mid_body() {
+        assert_fetch_times_out(&spawn_stalling_server(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nvless://",
+        ));
     }
 
     const NOW: u64 = 1_800_000_000;
