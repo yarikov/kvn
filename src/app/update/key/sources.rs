@@ -178,6 +178,9 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
             .iter()
             .any(|p| p.subscription_id == Some(id))
         {
+            if model.subscription_updates.contains(&id) {
+                return subscription_already_updating(model, &name);
+            }
             if !download_allowed(model) {
                 let mut result = vec![Effect::SaveConfig];
                 push_download_blocked(&mut result, model, DownloadKind::Subscription);
@@ -212,6 +215,9 @@ fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
     {
         let id = sub.id;
         let name = sub.name.clone();
+        if model.subscription_updates.contains(&id) {
+            return subscription_already_updating(model, &name);
+        }
         if !download_allowed(model) {
             push_download_blocked(&mut effects, model, DownloadKind::Subscription);
             return effects;
@@ -232,6 +238,16 @@ fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
         crate::app::model::AppStatus::Info(
             "Subscription selection required: select one or press U for geo".into(),
         ),
+    );
+    effects
+}
+
+fn subscription_already_updating(model: &mut Model, name: &str) -> Vec<Effect> {
+    let mut effects = Vec::new();
+    push_status(
+        &mut effects,
+        model,
+        crate::app::model::AppStatus::Info(format!("Subscription {name} is already updating…")),
     );
     effects
 }
@@ -439,6 +455,32 @@ mod tests {
         assert!(model.subscription_fetching);
         assert!(effects.contains(&Effect::UpdateSubscription { id: sub_id }));
         assert!(effects.contains(&Effect::SaveConfig));
+    }
+
+    #[test]
+    fn enter_on_an_empty_subscription_already_updating_starts_no_second_fetch() {
+        let sub_id = Uuid::new_v4();
+        let mut model = model_with_profiles(vec![]);
+        model.config.subscriptions.push(Subscription {
+            id: sub_id,
+            name: "Sub".to_string(),
+            url: "http://example.com".to_string(),
+            auto_update: SubscriptionAutoUpdate::Every1d,
+            last_updated: None,
+            next_auto_update: None,
+            retry_state: None,
+            send_hwid: false,
+            hwid: None,
+        });
+        model.subscription_updates.insert(sub_id);
+        model.selected = 0;
+
+        let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Enter));
+
+        assert_eq!(
+            effects,
+            vec![app_log_info("Subscription Sub is already updating…")]
+        );
     }
 
     #[test]
@@ -660,6 +702,32 @@ mod tests {
                 Effect::UpdateSubscription { id: sub_id },
                 app_log_info("Updating subscription Sub…"),
             ]
+        );
+    }
+
+    #[test]
+    fn subscriptions_update_while_already_updating_starts_no_second_fetch() {
+        let mut model = model_with_profiles(vec![]);
+        let sub_id = Uuid::new_v4();
+        model.config.subscriptions.push(Subscription {
+            id: sub_id,
+            name: "Sub".to_string(),
+            url: "http://example.com/sub".to_string(),
+            auto_update: SubscriptionAutoUpdate::Every1d,
+            last_updated: None,
+            next_auto_update: None,
+            retry_state: None,
+            send_hwid: false,
+            hwid: None,
+        });
+        model.subscription_updates.insert(sub_id);
+        model.selected = 0;
+
+        let effects = handle_sources(&mut model, key('u'));
+
+        assert_eq!(
+            effects,
+            vec![app_log_info("Subscription Sub is already updating…")]
         );
     }
 
