@@ -4,7 +4,8 @@ polkit.addRule(function(action, subject) {
         (
             action.id == "org.freedesktop.resolve1.set-dns-servers" ||
             action.id == "org.freedesktop.resolve1.set-domains" ||
-            action.id == "org.freedesktop.resolve1.set-default-route"
+            action.id == "org.freedesktop.resolve1.set-default-route" ||
+            action.id == "org.freedesktop.resolve1.revert"
         ) &&
         subject.isInGroup("kvn-tui")
     ) {

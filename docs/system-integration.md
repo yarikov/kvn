@@ -122,6 +122,8 @@ authentication prompt:
 - `org.freedesktop.resolve1.set-dns-servers`
 - `org.freedesktop.resolve1.set-domains`
 - `org.freedesktop.resolve1.set-default-route`
+- `org.freedesktop.resolve1.revert`, which sing-box uses when it stops to
+  reset the tunnel interface's DNS settings
 
 No NetworkManager actions are granted. This authorization is group-wide and is
 not restricted to the kvn process. After being added to `kvn-tui`, reboot
@@ -210,14 +212,27 @@ settings: immediately if the daemon is running, otherwise on its next start.
 
 ## Outdated integrations
 
+A package upgrade updates the installed system integrations itself: its install
+script runs `kvn refresh --killswitch --polkit --if-outdated` as root, which
+rewrites the polkit rule or the kill-switch files only when they are installed
+and differ from the new release, records their stamps, and reloads an active
+kill switch. These files belong to kvn, so changes made to them by hand are
+overwritten, and a kill switch with any of its files present gets all of them
+back; remove an integration with `kvn clean` instead. A polkit rule from before
+kvn 0.28 grants the `network` group rather than `kvn-tui`, so replacing it
+would take the access away; the upgrade leaves it alone, and `kvn doctor` keeps
+suggesting `sudo kvn setup --polkit`. Integrations that are not installed stay
+that way, and group membership does not change. The Omarchy
+integration lives in each user's files and is not refreshed.
+
 `kvn doctor` compares the installed kill-switch helper, ruleset, and unit with
 the versions embedded in the current kvn binary, and compares the recorded
 SHA-256 stamps with the embedded sudoers and polkit rules. Any difference is
-reported as an error; rerun `sudo kvn setup --killswitch` or
-`sudo kvn setup --polkit` to update the files. Installations made before
-stamps were introduced have no stamps and are reported as outdated once.
-A polkit rule that grants the DNS actions without a stamp is treated the same
-way. Cleanup removes the corresponding stamp.
+reported as an error, for example when the upgrade could not update them;
+rerun `sudo kvn setup --killswitch` or `sudo kvn setup --polkit` to update the
+files. Installations made before stamps were introduced have no stamps and are
+reported as outdated once. A polkit rule that grants the DNS actions without a
+stamp is treated the same way. Cleanup removes the corresponding stamp.
 
 ## Omarchy setup
 

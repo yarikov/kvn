@@ -54,6 +54,11 @@ print_migration_notice() {
     done
 }
 
+refresh_system_integrations() {
+    /usr/bin/kvn refresh --killswitch --polkit --if-outdated || \
+        echo "WARNING: could not update the kvn polkit or kill-switch files — run 'kvn doctor'"
+}
+
 print_service_enable_notice() {
     echo
     echo "======================================================================"
@@ -76,6 +81,7 @@ post_install() {
 post_upgrade() {
     seed_migration_baseline "$2"
     configure_sing_box_capabilities
+    refresh_system_integrations
     print_migration_notice "$2"
 }
 

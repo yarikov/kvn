@@ -14,8 +14,10 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+REFRESH="${KVN_SETUP_REFRESH:-0}"
 USER_NAME="${SUDO_USER:-}"
-if [[ -z "$USER_NAME" || "$USER_NAME" == "root" ]] || ! id "$USER_NAME" >/dev/null 2>&1; then
+if [[ "$REFRESH" != "1" ]] &&
+    { [[ -z "$USER_NAME" || "$USER_NAME" == "root" ]] || ! id "$USER_NAME" >/dev/null 2>&1; }; then
     echo "Could not identify a non-root invoking user; run this command via sudo." >&2
     exit 1
 fi
@@ -26,29 +28,36 @@ SUDOERS_SOURCE="${4:?missing embedded kill-switch sudoers source}"
 GROUP_NAME="kvn-tui"
 STAMP_DIR="/var/lib/kvn/integrations"
 
-echo "Installing kvn kill switch for user '$USER_NAME'…"
+if [[ "$REFRESH" == "1" ]]; then
+    echo "Updating kvn kill switch files…"
+else
+    echo "Installing kvn kill switch for user '$USER_NAME'…"
+fi
 
-if ! getent group "$GROUP_NAME" >/dev/null; then
+if [[ "$REFRESH" != "1" ]] && ! getent group "$GROUP_NAME" >/dev/null; then
     groupadd --system "$GROUP_NAME"
     echo "Created system group '$GROUP_NAME'."
 fi
 
+RULESET_TMP="$(mktemp)"
+HELPER_TMP=""
+SUDOERS_TMP=""
+trap 'rm -f "$RULESET_TMP" "$HELPER_TMP" "$SUDOERS_TMP"' EXIT
+
 # ── 1. nftables ruleset ────────────────────────────────────────────────
-install -dm755 /etc/kvn-tui
-printf '%s' "$RULESET_SOURCE" > /etc/kvn-tui/killswitch.nft
-chmod 644 /etc/kvn-tui/killswitch.nft
+printf '%s' "$RULESET_SOURCE" >"$RULESET_TMP"
 
 # Syntax-check before installing the unit so we don't ship a broken ruleset.
-if ! nft -c -f /etc/kvn-tui/killswitch.nft; then
-    echo "FATAL: /etc/kvn-tui/killswitch.nft failed nft syntax check" >&2
+if ! nft -c -f "$RULESET_TMP"; then
+    echo "FATAL: the kill-switch ruleset failed nft syntax check" >&2
     exit 1
 fi
+install -dm755 /etc/kvn-tui
+install -m 0644 -o root -g root "$RULESET_TMP" /etc/kvn-tui/killswitch.nft
 
 # ── 2. Helper script ───────────────────────────────────────────────────
 install -dm755 /usr/lib/kvn-tui
 HELPER_TMP="$(mktemp)"
-SUDOERS_TMP=""
-trap 'rm -f "$HELPER_TMP" "$SUDOERS_TMP"' EXIT
 printf '%s' "$HELPER_SOURCE" >"$HELPER_TMP"
 bash -n "$HELPER_TMP"
 install -m 0755 -o root -g root "$HELPER_TMP" /usr/lib/kvn-tui/killswitch-helper.sh
@@ -70,7 +79,9 @@ sha256sum /etc/sudoers.d/kvn-tui-killswitch | cut -d' ' -f1 > "$STAMP_DIR/killsw
 chmod 644 "$STAMP_DIR/killswitch-sudoers.sha256"
 
 # ── 5. Ensure user is in the dedicated group ──────────────────────────
-if ! id -nG "$USER_NAME" | tr ' ' '\n' | grep -Fxq "$GROUP_NAME"; then
+if [[ "$REFRESH" == "1" ]]; then
+    NEW_GROUP=0
+elif ! id -nG "$USER_NAME" | tr ' ' '\n' | grep -Fxq "$GROUP_NAME"; then
     echo "Adding user '$USER_NAME' to the '$GROUP_NAME' group…"
     usermod -aG "$GROUP_NAME" "$USER_NAME"
     NEW_GROUP=1
@@ -86,6 +97,11 @@ systemctl daemon-reload
 if systemctl is-active --quiet kvn-tui-killswitch.service; then
     echo "kvn-tui-killswitch.service is active — reloading ruleset…"
     systemctl reload kvn-tui-killswitch.service
+fi
+
+if [[ "$REFRESH" == "1" ]]; then
+    echo "Updated kvn kill switch files."
+    exit 0
 fi
 
 echo

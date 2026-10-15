@@ -34,6 +34,11 @@ time it loads it and keeps the previous file in `~/.config/kvn-tui/recovery/`:
 
 An older kvn cannot read a v7 configuration.
 
+The polkit rule also allows `org.freedesktop.resolve1.revert`, which sing-box
+uses to reset the tunnel's DNS settings when it stops. From this release on,
+the package upgrade updates an installed polkit rule and kill switch itself;
+there is nothing to rerun.
+
 ## v0.34.0
 
 The configuration moves to schema v6. kvn converts it automatically the first

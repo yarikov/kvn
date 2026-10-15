@@ -10,6 +10,8 @@ pub(crate) const POLKIT_RULE: &str = include_str!("../contrib/49-kvn-tui.rules")
 pub(crate) const KILLSWITCH_HELPER_PATH: &str = "/usr/lib/kvn-tui/killswitch-helper.sh";
 const KILLSWITCH_RULESET_PATH: &str = "/etc/kvn-tui/killswitch.nft";
 const KILLSWITCH_UNIT_PATH: &str = "/etc/systemd/system/kvn-tui-killswitch.service";
+const KILLSWITCH_SUDOERS_PATH: &str = "/etc/sudoers.d/kvn-tui-killswitch";
+const POLKIT_RULE_PATH: &str = "/etc/polkit-1/rules.d/49-kvn-tui.rules";
 const KILLSWITCH_SUDOERS_STAMP_PATH: &str = "/var/lib/kvn/integrations/killswitch-sudoers.sha256";
 const POLKIT_STAMP_PATH: &str = "/var/lib/kvn/integrations/polkit.sha256";
 
@@ -57,6 +59,41 @@ pub(crate) fn polkit_rule_state(root: &Path) -> StampState {
     stamp_state(root, POLKIT_STAMP_PATH, POLKIT_RULE)
 }
 
+const KILLSWITCH_FILES: [(&str, &str); 4] = [
+    (KILLSWITCH_HELPER_PATH, KILLSWITCH_HELPER),
+    (KILLSWITCH_RULESET_PATH, KILLSWITCH_RULESET),
+    (KILLSWITCH_UNIT_PATH, KILLSWITCH_UNIT),
+    (KILLSWITCH_SUDOERS_PATH, KILLSWITCH_SUDOERS),
+];
+
+pub(crate) fn killswitch_installed(root: &Path) -> bool {
+    KILLSWITCH_FILES
+        .iter()
+        .any(|(path, _)| under_root(root, path).exists())
+}
+
+pub(crate) fn killswitch_outdated(root: &Path) -> bool {
+    KILLSWITCH_FILES
+        .iter()
+        .any(|(path, expected)| !installed_matches(&under_root(root, path), expected))
+        || stamp_state(root, KILLSWITCH_SUDOERS_STAMP_PATH, KILLSWITCH_SUDOERS)
+            != StampState::Current
+}
+
+pub(crate) fn polkit_rule_installed(root: &Path) -> bool {
+    under_root(root, POLKIT_RULE_PATH).exists()
+}
+
+pub(crate) fn polkit_rule_grants_legacy_group(root: &Path) -> bool {
+    fs::read_to_string(under_root(root, POLKIT_RULE_PATH))
+        .is_ok_and(|rule| rule.contains("subject.isInGroup(\"network\")"))
+}
+
+pub(crate) fn polkit_rule_outdated(root: &Path) -> bool {
+    !installed_matches(&under_root(root, POLKIT_RULE_PATH), POLKIT_RULE)
+        || polkit_rule_state(root) != StampState::Current
+}
+
 fn installed_matches(path: &Path, expected: &str) -> bool {
     fs::read_to_string(path).is_ok_and(|installed| installed.trim_end() == expected.trim_end())
 }
@@ -83,6 +120,8 @@ pub(crate) fn install_current(root: &Path) {
         (KILLSWITCH_HELPER_PATH, KILLSWITCH_HELPER.to_owned()),
         (KILLSWITCH_RULESET_PATH, KILLSWITCH_RULESET.to_owned()),
         (KILLSWITCH_UNIT_PATH, KILLSWITCH_UNIT.to_owned()),
+        (KILLSWITCH_SUDOERS_PATH, KILLSWITCH_SUDOERS.to_owned()),
+        (POLKIT_RULE_PATH, POLKIT_RULE.to_owned()),
         (
             KILLSWITCH_SUDOERS_STAMP_PATH,
             format!("{}\n", sha256_hex(KILLSWITCH_SUDOERS.as_bytes())),
@@ -180,11 +219,75 @@ mod tests {
             "org.freedesktop.resolve1.set-dns-servers",
             "org.freedesktop.resolve1.set-domains",
             "org.freedesktop.resolve1.set-default-route",
+            "org.freedesktop.resolve1.revert",
         ] {
             assert!(POLKIT_RULE.contains(action));
         }
         assert!(POLKIT_RULE.contains("subject.isInGroup(\"kvn-tui\")"));
         assert!(!POLKIT_RULE.contains("org.freedesktop.NetworkManager"));
         assert!(!POLKIT_RULE.contains("subject.isInGroup(\"network\")"));
+    }
+
+    #[test]
+    fn nothing_is_installed_in_an_empty_root() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(!killswitch_installed(root.path()));
+        assert!(!polkit_rule_installed(root.path()));
+    }
+
+    #[test]
+    fn current_installation_is_installed_and_not_outdated() {
+        let root = tempfile::tempdir().unwrap();
+        install_current(root.path());
+        assert!(killswitch_installed(root.path()));
+        assert!(polkit_rule_installed(root.path()));
+        assert!(!killswitch_outdated(root.path()));
+        assert!(!polkit_rule_outdated(root.path()));
+    }
+
+    #[test]
+    fn changed_file_outdates_only_its_integration() {
+        let root = tempfile::tempdir().unwrap();
+        install_current(root.path());
+        fs::write(
+            under_root(root.path(), POLKIT_RULE_PATH),
+            "polkit.addRule(old);\n",
+        )
+        .unwrap();
+        assert!(polkit_rule_outdated(root.path()));
+        assert!(!killswitch_outdated(root.path()));
+
+        install_current(root.path());
+        fs::write(
+            under_root(root.path(), KILLSWITCH_SUDOERS_PATH),
+            "%kvn-tui ALL=(root) NOPASSWD: /usr/lib/kvn-tui/killswitch-helper.sh\n",
+        )
+        .unwrap();
+        assert!(killswitch_outdated(root.path()));
+        assert!(!polkit_rule_outdated(root.path()));
+    }
+
+    #[test]
+    fn installation_without_stamps_is_outdated() {
+        let root = tempfile::tempdir().unwrap();
+        install_current(root.path());
+        fs::remove_file(under_root(root.path(), POLKIT_STAMP_PATH)).unwrap();
+        fs::remove_file(under_root(root.path(), KILLSWITCH_SUDOERS_STAMP_PATH)).unwrap();
+        assert!(polkit_rule_outdated(root.path()));
+        assert!(killswitch_outdated(root.path()));
+    }
+
+    #[test]
+    fn only_a_rule_for_the_network_group_grants_the_legacy_group() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(!polkit_rule_grants_legacy_group(root.path()));
+        install_current(root.path());
+        assert!(!polkit_rule_grants_legacy_group(root.path()));
+        fs::write(
+            under_root(root.path(), POLKIT_RULE_PATH),
+            "polkit.addRule(function(action, subject) {\n    if (subject.isInGroup(\"network\")) {\n        return polkit.Result.YES;\n    }\n});\n",
+        )
+        .unwrap();
+        assert!(polkit_rule_grants_legacy_group(root.path()));
     }
 }

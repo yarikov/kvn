@@ -313,10 +313,10 @@ Neither the daemon nor the TUI runs as root.
 - **sing-box** gets `cap_net_admin,cap_net_raw` as file capabilities from the
   package, which is enough to create the TUN interface.
 - **DNS**: sing-box sets the tunnel's DNS through systemd-resolved. The
-  optional polkit rule (`sudo kvn setup --polkit`) allows exactly the three
-  resolved actions it uses — `set-dns-servers`, `set-domains` and
-  `set-default-route` — for members of the `kvn-tui` group, so connecting does not
-  ask for a password.
+  optional polkit rule (`sudo kvn setup --polkit`) allows exactly the four
+  resolved actions it uses — `set-dns-servers`, `set-domains`,
+  `set-default-route` and `revert` — for members of the `kvn-tui` group, so
+  connecting and disconnecting do not ask for a password.
 - **Kill switch**: an nftables ruleset loaded by a systemd unit, toggled
   through one helper script that the `kvn-tui` group may run with sudo
   (`sudo kvn setup --killswitch`).
