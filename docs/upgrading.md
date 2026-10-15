@@ -14,6 +14,16 @@ upgrade needs attention.
 
 ## Next release (unreleased)
 
+The AUR package is renamed from `kvn-tui-bin` to `kvn-bin`. `kvn-tui-bin` still
+receives updates for a while, but will be retired; switch now:
+
+```bash
+yay -S kvn-bin
+```
+
+Confirm the removal of `kvn-tui-bin` when asked. The new package installs the
+same files, so profiles, settings and the daemon autostart are kept.
+
 The shortcuts that have shown a deprecation notice since v0.30.0–v0.32.0 are
 removed:
 

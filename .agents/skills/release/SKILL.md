@@ -43,7 +43,7 @@ Activate this skill when the user says any of the following:
    ```bash
    git push && git push origin vX.Y.Z
    ```
-   The tag push runs CI; when CI succeeds on the tag, `release.yml` builds and publishes the GitHub release, and `aur.yml` then updates the AUR package.
+   The tag push runs CI; when CI succeeds on the tag, `release.yml` builds and publishes the GitHub release, and `aur.yml` then updates the `kvn-bin` and `kvn-tui-bin` AUR packages.
 
 ### Validation
 

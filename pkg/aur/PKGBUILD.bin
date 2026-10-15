@@ -1,8 +1,8 @@
 # Maintainer: Dmitry Yarikov <dmitry@yarikov.com>
-pkgname=kvn-tui-bin
+pkgname={{PKGNAME}}
 pkgver={{VERSION}}
 pkgrel=1
-pkgdesc="Terminal VPN client for Arch Linux with vim navigation"
+pkgdesc="Terminal VPN client for Arch Linux with vim navigation{{PKGDESC_SUFFIX}}"
 arch=('x86_64')
 url="https://github.com/yarikov/kvn"
 license=('MIT')
@@ -14,9 +14,9 @@ optdepends=(
     'xclip: clipboard integration on X11 (preferred)'
     'xsel: clipboard integration on X11 (alternative)'
 )
-provides=('kvn-tui')
-conflicts=('kvn-tui')
-source=("https://github.com/yarikov/kvn/releases/download/v{{VERSION}}/kvn-tui-{{VERSION}}-x86_64-linux.tar.gz")
+provides=('kvn' 'kvn-tui')
+conflicts=('kvn' 'kvn-tui')
+source=("https://github.com/yarikov/kvn/releases/download/v{{VERSION}}/{{ASSET}}-{{VERSION}}-x86_64-linux.tar.gz")
 sha256sums=('{{SHA256SUM}}')
 
 package() {

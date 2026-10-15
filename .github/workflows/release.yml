@@ -37,19 +37,20 @@ jobs:
           cp contrib/kvn-tui-sing-box-capabilities.hook "kvn-tui-${VERSION}-x86_64-linux/"
           cp LICENSE "kvn-tui-${VERSION}-x86_64-linux/"
           tar czf "kvn-tui-${VERSION}-x86_64-linux.tar.gz" "kvn-tui-${VERSION}-x86_64-linux"
+          cp "kvn-tui-${VERSION}-x86_64-linux.tar.gz" "kvn-${VERSION}-x86_64-linux.tar.gz"
 
       - name: Generate checksums
         run: |
           VERSION=${{ github.event.workflow_run.head_branch }}
           VERSION=${VERSION#v}
-          sha256sum "kvn-tui-${VERSION}-x86_64-linux.tar.gz" > checksums.txt
+          sha256sum "kvn-${VERSION}-x86_64-linux.tar.gz" "kvn-tui-${VERSION}-x86_64-linux.tar.gz" > checksums.txt
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: release-assets
           path: |
-            kvn-tui-*-x86_64-linux.tar.gz
+            kvn-*-x86_64-linux.tar.gz
             checksums.txt
 
   release:
@@ -89,6 +90,6 @@ jobs:
           tag_name: ${{ github.event.workflow_run.head_branch }}
           target_commitish: ${{ github.event.workflow_run.head_sha }}
           files: |
-            kvn-tui-*-x86_64-linux.tar.gz
+            kvn-*-x86_64-linux.tar.gz
             checksums.txt
           body_path: release-notes.md

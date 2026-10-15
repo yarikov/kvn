@@ -10,32 +10,44 @@ fi
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# Download tarball to compute checksum
-curl -sL "https://github.com/yarikov/kvn/releases/download/v${VERSION}/kvn-tui-${VERSION}-x86_64-linux.tar.gz" -o "$TMPDIR/pkg.tar.gz"
-SHA256=$(sha256sum "$TMPDIR/pkg.tar.gz" | awk '{print $1}')
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Clone AUR repo
-git clone ssh://aur@aur.archlinux.org/kvn-tui-bin.git "$TMPDIR/aur"
-cd "$TMPDIR/aur"
+curl -fsSL "https://github.com/yarikov/kvn/releases/download/v${VERSION}/checksums.txt" -o "$TMPDIR/checksums.txt"
 
-# Generate PKGBUILD from template
-sed -e "s/{{VERSION}}/${VERSION}/g" \
-    -e "s/{{SHA256SUM}}/${SHA256}/g" \
-    "${SCRIPT_DIR}/PKGBUILD.bin" > PKGBUILD
+update_package() {
+    local package="$1" asset="$2" pkgdesc_suffix="$3"
+    local tarball="${asset}-${VERSION}-x86_64-linux.tar.gz"
+    local sha256
+    sha256=$(awk -v tarball="$tarball" '$2 == tarball { print $1 }' "$TMPDIR/checksums.txt")
+    [[ -n "$sha256" ]] || { echo "No checksum for $tarball" >&2; exit 1; }
 
-# Copy .install file
-cp "${SCRIPT_DIR}/kvn-tui.install" kvn-tui.install
+    # Clone AUR repo
+    git clone "ssh://aur@aur.archlinux.org/${package}.git" "$TMPDIR/$package"
+    cd "$TMPDIR/$package"
 
-# Generate .SRCINFO
-makepkg --printsrcinfo > .SRCINFO
+    # Generate PKGBUILD from template
+    sed -e "s/{{PKGNAME}}/${package}/g" \
+        -e "s/{{ASSET}}/${asset}/g" \
+        -e "s/{{PKGDESC_SUFFIX}}/${pkgdesc_suffix}/g" \
+        -e "s/{{VERSION}}/${VERSION}/g" \
+        -e "s/{{SHA256SUM}}/${sha256}/g" \
+        "${SCRIPT_DIR}/PKGBUILD.bin" > PKGBUILD
 
-# Commit and push
-git add PKGBUILD .SRCINFO kvn-tui.install
-if git diff --cached --quiet; then
-    echo "No changes to commit"
-    exit 0
-fi
-git commit -m "chore(release): update to v${VERSION}"
-git push
+    # Copy .install file
+    cp "${SCRIPT_DIR}/kvn-tui.install" kvn-tui.install
+
+    # Generate .SRCINFO
+    makepkg --printsrcinfo > .SRCINFO
+
+    # Commit and push
+    git add PKGBUILD .SRCINFO kvn-tui.install
+    if git diff --cached --quiet; then
+        echo "No changes to commit for $package"
+        return 0
+    fi
+    git commit -m "chore(release): update to v${VERSION}"
+    git push origin HEAD:master
+}
+
+update_package kvn-bin kvn ""
+update_package kvn-tui-bin kvn-tui " (transitional, replaced by kvn-bin)"
