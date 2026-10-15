@@ -118,11 +118,18 @@ pub fn geo_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("./geo"))
 }
 
-/// Return the path to the application state JSON file.
-pub fn state_json_path() -> PathBuf {
-    config_dir()
-        .map(|d| d.join("state.json"))
-        .unwrap_or_else(|| PathBuf::from("kvn-tui-state.json"))
+const STATE_JSON: &str = "state.json";
+
+pub(crate) fn state_json_path() -> anyhow::Result<PathBuf> {
+    Ok(namespaced_runtime_dir("kvn")?.join(STATE_JSON))
+}
+
+pub(crate) fn ensure_state_json_path() -> anyhow::Result<PathBuf> {
+    Ok(ensure_kvn_runtime_dir()?.join(STATE_JSON))
+}
+
+pub(crate) fn legacy_state_json_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join(STATE_JSON))
 }
 
 /// Ensure the configuration directory and its sub-directories exist.
@@ -239,9 +246,15 @@ mod tests {
     }
 
     #[test]
-    fn state_json_path_is_not_empty() {
-        let path = state_json_path();
-        assert!(!path.as_os_str().is_empty());
+    fn state_json_lives_in_the_kvn_runtime_directory() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", root.path());
+
+        assert_eq!(
+            state_json_path().unwrap(),
+            root.path().join("kvn").join("state.json")
+        );
     }
 
     #[test]
