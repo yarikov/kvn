@@ -281,8 +281,8 @@ Prints one line of JSON for a Waybar `custom` module:
 ```
 
 `class` is `connected` or `disconnected`; the icons are Nerd Font glyphs. The
-state is read from `~/.config/kvn-tui/state.json` without contacting the
-daemon, so the command is cheap enough to poll:
+state is read from `$XDG_RUNTIME_DIR/kvn/state.json` without contacting the
+daemon, so the command is cheap enough to poll; it never writes the file.
 
 ```jsonc
 "custom/kvn": {

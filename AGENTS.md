@@ -338,7 +338,6 @@ Any added, removed, or changed CLI command, option, or output updates
 | Temp sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
 | Latency-test configs | `$XDG_RUNTIME_DIR/kvn-tui/test-<uuid>.json` |
 | Editor snapshot | `$XDG_RUNTIME_DIR/kvn-tui/profiles-edit-<pid>.json` |
-| Runtime state (waybar) | `~/.config/kvn-tui/state.json` |
 | IPC socket (daemon ↔ TUI) | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
 | First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
@@ -347,6 +346,7 @@ Any added, removed, or changed CLI command, option, or output updates
 | Recovery copies (3 per kind) | `~/.config/kvn-tui/recovery/profiles.json.{before-migration,invalid,conflict,conflict-invalid}-*` |
 | Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |
 | Daemon instance lock | `$XDG_RUNTIME_DIR/kvn/daemon.lock` |
+| Runtime state (waybar, crash recovery) | `$XDG_RUNTIME_DIR/kvn/state.json` |
 | Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
 | Migration baseline, machine-wide markers | `/var/lib/kvn/migration-baseline`, `/var/lib/kvn/migrations/` |
 | Integration stamps | `/var/lib/kvn/integrations/{polkit,killswitch-sudoers}.sha256` |

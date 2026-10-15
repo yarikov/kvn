@@ -6,9 +6,10 @@ use std::time::{Duration, Instant};
 /// Write current connection state to the state JSON file.
 pub fn write_state(model: &Model) {
     let state = build_state(model);
-    let path = crate::paths::state_json_path();
-    if let Err(e) = write_state_to(&state, &path) {
-        tracing::warn!("state write failed: {e}");
+    if let Err(e) =
+        crate::paths::ensure_state_json_path().and_then(|path| write_state_to(&state, &path))
+    {
+        tracing::warn!("state write failed: {e:#}");
     }
 }
 
@@ -30,43 +31,48 @@ fn build_state(model: &Model) -> AppState {
 
 /// Clear the state file (used on startup to recover from a crash).
 pub fn clear_state() {
-    let state = AppState {
-        connected: false,
-        profile_name: None,
-        active_profile_id: None,
-        singbox_pid: None,
+    if let Err(e) = crate::paths::ensure_state_json_path()
+        .and_then(|path| write_state_to(&AppState::default(), &path))
+    {
+        tracing::warn!("state clear failed: {e:#}");
+    }
+    remove_legacy_state();
+}
+
+// TODO: drop the legacy state.json fallback once upgrades from releases that
+// wrote ~/.config/kvn-tui/state.json are no longer supported.
+fn remove_legacy_state() {
+    let Some(path) = crate::paths::legacy_state_json_path() else {
+        return;
     };
-    let path = crate::paths::state_json_path();
-    if let Err(e) = write_state_to(&state, &path) {
-        tracing::warn!("state clear failed: {e}");
+    match std::fs::remove_file(&path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            tracing::warn!("Failed to remove legacy state file {path:?}: {e}");
+        }
+        _ => {}
     }
 }
 
-fn write_state_to(state: &AppState, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
-    let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+fn write_state_to(state: &AppState, path: impl AsRef<std::path::Path>) -> Result<()> {
     let json = serde_json::to_string_pretty(state).expect("AppState serialization is infallible");
-    std::fs::write(path, json)
+    crate::atomic_write::write(path.as_ref(), json.as_bytes())
 }
 
 fn read_state_from(path: impl AsRef<std::path::Path>) -> AppState {
     std::fs::read_to_string(path.as_ref())
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or(AppState {
-            connected: false,
-            profile_name: None,
-            active_profile_id: None,
-            singbox_pid: None,
-        })
+        .unwrap_or_default()
 }
 
 /// Read the current state from disk.
 pub fn read_state() -> AppState {
-    let path = crate::paths::state_json_path();
-    read_state_from(&path)
+    match crate::paths::state_json_path() {
+        Ok(path) if path.exists() => read_state_from(&path),
+        _ => crate::paths::legacy_state_json_path()
+            .map(read_state_from)
+            .unwrap_or_default(),
+    }
 }
 
 /// Stop a sing-box process left behind by a crashed daemon.
@@ -145,23 +151,14 @@ fn wait_until_stopped(pid: u32, timeout: Duration) -> bool {
 
 /// Print waybar status JSON to stdout.
 pub fn print_status() {
-    let path = crate::paths::state_json_path();
-    let mut state = read_state_from(&path);
+    print_waybar_from_state(&displayed_state(read_state()));
+}
 
-    if state.connected {
-        let alive = state.singbox_pid.is_some_and(is_singbox_alive);
-        if !alive {
-            state = AppState {
-                connected: false,
-                profile_name: None,
-                active_profile_id: None,
-                singbox_pid: None,
-            };
-            let _ = write_state_to(&state, &path);
-        }
+fn displayed_state(state: AppState) -> AppState {
+    if state.connected && !state.singbox_pid.is_some_and(is_singbox_alive) {
+        return AppState::default();
     }
-
-    print_waybar_from_state(&state);
+    state
 }
 
 pub fn is_singbox_alive(pid: u32) -> bool {
@@ -287,7 +284,7 @@ mod tests {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let config = tempfile::tempdir().unwrap();
         let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", config.path());
-        crate::paths::ensure_config_dirs().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", config.path());
 
         let executable = config.path().join("sing-box");
         std::fs::copy("/usr/bin/sleep", &executable).unwrap();
@@ -311,7 +308,7 @@ mod tests {
                 active_profile_id: Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
                 singbox_pid: Some(pid),
             },
-            crate::paths::state_json_path(),
+            crate::paths::ensure_state_json_path().unwrap(),
         )
         .unwrap();
 
@@ -321,34 +318,46 @@ mod tests {
     }
 
     #[test]
-    fn print_status_clears_stale_state() {
-        let temp = tempfile::NamedTempFile::new().unwrap();
+    fn a_connected_state_without_a_live_singbox_is_shown_disconnected() {
         let stale = AppState {
             connected: true,
             profile_name: Some("Stale".to_string()),
             active_profile_id: Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
             singbox_pid: Some(999_999),
         };
-        let _ = write_state_to(&stale, temp.path());
 
-        let mut state = read_state_from(temp.path());
-        if state.connected {
-            let alive = state.singbox_pid.is_some_and(is_singbox_alive);
-            if !alive {
-                state = AppState {
-                    connected: false,
-                    profile_name: None,
-                    active_profile_id: None,
-                    singbox_pid: None,
-                };
-                let _ = write_state_to(&state, temp.path());
-            }
-        }
+        let shown = displayed_state(stale);
 
-        let read = read_state_from(temp.path());
-        assert!(!read.connected);
-        assert!(read.profile_name.is_none());
-        assert!(read.singbox_pid.is_none());
+        assert!(!shown.connected);
+        assert!(shown.profile_name.is_none());
+        assert!(shown.singbox_pid.is_none());
+    }
+
+    #[test]
+    fn the_legacy_state_file_is_read_until_cleared() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", config.path());
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
+        let legacy = crate::paths::legacy_state_json_path().unwrap();
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        write_state_to(
+            &AppState {
+                singbox_pid: Some(4321),
+                ..AppState::default()
+            },
+            &legacy,
+        )
+        .unwrap();
+
+        assert_eq!(read_state().singbox_pid, Some(4321));
+
+        clear_state();
+
+        assert!(!legacy.exists());
+        assert!(crate::paths::state_json_path().unwrap().exists());
+        assert_eq!(read_state().singbox_pid, None);
     }
 
     #[test]

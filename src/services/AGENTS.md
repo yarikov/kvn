@@ -19,5 +19,6 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 - **UI**: the status bar shows a `[KS]` badge when the kill switch is enabled.
 
 ## State I/O
-- `services/waybar.rs` writes a small JSON file (`state.json`) on every connect/disconnect. It stores connection status, active profile name, and sing-box PID.
-- Used by the `--waybar-status` CLI flag and for crash recovery (state is cleared on startup).
+- `services/waybar.rs` writes a small JSON file (`$XDG_RUNTIME_DIR/kvn/state.json`) atomically on every connect/disconnect. It stores connection status, active profile name, and sing-box PID.
+- Used by the `--waybar-status` CLI flag and for crash recovery (state is cleared on startup). Only the daemon writes it: `--waybar-status` shows a connected state whose sing-box is gone as disconnected without rewriting the file, so it cannot overwrite a newer state and lose the PID crash recovery needs.
+- Earlier releases wrote `~/.config/kvn-tui/state.json`. `read_state` falls back to it while the runtime file does not exist, so a sing-box left by a crashed daemon is still stopped after an upgrade, and `clear_state` deletes it at daemon startup.

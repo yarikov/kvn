@@ -197,7 +197,7 @@ impl AppStatus {
 }
 
 /// Serializable application state for external integrations (waybar, etc.).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppState {
     pub connected: bool,
     pub profile_name: Option<String>,
@@ -1287,6 +1287,7 @@ mod tests {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
         let state_dir = tempfile::tempdir().unwrap();
         let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", state_dir.path());
 
@@ -1342,6 +1343,7 @@ mod tests {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
 
         // Model::new writes to app.log, which requires the logs subdirectory
         // to exist; production code calls ensure_config_dirs() in main().
@@ -1396,6 +1398,7 @@ mod tests {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
 
         let path = crate::paths::profiles_path().unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
