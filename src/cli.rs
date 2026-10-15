@@ -176,6 +176,27 @@ enum Command {
         killswitch: bool,
     },
 
+    /// Rewrite installed polkit and kill-switch files with this release's versions.
+    #[command(group(
+        ArgGroup::new("targets")
+            .required(true)
+            .multiple(true)
+            .args(["polkit", "killswitch"])
+    ))]
+    Refresh {
+        /// Refresh the polkit rule if it is installed.
+        #[arg(long)]
+        polkit: bool,
+
+        /// Refresh the kill-switch files if they are installed.
+        #[arg(long)]
+        killswitch: bool,
+
+        /// Skip an integration whose files already match this release.
+        #[arg(long)]
+        if_outdated: bool,
+    },
+
     /// Remove files left behind by optional integration setup.
     #[command(group(
         ArgGroup::new("targets")
@@ -322,9 +343,13 @@ fn run_config_recover(file: &Path) -> Result<()> {
 /// in a predictable temporary file. `bash -c` preserves the caller's stdin,
 /// which the interactive Omarchy installer needs for its prompts.
 fn run_embedded_script(name: &str, script: &str, args: &[&str]) -> Result<()> {
+    run_embedded_script_command(name, embedded_script_command(name, script, args))
+}
+
+fn embedded_script_command(name: &str, script: &str, args: &[&str]) -> std::process::Command {
     let mut command = std::process::Command::new("bash");
     command.arg("-c").arg(script).arg(name).args(args);
-    run_embedded_script_command(name, command)
+    command
 }
 
 fn run_embedded_script_command(name: &str, mut command: std::process::Command) -> Result<()> {
@@ -365,16 +390,24 @@ fn remove_omarchy() -> Result<()> {
 
 /// Run the embedded polkit rule installer script.
 fn install_polkit() -> Result<()> {
-    run_embedded_script(
+    run_embedded_script_command("setup-polkit.sh", polkit_setup_command())
+}
+
+/// Run the embedded kill switch installer script.
+fn install_killswitch() -> Result<()> {
+    run_embedded_script_command("setup-killswitch.sh", killswitch_setup_command())
+}
+
+fn polkit_setup_command() -> std::process::Command {
+    embedded_script_command(
         "setup-polkit.sh",
         include_str!("../contrib/setup-polkit.sh"),
         &[crate::integration_files::POLKIT_RULE],
     )
 }
 
-/// Run the embedded kill switch installer script.
-fn install_killswitch() -> Result<()> {
-    run_embedded_script(
+fn killswitch_setup_command() -> std::process::Command {
+    embedded_script_command(
         "setup-killswitch.sh",
         include_str!("../contrib/setup-killswitch.sh"),
         &[
@@ -384,6 +417,81 @@ fn install_killswitch() -> Result<()> {
             crate::integration_files::KILLSWITCH_SUDOERS,
         ],
     )
+}
+
+fn refresh_integrations(polkit: bool, killswitch: bool, if_outdated: bool) -> Result<()> {
+    #[allow(unsafe_code)]
+    let effective_uid = unsafe { libc::geteuid() };
+    anyhow::ensure!(
+        effective_uid == 0,
+        "refreshing system integrations requires root privileges; run `sudo kvn refresh`"
+    );
+    let root = Path::new("/");
+    let mut failures = Vec::new();
+    if killswitch
+        && let Err(e) = refresh_integration(
+            "Kill switch",
+            "setup-killswitch.sh",
+            killswitch_setup_command(),
+            crate::integration_files::killswitch_installed(root),
+            if_outdated && !crate::integration_files::killswitch_outdated(root),
+            if_outdated,
+        )
+    {
+        failures.push(e);
+    }
+    // TODO: remove this skip, `polkit_rule_grants_legacy_group` and its docs once
+    // upgrades from kvn before 0.28 (2026-09-04) are no longer supported. Until
+    // then, rewriting that rule, which grants the `network` group, would take
+    // passwordless DNS away from users who never reran `setup --polkit`.
+    if polkit && crate::integration_files::polkit_rule_grants_legacy_group(root) {
+        if !if_outdated {
+            println!(
+                "The polkit rule predates kvn 0.28; run `sudo kvn setup --polkit` to replace it."
+            );
+        }
+    } else if polkit
+        && let Err(e) = refresh_integration(
+            "Polkit rule",
+            "setup-polkit.sh",
+            polkit_setup_command(),
+            crate::integration_files::polkit_rule_installed(root),
+            if_outdated && !crate::integration_files::polkit_rule_outdated(root),
+            if_outdated,
+        )
+    {
+        failures.push(e);
+    }
+    combine_failures(failures)
+}
+
+fn combine_failures(failures: Vec<anyhow::Error>) -> Result<()> {
+    if failures.is_empty() {
+        return Ok(());
+    }
+    let messages: Vec<String> = failures.iter().map(|e| format!("{e:#}")).collect();
+    anyhow::bail!(messages.join("; "))
+}
+
+fn refresh_integration(
+    label: &str,
+    script: &str,
+    mut command: std::process::Command,
+    installed: bool,
+    up_to_date: bool,
+    quiet_when_missing: bool,
+) -> Result<()> {
+    if !installed {
+        if !quiet_when_missing {
+            println!("{label} is not installed; nothing to refresh.");
+        }
+        return Ok(());
+    }
+    if up_to_date {
+        return Ok(());
+    }
+    command.env("KVN_SETUP_REFRESH", "1");
+    run_embedded_script_command(script, command).with_context(|| format!("{label} refresh failed"))
 }
 
 fn clean_polkit() -> Result<()> {
@@ -884,10 +992,18 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
                 ConfigCommand::Recover { file } => run_config_recover(file),
             });
         }
+        Some(Command::Refresh {
+            polkit,
+            killswitch,
+            if_outdated,
+        }) => {
+            return Some(refresh_integrations(*polkit, *killswitch, *if_outdated));
+        }
         Some(Command::Setup {
             omarchy,
             polkit,
             killswitch,
+            ..
         }) => {
             let result = (|| {
                 validate_current_integration_privileges(
@@ -1453,6 +1569,42 @@ esac
     fn setup_omarchy_conflicts_with_system_integrations() {
         assert!(Cli::try_parse_from(["kvn-tui", "setup", "--omarchy", "--polkit"]).is_err());
         assert!(Cli::try_parse_from(["kvn-tui", "setup", "--omarchy", "--killswitch"]).is_err());
+    }
+
+    #[test]
+    fn combine_failures_reports_every_failed_integration() {
+        assert!(combine_failures(Vec::new()).is_ok());
+        let error = combine_failures(vec![
+            anyhow::anyhow!("nft check failed").context("Kill switch refresh failed"),
+            anyhow::anyhow!("Polkit rule refresh failed"),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "Kill switch refresh failed: nft check failed; Polkit rule refresh failed"
+        );
+    }
+
+    #[test]
+    fn refresh_takes_targets_and_if_outdated() {
+        let cli = Cli::parse_from([
+            "kvn-tui",
+            "refresh",
+            "--killswitch",
+            "--polkit",
+            "--if-outdated",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Refresh {
+                polkit: true,
+                killswitch: true,
+                if_outdated: true,
+            })
+        ));
+        assert!(Cli::try_parse_from(["kvn-tui", "refresh"]).is_err());
+        assert!(Cli::try_parse_from(["kvn-tui", "refresh", "--if-outdated"]).is_err());
     }
 
     #[test]

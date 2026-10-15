@@ -28,6 +28,7 @@ kvn --version
 | [`kvn migrate`](#migrate) | Run package migrations |
 | [`kvn config`](#config) | Reset or recover `profiles.json` |
 | [`kvn setup`](#setup) | Install optional integrations |
+| [`kvn refresh`](#refresh) | Update installed polkit and kill-switch files |
 | [`kvn clean`](#clean) | Remove optional integrations or everything kvn created |
 | [`kvn --waybar-status`](#--waybar-status) | Print status JSON for a Waybar module |
 | [`kvn --daemon`](#--daemon) | Run the headless daemon |
@@ -213,6 +214,33 @@ sudo kvn setup --polkit --killswitch
 `--omarchy` changes only user files and is rejected under `sudo`, so it cannot
 be combined with the other two. `--polkit` and `--killswitch` must be run
 through `sudo` from the account that uses kvn.
+
+### refresh
+
+```bash
+sudo kvn refresh --polkit
+sudo kvn refresh --killswitch
+sudo kvn refresh --killswitch --polkit --if-outdated
+```
+
+Rewrites the files of an installed integration with the versions in this kvn
+release and reloads an active kill switch. The files belong to kvn: changes
+made to them by hand are overwritten, and a kill switch with any of its files
+present gets all of them back. A polkit rule installed before kvn 0.28, which
+grants the `network` group, is left alone: rerun `sudo kvn setup --polkit` to
+replace it. An integration that is not installed is skipped, and group membership does not change, so `refresh` never installs
+anything `setup` did not. Each integration is refreshed on its own: a failure in
+one does not stop the other, and the command reports every failure at the end.
+
+| Option | Effect |
+|--------|--------|
+| `--polkit` | Refresh the polkit rule |
+| `--killswitch` | Refresh the kill-switch ruleset, helper, unit, and sudoers rule |
+| `--if-outdated` | Skip an integration whose files already match this release, and say nothing about one that is not installed |
+
+The package runs `kvn refresh --killswitch --polkit --if-outdated` as root
+after every upgrade, so installed integrations follow the package without a
+manual step. Omarchy files belong to each user and are not refreshed.
 
 ### clean
 
