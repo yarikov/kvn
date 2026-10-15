@@ -786,15 +786,16 @@ impl GeoManager {
     }
 
     fn check_single(&self, url: &str, saved_etag: Option<&str>) -> Result<bool> {
-        let timeout = self.request_timeout()?;
-        let resp = self
-            .agent
-            .head(url)
-            .config()
-            .timeout_global(Some(timeout))
-            .build()
-            .call()
-            .with_context(|| format!("HEAD request failed for {}", url))?;
+        let deadline = Instant::now() + self.request_timeout()?;
+        let resp = crate::http::retry_interrupted(deadline, |remaining| {
+            self.agent
+                .head(url)
+                .config()
+                .timeout_global(Some(remaining))
+                .build()
+                .call()
+        })
+        .with_context(|| format!("HEAD request failed for {}", url))?;
 
         if resp.status() != 200 {
             return Ok(true); // assume update needed if we can't check
@@ -811,15 +812,16 @@ impl GeoManager {
 
     /// Download a file and return its ETag on success.
     fn download_file(&self, url: &str, dest: &Path) -> Result<Option<String>> {
-        let timeout = self.request_timeout()?;
-        let resp = self
-            .agent
-            .get(url)
-            .config()
-            .timeout_global(Some(timeout))
-            .build()
-            .call()
-            .with_context(|| format!("GET {}", url))?;
+        let deadline = Instant::now() + self.request_timeout()?;
+        let resp = crate::http::retry_interrupted(deadline, |remaining| {
+            self.agent
+                .get(url)
+                .config()
+                .timeout_global(Some(remaining))
+                .build()
+                .call()
+        })
+        .with_context(|| format!("GET {}", url))?;
 
         if resp.status() != 200 {
             anyhow::bail!("HTTP {} for {}", resp.status(), url);

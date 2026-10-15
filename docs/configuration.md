@@ -133,6 +133,11 @@ subscription: Remnawave, for example, answers `403` when its response rules
 block the client or no rule matches it. kvn then reports that the server
 refuses this client; ask the provider to allow kvn.
 
+A subscription download gives up when resolving the server's address or
+connecting to it takes longer than 15 seconds, or when the whole answer has not
+arrived within 60 seconds. The update then fails like any other: the
+subscription keeps its current servers, and a scheduled update is retried later.
+
 When a subscription has expired, been disabled or run out of traffic, some
 panels still answer with a list that holds only a notice dressed as a server.
 kvn does not import those entries. If the answer has nothing else, the update
