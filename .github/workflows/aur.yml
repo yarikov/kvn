@@ -10,6 +10,16 @@ jobs:
   aur:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: kvn-bin
+            asset: kvn
+            pkgdesc_suffix: ""
+          - package: kvn-tui-bin
+            asset: kvn-tui
+            pkgdesc_suffix: " (transitional, replaced by kvn-bin)"
     steps:
       - uses: actions/checkout@v7
 
@@ -36,17 +46,22 @@ jobs:
         run: mkdir -p ~/.ssh && ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
 
       - name: Clone AUR repo
-        run: git clone ssh://aur@aur.archlinux.org/kvn-tui-bin.git /tmp/aur
+        run: git clone ssh://aur@aur.archlinux.org/${{ matrix.package }}.git /tmp/aur
 
-      - name: Download tarball and compute checksum
+      - name: Read tarball checksum
         run: |
-          curl -sL "https://github.com/yarikov/kvn/releases/download/v${VERSION}/kvn-tui-${VERSION}-x86_64-linux.tar.gz" -o /tmp/pkg.tar.gz
-          SHA256=$(sha256sum /tmp/pkg.tar.gz | awk '{print $1}')
+          TARBALL="${{ matrix.asset }}-${VERSION}-x86_64-linux.tar.gz"
+          SHA256=$(curl -fsSL "https://github.com/yarikov/kvn/releases/download/v${VERSION}/checksums.txt" \
+            | awk -v tarball="$TARBALL" '$2 == tarball { print $1 }')
+          test -n "$SHA256"
           echo "SHA256=$SHA256" >> $GITHUB_ENV
 
       - name: Generate PKGBUILD
         run: |
-          sed -e "s/{{VERSION}}/${VERSION}/g" \
+          sed -e "s/{{PKGNAME}}/${{ matrix.package }}/g" \
+              -e "s/{{ASSET}}/${{ matrix.asset }}/g" \
+              -e "s/{{PKGDESC_SUFFIX}}/${{ matrix.pkgdesc_suffix }}/g" \
+              -e "s/{{VERSION}}/${VERSION}/g" \
               -e "s/{{SHA256SUM}}/${SHA256}/g" \
               pkg/aur/PKGBUILD.bin > /tmp/aur/PKGBUILD
           cp pkg/aur/kvn-tui.install /tmp/aur/kvn-tui.install
@@ -70,4 +85,4 @@ jobs:
             exit 0
           fi
           git commit -m "chore(release): update to v${VERSION}"
-          git push
+          git push origin HEAD:master

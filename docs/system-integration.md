@@ -17,7 +17,8 @@ The Arch package installs:
 | `/var/lib/kvn/migration-baseline` | `0644` | Scripts older than the first installed version, which never run; written by the install scriptlet and removed with the package |
 | `/usr/share/libalpm/hooks/kvn-tui-sing-box-capabilities.hook` | `0644` | Restores sing-box capabilities after package updates |
 | `/usr/share/licenses/kvn-tui/LICENSE` | `0644` | MIT license for the source package |
-| `/usr/share/licenses/kvn-tui-bin/LICENSE` | `0644` | MIT license for the binary package |
+| `/usr/share/licenses/kvn-bin/LICENSE` | `0644` | MIT license for the binary package |
+| `/usr/share/licenses/kvn-tui-bin/LICENSE` | `0644` | MIT license for the legacy binary package |
 
 The package post-install hook grants `/usr/bin/sing-box` the
 `cap_net_admin,cap_net_raw+ep` capabilities required for TUN operation. It does

@@ -1,7 +1,7 @@
 # kvn
 
 [![CI](https://github.com/yarikov/kvn/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/yarikov/kvn/actions/workflows/ci.yml)
-[![AUR version](https://img.shields.io/aur/version/kvn-tui-bin?logo=arch-linux&label=AUR)](https://aur.archlinux.org/packages/kvn-tui-bin)
+[![AUR version](https://img.shields.io/aur/version/kvn-bin?logo=arch-linux&label=AUR)](https://aur.archlinux.org/packages/kvn-bin)
 [![GitHub Release](https://img.shields.io/github/v/release/yarikov/kvn?logo=github&label=release)](https://github.com/yarikov/kvn/releases/latest)
 [![Rust Version](https://img.shields.io/badge/rust-1.98%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/github/license/yarikov/kvn)](LICENSE)
@@ -89,7 +89,7 @@ permissions, and removal instructions.
 ### AUR
 
 ```bash
-yay -S kvn-tui-bin \
+yay -S kvn-bin \
   && systemctl --user enable --now kvn-tui.service
 ```
 
