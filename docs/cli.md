@@ -228,9 +228,10 @@ release and reloads an active kill switch. The files belong to kvn: changes
 made to them by hand are overwritten, and a kill switch with any of its files
 present gets all of them back. A polkit rule installed before kvn 0.28, which
 grants the `network` group, is left alone: rerun `sudo kvn setup --polkit` to
-replace it. An integration that is not installed is skipped, and group membership does not change, so `refresh` never installs
-anything `setup` did not. Each integration is refreshed on its own: a failure in
-one does not stop the other, and the command reports every failure at the end.
+replace it. An integration that is not installed is skipped, and group
+membership does not change, so `refresh` never installs anything `setup` did
+not. Each integration is refreshed on its own: a failure in one does not stop
+the other, and the command reports every failure at the end.
 
 | Option | Effect |
 |--------|--------|

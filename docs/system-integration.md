@@ -224,8 +224,8 @@ back; remove an integration with `kvn clean` instead. A polkit rule from before
 kvn 0.28 grants the `network` group rather than `kvn-tui`, so replacing it
 would take the access away; the upgrade leaves it alone, and `kvn doctor` keeps
 suggesting `sudo kvn setup --polkit`. Integrations that are not installed stay
-that way, and group membership does not change. The Omarchy
-integration lives in each user's files and is not refreshed.
+that way, and group membership does not change. The Omarchy integration lives
+in each user's files and is not refreshed.
 
 `kvn doctor` compares the installed kill-switch helper, ruleset, and unit with
 the versions embedded in the current kvn binary, and compares the recorded
