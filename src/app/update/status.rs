@@ -1,10 +1,14 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model};
+use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey};
 use crate::app::msg::CopiedTarget;
 
 /// Set the application status (pure, in-memory) and return an effect that
 /// appends the same message to the on-disk log file.
-pub(in crate::app::update) fn set_status(model: &mut Model, status: AppStatus) -> Option<Effect> {
+pub(in crate::app::update) fn set_status(
+    model: &mut Model,
+    key: StatusKey,
+    status: AppStatus,
+) -> Option<Effect> {
     let (level, text) = match &status {
         AppStatus::Info(text) => ("INFO", text),
         AppStatus::Error(text) => ("ERROR", text),
@@ -13,16 +17,17 @@ pub(in crate::app::update) fn set_status(model: &mut Model, status: AppStatus) -
         level: level.to_string(),
         message: text.clone(),
     });
-    model.set_status(status);
+    model.set_status(key, status);
     effect
 }
 
 pub(in crate::app::update) fn push_status(
     effects: &mut Vec<Effect>,
     model: &mut Model,
+    key: StatusKey,
     status: AppStatus,
 ) {
-    if let Some(e) = set_status(model, status) {
+    if let Some(e) = set_status(model, key, status) {
         effects.push(e);
     }
 }
@@ -30,7 +35,7 @@ pub(in crate::app::update) fn push_status(
 #[derive(Clone, Copy)]
 pub(in crate::app::update) enum DownloadKind {
     Geo,
-    Subscription,
+    Subscription(uuid::Uuid),
 }
 
 pub(in crate::app::update) fn download_allowed(model: &Model) -> bool {
@@ -42,15 +47,17 @@ pub(in crate::app::update) fn push_download_blocked(
     model: &mut Model,
     kind: DownloadKind,
 ) {
-    let message = match kind {
-        DownloadKind::Geo => {
-            "Geo download failed: blocked by kill switch; connect to VPN and retry"
-        }
-        DownloadKind::Subscription => {
-            "Subscription update failed: blocked by kill switch; connect to VPN and retry"
-        }
+    let (key, message) = match kind {
+        DownloadKind::Geo => (
+            StatusKey::Geo,
+            "Geo download failed: blocked by kill switch; connect to VPN and retry",
+        ),
+        DownloadKind::Subscription(id) => (
+            StatusKey::Subscription(id),
+            "Subscription update failed: blocked by kill switch; connect to VPN and retry",
+        ),
     };
-    push_status(effects, model, AppStatus::Error(message.into()));
+    push_status(effects, model, key, AppStatus::Error(message.into()));
 }
 
 pub(in crate::app::update) fn append_download_hint(
@@ -65,13 +72,13 @@ pub(in crate::app::update) fn append_download_hint(
         (true, DownloadKind::Geo) => {
             "Kill switch is enabled and VPN is disconnected. Reconnect VPN and retry the geo download."
         }
-        (true, DownloadKind::Subscription) => {
+        (true, DownloadKind::Subscription(_)) => {
             "Kill switch is enabled and VPN is disconnected. Reconnect VPN and retry the subscription update."
         }
         (false, DownloadKind::Geo) => {
             "VPN is disconnected. Try connecting to VPN and retrying the geo download."
         }
-        (false, DownloadKind::Subscription) => {
+        (false, DownloadKind::Subscription(_)) => {
             "VPN is disconnected. Try connecting to VPN and retrying the subscription update."
         }
     };
@@ -92,7 +99,12 @@ pub(in crate::app::update) fn handle_copied_status(
         CopiedTarget::Command => "Command copied".to_string(),
     };
     let mut effects = Vec::new();
-    push_status(&mut effects, model, crate::app::model::AppStatus::Info(msg));
+    push_status(
+        &mut effects,
+        model,
+        StatusKey::Clipboard,
+        crate::app::model::AppStatus::Info(msg),
+    );
     effects
 }
 

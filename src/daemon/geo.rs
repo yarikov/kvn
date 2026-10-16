@@ -1,7 +1,7 @@
 use std::sync::mpsc::Sender;
 use std::thread;
 
-use crate::app::model::{AppStatus, Model};
+use crate::app::model::{AppStatus, Model, StatusKey};
 use crate::app::msg::{GeoResult, Msg};
 use crate::config::profile::{GeoAutoUpdate, GeoRegion, RoutedService};
 use crate::geo::RegionUpdate;
@@ -194,7 +194,7 @@ pub(super) fn reset_update_schedules(model: &mut Model) {
         }
         Err(error) => {
             let message = format!("Rule-set update schedule reset failed: {error:#}");
-            model.set_status(AppStatus::Error(message.clone()));
+            model.set_status(StatusKey::Geo, AppStatus::Error(message.clone()));
             crate::services::log_tailer::append_app_log("ERROR", &message);
         }
     }

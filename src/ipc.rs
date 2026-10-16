@@ -439,6 +439,7 @@ mod tests {
             status: "ok".into(),
             status_is_error: false,
             status_revision: 1,
+            status_events: Vec::new(),
             singbox_pid: None,
             active_profile_id: None,
             selected: 0,

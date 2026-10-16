@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, Model, Overlay};
+use crate::app::model::{AppStatus, Model, Overlay, StatusKey};
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::update::key::sources::is_connection_affected;
@@ -17,6 +17,7 @@ pub(in crate::app::update) fn handle_confirm_delete(
                 push_status(
                     &mut effects,
                     model,
+                    StatusKey::Sources,
                     AppStatus::Error("Delete failed: disconnect first".into()),
                 );
                 return effects;
@@ -33,6 +34,7 @@ pub(in crate::app::update) fn handle_confirm_delete(
                         push_status(
                             &mut effects,
                             model,
+                            StatusKey::Sources,
                             crate::app::model::AppStatus::Info(format!(
                                 "Profile deleted: {}",
                                 name
@@ -49,6 +51,7 @@ pub(in crate::app::update) fn handle_confirm_delete(
                         push_status(
                             &mut effects,
                             model,
+                            StatusKey::Sources,
                             crate::app::model::AppStatus::Info(format!(
                                 "Subscription deleted: {}",
                                 name

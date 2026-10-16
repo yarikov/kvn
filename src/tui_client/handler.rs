@@ -15,7 +15,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 
-use crate::app::model::{AppStatus, MainPaneFocus, Model, Overlay};
+use crate::app::model::{MainPaneFocus, Model, Overlay};
 use crate::app::msg::{IpcCommand, Msg, StateSnapshot};
 use crate::ipc::{DaemonConnectionLost, IpcClient};
 use crate::services::LogTailer;
@@ -27,7 +27,7 @@ use super::{
 };
 use key::GoFirstSequence;
 use pointer::{ClickTracker, PointerShape, update_pointer_shape};
-use toast::ToastState;
+use toast::{ToastKey, ToastState};
 use wheel::WheelAccelerator;
 
 pub(super) const IPC_INTERACTION_TIMEOUT: Duration = Duration::from_secs(2);
@@ -105,16 +105,7 @@ impl<'a> ClientLoop<'a> {
     }
 
     pub(super) fn initial_draw(&mut self) -> Result<()> {
-        let clear_initial_error = self
-            .toast
-            .show_initial_error(self.model.status.clone(), Instant::now());
-        self.draw()?;
-        if clear_initial_error {
-            self.client.send(&IpcCommand::ClearErrorStatus {
-                status_revision: self.model.status_revision,
-            })?;
-        }
-        Ok(())
+        self.draw()
     }
 
     pub(super) fn handle(&mut self, msg: Msg) -> Result<Flow> {
@@ -171,11 +162,11 @@ impl<'a> ClientLoop<'a> {
             snapshot.main_pane_focus,
             Instant::now(),
         );
-        let toast_status =
-            AppStatus::from_snapshot(snapshot.status.clone(), snapshot.status_is_error);
-        self.pending_error_status_clear =
-            self.toast
-                .observe(snapshot.status_revision, toast_status, Instant::now());
+        self.pending_error_status_clear = self.toast.observe(
+            snapshot.status_revision,
+            &snapshot.status_events,
+            Instant::now(),
+        );
         let old_context = crate::app::scroll::context(self.model.overlay);
         let response_to = snapshot.response_to;
         let scroll_result = snapshot.scroll_result;
@@ -221,10 +212,8 @@ impl<'a> ClientLoop<'a> {
         *self.client = client;
         self.scroll_queue.cancel();
         self.pending_focus = None;
-        let revision = snapshot.status_revision;
-        let status = AppStatus::from_snapshot(snapshot.status.clone(), snapshot.status_is_error);
+        self.toast.reattach(snapshot.status_revision);
         let flow = self.apply_state_update(snapshot)?;
-        self.pending_error_status_clear = self.toast.reattach(revision, status, Instant::now());
         if let Some(message) = self.unreported_error.take() {
             self.report_error(message)?;
         }
@@ -246,7 +235,8 @@ impl<'a> ClientLoop<'a> {
     fn tick(&mut self) -> Result<Flow> {
         let now = Instant::now();
         if self.scroll_queue.expire(now) {
-            self.toast.show_info("Scrolling timed out; try again", now);
+            self.toast
+                .show_info(ToastKey::Scroll, "Scrolling timed out; try again", now);
         }
         if pointer::expire_pane_focus(&mut self.pending_focus, now) {
             self.pane_focus = self.model.main_pane_focus;
@@ -302,7 +292,7 @@ impl<'a> ClientLoop<'a> {
         let pane_focus = self.pane_focus;
         let log_navigation = &self.log_navigation;
         let log_selection = self.log_selection.as_ref();
-        let toast = self.toast.current();
+        let toasts = self.toast.statuses();
         self.terminal.draw(|frame| {
             crate::ui::layout::draw_with_toast(
                 frame,
@@ -310,7 +300,7 @@ impl<'a> ClientLoop<'a> {
                 pane_focus,
                 Some(log_navigation),
                 log_selection,
-                toast,
+                &toasts,
             )
         })?;
         Ok(())

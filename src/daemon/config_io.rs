@@ -4,7 +4,7 @@ use std::thread;
 use anyhow::Context;
 
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, Model, Overlay};
+use crate::app::model::{AppStatus, Model, Overlay, StatusKey};
 use crate::app::msg::{ConfigEditResult, IpcError, Msg};
 use crate::config::profile::Config;
 use crate::onboarding::{OnboardingProgress, OnboardingRecovery};
@@ -102,7 +102,7 @@ fn commit_model_config(model: &mut Model, before: &Config) -> anyhow::Result<()>
 }
 
 fn report_save_failure(model: &mut Model, message: &str) {
-    model.set_status(AppStatus::Error(message.to_string()));
+    model.set_status(StatusKey::Config, AppStatus::Error(message.to_string()));
     crate::services::log_tailer::append_app_log("ERROR", message);
 }
 
@@ -166,9 +166,10 @@ pub(super) fn report_uncommitted_save(model: &mut Model) {
     // The main loop must consume this marker through
     // `commit_config_change` before executing effects. Never fall
     // back to an unconditional write here.
-    model.set_status(AppStatus::Error(
-        "Configuration save failed: uncommitted SaveConfig effect".into(),
-    ));
+    model.set_status(
+        StatusKey::Config,
+        AppStatus::Error("Configuration save failed: uncommitted SaveConfig effect".into()),
+    );
 }
 
 pub(super) fn persist_support_prompt(
@@ -185,7 +186,7 @@ pub(super) fn persist_support_prompt(
             model.overlay = Overlay::Support;
         }
         let message = format!("Support prompt save failed: {error:#}");
-        model.set_status(AppStatus::Error(message.clone()));
+        model.set_status(StatusKey::Config, AppStatus::Error(message.clone()));
         crate::services::log_tailer::append_app_log("ERROR", &message);
     }
 }
@@ -203,7 +204,7 @@ pub(super) fn persist_onboarding(
         Err(error) => {
             restore_onboarding_after_failure(model, previous, recovery);
             let message = format!("Onboarding progress save failed: {error:#}");
-            model.set_status(AppStatus::Error(message.clone()));
+            model.set_status(StatusKey::Config, AppStatus::Error(message.clone()));
             crate::services::log_tailer::append_app_log("ERROR", &message);
         }
     }
@@ -255,15 +256,21 @@ fn arm_support_prompt_after_onboarding(model: &mut Model) {
 
 pub(super) fn save_conflict(model: &mut Model, edited: Box<Config>, conflicts: Vec<String>) {
     match crate::config::save_conflict_config(&edited) {
-        Ok(path) => model.set_status(AppStatus::Error(format!(
-            "Configuration edit failed: conflicts at {}; edited version saved to {}",
-            conflicts.join(", "),
-            path.display()
-        ))),
-        Err(error) => model.set_status(AppStatus::Error(format!(
-            "Configuration edit failed: conflicts at {}; edited version save failed: {error:#}",
-            conflicts.join(", ")
-        ))),
+        Ok(path) => model.set_status(
+            StatusKey::Config,
+            AppStatus::Error(format!(
+                "Configuration edit failed: conflicts at {}; edited version saved to {}",
+                conflicts.join(", "),
+                path.display()
+            )),
+        ),
+        Err(error) => model.set_status(
+            StatusKey::Config,
+            AppStatus::Error(format!(
+                "Configuration edit failed: conflicts at {}; edited version save failed: {error:#}",
+                conflicts.join(", ")
+            )),
+        ),
     }
 }
 
@@ -306,7 +313,7 @@ pub(super) fn commit_edited(
                     "Configuration edit failed: {error:#}; edited version preservation failed: {save_error:#}"
                 ),
             };
-            model.set_status(AppStatus::Error(message.clone()));
+            model.set_status(StatusKey::Config, AppStatus::Error(message.clone()));
             crate::services::log_tailer::append_app_log("ERROR", &message);
             ConfigEditResult::Failed { message }
         }

@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model};
+use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey};
 use crate::config::profile::Profile;
 use uuid::Uuid;
 
@@ -97,7 +97,12 @@ pub(crate) fn handle_config_reloaded(
             } else {
                 "Configuration reloaded"
             };
-            push_status(&mut effects, model, AppStatus::Info(status.into()));
+            push_status(
+                &mut effects,
+                model,
+                StatusKey::Config,
+                AppStatus::Info(status.into()),
+            );
             effects
         }
         Err(e) => {
@@ -105,6 +110,7 @@ pub(crate) fn handle_config_reloaded(
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Config,
                 AppStatus::Error(format!("Configuration reload failed: {}", e)),
             );
             effects

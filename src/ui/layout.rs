@@ -61,7 +61,7 @@ pub(crate) fn sync_overlay_scroll(model: &mut Model, area: Rect) {
 #[cfg(test)]
 use crate::app::model::AppStatus;
 use crate::app::model::{MainPaneFocus, Model};
-use crate::ui::widgets::Toast;
+use crate::ui::widgets::ToastStack;
 
 use panes::{draw_main, draw_status_bar, draw_traffic_panel};
 
@@ -82,7 +82,7 @@ pub(crate) const MIN_TERMINAL_HEIGHT: u16 = 15;
 /// Render the full application UI into the terminal frame.
 #[cfg(test)]
 pub(crate) fn draw(frame: &mut Frame, model: &Model) {
-    draw_impl(frame, model, MainPaneFocus::Sources, None, None, None);
+    draw_impl(frame, model, MainPaneFocus::Sources, None, None, &[]);
 }
 
 #[cfg(test)]
@@ -97,7 +97,7 @@ pub(crate) fn draw_with_log_selection(
         MainPaneFocus::Sources,
         None,
         log_selection,
-        None,
+        &[],
     );
 }
 
@@ -109,14 +109,7 @@ pub(crate) fn draw_with_interaction(
     log_navigation: Option<&LogNavigation>,
     log_selection: Option<&LogSelection>,
 ) {
-    draw_impl(
-        frame,
-        model,
-        pane_focus,
-        log_navigation,
-        log_selection,
-        None,
-    );
+    draw_impl(frame, model, pane_focus, log_navigation, log_selection, &[]);
 }
 
 pub(crate) fn draw_with_toast(
@@ -125,7 +118,7 @@ pub(crate) fn draw_with_toast(
     pane_focus: MainPaneFocus,
     log_navigation: Option<&LogNavigation>,
     log_selection: Option<&LogSelection>,
-    toast: Option<&crate::app::model::AppStatus>,
+    toasts: &[&crate::app::model::AppStatus],
 ) {
     draw_impl(
         frame,
@@ -133,7 +126,7 @@ pub(crate) fn draw_with_toast(
         pane_focus,
         log_navigation,
         log_selection,
-        toast,
+        toasts,
     );
 }
 
@@ -143,7 +136,7 @@ fn draw_impl(
     pane_focus: MainPaneFocus,
     log_navigation: Option<&LogNavigation>,
     log_selection: Option<&LogSelection>,
-    toast: Option<&crate::app::model::AppStatus>,
+    toasts: &[&crate::app::model::AppStatus],
 ) {
     let area = frame.area();
 
@@ -183,12 +176,7 @@ fn draw_impl(
 
     overlay::draw(frame, model, area);
 
-    if let Some(status) = toast {
-        let toast = Toast::new(status, &model.theme);
-        if let Some(area) = toast.area(frame.area()) {
-            frame.render_widget(toast, area);
-        }
-    }
+    frame.render_widget(ToastStack::new(toasts, &model.theme), area);
 }
 
 pub(crate) fn terminal_size_supported(area: Rect) -> bool {
@@ -271,7 +259,7 @@ mod tests {
                 MainPaneFocus::Sources,
                 None,
                 None,
-                Some(&status),
+                &[&status],
             )
         });
         assert!(output.lines().nth(2).unwrap().contains("Saved"));
@@ -288,7 +276,7 @@ mod tests {
                 MainPaneFocus::Sources,
                 None,
                 None,
-                Some(&status),
+                &[&status],
             )
         });
         assert!(output.contains("Saved"));
@@ -307,7 +295,7 @@ mod tests {
                 MainPaneFocus::Sources,
                 None,
                 None,
-                Some(&status),
+                &[&status],
             )
         });
         assert!(output.contains("Must not appear"));
@@ -319,27 +307,13 @@ mod tests {
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Root);
         let error = AppStatus::Error("Failed to save config".into());
         let rendered = render_to_string(80, 20, |frame| {
-            draw_with_toast(
-                frame,
-                &model,
-                MainPaneFocus::Sources,
-                None,
-                None,
-                Some(&error),
-            )
+            draw_with_toast(frame, &model, MainPaneFocus::Sources, None, None, &[&error])
         });
         assert!(rendered.contains("Failed to save config"));
 
         let info = AppStatus::Info("Saved".into());
         let rendered = render_to_string(80, 20, |frame| {
-            draw_with_toast(
-                frame,
-                &model,
-                MainPaneFocus::Sources,
-                None,
-                None,
-                Some(&info),
-            )
+            draw_with_toast(frame, &model, MainPaneFocus::Sources, None, None, &[&info])
         });
         assert!(rendered.contains("Saved"));
     }

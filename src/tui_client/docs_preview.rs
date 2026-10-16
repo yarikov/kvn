@@ -29,7 +29,7 @@ pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
                 crate::app::model::MainPaneFocus::Sources,
                 None,
                 None,
-                Some(&toast),
+                &[&toast],
             )
         })?;
         if event::poll(Duration::from_millis(250))?
@@ -380,7 +380,7 @@ mod tests {
                     crate::app::model::MainPaneFocus::Sources,
                     None,
                     None,
-                    Some(&state.toast),
+                    &[&state.toast],
                 )
             },
         );

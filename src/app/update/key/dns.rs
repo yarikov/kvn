@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, Model, Overlay, SettingsMenuPage};
+use crate::app::model::{AppStatus, Model, Overlay, SettingsMenuPage, StatusKey};
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::update::connection::reconnect_with_new_settings;
@@ -92,6 +92,7 @@ fn commit_dns_drafts(model: &mut Model) -> Vec<Effect> {
         push_status(
             &mut effects,
             model,
+            StatusKey::Dns,
             AppStatus::Error(format!("DNS preset {missing:?} no longer exists")),
         );
         return effects;
@@ -105,12 +106,14 @@ fn commit_dns_drafts(model: &mut Model) -> Vec<Effect> {
     push_status(
         &mut effects,
         model,
+        StatusKey::Dns,
         AppStatus::Info("DNS settings changed".into()),
     );
     if reconnect_with_new_settings(model) {
         push_status(
             &mut effects,
             model,
+            StatusKey::Connection,
             AppStatus::Info("DNS changed — reconnecting…".into()),
         );
     }

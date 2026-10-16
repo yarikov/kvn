@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::app::model::{AppStatus, ConnectionState, Model, Overlay, TrafficStats};
+use crate::app::model::{AppStatus, ConnectionState, Model, Overlay, StatusKey, TrafficStats};
 use crate::app::msg::{IpcError, Msg};
 use crate::config::profile::{Profile, Settings};
 
@@ -147,7 +147,10 @@ pub(super) fn disconnect(model: &mut Model, shared: &DaemonShared) {
     model.traffic_request_id = 0;
     model.last_traffic_response_id = 0;
     model.last_traffic_fetch_at = None;
-    model.set_status(AppStatus::Info("Disconnected".into()));
+    model.set_status(
+        StatusKey::Connection,
+        AppStatus::Info("Disconnected".into()),
+    );
     model.overlay = Overlay::None;
     crate::services::waybar::write_state(model);
     if model.config.settings.kill_switch

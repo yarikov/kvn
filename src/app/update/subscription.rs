@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model};
+use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey};
 use crate::config::profile::{Profile, SubscriptionAutoUpdate};
 use chrono::Local;
 use std::collections::{HashMap, HashSet};
@@ -114,12 +114,14 @@ fn handle_subscription_result_at(
                 push_status(
                     &mut effects,
                     model,
+                    StatusKey::Subscription(id),
                     crate::app::model::AppStatus::Info(format!("Profiles imported: {}", imported)),
                 );
             } else {
                 push_status(
                     &mut effects,
                     model,
+                    StatusKey::Subscription(id),
                     crate::app::model::AppStatus::Info(
                         "Subscription unchanged: no new profiles".into(),
                     ),
@@ -144,9 +146,10 @@ fn handle_subscription_result_at(
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Subscription(id),
                 crate::app::model::AppStatus::Error(format!("Subscription update failed: {}", err)),
             );
-            append_download_hint(&mut effects, model, DownloadKind::Subscription);
+            append_download_hint(&mut effects, model, DownloadKind::Subscription(id));
             effects
         }
     };
@@ -192,6 +195,7 @@ fn handle_subscription_result_at(
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Connection,
                 AppStatus::Info("Subscription changed — reconnecting".into()),
             );
         }

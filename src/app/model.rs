@@ -169,7 +169,8 @@ pub enum ConnectionState {
 }
 
 /// Typed status message for the application.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "level", content = "text", rename_all = "snake_case")]
 pub enum AppStatus {
     Info(String),
     Error(String),
@@ -195,6 +196,33 @@ impl AppStatus {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum StatusKey {
+    Connection,
+    ConnectionWarning(usize),
+    KillSwitch,
+    AutoConnect,
+    Routing,
+    Dns,
+    Geo,
+    Subscription(Uuid),
+    Sources,
+    Clipboard,
+    Interface,
+    Config,
+    Client,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusEvent {
+    pub revision: u64,
+    pub key: StatusKey,
+    pub status: AppStatus,
+}
+
+const STATUS_EVENT_CAPACITY: usize = 16;
 
 /// Serializable application state for external integrations (waybar, etc.).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -308,6 +336,7 @@ pub struct Model {
     /// show repeated messages as distinct toast notifications even when the
     /// text itself did not change.
     pub status_revision: u64,
+    pub status_events: VecDeque<StatusEvent>,
     pub singbox_pid: Option<u32>,
     pub active_profile_id: Option<Uuid>,
     /// Explicit target for a queued connection attempt. This must never be
@@ -429,13 +458,21 @@ impl Model {
 
     /// Set application status and also push it to the in-memory logs panel.
     /// This method is side-effect-free: it does not write to disk.
-    pub fn set_status(&mut self, status: AppStatus) {
-        let text = status.text();
-        if !text.is_empty() {
-            self.push_log(text.to_string());
+    pub fn set_status(&mut self, key: StatusKey, status: AppStatus) {
+        self.status_revision = self.status_revision.wrapping_add(1);
+        self.status_events.retain(|event| event.key != key);
+        if !status.text().is_empty() {
+            self.push_log(status.text().to_string());
+            if self.status_events.len() == STATUS_EVENT_CAPACITY {
+                self.status_events.pop_front();
+            }
+            self.status_events.push_back(StatusEvent {
+                revision: self.status_revision,
+                key,
+                status: status.clone(),
+            });
         }
         self.status = Some(status);
-        self.status_revision = self.status_revision.wrapping_add(1);
     }
 
     pub fn apply_geo_schedule(&mut self, schedule: crate::app::msg::GeoSchedule) {
@@ -600,6 +637,7 @@ impl Model {
             selected,
             status: None,
             status_revision: 0,
+            status_events: VecDeque::new(),
             singbox_pid: None,
             active_profile_id: None,
             connecting_profile_id,
@@ -650,7 +688,7 @@ impl Model {
             model.overlay = Overlay::Onboarding(model.onboarding.step());
         }
         if let Some(status) = status {
-            model.set_status(status);
+            model.set_status(StatusKey::Connection, status);
         }
         // A load/validate failure at startup must reach the user. set_status
         // populates the status bar and the in-memory log panel; the extra
@@ -658,7 +696,7 @@ impl Model {
         // so the user can still see the reason after restarting the TUI.
         if let Some(msg) = startup_error {
             crate::services::log_tailer::append_app_log("ERROR", &msg);
-            model.set_status(AppStatus::Error(msg));
+            model.set_status(StatusKey::Config, AppStatus::Error(msg));
         }
         Ok(model)
     }
@@ -726,6 +764,7 @@ impl Model {
             selected,
             status: None,
             status_revision: 0,
+            status_events: VecDeque::new(),
             singbox_pid: None,
             active_profile_id: None,
             connecting_profile_id: None,
@@ -1005,6 +1044,7 @@ impl Model {
             selected,
             status: None,
             status_revision: 0,
+            status_events: VecDeque::new(),
             singbox_pid: None,
             active_profile_id: None,
             connecting_profile_id: None,
@@ -1439,21 +1479,71 @@ mod tests {
     fn set_status_logs_plain_text() {
         let mut model = Model::test_new(Config::default());
         let initial_revision = model.status_revision;
-        model.set_status(AppStatus::Info("hello".into()));
+        model.set_status(StatusKey::Connection, AppStatus::Info("hello".into()));
         assert_eq!(model.status_text(), "hello");
         assert_eq!(model.logs.back().unwrap(), "hello");
         assert_eq!(model.status_revision, initial_revision + 1);
 
-        model.set_status(AppStatus::Error("oops".into()));
+        model.set_status(StatusKey::Connection, AppStatus::Error("oops".into()));
         assert_eq!(model.status_text(), "oops");
         assert_eq!(model.logs.back().unwrap(), "oops");
         assert_eq!(model.status_revision, initial_revision + 2);
     }
 
     #[test]
+    fn set_status_keeps_the_latest_event_of_each_key() {
+        let mut model = Model::test_new(Config::default());
+        model.set_status(StatusKey::Connection, AppStatus::Info("Connecting…".into()));
+        model.set_status(StatusKey::Geo, AppStatus::Error("Geo update failed".into()));
+        model.set_status(StatusKey::Connection, AppStatus::Info("Connected".into()));
+
+        let events: Vec<_> = model
+            .status_events
+            .iter()
+            .map(|event| (event.revision, event.key, event.status.text()))
+            .collect();
+        assert_eq!(
+            events,
+            vec![
+                (2, StatusKey::Geo, "Geo update failed"),
+                (3, StatusKey::Connection, "Connected"),
+            ]
+        );
+    }
+
+    #[test]
+    fn set_status_drops_the_oldest_event_beyond_capacity() {
+        let mut model = Model::test_new(Config::default());
+        for index in 0..=STATUS_EVENT_CAPACITY {
+            model.set_status(
+                StatusKey::ConnectionWarning(index),
+                AppStatus::Info(format!("warning {index}")),
+            );
+        }
+
+        assert_eq!(model.status_events.len(), STATUS_EVENT_CAPACITY);
+        assert_eq!(
+            model.status_events.front().unwrap().status.text(),
+            "warning 1"
+        );
+    }
+
+    #[test]
+    fn empty_status_replaces_its_key_without_an_event() {
+        let mut model = Model::test_new(Config::default());
+        model.set_status(
+            StatusKey::Sources,
+            AppStatus::Info("Profile imported".into()),
+        );
+        model.set_status(StatusKey::Sources, AppStatus::Info(String::new()));
+
+        assert!(model.status_events.is_empty());
+    }
+
+    #[test]
     fn clear_error_status_requires_the_current_revision() {
         let mut model = Model::test_new(Config::default());
-        model.set_status(AppStatus::Error("first".into()));
+        model.set_status(StatusKey::Connection, AppStatus::Error("first".into()));
         let revision = model.status_revision;
 
         assert!(!model.clear_error_status(revision.wrapping_sub(1)));
@@ -1467,7 +1557,7 @@ mod tests {
     #[test]
     fn set_status_does_not_log_empty() {
         let mut model = Model::test_new(Config::default());
-        model.set_status(AppStatus::Info("".into()));
+        model.set_status(StatusKey::Connection, AppStatus::Info("".into()));
         assert!(model.logs.is_empty());
     }
 }

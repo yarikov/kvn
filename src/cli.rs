@@ -683,9 +683,6 @@ fn run_status(json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&snap)?);
     } else {
         println!("{}", format_status_line(&snap));
-        if snap.status_is_error {
-            eprintln!("last error: {}", snap.status);
-        }
     }
     Ok(())
 }
@@ -1949,6 +1946,7 @@ esac
             status: "ok".into(),
             status_is_error: false,
             status_revision: 1,
+            status_events: Vec::new(),
             singbox_pid: None,
             active_profile_id: None,
             selected: 0,

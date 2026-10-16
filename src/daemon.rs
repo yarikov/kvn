@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model};
+use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey};
 use crate::app::msg::{IpcCommand, LogSessionOffsets, Msg, StateSnapshot};
 use crate::app::update::update;
 use crate::ipc::{IpcServer, cleanup_socket};
@@ -304,10 +304,13 @@ fn cancel_startup_auto_connect(model: &mut Model) {
         model.connection = ConnectionState::Idle;
         model.connecting_profile_id = None;
     }
-    model.status = Some(AppStatus::Info(
-        "Auto-connect disabled: passwordless polkit is not set up; run `sudo kvn setup --polkit`"
-            .into(),
-    ));
+    model.set_status(
+        StatusKey::Connection,
+        AppStatus::Info(
+            "Auto-connect disabled: passwordless polkit is not set up; run `sudo kvn setup --polkit`"
+                .into(),
+        ),
+    );
 }
 
 pub(crate) fn build_snapshot(
@@ -331,6 +334,7 @@ pub(crate) fn build_snapshot(
         status: model.status_text().to_string(),
         status_is_error: model.status_is_error(),
         status_revision: model.status_revision,
+        status_events: model.status_events.iter().cloned().collect(),
         singbox_pid: model.singbox_pid,
         active_profile_id: model.active_profile_id.map(|id| id.to_string()),
         selected: model.selected,

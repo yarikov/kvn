@@ -12,6 +12,7 @@ use crate::tui_client::{OSC_POINTER_DEFAULT, editor, input};
 
 use super::super::ClientLoop;
 use super::super::pointer::PointerShape;
+use super::super::toast::ToastKey;
 
 pub(super) fn open(state: &mut ClientLoop) -> Result<()> {
     state.clear_log_selection();
@@ -36,7 +37,9 @@ pub(super) fn open(state: &mut ClientLoop) -> Result<()> {
     } else {
         if let Some(AppStatus::Info(message)) = &status {
             crate::services::log_tailer::append_app_log("INFO", message);
-            state.toast.show_info(message, Instant::now());
+            state
+                .toast
+                .show_info(ToastKey::Editor, message, Instant::now());
         }
         Ok(())
     };

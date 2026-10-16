@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model, RoutingSettings};
+use crate::app::model::{AppStatus, ConnectionState, Model, RoutingSettings, StatusKey};
 use crate::app::msg::{ServiceCheckTimes, ServiceSchedule};
 use crate::config::profile::{GeoRegion, RoutingMode};
 
@@ -32,6 +32,7 @@ pub(in crate::app::update) fn on_service_rule_sets_ready(
         push_status(
             &mut effects,
             model,
+            StatusKey::Geo,
             AppStatus::Error(format!(
                 "Service rule-set update failed: {}",
                 errors.join("; ")
@@ -67,12 +68,14 @@ pub(in crate::app::update) fn on_service_rule_sets_ready(
         push_status(
             &mut effects,
             model,
+            StatusKey::Routing,
             AppStatus::Info("Service routing changed — reconnecting".into()),
         );
     } else {
         push_status(
             &mut effects,
             model,
+            StatusKey::Routing,
             AppStatus::Info("Service routing changed — applies after reconnect".into()),
         );
     }
@@ -92,6 +95,7 @@ pub(in crate::app::update) fn commit_routing_mode(
         push_status(
             &mut effects,
             model,
+            StatusKey::Routing,
             AppStatus::Error(format!(
                 "Routing mode change failed: {mode} is unavailable for region {}",
                 region.map(|r| r.code_upper()).unwrap_or("GLOBAL")
@@ -116,7 +120,12 @@ pub(in crate::app::update) fn commit_routing_mode(
     } else {
         format!("Routing mode changed: {mode}")
     };
-    push_status(&mut effects, model, AppStatus::Info(status));
+    push_status(
+        &mut effects,
+        model,
+        StatusKey::Routing,
+        AppStatus::Info(status),
+    );
     effects
 }
 
@@ -129,6 +138,7 @@ pub(in crate::app::update) fn commit_routing_settings(
         push_status(
             &mut effects,
             model,
+            StatusKey::Routing,
             AppStatus::Error(format!(
                 "Routing mode change failed: {} is unavailable for region {}",
                 settings.mode,
@@ -169,6 +179,7 @@ pub(in crate::app::update) fn commit_routing_settings(
     push_status(
         &mut effects,
         model,
+        StatusKey::Routing,
         AppStatus::Info("Routing settings changed".into()),
     );
 
@@ -198,6 +209,7 @@ pub(in crate::app::update) fn commit_routing_settings(
                 push_status(
                     &mut effects,
                     model,
+                    StatusKey::Routing,
                     AppStatus::Info("Routing settings changed — applies after reconnect".into()),
                 );
             }
@@ -260,6 +272,7 @@ pub(in crate::app::update) fn commit_geo_region(
     push_status(
         &mut effects,
         model,
+        StatusKey::Routing,
         AppStatus::Info(format!("Geo region selected: {}", region.as_str())),
     );
 
@@ -272,7 +285,8 @@ pub(in crate::app::update) fn commit_geo_region(
             push_status(
                 &mut effects,
                 model,
-                AppStatus::Info("Checking geo databases...".to_string()),
+                StatusKey::Geo,
+                AppStatus::Info("Checking geo databases…".to_string()),
             );
             effects.push(Effect::DownloadGeoIfMissing);
         } else {
@@ -296,6 +310,7 @@ pub(in crate::app::update) fn commit_geo_region(
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Routing,
                 AppStatus::Info(format!("Routing mode changed: {new_mode}")),
             );
         }

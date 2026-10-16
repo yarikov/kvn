@@ -469,6 +469,8 @@ pub struct StateSnapshot {
     /// distinguish repeated messages with identical text.
     #[serde(default)]
     pub status_revision: u64,
+    #[serde(default)]
+    pub status_events: Vec<crate::app::model::StatusEvent>,
     pub singbox_pid: Option<u32>,
     pub active_profile_id: Option<String>,
     pub selected: usize,

@@ -1,6 +1,6 @@
 # Agent Guide: App behavior
 
-This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply here too. It covers the module layout of `src/app/update/`, the reducers in `src/app/` and the client code that drives them: the first-run tour (`src/onboarding.rs`, `app/update/onboarding.rs`, `tui_client/handler/key/onboarding.rs`), region selection, disable confirmation, auto-connect, and wheel scrolling and pointer focus (`app/scroll*`, `tui_client/handler/{mouse,wheel,scroll,pointer}.rs`). Read it before changing that code.
+This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply here too. It covers the module layout of `src/app/update/`, the reducers in `src/app/` and the client code that drives them: the first-run tour (`src/onboarding.rs`, `app/update/onboarding.rs`, `tui_client/handler/key/onboarding.rs`), status events, region selection, disable confirmation, auto-connect, and wheel scrolling and pointer focus (`app/scroll*`, `tui_client/handler/{mouse,wheel,scroll,pointer}.rs`). Read it before changing that code.
 
 ## Geo Region Selection
 - `settings.geo_routing.current_region` (`Option<GeoRegion>`) controls which country rule-sets are downloaded and which routing modes are shown.
@@ -215,6 +215,12 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   `Every1d`. Every `Default`/`#[serde(default)]`
   in that chain still means `Off`, so a config that omits the field — or the
   whole `geo_routing` or `settings` section — keeps its current behaviour.
+
+## Status Events
+
+- Every status names a `StatusKey` (`push_status(effects, model, key, status)`, `Model::set_status(key, status)`): the key says which earlier status the new one supersedes. `Connecting to X…`, `Connected to X` and `Connection failed` share `Connection`; a subscription's statuses share `Subscription(id)`; connect warnings take `ConnectionWarning(index)` so they do not replace `Connected`. Pick the key of the subject the status reports on, not of the screen that raised it.
+- `Model.status_events` keeps the latest event of each key, oldest first and at most 16, each with the `status_revision` it was given; a status with empty text only removes its key's event. It reaches clients as `StateSnapshot::status_events`, so statuses set between two snapshots are not lost. `status` / `status_is_error` still carry the newest status alone for the omakvn plugin and `kvn status`.
+- A TUI shows only the events it receives while attached: attaching or reattaching takes the snapshot's `status_revision` as the baseline and shows nothing older, errors included. Earlier statuses stay in the app log.
 
 ## Disable Confirmation
 

@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model, TrafficStats};
+use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey, TrafficStats};
 use crate::config::profile::RoutingFallback;
 use uuid::Uuid;
 
@@ -66,6 +66,7 @@ pub(in crate::app::update) fn on_connected(
     push_status(
         &mut effects,
         model,
+        StatusKey::Connection,
         AppStatus::Info(match profile_name {
             Some(name) => format!("Connected to {}", name),
             // Profile deleted while the connect was in flight.
@@ -77,8 +78,13 @@ pub(in crate::app::update) fn on_connected(
             model, fallback,
         ));
     }
-    for warning in warnings {
-        push_status(&mut effects, model, AppStatus::Error(warning));
+    for (index, warning) in warnings.into_iter().enumerate() {
+        push_status(
+            &mut effects,
+            model,
+            StatusKey::ConnectionWarning(index),
+            AppStatus::Error(warning),
+        );
     }
     // Persist last connected profile for auto-connect on next startup.
     if model.config.settings.last_connected_profile != Some(profile_id) {
@@ -101,6 +107,7 @@ pub(in crate::app::update) fn on_connect_failed(
     push_status(
         &mut effects,
         model,
+        StatusKey::Connection,
         AppStatus::Error(format!("Connection failed: {}", error)),
     );
     effects
@@ -132,7 +139,12 @@ pub(in crate::app::update) fn on_singbox_exited(
         Effect::RevokeKillSwitchExceptions,
         Effect::BroadcastState,
     ];
-    push_status(&mut effects, model, AppStatus::Error(reason));
+    push_status(
+        &mut effects,
+        model,
+        StatusKey::Connection,
+        AppStatus::Error(reason),
+    );
     effects
 }
 
@@ -148,6 +160,7 @@ pub(in crate::app::update) fn on_system_resumed(model: &mut Model) -> Vec<Effect
     push_status(
         &mut effects,
         model,
+        StatusKey::Connection,
         AppStatus::Info("VPN resumed — reconnecting…".into()),
     );
     effects
@@ -187,6 +200,7 @@ pub(in crate::app::update) fn handle_kill_switch_applied(
             push_status(
                 &mut effects,
                 model,
+                StatusKey::KillSwitch,
                 AppStatus::Info(format!(
                     "Kill switch {}",
                     if enabled { "enabled" } else { "disabled" }
@@ -199,6 +213,7 @@ pub(in crate::app::update) fn handle_kill_switch_applied(
             push_status(
                 &mut effects,
                 model,
+                StatusKey::KillSwitch,
                 AppStatus::Error(format!("Kill switch failed: {}", err)),
             );
             effects.push(Effect::BroadcastState);
@@ -222,6 +237,7 @@ pub(in crate::app::update) fn handle_auto_connect_polkit_checked(
             push_status(
                 &mut effects,
                 model,
+                StatusKey::AutoConnect,
                 AppStatus::Info("Auto-connect enabled".into()),
             );
             effects.push(Effect::SaveConfig);
@@ -230,6 +246,7 @@ pub(in crate::app::update) fn handle_auto_connect_polkit_checked(
             push_status(
                 &mut effects,
                 model,
+                StatusKey::AutoConnect,
                 AppStatus::Error(format!("Auto-connect failed: {err}")),
             );
         }
@@ -839,6 +856,23 @@ mod tests {
 
         assert_eq!(model.status, Some(AppStatus::Error(warning.clone())));
         assert!(effects.contains(&app_log_error(&warning)));
+    }
+
+    #[test]
+    fn connect_warnings_do_not_replace_the_connected_status_event() {
+        let mut profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        profile
+            .share_link_params
+            .insert("pinSHA256".into(), "AB:CD".into());
+        let mut model = model_with_profiles(vec![profile.clone()]);
+
+        on_connected(&mut model, 1, profile.id, 0, None);
+
+        let keys: Vec<_> = model.status_events.iter().map(|event| event.key).collect();
+        assert_eq!(
+            keys,
+            vec![StatusKey::Connection, StatusKey::ConnectionWarning(0)]
+        );
     }
 
     #[test]
