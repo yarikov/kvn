@@ -239,8 +239,10 @@ one does not stop the other, and the command reports every failure at the end.
 | `--if-outdated` | Skip an integration whose files already match this release, and say nothing about one that is not installed |
 
 The package runs `kvn refresh --killswitch --polkit --if-outdated` as root
-after every upgrade, so installed integrations follow the package without a
-manual step. Omarchy files belong to each user and are not refreshed.
+after every upgrade and after an installation that replaces an earlier one,
+such as the switch from `kvn-tui-bin` to `kvn-bin`, so installed integrations
+follow the package without a manual step. Omarchy files belong to each user and
+are not refreshed.
 
 ### clean
 

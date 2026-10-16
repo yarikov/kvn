@@ -213,8 +213,9 @@ settings: immediately if the daemon is running, otherwise on its next start.
 
 ## Outdated integrations
 
-A package upgrade updates the installed system integrations itself: its install
-script runs `kvn refresh --killswitch --polkit --if-outdated` as root, which
+A package upgrade updates the installed system integrations itself, and so
+does an installation that replaces an earlier one, such as the switch from
+`kvn-tui-bin` to `kvn-bin`: the install script runs `kvn refresh --killswitch --polkit --if-outdated` as root, which
 rewrites the polkit rule or the kill-switch files only when they are installed
 and differ from the new release, records their stamps, and reloads an active
 kill switch. These files belong to kvn, so changes made to them by hand are
