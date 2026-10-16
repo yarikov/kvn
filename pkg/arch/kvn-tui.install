@@ -95,6 +95,8 @@ post_install() {
     configure_sing_box_capabilities
     if (( first_install )); then
         print_service_enable_notice
+    else
+        refresh_system_integrations
     fi
 }
 
