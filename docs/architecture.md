@@ -209,7 +209,9 @@ Clients talk to the daemon in newline-delimited JSON over
   snapshot, including the complete config, to every attached client. There are
   no diffs to get out of sync. A client that cannot take a snapshot within
   200 ms, for example a TUI process stopped with `SIGSTOP`, is disconnected
-  and no longer counts as an open window.
+  and no longer counts as an open window. `onboarding_complete` tells clients
+  without a keyboard model whether the first-run tour is finished: the Omarchy
+  plugin sends no commands until it is.
 - **Reattaching**: a TUI that loses its connection, because the daemon was
   restarted (`systemctl --user restart kvn-tui.service`, `kvn migrate`) or
   disconnected it, reattaches on its own and shows the current state. When the

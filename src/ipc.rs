@@ -450,6 +450,7 @@ mod tests {
             theme_draft: None,
             onboarding_awaiting: None,
             onboarding_omarchy: false,
+            onboarding_complete: true,
             integration_setup: crate::onboarding::IntegrationSetup::default(),
             settings_menu_selected: 0,
             routing_settings_draft: None,
@@ -559,6 +560,13 @@ mod tests {
         assert!(value.get("config_edit_result").is_none());
         let snapshot: StateSnapshot = serde_json::from_value(value).unwrap();
         assert!(snapshot.config_edit_result.is_none());
+    }
+
+    #[test]
+    fn a_snapshot_from_a_daemon_without_the_tour_flag_still_parses() {
+        let mut value = serde_json::to_value(sample_snapshot()).unwrap();
+        value.as_object_mut().unwrap().remove("onboarding_complete");
+        assert!(serde_json::from_value::<StateSnapshot>(value).is_ok());
     }
 
     #[test]

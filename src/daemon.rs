@@ -342,6 +342,7 @@ pub(crate) fn build_snapshot(
         theme_draft: model.theme_draft.clone(),
         onboarding_awaiting: model.onboarding.awaiting,
         onboarding_omarchy: model.onboarding.include_omarchy_card,
+        onboarding_complete: model.onboarding.is_complete(),
         integration_setup: model.integration_setup,
         settings_menu_selected: model.settings_menu_selected,
         routing_settings_draft: model.routing_settings_draft.clone(),

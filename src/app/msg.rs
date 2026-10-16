@@ -490,6 +490,8 @@ pub struct StateSnapshot {
     /// started afterwards would otherwise count a shorter tour than the daemon.
     #[serde(default)]
     pub onboarding_omarchy: bool,
+    #[serde(default)]
+    pub onboarding_complete: bool,
     /// Setup state of the privileged integrations the protection cards ask for.
     #[serde(default)]
     pub integration_setup: crate::onboarding::IntegrationSetup,
