@@ -12,7 +12,7 @@ Pending migrations run on the next `kvn` launch, or explicitly with
 Use `kvn migrate --pending` to check pending migrations and `kvn doctor` if an
 upgrade needs attention.
 
-## Next release (unreleased)
+## v0.35.0
 
 The AUR package is renamed from `kvn-tui-bin` to `kvn-bin`. `kvn-tui-bin` still
 receives updates for a while, but will be retired; switch now:
@@ -48,6 +48,11 @@ The polkit rule also allows `org.freedesktop.resolve1.revert`, which sing-box
 uses to reset the tunnel's DNS settings when it stops. From this release on,
 the package upgrade updates an installed polkit rule and kill switch itself;
 there is nothing to rerun.
+
+The status file for bars moves to `$XDG_RUNTIME_DIR/kvn/state.json`; the
+daemon removes the old `~/.config/kvn-tui/state.json` when it starts. Scripts
+that read the file directly need the new path; `kvn --waybar-status` follows it
+on its own. `kvn status` no longer writes `last error: <message>` to stderr.
 
 ## v0.34.0
 
