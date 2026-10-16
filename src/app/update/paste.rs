@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::Model;
+use crate::app::model::{Model, StatusKey};
 use crate::config::profile::{Subscription, SubscriptionAutoUpdate};
 use uuid::Uuid;
 
@@ -19,6 +19,7 @@ pub(in crate::app::update) fn handle_clipboard_text(model: &mut Model, text: &st
         push_status(
             &mut effects,
             model,
+            StatusKey::Sources,
             crate::app::model::AppStatus::Error(message.into()),
         );
         return effects;
@@ -36,6 +37,7 @@ pub(in crate::app::update) fn handle_clipboard_text(model: &mut Model, text: &st
                 push_status(
                     &mut effects,
                     model,
+                    StatusKey::Sources,
                     crate::app::model::AppStatus::Error(
                         "Profile import failed: profile already exists".into(),
                     ),
@@ -48,6 +50,7 @@ pub(in crate::app::update) fn handle_clipboard_text(model: &mut Model, text: &st
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Sources,
                 crate::app::model::AppStatus::Info(format!("Profile imported: {}", name)),
             );
             effects
@@ -57,6 +60,7 @@ pub(in crate::app::update) fn handle_clipboard_text(model: &mut Model, text: &st
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Sources,
                 crate::app::model::AppStatus::Error(format!("Profile import failed: {}", e)),
             );
             effects
@@ -73,6 +77,7 @@ fn add_and_fetch_subscription(model: &mut Model, url: &str) -> Vec<Effect> {
         push_status(
             &mut effects,
             model,
+            StatusKey::Sources,
             crate::app::model::AppStatus::Error(format!("Subscription import failed: {error}")),
         );
         return effects;
@@ -100,7 +105,7 @@ fn add_and_fetch_subscription(model: &mut Model, url: &str) -> Vec<Effect> {
     );
     let mut effects = vec![Effect::SaveConfig];
     if !download_allowed(model) {
-        push_download_blocked(&mut effects, model, DownloadKind::Subscription);
+        push_download_blocked(&mut effects, model, DownloadKind::Subscription(id));
         return effects;
     }
     model.subscription_fetching = true;
@@ -109,6 +114,7 @@ fn add_and_fetch_subscription(model: &mut Model, url: &str) -> Vec<Effect> {
     push_status(
         &mut effects,
         model,
+        StatusKey::Subscription(id),
         crate::app::model::AppStatus::Info(format!(
             "Subscription added: {} — fetching profiles…",
             name

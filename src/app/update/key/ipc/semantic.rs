@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model};
+use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey};
 use uuid::Uuid;
 
 use crate::app::update::connection::queue_connect;
@@ -18,6 +18,7 @@ pub(super) fn connect_profile(model: &mut Model, profile_id: Uuid) -> Vec<Effect
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Connection,
                 AppStatus::Info(format!("Connecting to {profile_name}…")),
             );
             queue_connect(model, profile_id);
@@ -25,6 +26,7 @@ pub(super) fn connect_profile(model: &mut Model, profile_id: Uuid) -> Vec<Effect
         None => push_status(
             &mut effects,
             model,
+            StatusKey::Connection,
             AppStatus::Error("Connection failed: profile no longer exists".into()),
         ),
     }
@@ -38,7 +40,12 @@ pub(super) fn disconnect(model: &mut Model) -> Vec<Effect> {
         | ConnectionState::ConnectPending => vec![Effect::Disconnect],
         ConnectionState::Idle if matches!(model.status, Some(AppStatus::Error(_))) => {
             let mut effects = vec![];
-            push_status(&mut effects, model, AppStatus::Info("Disconnected".into()));
+            push_status(
+                &mut effects,
+                model,
+                StatusKey::Connection,
+                AppStatus::Info("Disconnected".into()),
+            );
             effects
         }
         ConnectionState::Idle => vec![],
@@ -56,6 +63,7 @@ pub(super) fn reconnect(model: &mut Model) -> Vec<Effect> {
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Connection,
                 AppStatus::Error("Reconnect failed: VPN is disconnected".into()),
             );
             return effects;
@@ -98,11 +106,17 @@ fn connect_known_profile(
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Connection,
                 AppStatus::Info(format!("{verb} {profile_name}…")),
             );
             queue_connect(model, profile_id);
         }
-        None => push_status(&mut effects, model, AppStatus::Error(missing.into())),
+        None => push_status(
+            &mut effects,
+            model,
+            StatusKey::Connection,
+            AppStatus::Error(missing.into()),
+        ),
     }
     effects
 }

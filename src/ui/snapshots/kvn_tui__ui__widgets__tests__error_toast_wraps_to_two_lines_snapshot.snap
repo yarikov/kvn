@@ -1,6 +1,6 @@
 ---
 source: src/ui/widgets.rs
-expression: trimmed
+expression: "render_toasts(&[&status], Rect::new(0, 0, 42, 10))"
 ---
 
  ┌──────────────────────────────────────┐

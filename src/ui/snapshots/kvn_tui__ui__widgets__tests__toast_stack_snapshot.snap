@@ -1,0 +1,17 @@
+---
+source: src/ui/widgets.rs
+expression: "render_toasts(&[&connected, &geo, &dns, &hidden], Rect::new(0, 0, 60, 12))"
+---
+
+                                     ┌────────────────────┐
+                                     │ Connected to Alpha │
+                                     └────────────────────┘
+                   ┌──────────────────────────────────────┐
+                   │ Geo update failed: rule-set download │
+                   │ timed out after 30 seconds           │
+                   └──────────────────────────────────────┘
+                                   ┌──────────────────────┐
+                                   │ DNS settings changed │
+                                   └──────────────────────┘
+
+[60x12]

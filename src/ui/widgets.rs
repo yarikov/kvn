@@ -311,35 +311,75 @@ impl<'a> Widget for StatusBar<'a> {
 
 /// Temporary status notification rendered above the application rather than
 /// consuming space in the persistent bottom bar.
-pub struct Toast<'a> {
+struct Toast<'a> {
     status: &'a AppStatus,
     theme: &'a crate::ui::styles::Theme,
 }
 
 impl<'a> Toast<'a> {
-    pub fn new(status: &'a AppStatus, theme: &'a crate::ui::styles::Theme) -> Self {
+    fn new(status: &'a AppStatus, theme: &'a crate::ui::styles::Theme) -> Self {
         Self { status, theme }
     }
 
-    pub fn area(&self, container: Rect) -> Option<Rect> {
-        if container.width < 12 || container.height < 5 || self.status.text().is_empty() {
-            return None;
-        }
-        let max_width = container.width.saturating_sub(2).min(50);
-        let text_width = self.status.text().width().min(46) as u16;
-        let width = text_width.saturating_add(4).min(max_width);
+    fn width(&self, container: Rect) -> u16 {
+        let max_width = container.width.saturating_sub(2).min(TOAST_MAX_WIDTH);
+        let text_width = self.status.text().width().min(usize::from(max_width)) as u16;
+        text_width.saturating_add(4).min(max_width)
+    }
+
+    fn height(&self, width: u16) -> u16 {
         let inner_width = usize::from(width.saturating_sub(4)).max(1);
-        let height = if self.status.text().width() > inner_width {
+        if self.status.text().width() > inner_width {
             4
         } else {
             3
-        };
-        Some(Rect::new(
-            container.right().saturating_sub(width + 1),
-            container.y + 1,
-            width,
-            height,
-        ))
+        }
+    }
+}
+
+const TOAST_MAX_WIDTH: u16 = 40;
+
+pub struct ToastStack<'a> {
+    toasts: Vec<Toast<'a>>,
+}
+
+impl<'a> ToastStack<'a> {
+    pub fn new(newest_first: &[&'a AppStatus], theme: &'a crate::ui::styles::Theme) -> Self {
+        let toasts = newest_first
+            .iter()
+            .filter(|status| !status.text().is_empty())
+            .map(|status| Toast::new(status, theme))
+            .collect();
+        Self { toasts }
+    }
+
+    fn areas(&self, container: Rect) -> Vec<Rect> {
+        if container.width < 12 || container.height < 5 {
+            return Vec::new();
+        }
+        let bottom = container.bottom().saturating_sub(1);
+        let mut y = container.y + 1;
+        let mut areas = Vec::new();
+        for toast in &self.toasts {
+            let width = toast.width(container);
+            let height = toast.height(width);
+            if y + height > bottom {
+                break;
+            }
+            let x = container.right().saturating_sub(width + 1);
+            areas.push(Rect::new(x, y, width, height));
+            y += height;
+        }
+        areas
+    }
+}
+
+impl Widget for ToastStack<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let areas = self.areas(area);
+        for (toast, toast_area) in self.toasts.into_iter().zip(areas) {
+            toast.render(toast_area, buf);
+        }
     }
 }
 
@@ -751,22 +791,21 @@ mod tests {
         insta::assert_snapshot!(status_bar_styles(&model));
     }
 
-    #[test]
-    fn info_toast_snapshot() {
-        let status = AppStatus::Info("Connected to Alpha".into());
+    fn render_toasts(statuses: &[&AppStatus], container: Rect) -> String {
         let theme = crate::ui::styles::Theme::legacy();
-        let container = Rect::new(0, 0, 60, 10);
-        let toast = Toast::new(&status, &theme);
-        let area = toast.area(container).unwrap();
         let mut buf = Buffer::empty(container);
-        toast.render(area, &mut buf);
-        let rendered = buffer_to_string(&buf);
-        let trimmed = rendered
+        ToastStack::new(statuses, &theme).render(container, &mut buf);
+        buffer_to_string(&buf)
             .lines()
             .map(str::trim_end)
             .collect::<Vec<_>>()
-            .join("\n");
-        insta::assert_snapshot!(trimmed);
+            .join("\n")
+    }
+
+    #[test]
+    fn info_toast_snapshot() {
+        let status = AppStatus::Info("Connected to Alpha".into());
+        insta::assert_snapshot!(render_toasts(&[&status], Rect::new(0, 0, 60, 10)));
     }
 
     #[test]
@@ -774,19 +813,21 @@ mod tests {
         let status = AppStatus::Error(
             "Connection failed: handshake timed out while contacting the selected server".into(),
         );
-        let theme = crate::ui::styles::Theme::legacy();
-        let container = Rect::new(0, 0, 42, 10);
-        let toast = Toast::new(&status, &theme);
-        let area = toast.area(container).unwrap();
-        let mut buf = Buffer::empty(container);
-        toast.render(area, &mut buf);
-        let rendered = buffer_to_string(&buf);
-        let trimmed = rendered
-            .lines()
-            .map(str::trim_end)
-            .collect::<Vec<_>>()
-            .join("\n");
-        insta::assert_snapshot!(trimmed);
+        insta::assert_snapshot!(render_toasts(&[&status], Rect::new(0, 0, 42, 10)));
+    }
+
+    #[test]
+    fn toast_stack_snapshot() {
+        let connected = AppStatus::Info("Connected to Alpha".into());
+        let geo = AppStatus::Error(
+            "Geo update failed: rule-set download timed out after 30 seconds".into(),
+        );
+        let dns = AppStatus::Info("DNS settings changed".into());
+        let hidden = AppStatus::Info("Does not fit".into());
+        insta::assert_snapshot!(render_toasts(
+            &[&connected, &geo, &dns, &hidden],
+            Rect::new(0, 0, 60, 12)
+        ));
     }
 
     #[test]
@@ -794,9 +835,9 @@ mod tests {
         let status = AppStatus::Info("Saved".into());
         let theme = crate::ui::styles::Theme::legacy();
         assert!(
-            Toast::new(&status, &theme)
-                .area(Rect::new(0, 0, 10, 4))
-                .is_none()
+            ToastStack::new(&[&status], &theme)
+                .areas(Rect::new(0, 0, 10, 4))
+                .is_empty()
         );
     }
 }

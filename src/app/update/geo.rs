@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model};
+use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey};
 use crate::app::msg::GeoResult;
 use crate::config::profile::RoutingFallback;
 
@@ -58,7 +58,7 @@ pub(in crate::app::update) fn handle_geo_result(
                     warnings.join("; ")
                 ))
             };
-            push_status(&mut log_effects, model, status);
+            push_status(&mut log_effects, model, StatusKey::Geo, status);
             if !pending_geo_reconnect
                 && model.connection == ConnectionState::Connected
                 && let Some(active_id) = model.active_profile_id
@@ -93,7 +93,7 @@ pub(in crate::app::update) fn handle_geo_result(
                     warnings.join("; ")
                 ))
             };
-            push_status(&mut effects, model, status);
+            push_status(&mut effects, model, StatusKey::Geo, status);
             if !warnings.is_empty() {
                 append_download_hint(&mut effects, model, DownloadKind::Geo);
             }
@@ -114,6 +114,7 @@ pub(in crate::app::update) fn handle_geo_result(
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Geo,
                 crate::app::model::AppStatus::Error(format!("Geo update failed: {message}")),
             );
             append_download_hint(&mut effects, model, DownloadKind::Geo);
@@ -167,6 +168,7 @@ pub(in crate::app::update) fn fetch_region_rule_sets(
     push_status(
         &mut effects,
         model,
+        StatusKey::Geo,
         AppStatus::Info(format!("{mode} rule-sets are missing — {consequence}")),
     );
     if model.geo_updating {
@@ -204,6 +206,7 @@ fn leave_routing_fallback(
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Geo,
                 AppStatus::Error(format!("{mode} unavailable — {consequence}: {message}")),
             );
             effects

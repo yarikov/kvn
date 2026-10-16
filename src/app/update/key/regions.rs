@@ -193,7 +193,7 @@ mod tests {
                 Effect::SaveConfig,
                 Effect::RefreshGeoLastUpdated,
                 app_log_info("Geo region selected: cn"),
-                app_log_info("Checking geo databases..."),
+                app_log_info("Checking geo databases…"),
                 Effect::DownloadGeoIfMissing,
             ]
         );

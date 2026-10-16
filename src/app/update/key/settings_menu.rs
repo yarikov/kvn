@@ -1,5 +1,7 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, Model, Overlay, RoutingSettingsItem, SettingsMenuPage};
+use crate::app::model::{
+    AppStatus, Model, Overlay, RoutingSettingsItem, SettingsMenuPage, StatusKey,
+};
 use crate::config::profile::GeoRegion;
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -180,6 +182,7 @@ fn commit_interface_settings(model: &mut Model) -> Vec<Effect> {
         push_status(
             &mut effects,
             model,
+            StatusKey::Interface,
             AppStatus::Info(format!("Theme selected: {slug}")),
         );
     }
@@ -298,6 +301,7 @@ pub(in crate::app::update) fn set_auto_connect(model: &mut Model, enabled: bool)
     push_status(
         &mut effects,
         model,
+        StatusKey::AutoConnect,
         AppStatus::Info("Auto-connect disabled".into()),
     );
     effects.push(Effect::SaveConfig);
@@ -313,6 +317,7 @@ pub(in crate::app::update) fn set_kill_switch(model: &mut Model, enabled: bool) 
     push_status(
         &mut effects,
         model,
+        StatusKey::KillSwitch,
         AppStatus::Info(format!(
             "{} kill switch…",
             if enabled { "Enabling" } else { "Disabling" }

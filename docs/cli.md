@@ -71,8 +71,8 @@ Disconnected
 
 The transfer rates appear only while either of them is above zero, and
 `[kill switch]` only while the kill switch is on. When the last action failed,
-the line becomes `Disconnected — <message>` while kvn is disconnected, and the
-message is written to stderr as `last error: <message>` in every state. `--json` prints the daemon's full state snapshot instead.
+the line becomes `Disconnected — <message>` while kvn is disconnected. `--json`
+prints the daemon's full state snapshot instead.
 `status` never starts the daemon; it fails when the daemon is not running.
 
 ### connect

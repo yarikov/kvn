@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model, Overlay};
+use crate::app::model::{AppStatus, ConnectionState, Model, Overlay, StatusKey};
 use crate::config::profile::{GeoRegion, SubscriptionAutoUpdate};
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -29,6 +29,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 push_status(
                     &mut effects,
                     model,
+                    StatusKey::Sources,
                     AppStatus::Error("Delete failed: disconnect first".into()),
                 );
                 return effects;
@@ -48,6 +49,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
             push_status(
                 &mut effects,
                 model,
+                StatusKey::Geo,
                 AppStatus::Info(format!(
                     "Rule-set update interval changed: {}",
                     schedule.interval_label()
@@ -57,14 +59,14 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
         }
         KeyCode::Char('i') => {
             if let Some(idx) = model.selected_subscription_index() {
-                let (name, label) = if let Some(sub) = model.config.subscriptions.get_mut(idx) {
+                let (id, name, label) = if let Some(sub) = model.config.subscriptions.get_mut(idx) {
                     sub.auto_update = sub.auto_update.next();
                     sub.clear_retry_state();
                     sub.next_auto_update =
                         (sub.auto_update != SubscriptionAutoUpdate::Off).then(|| {
                             crate::config::profile::next_update_window_date(chrono::Local::now())
                         });
-                    (sub.name.clone(), sub.auto_update.label())
+                    (sub.id, sub.name.clone(), sub.auto_update.label())
                 } else {
                     return effects;
                 };
@@ -72,6 +74,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 push_status(
                     &mut effects,
                     model,
+                    StatusKey::Subscription(id),
                     crate::app::model::AppStatus::Info(format!(
                         "Subscription update interval changed: {} ({})",
                         label.trim_matches(['(', ')']),
@@ -98,6 +101,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 push_status(
                     &mut effects,
                     model,
+                    StatusKey::Connection,
                     crate::app::model::AppStatus::Info(format!(
                         "Reconnecting to {}…",
                         profile_name
@@ -120,6 +124,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 push_status(
                     &mut effects,
                     model,
+                    StatusKey::Sources,
                     crate::app::model::AppStatus::Info(
                         "Latency testing disabled: enable it in profiles.json".into(),
                     ),
@@ -138,6 +143,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 push_status(
                     &mut effects,
                     model,
+                    StatusKey::Sources,
                     crate::app::model::AppStatus::Info(
                         "Latency testing disabled: enable it in profiles.json".into(),
                     ),
@@ -166,6 +172,7 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
         push_status(
             &mut effects,
             model,
+            StatusKey::Connection,
             crate::app::model::AppStatus::Info(format!("Connecting to {}…", profile_name)),
         );
         queue_connect(model, profile_id);
@@ -179,11 +186,11 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
             .any(|p| p.subscription_id == Some(id))
         {
             if model.subscription_updates.contains(&id) {
-                return subscription_already_updating(model, &name);
+                return subscription_already_updating(model, id, &name);
             }
             if !download_allowed(model) {
                 let mut result = vec![Effect::SaveConfig];
-                push_download_blocked(&mut result, model, DownloadKind::Subscription);
+                push_download_blocked(&mut result, model, DownloadKind::Subscription(id));
                 return result;
             }
             model.subscription_fetching = true;
@@ -192,6 +199,7 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
             push_status(
                 &mut result,
                 model,
+                StatusKey::Subscription(id),
                 crate::app::model::AppStatus::Info(format!("Updating subscription {name}…")),
             );
             return result;
@@ -200,6 +208,7 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
         push_status(
             &mut effects,
             model,
+            StatusKey::Sources,
             crate::app::model::AppStatus::Info(
                 "Sources empty: press p to paste or e to edit".into(),
             ),
@@ -216,10 +225,10 @@ fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
         let id = sub.id;
         let name = sub.name.clone();
         if model.subscription_updates.contains(&id) {
-            return subscription_already_updating(model, &name);
+            return subscription_already_updating(model, id, &name);
         }
         if !download_allowed(model) {
-            push_download_blocked(&mut effects, model, DownloadKind::Subscription);
+            push_download_blocked(&mut effects, model, DownloadKind::Subscription(id));
             return effects;
         }
         model.subscription_fetching = true;
@@ -228,6 +237,7 @@ fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
         push_status(
             &mut result,
             model,
+            StatusKey::Subscription(id),
             crate::app::model::AppStatus::Info(format!("Updating subscription {name}…")),
         );
         return result;
@@ -235,6 +245,7 @@ fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
     push_status(
         &mut effects,
         model,
+        StatusKey::Sources,
         crate::app::model::AppStatus::Info(
             "Subscription selection required: select one or press U for geo".into(),
         ),
@@ -242,11 +253,12 @@ fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
     effects
 }
 
-fn subscription_already_updating(model: &mut Model, name: &str) -> Vec<Effect> {
+fn subscription_already_updating(model: &mut Model, id: uuid::Uuid, name: &str) -> Vec<Effect> {
     let mut effects = Vec::new();
     push_status(
         &mut effects,
         model,
+        StatusKey::Subscription(id),
         crate::app::model::AppStatus::Info(format!("Subscription {name} is already updating…")),
     );
     effects
@@ -261,6 +273,7 @@ fn update_geo(model: &mut Model) -> Vec<Effect> {
                 push_status(
                     &mut effects,
                     model,
+                    StatusKey::Geo,
                     crate::app::model::AppStatus::Info(
                         "No enabled service rule-sets to update".to_string(),
                     ),
@@ -276,7 +289,8 @@ fn update_geo(model: &mut Model) -> Vec<Effect> {
             push_status(
                 &mut effects,
                 model,
-                crate::app::model::AppStatus::Info("Checking service rule-sets...".to_string()),
+                StatusKey::Geo,
+                crate::app::model::AppStatus::Info("Checking service rule-sets…".to_string()),
             );
             effects.push(Effect::RetryServiceRuleSets { services });
             return effects;
@@ -291,7 +305,8 @@ fn update_geo(model: &mut Model) -> Vec<Effect> {
         push_status(
             &mut effects,
             model,
-            crate::app::model::AppStatus::Info("Checking for geo updates...".to_string()),
+            StatusKey::Geo,
+            crate::app::model::AppStatus::Info("Checking for geo updates…".to_string()),
         );
         effects.push(Effect::DownloadGeo);
         return effects;

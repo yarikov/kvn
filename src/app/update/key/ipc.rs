@@ -2,7 +2,7 @@ mod semantic;
 mod support;
 
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, Model, Overlay};
+use crate::app::model::{AppStatus, Model, Overlay, StatusKey};
 
 use crate::app::update::key::handle_key;
 use crate::app::update::key::settings_menu::{set_auto_connect, set_kill_switch};
@@ -97,7 +97,12 @@ pub(in crate::app::update) fn handle_ipc_command(
         IpcCommand::ApplyEditedConfig { base, edited } => apply_edited_config(model, base, edited),
         IpcCommand::ClientError { message } => {
             let mut effects = Vec::new();
-            push_status(&mut effects, model, AppStatus::Error(message));
+            push_status(
+                &mut effects,
+                model,
+                StatusKey::Client,
+                AppStatus::Error(message),
+            );
             effects
         }
         IpcCommand::ClearErrorStatus { .. } | IpcCommand::RestartRequired | IpcCommand::Quit => {
@@ -120,6 +125,7 @@ fn apply_edited_config(
     push_status(
         &mut effects,
         model,
+        StatusKey::Config,
         AppStatus::Error("Configuration edit failed: profiles.json is unreadable".into()),
     );
     effects
@@ -224,7 +230,7 @@ mod tests {
     #[test]
     fn ipc_error_status_clear_is_revision_safe() {
         let mut model = model_with_profiles(vec![]);
-        model.set_status(AppStatus::Error("first".into()));
+        model.set_status(StatusKey::Client, AppStatus::Error("first".into()));
         let first_revision = model.status_revision;
 
         handle_ipc_command(
@@ -244,7 +250,7 @@ mod tests {
         assert!(model.status.is_none());
         assert_eq!(model.status_revision, first_revision);
 
-        model.set_status(AppStatus::Error("first".into()));
+        model.set_status(StatusKey::Client, AppStatus::Error("first".into()));
         assert_eq!(model.status_revision, first_revision + 1);
         assert_eq!(model.status, Some(AppStatus::Error("first".into())));
     }
