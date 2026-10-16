@@ -1960,6 +1960,7 @@ esac
             theme_draft: None,
             onboarding_awaiting: None,
             onboarding_omarchy: false,
+            onboarding_complete: true,
             integration_setup: crate::onboarding::IntegrationSetup::default(),
             settings_menu_selected: 0,
             routing_settings_draft: None,

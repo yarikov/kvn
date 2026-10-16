@@ -46,6 +46,9 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   free). The client reads the active card from `Overlay::Onboarding(step)`;
   `awaiting` is carried separately as `StateSnapshot::onboarding_awaiting`
   because the pickers render differently while the tour holds them.
+  `StateSnapshot::onboarding_complete` carries `is_complete()` for the Omarchy
+  plugin, which blocks its controls until the tour is finished: neither the
+  overlay nor `awaiting` covers the `card_pending` gap. The TUI ignores it.
 - An install that already has a geo region is **grandfathered**:
   `onboarding::load_for_daemon` records it complete and persists that, so nobody
   who already uses kvn sees the tour.
