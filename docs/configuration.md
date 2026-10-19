@@ -9,6 +9,11 @@
 This is the default location; `XDG_CONFIG_HOME` is respected when set.
 
 Press `e` in the TUI to edit a private copy with `$VISUAL` or `$EDITOR`.
+When that is Omarchy's `omarchy-launch-editor`, kvn runs the editor chosen
+with `omarchy default editor` itself, so the copy opens at the selected profile
+or subscription and kvn waits until the editor is closed: VS Code, Cursor, Zed
+and Sublime Text get `--wait`. An editor kvn cannot wait for is reported
+instead of being opened detached; set `$VISUAL` to a command that waits.
 After the editor exits, kvn validates the copy and waits for the daemon to
 confirm saving it. For JSON or validation errors, a temporary screen shows the
 current problems, replacing any previous error. A JSON syntax error is reported

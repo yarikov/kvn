@@ -18,6 +18,12 @@ mod retry;
 
 use retry::retry_edit;
 
+const OMARCHY_LAUNCHER: &str = "omarchy-launch-editor";
+const OMARCHY_FALLBACK_EDITOR: &str = "nvim";
+const OMARCHY_BLOCKING_EDITORS: [&str; 8] = [
+    "nvim", "vim", "nano", "micro", "hx", "helix", "fresh", "emacs",
+];
+
 /// Config object that should be selected when the editor opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EditorTarget {
@@ -42,28 +48,92 @@ fn detect_editor() -> String {
     env::var("VISUAL")
         .or_else(|_| env::var("EDITOR"))
         .unwrap_or_else(|_| {
-            for candidate in &["nvim", "vim", "vi", "nano"] {
-                if Command::new("sh")
-                    .args(["-c", &format!("command -v {candidate}")])
-                    .output()
-                    .is_ok_and(|output| output.status.success())
-                {
-                    return candidate.to_string();
-                }
-            }
-            "vi".to_string()
+            ["nvim", "vim", "vi", "nano"]
+                .into_iter()
+                .find(|candidate| command_exists(candidate))
+                .unwrap_or("vi")
+                .to_string()
         })
 }
 
-/// Split an editor command into program and leading arguments.
-///
-/// $VISUAL/$EDITOR may contain flags, not just a binary — Omarchy 4 sets
-/// `EDITOR="omarchy-launch-editor --inline"` — so the value cannot be passed
-/// to `Command::new` whole.
-fn split_editor(editor: &str) -> (String, Vec<String>) {
-    let mut parts = editor.split_whitespace().map(String::from);
-    let program = parts.next().unwrap_or_else(|| "vi".to_string());
-    (program, parts.collect())
+fn command_exists(command: &str) -> bool {
+    Command::new("sh")
+        .args(["-c", "command -v \"$1\"", "sh", command])
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EditorCommand {
+    program: String,
+    args: Vec<String>,
+}
+
+impl EditorCommand {
+    /// Split an editor command into program and leading arguments.
+    ///
+    /// $VISUAL/$EDITOR may contain flags, not just a binary — Omarchy 4 sets
+    /// `EDITOR="omarchy-launch-editor --inline"` — so the value cannot be passed
+    /// to `Command::new` whole.
+    fn parse(editor: &str) -> Self {
+        let mut parts = editor.split_whitespace().map(String::from);
+        let program = parts.next().unwrap_or_else(|| "vi".to_string());
+        Self {
+            program,
+            args: parts.collect(),
+        }
+    }
+
+    fn bypass_omarchy_launcher(self) -> Result<Self> {
+        if program_name(&self.program) != OMARCHY_LAUNCHER {
+            return Ok(self);
+        }
+        Self::omarchy_default(crate::omarchy::default_editor(), command_exists)
+    }
+
+    fn omarchy_default(
+        configured: Option<String>,
+        is_installed: impl Fn(&str) -> bool,
+    ) -> Result<Self> {
+        let program = configured
+            .filter(|editor| is_installed(editor))
+            .unwrap_or_else(|| OMARCHY_FALLBACK_EDITOR.to_string());
+        let args = match line_jump(&program) {
+            LineJump::GotoFlag | LineJump::PathSuffix => vec!["--wait".to_string()],
+            LineJump::PlusArgument
+                if OMARCHY_BLOCKING_EDITORS.contains(&program_name(&program)) =>
+            {
+                vec![]
+            }
+            LineJump::PlusArgument => anyhow::bail!(
+                "Omarchy opens {} detached, so kvn cannot tell when editing ends; \
+                 set $VISUAL to an editor command that waits until the file is closed",
+                program_name(&program)
+            ),
+        };
+        Ok(Self { program, args })
+    }
+}
+
+enum LineJump {
+    GotoFlag,
+    PathSuffix,
+    PlusArgument,
+}
+
+fn line_jump(program: &str) -> LineJump {
+    match program_name(program) {
+        "code" | "code-oss" | "codium" | "cursor" => LineJump::GotoFlag,
+        "zeditor" | "zed" | "sublime_text" | "subl" => LineJump::PathSuffix,
+        _ => LineJump::PlusArgument,
+    }
+}
+
+fn program_name(program: &str) -> &str {
+    Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program)
 }
 
 fn find_target_line(path: &Path, target: EditorTarget) -> Option<usize> {
@@ -77,16 +147,11 @@ fn find_target_line(path: &Path, target: EditorTarget) -> Option<usize> {
 
 /// Build editor command-line arguments that jump to `line` in `path`.
 fn editor_args(editor: &str, path: &Path, line: usize) -> Vec<String> {
-    let name = Path::new(editor)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(editor);
-
-    match name {
-        "code" | "code-oss" | "codium" => {
-            vec!["--goto".to_string(), format!("{}:{}", path.display(), line)]
-        }
-        _ => vec![format!("+{}", line), path.display().to_string()],
+    let path_with_line = format!("{}:{}", path.display(), line);
+    match line_jump(editor) {
+        LineJump::GotoFlag => vec!["--goto".to_string(), path_with_line],
+        LineJump::PathSuffix => vec![path_with_line],
+        LineJump::PlusArgument => vec![format!("+{}", line), path.display().to_string()],
     }
 }
 
@@ -154,7 +219,7 @@ fn preserve_invalid_edit(snapshot: EditorSnapshot) -> Result<PathBuf> {
 /// Edit an isolated snapshot. The live `profiles.json` remains daemon-owned.
 pub fn open_profiles_editor(target: Option<EditorTarget>, base: Config) -> Result<EditorOutcome> {
     let editor = detect_editor();
-    let (program, base_args) = split_editor(&editor);
+    let editor = EditorCommand::parse(&editor).bypass_omarchy_launcher()?;
     let runtime_dir = crate::paths::ensure_runtime_dir()?;
     let path = runtime_dir.join(format!("profiles-edit-{}.json", std::process::id()));
     let json_schema = write_editor_schema();
@@ -169,14 +234,7 @@ pub fn open_profiles_editor(target: Option<EditorTarget>, base: Config) -> Resul
     crate::atomic_write::write(&path, &original).context("Failed to finish editor snapshot")?;
 
     let line = target.and_then(|target| find_target_line(&path, target));
-    let result = edit_until_saved(
-        &path,
-        base,
-        json_schema.as_deref(),
-        &program,
-        &base_args,
-        line,
-    );
+    let result = edit_until_saved(&path, base, json_schema.as_deref(), &editor, line);
     finish_edit(snapshot, &original, result)
 }
 
@@ -224,20 +282,19 @@ fn edit_until_saved(
     path: &Path,
     mut base: Config,
     json_schema: Option<&str>,
-    program: &str,
-    base_args: &[String],
+    editor: &EditorCommand,
     mut line: Option<usize>,
 ) -> Result<EditorOutcome> {
     loop {
         let args = match line {
-            Some(line) => editor_args(program, path, line),
+            Some(line) => editor_args(&editor.program, path, line),
             None => vec![path.display().to_string()],
         };
-        let status = Command::new(program)
-            .args(base_args)
+        let status = Command::new(&editor.program)
+            .args(&editor.args)
             .args(args)
             .status()
-            .with_context(|| format!("Failed to launch editor: {program}"))?;
+            .with_context(|| format!("Failed to launch editor: {}", editor.program))?;
         anyhow::ensure!(status.success(), "Editor exited with non-zero status");
         let contents = fs::read_to_string(path).context("Failed to read editor snapshot")?;
         let edited = match check_edit(&contents, path) {
@@ -855,25 +912,29 @@ mod tests {
 
     // ---- editor_args ----
 
-    #[test]
-    fn split_editor_bare_program() {
-        assert_eq!(split_editor("nvim"), ("nvim".to_string(), vec![]));
+    fn editor(program: &str, args: &[&str]) -> EditorCommand {
+        EditorCommand {
+            program: program.to_string(),
+            args: args.iter().map(|arg| arg.to_string()).collect(),
+        }
     }
 
     #[test]
-    fn split_editor_program_with_flags() {
+    fn parse_editor_bare_program() {
+        assert_eq!(EditorCommand::parse("nvim"), editor("nvim", &[]));
+    }
+
+    #[test]
+    fn parse_editor_program_with_flags() {
         assert_eq!(
-            split_editor("omarchy-launch-editor --inline"),
-            (
-                "omarchy-launch-editor".to_string(),
-                vec!["--inline".to_string()]
-            )
+            EditorCommand::parse("omarchy-launch-editor --inline"),
+            editor("omarchy-launch-editor", &["--inline"])
         );
     }
 
     #[test]
-    fn split_editor_empty_falls_back_to_vi() {
-        assert_eq!(split_editor(""), ("vi".to_string(), vec![]));
+    fn parse_editor_empty_falls_back_to_vi() {
+        assert_eq!(EditorCommand::parse(""), editor("vi", &[]));
     }
 
     #[test]
@@ -914,6 +975,20 @@ mod tests {
     }
 
     #[test]
+    fn editor_args_cursor_uses_goto_flag() {
+        let args = editor_args("cursor", Path::new("/p.json"), 5);
+        assert_eq!(args, vec!["--goto".to_string(), "/p.json:5".into()]);
+    }
+
+    #[test]
+    fn editor_args_zed_and_sublime_append_the_line_to_the_path() {
+        for editor in ["zeditor", "zed", "sublime_text", "subl"] {
+            let args = editor_args(editor, Path::new("/p.json"), 5);
+            assert_eq!(args, vec!["/p.json:5".to_string()], "{editor}");
+        }
+    }
+
+    #[test]
     fn editor_args_unknown_editor_uses_plus_line() {
         let args = editor_args("helix", Path::new("/x.json"), 9);
         assert_eq!(args[0], "+9");
@@ -925,6 +1000,49 @@ mod tests {
         // Full path: only the file_name is matched against the switch table.
         let args = editor_args("/usr/bin/code", Path::new("/p.json"), 2);
         assert_eq!(args[0], "--goto");
+    }
+
+    #[test]
+    fn omarchy_default_runs_a_terminal_editor_directly() {
+        assert_eq!(
+            EditorCommand::omarchy_default(Some("/usr/bin/helix".into()), |_| true).unwrap(),
+            editor("/usr/bin/helix", &[])
+        );
+    }
+
+    #[test]
+    fn omarchy_default_waits_for_graphical_editors() {
+        for program in ["code", "cursor", "zeditor", "sublime_text"] {
+            assert_eq!(
+                EditorCommand::omarchy_default(Some(program.into()), |_| true).unwrap(),
+                editor(program, &["--wait"])
+            );
+        }
+    }
+
+    #[test]
+    fn omarchy_default_falls_back_to_nvim_like_the_launcher() {
+        let nvim = editor("nvim", &[]);
+        assert_eq!(
+            EditorCommand::omarchy_default(None, |_| true).unwrap(),
+            nvim
+        );
+        assert_eq!(
+            EditorCommand::omarchy_default(Some("micro".into()), |_| false).unwrap(),
+            nvim
+        );
+    }
+
+    #[test]
+    fn omarchy_default_rejects_an_editor_it_cannot_wait_for() {
+        let error = EditorCommand::omarchy_default(Some("kate".into()), |_| true).unwrap_err();
+        assert!(error.to_string().contains("kate"));
+    }
+
+    #[test]
+    fn non_omarchy_editor_is_not_rewritten() {
+        let vim = editor("vim", &["-u", "NONE"]);
+        assert_eq!(vim.clone().bypass_omarchy_launcher().unwrap(), vim);
     }
 
     // ---- detect_editor ----
