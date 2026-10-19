@@ -62,7 +62,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `migrations` | `src/migrations.rs`, `contrib/migrations/*.sh` | Ordered package migrations: root-owned script discovery, per-user/machine markers written per script, runner lock, `profiles.json` backup, end-of-run daemon restart handoff |
 | `test_helpers` | `src/test_helpers.rs` | Shared test utilities (e.g. `model_with_profiles`) |
 | `doctor` | `src/doctor.rs` | `kvn doctor` read-only diagnostics, plus the polkit and integration probes the daemon reuses (`polkit_readiness`, `polkit_authorization_denied`, `integration_setup`) |
-| `omarchy` | `src/omarchy.rs` | Omarchy detection: active theme name, current-theme paths, Omarchy version, and whether the `yarikov.omakvn` plugin is installed |
+| `omarchy` | `src/omarchy.rs` | Omarchy detection: active theme name, current-theme paths, Omarchy version, the default editor chosen in Omarchy (read by the TUI editor launcher), and whether the `yarikov.omakvn` plugin is installed |
 | `support_prompt` | `src/support_prompt.rs` | The support prompt's persisted schedule (`support-prompt.json`), outside the versioned config |
 | `redaction` | `src/redaction.rs` | Strips credentials, path tokens, queries and fragments from URLs and share links before they are logged |
 | `main` | `src/main.rs` | Entry point: legacy-name warning, CLI dispatch, pending-migration gate, logging setup, daemon start (`start_daemon` / `start_current_daemon`) |

@@ -30,6 +30,16 @@ pub fn omarchy_current_dir() -> Option<PathBuf> {
     Some(state_home()?.join("omarchy").join("current"))
 }
 
+pub fn default_editor() -> Option<String> {
+    let path = state_home()?
+        .join("omarchy")
+        .join("defaults")
+        .join("editor");
+    let raw = std::fs::read_to_string(path).ok()?;
+    let editor = raw.lines().next()?.trim();
+    (!editor.is_empty()).then(|| editor.to_string())
+}
+
 /// Path to the semantic palette of the active Omarchy theme.
 pub fn theme_colors_path() -> Option<PathBuf> {
     Some(omarchy_current_dir()?.join("theme").join("colors.toml"))
@@ -199,6 +209,23 @@ mod tests {
             std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o755)).unwrap();
             assert_eq!(installed_major_version(), expected);
         }
+    }
+
+    #[test]
+    fn default_editor_reads_the_first_line_of_the_omarchy_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let _env = isolate_xdg(config.path(), state.path());
+        assert_eq!(default_editor(), None);
+
+        let defaults = state.path().join("omarchy").join("defaults");
+        fs::create_dir_all(&defaults).unwrap();
+        fs::write(defaults.join("editor"), "  hx \nnvim\n").unwrap();
+        assert_eq!(default_editor().as_deref(), Some("hx"));
+
+        fs::write(defaults.join("editor"), "\n").unwrap();
+        assert_eq!(default_editor(), None);
     }
 
     #[test]
