@@ -55,7 +55,7 @@ urlencoding = "2.1"
 base64 = "0.23"
 
 # D-Bus integration for suspend/resume detection (systemd-logind)
-zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+zbus = { version = "6", default-features = false, features = ["default-rt"] }
 
 # CLI parsing
 clap = { version = "4", features = ["derive"] }
