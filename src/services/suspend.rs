@@ -1,20 +1,29 @@
 use crate::app::msg::Msg;
+use std::future::poll_fn;
+use std::num::NonZeroUsize;
+use std::pin::Pin;
 use std::sync::mpsc::Sender;
+use zbus::export::futures_core::Stream;
+use zbus::{Connection, MatchRule, MessageStream};
 
 /// Spawn a blocking D-Bus listener that watches for systemd-logind
 /// `PrepareForSleep` signals and notifies the caller on resume.
 pub fn listen_blocking(tx: Sender<Msg>) {
-    let Ok(conn) = zbus::blocking::Connection::system() else {
+    zbus::block_on(listen(tx));
+}
+
+async fn listen(tx: Sender<Msg>) {
+    let Ok(conn) = Connection::system().await else {
         tracing::warn!("Failed to connect to system D-Bus");
         return;
     };
 
-    let rule = match zbus::MatchRule::builder()
+    let rule = match MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
         .sender("org.freedesktop.login1")
-        .and_then(|b| b.interface("org.freedesktop.login1.Manager"))
-        .and_then(|b| b.member("PrepareForSleep"))
-        .map(|b| b.build())
+        .interface("org.freedesktop.login1.Manager")
+        .member("PrepareForSleep")
+        .build()
     {
         Ok(r) => r,
         Err(e) => {
@@ -23,16 +32,18 @@ pub fn listen_blocking(tx: Sender<Msg>) {
         }
     };
 
-    let iter = match zbus::blocking::MessageIterator::for_match_rule(rule, &conn, Some(1)) {
-        Ok(i) => i,
+    let mut stream = match MessageStream::for_match_rule(rule, &conn, Some(NonZeroUsize::MIN)).await
+    {
+        Ok(s) => s,
         Err(e) => {
-            tracing::warn!("Failed to create D-Bus message iterator: {}", e);
+            tracing::warn!("Failed to create D-Bus message stream: {}", e);
             return;
         }
     };
 
-    for msg in iter.flatten() {
-        if let Ok(going_to_sleep) = msg.body().deserialize::<bool>()
+    while let Some(msg) = poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await {
+        if let Ok(msg) = msg
+            && let Ok(going_to_sleep) = msg.body().deserialize::<bool>()
             && !going_to_sleep
         {
             let _ = tx.send(Msg::SystemResumed);
