@@ -17,7 +17,7 @@ optdepends=(
 makedepends=('cargo' 'rust')
 # sing-box >= 1.14 required for valid config generation
 source=()
-options=('!lto')
+options=('!lto' '!debug')
 sha256sums=()
 
 build() {
