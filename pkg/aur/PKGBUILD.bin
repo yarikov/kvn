@@ -16,6 +16,7 @@ optdepends=(
 )
 provides=('kvn' 'kvn-tui')
 conflicts=('kvn' 'kvn-tui')
+options=('!debug' '!strip')
 source=("https://github.com/yarikov/kvn/releases/download/v{{VERSION}}/{{ASSET}}-{{VERSION}}-x86_64-linux.tar.gz")
 sha256sums=('{{SHA256SUM}}')
 
