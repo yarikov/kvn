@@ -6,6 +6,10 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 
 - **`daemon` submodules** (`src/daemon/{effect,connection,geo,config_io,subscription,traffic,profile_test,process_slot}.rs`): Effect execution, mirroring the `app/update/` handler split: `effect.rs` is the `execute_daemon_effect` dispatcher only; `connection.rs` owns connect/disconnect, the polkit check and the tour's integration probe; `geo.rs` the seven geo/service rule-set effects plus the shared refresh and result-finalizing helpers; `config_io.rs` the revision-checked `profiles.json` commit, the support-prompt and onboarding-progress writes (including the failed-write recovery in `src/app/AGENTS.md` § First-Run Onboarding) and config reload; `subscription.rs`, `traffic.rs` and `profile_test.rs` one effect each (the last owns the temporary sing-box SOCKS5 latency probe); `process_slot.rs` the sing-box process slot, its poisoned-lock-safe accessors, the 250 ms ticker and exit polling
 
+## Stopping sing-box
+
+sing-box removes its `auto_route` / `strict_route` ip rules only when it exits on its own; after SIGKILL they stay, and IPv6 stays unreachable until the next start. `ProcessHandle::stop` therefore sends SIGTERM and waits `STOP_GRACE_PERIOD` (12 s: sing-box gives up closing by itself after 10 s) before SIGKILL. That wait never runs on the main loop: disconnect and reconnect move the handle into `ProcessSlot::retired`, and `stop_retired` stops it under `connect_coordinator` — on a disconnect thread, or at the start of the next connect thread, so a new sing-box never starts while the old one still holds the TUN interface. Daemon exit stops it synchronously.
+
 ## Config Saves
 
 `config_io::persist_config_changes` commits `profiles.json` after each `update`, before any effect runs. The update chooses how a failed write is undone:

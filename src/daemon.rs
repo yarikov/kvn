@@ -23,7 +23,7 @@ use crate::runtime_lock::RuntimeLock;
 
 use config_io::commit_config_change;
 use effect::execute_daemon_effect;
-use process_slot::{ProcessSlot, lock_process_slot, spawn_ticker};
+use process_slot::{ProcessSlot, lock_process_slot, spawn_ticker, stop_retired};
 
 struct DaemonShared {
     process_slot: Arc<Mutex<ProcessSlot>>,
@@ -91,10 +91,7 @@ fn run(mut model: Model) -> Result<()> {
     probe_integration_setup(&mut model);
 
     let shared = DaemonShared {
-        process_slot: Arc::new(Mutex::new(ProcessSlot {
-            attempt_id: model.connect_attempt_id,
-            handle: None,
-        })),
+        process_slot: Arc::new(Mutex::new(ProcessSlot::new(model.connect_attempt_id))),
         connect_coordinator: Arc::new(Mutex::new(())),
         singbox_log_pruned_at: Arc::new(Mutex::new(singbox_log_pruned_at)),
     };
@@ -114,11 +111,8 @@ fn run(mut model: Model) -> Result<()> {
         .connect_coordinator
         .lock()
         .unwrap_or_else(|p| p.into_inner());
-    if let Some(mut handle) = lock_process_slot(&shared.process_slot).handle.take()
-        && let Err(e) = handle.kill_and_wait()
-    {
-        tracing::warn!("Failed to stop sing-box on exit: {}", e);
-    }
+    lock_process_slot(&shared.process_slot).retire_handle();
+    stop_retired(&shared.process_slot);
     if model.config.settings.kill_switch
         && let Err(e) = crate::services::killswitch::revoke()
     {
@@ -450,10 +444,7 @@ mod tests {
         let server = IpcServer::bind(tx.clone()).unwrap();
         let worker = thread::spawn(move || {
             let shared = DaemonShared {
-                process_slot: Arc::new(Mutex::new(ProcessSlot {
-                    attempt_id: 0,
-                    handle: None,
-                })),
+                process_slot: Arc::new(Mutex::new(ProcessSlot::new(0))),
                 connect_coordinator: Arc::new(Mutex::new(())),
                 singbox_log_pruned_at: Arc::new(Mutex::new(None)),
             };
