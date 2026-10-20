@@ -1,4 +1,5 @@
 use crate::app::model::{AppState, Model};
+use crate::singbox::process_handle::{STOP_GRACE_PERIOD, signal_process};
 use anyhow::{Context, Result};
 use std::os::unix::fs::MetadataExt;
 use std::time::{Duration, Instant};
@@ -107,7 +108,7 @@ pub fn cleanup_stale_session() -> Result<Option<u32>> {
     );
 
     signal_process(pid, libc::SIGTERM)?;
-    if wait_until_stopped(pid, Duration::from_secs(1)) {
+    if wait_until_stopped(pid, STOP_GRACE_PERIOD) {
         return Ok(Some(pid));
     }
 
@@ -123,19 +124,6 @@ pub fn cleanup_stale_session() -> Result<Option<u32>> {
         "Stale sing-box PID {pid} did not stop"
     );
     Ok(Some(pid))
-}
-
-fn signal_process(pid: u32, signal: i32) -> Result<()> {
-    let pid = i32::try_from(pid).context("sing-box PID exceeds i32")?;
-    // SAFETY: kill does not dereference pointers. PID ownership and process
-    // identity are checked immediately before this helper is called.
-    #[allow(unsafe_code)]
-    let result = unsafe { libc::kill(pid, signal) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error()).context("Failed to signal stale sing-box process")
-    }
 }
 
 fn wait_until_stopped(pid: u32, timeout: Duration) -> bool {

@@ -4,11 +4,39 @@ use std::thread;
 use std::time::Duration;
 
 use crate::app::msg::Msg;
-use crate::singbox::process_handle::ProcessHandle;
+use crate::singbox::process_handle::{ProcessHandle, STOP_GRACE_PERIOD};
 
 pub(super) struct ProcessSlot {
     pub(super) attempt_id: u64,
     pub(super) handle: Option<ProcessHandle>,
+    pub(super) retired: Vec<ProcessHandle>,
+}
+
+impl ProcessSlot {
+    pub(super) fn new(attempt_id: u64) -> Self {
+        Self {
+            attempt_id,
+            handle: None,
+            retired: Vec::new(),
+        }
+    }
+
+    pub(super) fn retire_handle(&mut self) -> bool {
+        let Some(handle) = self.handle.take() else {
+            return false;
+        };
+        self.retired.push(handle);
+        true
+    }
+}
+
+pub(super) fn stop_retired(process_slot: &Arc<Mutex<ProcessSlot>>) {
+    let retired = std::mem::take(&mut lock_process_slot(process_slot).retired);
+    for mut handle in retired {
+        if let Err(e) = handle.stop(STOP_GRACE_PERIOD) {
+            tracing::warn!("Failed to stop sing-box process {}: {e:#}", handle.pid);
+        }
+    }
 }
 
 pub(super) fn spawn_ticker(tx: Sender<Msg>, process_slot: Weak<Mutex<ProcessSlot>>) {
@@ -70,7 +98,7 @@ pub(super) fn is_current_attempt(slot: &Arc<Mutex<ProcessSlot>>, attempt_id: u64
 
 #[cfg(test)]
 mod tests {
-    use super::{ProcessSlot, lock_process_slot, poll_process_exit};
+    use super::{ProcessSlot, lock_process_slot, poll_process_exit, stop_retired};
     use crate::app::msg::Msg;
     use crate::singbox::process_handle::ProcessHandle;
     use std::sync::{Arc, Mutex};
@@ -83,8 +111,8 @@ mod tests {
             .spawn()
             .unwrap();
         let slot = Arc::new(Mutex::new(ProcessSlot {
-            attempt_id: 42,
             handle: Some(ProcessHandle::new(child, 0)),
+            ..ProcessSlot::new(42)
         }));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         let msg = loop {
@@ -109,10 +137,39 @@ mod tests {
 
     #[test]
     fn process_poll_ignores_intentionally_removed_handle() {
-        let slot = Arc::new(Mutex::new(ProcessSlot {
-            attempt_id: 1,
-            handle: None,
-        }));
+        let slot = Arc::new(Mutex::new(ProcessSlot::new(1)));
         assert!(poll_process_exit(&slot).is_none());
+    }
+
+    #[test]
+    fn retired_handle_is_stopped_and_released() {
+        use std::io::{BufRead, Read};
+
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let mut child = std::process::Command::new("sh")
+            .args([
+                "-c",
+                "trap 'echo stopped; exit' TERM; echo ready; while :; do sleep 0.05; done",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut ready = String::new();
+        stdout.read_line(&mut ready).unwrap();
+        let slot = Arc::new(Mutex::new(ProcessSlot {
+            handle: Some(ProcessHandle::new(child, 0)),
+            ..ProcessSlot::new(1)
+        }));
+
+        assert!(lock_process_slot(&slot).retire_handle());
+        assert!(!lock_process_slot(&slot).retire_handle());
+        assert!(poll_process_exit(&slot).is_none());
+
+        stop_retired(&slot);
+        assert!(lock_process_slot(&slot).retired.is_empty());
+        let mut output = String::new();
+        stdout.read_to_string(&mut output).unwrap();
+        assert_eq!(output, "stopped\n");
     }
 }
