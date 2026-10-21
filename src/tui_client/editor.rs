@@ -98,20 +98,27 @@ impl EditorCommand {
         let program = configured
             .filter(|editor| is_installed(editor))
             .unwrap_or_else(|| OMARCHY_FALLBACK_EDITOR.to_string());
-        let args = match line_jump(&program) {
-            LineJump::GotoFlag | LineJump::PathSuffix => vec!["--wait".to_string()],
-            LineJump::PlusArgument
-                if OMARCHY_BLOCKING_EDITORS.contains(&program_name(&program)) =>
-            {
-                vec![]
-            }
-            LineJump::PlusArgument => anyhow::bail!(
+        if matches!(line_jump(&program), LineJump::PlusArgument)
+            && !OMARCHY_BLOCKING_EDITORS.contains(&program_name(&program))
+        {
+            anyhow::bail!(
                 "Omarchy opens {} detached, so kvn cannot tell when editing ends; \
                  set $VISUAL to an editor command that waits until the file is closed",
                 program_name(&program)
-            ),
-        };
-        Ok(Self { program, args })
+            );
+        }
+        Ok(Self {
+            program,
+            args: vec![],
+        })
+    }
+
+    fn wait_until_closed(mut self) -> Self {
+        let detaches = !matches!(line_jump(&self.program), LineJump::PlusArgument);
+        if detaches && !self.args.iter().any(|arg| arg == "--wait" || arg == "-w") {
+            self.args.push("--wait".to_string());
+        }
+        self
     }
 }
 
@@ -219,7 +226,9 @@ fn preserve_invalid_edit(snapshot: EditorSnapshot) -> Result<PathBuf> {
 /// Edit an isolated snapshot. The live `profiles.json` remains daemon-owned.
 pub fn open_profiles_editor(target: Option<EditorTarget>, base: Config) -> Result<EditorOutcome> {
     let editor = detect_editor();
-    let editor = EditorCommand::parse(&editor).bypass_omarchy_launcher()?;
+    let editor = EditorCommand::parse(&editor)
+        .bypass_omarchy_launcher()?
+        .wait_until_closed();
     let runtime_dir = crate::paths::ensure_runtime_dir()?;
     let path = runtime_dir.join(format!("profiles-edit-{}.json", std::process::id()));
     let json_schema = write_editor_schema();
@@ -1011,13 +1020,20 @@ mod tests {
     }
 
     #[test]
-    fn omarchy_default_waits_for_graphical_editors() {
-        for program in ["code", "cursor", "zeditor", "sublime_text"] {
+    fn graphical_editors_wait_until_the_file_is_closed() {
+        for program in ["code", "/usr/bin/codium", "cursor", "zeditor", "subl"] {
             assert_eq!(
-                EditorCommand::omarchy_default(Some(program.into()), |_| true).unwrap(),
-                editor(program, &["--wait"])
+                EditorCommand::parse(program).wait_until_closed(),
+                editor(program, &["--wait"]),
+                "{program}"
             );
         }
+        for command in ["code --wait", "code -w --new-window"] {
+            let parsed = EditorCommand::parse(command);
+            assert_eq!(parsed.clone().wait_until_closed(), parsed, "{command}");
+        }
+        let vim = EditorCommand::parse("vim");
+        assert_eq!(vim.clone().wait_until_closed(), vim);
     }
 
     #[test]
