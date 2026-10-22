@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{Model, StatusKey};
+use crate::app::model::{Model, StatusKey, UpdateTrigger};
 use crate::config::profile::{Subscription, SubscriptionAutoUpdate};
 use uuid::Uuid;
 
@@ -108,7 +108,7 @@ fn add_and_fetch_subscription(model: &mut Model, url: &str) -> Vec<Effect> {
         push_download_blocked(&mut effects, model, DownloadKind::Subscription(id));
         return effects;
     }
-    model.subscription_updates.insert(id);
+    model.subscription_updates.insert(id, UpdateTrigger::Manual);
     effects.push(Effect::UpdateSubscription { id });
     push_status(
         &mut effects,
@@ -191,10 +191,11 @@ mod tests {
             model.selected_row(),
             Some(crate::app::model::SourceRow::SubscriptionHeader(0))
         ));
-        assert!(
+        assert_eq!(
             model
                 .subscription_updates
-                .contains(&model.config.subscriptions[0].id)
+                .get(&model.config.subscriptions[0].id),
+            Some(&UpdateTrigger::Manual)
         );
         assert_eq!(
             effects,

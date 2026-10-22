@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{ConnectionState, Model, Overlay};
+use crate::app::model::{ConnectionState, Model, Overlay, UpdateTrigger};
 use crate::config::profile::{GeoRegion, RoutedService, update_window_open};
 use chrono::Local;
 use std::time::Instant;
@@ -187,7 +187,7 @@ fn check_due_subscriptions_at(model: &mut Model, now: chrono::DateTime<Local>) -
         if interval == 0 {
             continue;
         }
-        if model.subscription_updates.contains(&sub.id) {
+        if model.subscription_updates.contains_key(&sub.id) {
             continue;
         }
         let today = now.date_naive();
@@ -206,8 +206,9 @@ fn check_due_subscriptions_at(model: &mut Model, now: chrono::DateTime<Local>) -
             }
         };
         if due {
-            model.subscription_updates.insert(sub.id);
-            model.automatic_subscription_updates.insert(sub.id);
+            model
+                .subscription_updates
+                .insert(sub.id, UpdateTrigger::Automatic);
             effects.push(Effect::UpdateSubscription { id: sub.id });
         }
     }
@@ -430,7 +431,10 @@ mod tests {
         let effects = check_due_subscriptions_at(&mut model, now);
 
         assert_eq!(effects, vec![Effect::UpdateSubscription { id: sub_id }]);
-        assert!(model.subscription_updates.contains(&sub_id));
+        assert_eq!(
+            model.subscription_updates.get(&sub_id),
+            Some(&UpdateTrigger::Automatic)
+        );
     }
 
     #[test]
@@ -517,7 +521,7 @@ mod tests {
         let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Char('u')));
 
         assert!(effects.contains(&Effect::UpdateSubscription { id: sub_id }));
-        assert!(model.subscription_updates.contains(&sub_id));
+        assert!(model.subscription_updates.contains_key(&sub_id));
     }
 
     #[test]
@@ -540,18 +544,18 @@ mod tests {
 
         model.connection = ConnectionState::Connecting;
         assert!(check_due_subscriptions_at(&mut model, now).is_empty());
-        assert!(!model.subscription_updates.contains(&sub_id));
+        assert!(!model.subscription_updates.contains_key(&sub_id));
 
         model.connection = ConnectionState::ConnectPending;
         assert!(check_due_subscriptions_at(&mut model, now).is_empty());
-        assert!(!model.subscription_updates.contains(&sub_id));
+        assert!(!model.subscription_updates.contains_key(&sub_id));
 
         model.connection = ConnectionState::Connected;
         assert_eq!(
             check_due_subscriptions_at(&mut model, now),
             vec![Effect::UpdateSubscription { id: sub_id }]
         );
-        assert!(model.subscription_updates.contains(&sub_id));
+        assert!(model.subscription_updates.contains_key(&sub_id));
     }
 
     #[test]
@@ -574,7 +578,7 @@ mod tests {
         let effects = check_due_subscriptions_at(&mut model, now);
 
         assert!(effects.is_empty());
-        assert!(!model.subscription_updates.contains(&sub_id));
+        assert!(!model.subscription_updates.contains_key(&sub_id));
     }
 
     #[test]
@@ -597,7 +601,7 @@ mod tests {
         model.config.subscriptions.push(sub);
 
         assert!(check_due_subscriptions_at(&mut model, now).is_empty());
-        assert!(!model.subscription_updates.contains(&sub_id));
+        assert!(!model.subscription_updates.contains_key(&sub_id));
     }
 
     #[test]

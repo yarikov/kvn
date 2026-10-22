@@ -124,6 +124,12 @@ pub struct ConnectionSettings {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateTrigger {
+    Manual,
+    Automatic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DnsSettingsItem {
     Preset,
     ToggleFakeIp,
@@ -382,8 +388,7 @@ pub struct Model {
     pub region_download_deferred: bool,
     pub logs: VecDeque<String>,
     pub geo_updating: bool,
-    pub subscription_updates: HashSet<Uuid>,
-    pub automatic_subscription_updates: HashSet<Uuid>,
+    pub subscription_updates: HashMap<Uuid, UpdateTrigger>,
     pub needs_redraw: bool,
     pub should_quit: bool,
     pub geo_last_updated: Option<String>,
@@ -610,8 +615,7 @@ impl Model {
             region_download_deferred: false,
             logs: VecDeque::new(),
             geo_updating: false,
-            subscription_updates: HashSet::new(),
-            automatic_subscription_updates: HashSet::new(),
+            subscription_updates: HashMap::new(),
             needs_redraw: false,
             should_quit: false,
             geo_last_updated,
@@ -728,8 +732,7 @@ impl Model {
             region_download_deferred: false,
             logs: VecDeque::new(),
             geo_updating: false,
-            subscription_updates: HashSet::new(),
-            automatic_subscription_updates: HashSet::new(),
+            subscription_updates: HashMap::new(),
             needs_redraw: false,
             should_quit: false,
             geo_last_updated,
@@ -996,8 +999,7 @@ impl Model {
             region_download_deferred: false,
             logs: VecDeque::new(),
             geo_updating: false,
-            subscription_updates: HashSet::new(),
-            automatic_subscription_updates: HashSet::new(),
+            subscription_updates: HashMap::new(),
             needs_redraw: false,
             should_quit: false,
             geo_last_updated: None,
