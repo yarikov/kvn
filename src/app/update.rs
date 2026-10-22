@@ -15,7 +15,7 @@ use crate::app::model::Model;
 use crate::app::msg::Msg;
 use connection::{
     handle_auto_connect_polkit_checked, handle_kill_switch_applied, on_connect_failed,
-    on_connected, on_singbox_exited, on_system_resumed,
+    on_connect_retrying, on_connected, on_singbox_exited, on_system_resumed,
 };
 use geo::handle_geo_result;
 use key::handle_key;
@@ -71,6 +71,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             errors,
         } => on_service_rule_sets_ready(model, checked_at, schedule, updated_parts, errors),
         Msg::ConnectFailed { attempt_id, error } => on_connect_failed(model, attempt_id, error),
+        Msg::ConnectRetrying {
+            attempt_id,
+            reason,
+            limit,
+        } => on_connect_retrying(model, attempt_id, reason, limit),
         Msg::SingBoxExited {
             attempt_id,
             code,

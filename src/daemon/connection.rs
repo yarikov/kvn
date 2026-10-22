@@ -3,14 +3,19 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::app::model::{AppStatus, ConnectionState, Model, Overlay, StatusKey, TrafficStats};
-use crate::app::msg::{IpcError, Msg};
+use crate::app::msg::{ConnectRetryReason, IpcError, Msg};
 use crate::config::profile::{Profile, Settings};
+use crate::singbox::runner::NotReady;
 
 use super::DaemonShared;
 use super::process_slot::{is_current_attempt, lock_process_slot, stop_retired};
 use crate::singbox::process_handle::STOP_GRACE_PERIOD;
 
 const LOG_PRUNE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+const NOT_READY_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+const BINARY_WRITE_RETRY_LIMIT: Duration = Duration::from_secs(15);
+const TUN_PERMISSION_RETRY_LIMIT: Duration = Duration::from_mins(2);
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 pub(super) fn connect(
     tx: &Sender<Msg>,
@@ -54,7 +59,7 @@ pub(super) fn connect(
         }
         drop(last_pruned);
         let cancelled = || !is_current_attempt(&slot, attempt_id);
-        match crate::singbox::runner::start(&profile, &settings, &cancelled) {
+        match start_retrying_until_ready(&tx, &profile, &settings, attempt_id, &cancelled) {
             Ok(crate::singbox::runner::StartedSingBox {
                 handle,
                 routing_fallback,
@@ -91,6 +96,110 @@ pub(super) fn connect(
             }
         }
     });
+}
+
+fn start_retrying_until_ready(
+    tx: &Sender<Msg>,
+    profile: &Profile,
+    settings: &Settings,
+    attempt_id: u64,
+    cancelled: &dyn Fn() -> bool,
+) -> anyhow::Result<crate::singbox::runner::StartedSingBox> {
+    let mut budget = RetryBudget::default();
+    loop {
+        let error = match crate::singbox::runner::start(profile, settings, cancelled) {
+            Ok(started) => return Ok(started),
+            Err(error) => error,
+        };
+        if cancelled() {
+            return Err(error);
+        }
+        let Some(not_ready) = crate::singbox::runner::not_ready(&error) else {
+            return Err(error);
+        };
+        tracing::info!("sing-box is not ready yet ({not_ready:?}): {error:#}");
+        match budget.step(not_ready, Instant::now()) {
+            RetryStep::GiveUp => return Err(give_up(error, not_ready)),
+            RetryStep::FirstRetry => {
+                let _ = tx.send(Msg::ConnectRetrying {
+                    attempt_id,
+                    reason: retry_reason(not_ready),
+                    limit: retry_limit(not_ready),
+                });
+            }
+            RetryStep::Retry => {}
+        }
+        if !sleep_unless_cancelled(NOT_READY_RETRY_INTERVAL, cancelled) {
+            return Err(error);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetryStep {
+    FirstRetry,
+    Retry,
+    GiveUp,
+}
+
+#[derive(Default)]
+struct RetryBudget {
+    binary_busy_since: Option<Instant>,
+    tun_denied_since: Option<Instant>,
+}
+
+impl RetryBudget {
+    fn step(&mut self, reason: NotReady, now: Instant) -> RetryStep {
+        let limit = retry_limit(reason);
+        let since = match reason {
+            NotReady::BinaryBeingWritten => &mut self.binary_busy_since,
+            NotReady::TunNotPermitted => &mut self.tun_denied_since,
+        };
+        match *since {
+            None => {
+                *since = Some(now);
+                RetryStep::FirstRetry
+            }
+            Some(first) if now.duration_since(first) >= limit => RetryStep::GiveUp,
+            Some(_) => RetryStep::Retry,
+        }
+    }
+}
+
+fn retry_limit(not_ready: NotReady) -> Duration {
+    match not_ready {
+        NotReady::BinaryBeingWritten => BINARY_WRITE_RETRY_LIMIT,
+        NotReady::TunNotPermitted => TUN_PERMISSION_RETRY_LIMIT,
+    }
+}
+
+fn retry_reason(not_ready: NotReady) -> ConnectRetryReason {
+    match not_ready {
+        NotReady::BinaryBeingWritten => ConnectRetryReason::BinaryBeingWritten,
+        NotReady::TunNotPermitted => ConnectRetryReason::TunNotPermitted,
+    }
+}
+
+fn give_up(error: anyhow::Error, reason: NotReady) -> anyhow::Error {
+    match reason {
+        NotReady::BinaryBeingWritten => error,
+        NotReady::TunNotPermitted => error.context(format!(
+            "sing-box was still not allowed to create the TUN interface after {} seconds; \
+             run `kvn doctor`",
+            TUN_PERMISSION_RETRY_LIMIT.as_secs()
+        )),
+    }
+}
+
+fn sleep_unless_cancelled(duration: Duration, cancelled: &dyn Fn() -> bool) -> bool {
+    let deadline = Instant::now() + duration;
+    while Instant::now() < deadline {
+        if cancelled() {
+            return false;
+        }
+        thread::sleep(CANCEL_POLL_INTERVAL);
+    }
+    true
 }
 
 pub(super) fn disconnect(model: &mut Model, shared: &DaemonShared) {
@@ -175,7 +284,10 @@ fn log_prune_due(last_pruned: Option<Instant>, now: Instant) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::log_prune_due;
+    use super::{
+        BINARY_WRITE_RETRY_LIMIT, NotReady, RetryBudget, RetryStep, TUN_PERMISSION_RETRY_LIMIT,
+        log_prune_due,
+    };
     use std::time::{Duration, Instant};
 
     #[test]
@@ -190,5 +302,46 @@ mod tests {
             Some(start),
             start + Duration::from_secs(24 * 60 * 60)
         ));
+    }
+
+    #[test]
+    fn retry_budget_counts_each_reason_from_its_own_first_failure() {
+        let start = Instant::now();
+        let mut budget = RetryBudget::default();
+
+        assert_eq!(
+            budget.step(NotReady::TunNotPermitted, start),
+            RetryStep::FirstRetry
+        );
+        let later = start + Duration::from_secs(20);
+        assert_eq!(
+            budget.step(NotReady::BinaryBeingWritten, later),
+            RetryStep::FirstRetry
+        );
+        assert_eq!(
+            budget.step(
+                NotReady::BinaryBeingWritten,
+                later + Duration::from_secs(10)
+            ),
+            RetryStep::Retry
+        );
+        assert_eq!(
+            budget.step(
+                NotReady::BinaryBeingWritten,
+                later + BINARY_WRITE_RETRY_LIMIT
+            ),
+            RetryStep::GiveUp
+        );
+        assert_eq!(
+            budget.step(NotReady::TunNotPermitted, later),
+            RetryStep::Retry
+        );
+        assert_eq!(
+            budget.step(
+                NotReady::TunNotPermitted,
+                start + TUN_PERMISSION_RETRY_LIMIT
+            ),
+            RetryStep::GiveUp
+        );
     }
 }

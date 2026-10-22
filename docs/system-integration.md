@@ -24,11 +24,14 @@ The package post-install hook grants `/usr/bin/sing-box` the
 not enable the daemon service automatically. An ALPM hook restores these
 capabilities whenever pacman installs or upgrades `/usr/bin/sing-box`; manually
 replaced binaries are not covered. That hook runs only at the end of the pacman
-transaction, so a connection started while the transaction is still upgrading
-sing-box fails with `operation not permitted`; connect again once the upgrade
-finishes. kvn does not retry by itself, so a reconnect after resume or the
-auto-connect at startup that falls into that window stays disconnected, and
-with the kill switch on the computer stays offline, until you connect again.
+transaction, so while the transaction is still upgrading sing-box, the binary
+is briefly busy while it is written and then not allowed to create the TUN
+interface. kvn then keeps the connection connecting and retries every 5
+seconds, for up to 15 seconds while the binary is busy and up to 2 minutes
+while it may not create the interface. This covers a manual connect, the reconnect
+after resume and the auto-connect at startup alike; disconnecting stops it.
+If sing-box still may not create the interface, the connection fails and
+suggests running `kvn doctor`.
 Enable the daemon as your regular user:
 
 ```bash

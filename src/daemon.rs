@@ -107,6 +107,10 @@ fn run(mut model: Model) -> Result<()> {
     );
 
     // Cleanup
+    {
+        let mut slot = lock_process_slot(&shared.process_slot);
+        slot.attempt_id = slot.attempt_id.wrapping_add(1);
+    }
     let _coordinator = shared
         .connect_coordinator
         .lock()

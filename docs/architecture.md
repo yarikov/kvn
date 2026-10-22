@@ -139,7 +139,10 @@ Connecting to a profile, end to end:
    resume use the same path.
 4. The daemon marks the connection as pending, so later ticks do not start
    it again, and runs it in a worker thread (generate config, check, spawn).
-   The worker puts the process into the shared process slot (see
+   While a sing-box upgrade leaves the binary busy or without its
+   TUN capabilities, the worker sends `Msg::ConnectRetrying` and tries again
+   every 5 seconds, for up to 15 seconds or 2 minutes respectively. The
+   worker puts the process into the shared process slot (see
    [Daemon threads](#daemon-threads)) and sends back `Msg::Connected`, or
    sends `Msg::ConnectFailed`.
 5. `update` records the result and returns more effects: save the last used

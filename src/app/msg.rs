@@ -49,6 +49,12 @@ impl From<anyhow::Error> for IpcError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectRetryReason {
+    BinaryBeingWritten,
+    TunNotPermitted,
+}
+
 pub enum Msg {
     Key(KeyEvent),
     Mouse(MouseEvent),
@@ -78,6 +84,11 @@ pub enum Msg {
     ConnectFailed {
         attempt_id: u64,
         error: IpcError,
+    },
+    ConnectRetrying {
+        attempt_id: u64,
+        reason: ConnectRetryReason,
+        limit: std::time::Duration,
     },
     /// The managed sing-box child exited after passing its initial readiness
     /// check. Bound to the connection generation so a late notification from
