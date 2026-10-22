@@ -148,6 +148,8 @@ See the `release` skill in `.agents/skills/release/SKILL.md` for the full versio
 - Make code self-documenting through precise names, small focused functions, explicit types, and clear structure.
 - If intent is unclear without a comment, refactor the code until the intent is evident instead of explaining it with a comment.
 - Do not remove existing comments unless their removal is directly required by the task.
+- Doc comments on a type that derives `JsonSchema` or a clap `Parser` / `Subcommand` / `Args` / `ValueEnum`, and on its fields and variants, are data rather than comments: schemars turns them into the editor's JSON Schema descriptions and clap into `kvn --help`. Keep them, and write one for every new field there.
+- `tests/comment_policy.rs` enforces these rules on `src/`, `tests/` and `build.rs` as part of `cargo test`.
 
 **Exception — actionable markers.** `TODO`, `FIXME`, `HACK`, `PERF` and
 `NOTE` comments are allowed and are not covered by the rule above. They record
@@ -219,7 +221,7 @@ Rules of thumb:
 
 ## Testing Patterns
 
-- Unit tests are co-located in `#[cfg(test)] mod tests` blocks at the bottom of each source file. `tests/cli_invocation.rs` holds the integration tests that run the built binary.
+- Unit tests are co-located in `#[cfg(test)] mod tests` blocks at the bottom of each source file. `tests/cli_invocation.rs` holds the integration tests that run the built binary. `tests/comment_policy.rs` checks the comment rules in § Comments and Self-Documenting Code.
 - `src/test_helpers.rs` provides shared test utilities (e.g., `model_with_profiles`).
 - Tests should not depend on external network or the `sing-box` binary unless explicitly marked `#[ignore]` (or guarded by a `command -v sing-box` runtime check).
 - Use `tempfile` for file-system tests; use `NamedTempFile` / `tempdir()` for isolation.
