@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn theme_changed_msg_applies_in_omarchy_mode() {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.theme = "omarchy".into();
+        model.config.settings.theme = crate::config::profile::OMARCHY_THEME_SENTINEL.into();
         let new_theme = crate::ui::styles::Theme::resolve("nord");
         let _ = update(&mut model, Msg::ThemeChanged(new_theme));
         assert_eq!(model.theme, new_theme);
