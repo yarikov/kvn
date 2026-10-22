@@ -157,9 +157,14 @@ impl<'de> Deserialize<'de> for RoutingMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceRoute {
+    /// No override — the service follows the regional routing mode.
     #[default]
     Disabled,
+    /// Force the service through the VPN tunnel, even under `Bypass`.
     Proxy,
+    /// Send the service out the `direct` outbound (real network location),
+    /// even under `Only`. Deliberately bypasses the tunnel — and the kill
+    /// switch, which allowlists the `direct` outbound's fwmark by design.
     Direct,
 }
 

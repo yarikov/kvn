@@ -229,6 +229,7 @@ pub struct DnsRule {
     pub domain_regex: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rule_set: Vec<String>,
+    /// Must match a server tag of the same preset.
     pub server: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disable_cache: bool,

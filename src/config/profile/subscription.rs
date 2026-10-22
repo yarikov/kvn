@@ -27,8 +27,14 @@ pub struct Subscription {
     pub next_auto_update: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_state: Option<SubscriptionRetryState>,
+    /// When true, HWID identification headers are sent with subscription
+    /// requests (see [`Subscription::effective_hwid`]). Default false: raw
+    /// identifiers must not reach unrelated hosts.
     #[serde(default, skip_serializing_if = "is_false")]
     pub send_hwid: bool,
+    /// Per-subscription HWID override; requires `send_hwid` to take effect.
+    /// When absent, `settings.hwid` is used. Its presence alone never enables
+    /// sending.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hwid: Option<String>,
 }
