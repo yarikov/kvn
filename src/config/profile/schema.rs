@@ -23,6 +23,9 @@ fn default_schema_version() -> u32 {
 pub struct Config {
     #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
     pub json_schema: Option<String>,
+    /// Schema version of the persisted file. See [`CURRENT_SCHEMA_VERSION`].
+    /// Absent in pre-versioned files; defaults to 0 for the schema migration
+    /// path.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     #[serde(default)]
