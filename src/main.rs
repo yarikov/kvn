@@ -61,6 +61,8 @@ fn main() -> Result<()> {
 
 fn initialize_logging() -> Result<()> {
     ensure_config_dirs()?;
+    // NOTE: read-only on purpose: an older daemon may still be serving the active
+    // VPN from this profiles.json while a newer client starts.
     let cfg = crate::paths::profiles_path()
         .and_then(|path| crate::config::load_config_at_read_only(&path).ok())
         .unwrap_or_default();

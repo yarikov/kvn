@@ -52,6 +52,8 @@ fn write_inner(dest: &Path, data: &[u8], expected: Option<Option<&[u8]>>) -> Res
         .map_err(|error| error.error)
         .with_context(|| format!("Failed to publish temp file as {:?}", dest))?;
 
+    // NOTE: the parent-dir fsync is best-effort: tmpfs and some FUSE mounts fail
+    // it although the rename is already safe there.
     match fs::File::open(dir) {
         Ok(handle) => {
             if let Err(e) = handle.sync_all() {

@@ -144,6 +144,9 @@ impl IpcServer {
             }
         };
 
+        // NOTE: writes happen on clones outside the clients lock, each bounded by
+        // BROADCAST_WRITE_TIMEOUT, so a TUI that stops reading cannot stall the
+        // daemon main loop or the other clients.
         let writers: Vec<(RawFd, UnixStream)> = {
             let guard = self.clients.lock().unwrap();
             guard
@@ -290,6 +293,9 @@ impl IpcClient {
         self.stream
             .set_read_timeout(Some(timeout))
             .context("Failed to set IPC read timeout")?;
+        // NOTE: read one byte at a time so nothing past the first newline is
+        // consumed; a one-shot CLI client reads the daemon's next broadcast from
+        // the same stream after sending its command.
         let mut line = Vec::new();
         let mut byte = [0u8; 1];
         loop {
@@ -314,6 +320,9 @@ impl IpcClient {
             .stream
             .try_clone()
             .context("Failed to clone IPC socket for snapshot reader")?;
+        // NOTE: a cloned UnixStream shares the socket's read timeout with the
+        // handshake read; without clearing it the reader would give up while the
+        // daemon has nothing to broadcast.
         stream
             .set_read_timeout(None)
             .context("Failed to clear IPC read timeout")?;

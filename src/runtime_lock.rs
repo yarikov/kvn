@@ -39,6 +39,8 @@ impl RuntimeLock {
 
 impl Drop for RuntimeLock {
     fn drop(&mut self) {
+        // NOTE: closing the file is not enough: a child forked concurrently keeps
+        // the inherited descriptor, and with it the lock, until it execs.
         if let Err(error) = self.file.unlock() {
             tracing::warn!(%error, "Failed to release runtime lock");
         }
