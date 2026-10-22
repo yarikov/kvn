@@ -114,17 +114,62 @@ impl GeoAutoUpdate {
     }
 }
 
-pub fn next_update_window_date(now: DateTime<Local>) -> NaiveDate {
-    if now.hour() < 8 {
-        now.date_naive()
-    } else {
-        now.date_naive()
-            .succ_opt()
-            .expect("local date must advance")
+const UPDATE_WINDOW_HOUR: u32 = 8;
+const MAX_CONSECUTIVE_FAILURES: u32 = 5;
+
+/// Retry bookkeeping after a failed background update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RetryState {
+    /// Failed attempts in a row on `attempt_date`; retries stop after five.
+    pub consecutive_failures: u32,
+    /// Earliest time of the next automatic retry.
+    pub retry_at: DateTime<Local>,
+    /// Local date of the failures counted; a failure on a later date starts
+    /// the count again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_date: Option<NaiveDate>,
+}
+
+impl RetryState {
+    pub fn after_failure(previous: Option<&RetryState>, now: DateTime<Local>) -> Self {
+        let today = now.date_naive();
+        let consecutive_failures = previous
+            .filter(|state| state.attempt_date == Some(today))
+            .map_or(1, |state| state.consecutive_failures.saturating_add(1));
+        Self {
+            consecutive_failures,
+            retry_at: now
+                + chrono::Duration::minutes(retry_delay_minutes(consecutive_failures, now)),
+            attempt_date: Some(today),
+        }
+    }
+
+    pub fn governs(&self, now: DateTime<Local>) -> bool {
+        self.attempt_date
+            .is_none_or(|date| date == now.date_naive())
+    }
+
+    pub fn retry_due(&self, now: DateTime<Local>) -> bool {
+        self.consecutive_failures < MAX_CONSECUTIVE_FAILURES && now >= self.retry_at
     }
 }
 
-pub fn retry_delay_minutes(failure: u32, now: DateTime<Local>) -> i64 {
+pub fn update_window_open(now: DateTime<Local>) -> bool {
+    now.hour() >= UPDATE_WINDOW_HOUR
+}
+
+pub fn next_update_window_date(now: DateTime<Local>) -> NaiveDate {
+    if update_window_open(now) {
+        now.date_naive()
+            .succ_opt()
+            .expect("local date must advance")
+    } else {
+        now.date_naive()
+    }
+}
+
+fn retry_delay_minutes(failure: u32, now: DateTime<Local>) -> i64 {
     match failure {
         1 => 1,
         2 => 5,
@@ -134,10 +179,11 @@ pub fn retry_delay_minutes(failure: u32, now: DateTime<Local>) -> i64 {
     }
 }
 
-pub(super) fn minutes_until_next_update_window(now: DateTime<Local>) -> i64 {
+fn minutes_until_next_update_window(now: DateTime<Local>) -> i64 {
     let next = next_update_window_date(now);
     let days = next.num_days_from_ce() - now.date_naive().num_days_from_ce();
-    i64::from(days) * 1_440 - i64::from(now.hour()) * 60 - i64::from(now.minute()) + 8 * 60
+    i64::from(days) * 1_440 - i64::from(now.hour()) * 60 - i64::from(now.minute())
+        + i64::from(UPDATE_WINDOW_HOUR) * 60
 }
 
 #[cfg(test)]
@@ -215,6 +261,25 @@ mod tests {
             next_update_window_date(after),
             after.date_naive().succ_opt().unwrap()
         );
+    }
+
+    #[test]
+    fn retry_state_governs_only_its_attempt_day_and_stops_after_five_failures() {
+        use chrono::TimeZone;
+
+        let now = Local.with_ymd_and_hms(2026, 8, 22, 12, 0, 0).unwrap();
+        let state = RetryState {
+            consecutive_failures: 4,
+            retry_at: now,
+            attempt_date: Some(now.date_naive()),
+        };
+        assert!(state.governs(now));
+        assert!(!state.governs(now + chrono::Duration::days(1)));
+        assert!(state.retry_due(now));
+
+        let exhausted = RetryState::after_failure(Some(&state), now);
+        assert_eq!(exhausted.consecutive_failures, 5);
+        assert!(!exhausted.retry_due(exhausted.retry_at));
     }
 
     #[test]

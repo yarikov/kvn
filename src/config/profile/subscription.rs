@@ -3,7 +3,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::schedule::minutes_until_next_update_window;
+use super::schedule::RetryState;
 use super::{Settings, SubscriptionAutoUpdate};
 
 fn is_false(value: &bool) -> bool {
@@ -26,7 +26,7 @@ pub struct Subscription {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_auto_update: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub retry_state: Option<SubscriptionRetryState>,
+    pub retry_state: Option<RetryState>,
     /// When true, HWID identification headers are sent with subscription
     /// requests (see [`Subscription::effective_hwid`]). Default false: raw
     /// identifiers must not reach unrelated hosts.
@@ -39,16 +39,6 @@ pub struct Subscription {
     pub hwid: Option<String>,
 }
 
-/// Persisted retry metadata for an auto-updating subscription.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SubscriptionRetryState {
-    pub consecutive_failures: u32,
-    pub retry_at: DateTime<Local>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attempt_date: Option<NaiveDate>,
-}
-
 impl Subscription {
     pub fn effective_hwid<'a>(&'a self, settings: &'a Settings) -> Option<&'a str> {
         if !self.send_hwid {
@@ -58,24 +48,7 @@ impl Subscription {
     }
 
     pub fn record_fetch_failure(&mut self, now: DateTime<Local>) {
-        let today = now.date_naive();
-        let consecutive_failures = self
-            .retry_state
-            .as_ref()
-            .filter(|state| state.attempt_date == Some(today))
-            .map_or(1, |state| state.consecutive_failures.saturating_add(1));
-        let delay_minutes = match consecutive_failures {
-            1 => 1,
-            2 => 5,
-            3 => 15,
-            4 => 60,
-            _ => minutes_until_next_update_window(now),
-        };
-        self.retry_state = Some(SubscriptionRetryState {
-            consecutive_failures,
-            retry_at: now + chrono::Duration::minutes(delay_minutes),
-            attempt_date: Some(today),
-        });
+        self.retry_state = Some(RetryState::after_failure(self.retry_state.as_ref(), now));
     }
 
     pub fn clear_retry_state(&mut self) {

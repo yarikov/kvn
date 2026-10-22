@@ -233,14 +233,14 @@ mod tests {
     use super::*;
     use crate::app::msg::{GeoSchedule, Msg};
     use crate::app::update::update;
+    use crate::config::profile::RetryState;
     use crate::config::profile::{GeoRegion, Profile, RoutedService, RoutingMode};
-    use crate::geo::GeoRetryState;
     use crate::test_helpers::*;
     use chrono::Local;
     use std::collections::HashMap;
 
-    fn stale_retry_state() -> GeoRetryState {
-        GeoRetryState {
+    fn stale_retry_state() -> RetryState {
+        RetryState {
             consecutive_failures: 3,
             retry_at: Local::now(),
             attempt_date: None,
@@ -566,7 +566,7 @@ mod tests {
     fn geo_result_error_broadcasts_state() {
         let mut model = model_with_profiles(vec![]);
         model.geo_updating = true;
-        let retry_state = crate::geo::GeoRetryState {
+        let retry_state = crate::config::profile::RetryState {
             consecutive_failures: 1,
             retry_at: Local::now() + chrono::Duration::minutes(1),
             attempt_date: None,

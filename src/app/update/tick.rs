@@ -1,6 +1,6 @@
 use crate::app::effect::Effect;
 use crate::app::model::{ConnectionState, Model, Overlay};
-use crate::config::profile::{GeoRegion, RoutedService};
+use crate::config::profile::{GeoRegion, RoutedService, update_window_open};
 use chrono::Local;
 use std::time::Instant;
 
@@ -101,9 +101,9 @@ fn tick_running_work(model: &mut Model) -> Vec<Effect> {
 
 fn service_update_due(model: &Model, service: RoutedService, now: chrono::DateTime<Local>) -> bool {
     if let Some(state) = model.service_retry_states.get(&service)
-        && (state.attempt_date.is_none() || state.attempt_date == Some(now.date_naive()))
+        && state.governs(now)
     {
-        return state.consecutive_failures < 5 && now >= state.retry_at;
+        return state.retry_due(now);
     }
     model
         .config
@@ -112,7 +112,7 @@ fn service_update_due(model: &Model, service: RoutedService, now: chrono::DateTi
         .auto_update
         .interval_minutes()
         != 0
-        && now.time() >= chrono::NaiveTime::from_hms_opt(8, 0, 0).unwrap()
+        && update_window_open(now)
         && model.service_next_updates.get(&service).map_or_else(
             || {
                 model
@@ -155,11 +155,11 @@ fn geo_update_due(model: &Model, now: chrono::DateTime<Local>) -> bool {
         return false;
     }
     if let Some(retry) = model.geo_retry_state
-        && (retry.attempt_date.is_none() || retry.attempt_date == Some(now.date_naive()))
+        && retry.governs(now)
     {
-        return retry.consecutive_failures < 5 && now >= retry.retry_at;
+        return retry.retry_due(now);
     }
-    now.time() >= chrono::NaiveTime::from_hms_opt(8, 0, 0).unwrap()
+    update_window_open(now)
         && model.geo_next_update.map_or_else(
             || {
                 let reference = match (model.geo_last_checked_at, model.geo_last_attempt_at) {
@@ -191,13 +191,10 @@ fn check_due_subscriptions_at(model: &mut Model, now: chrono::DateTime<Local>) -
             continue;
         }
         let today = now.date_naive();
-        let after_window = now.time() >= chrono::NaiveTime::from_hms_opt(8, 0, 0).unwrap();
         let due = match &sub.retry_state {
-            Some(state) if state.attempt_date.is_none() || state.attempt_date == Some(today) => {
-                state.consecutive_failures < 5 && now >= state.retry_at
-            }
+            Some(state) if state.governs(now) => state.retry_due(now),
             _ => {
-                after_window
+                update_window_open(now)
                     && sub.next_auto_update.map_or_else(
                         || {
                             sub.last_updated.is_none_or(|last| {
@@ -267,7 +264,7 @@ mod tests {
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
         let now = after_update_window();
         model.geo_last_checked_at = Some(now - chrono::Duration::days(2));
-        model.geo_retry_state = Some(crate::geo::GeoRetryState {
+        model.geo_retry_state = Some(crate::config::profile::RetryState {
             consecutive_failures: 2,
             retry_at: now + chrono::Duration::minutes(5),
             attempt_date: None,
@@ -290,7 +287,7 @@ mod tests {
         );
         model.service_retry_states.insert(
             crate::config::profile::RoutedService::Telegram,
-            crate::geo::GeoRetryState {
+            crate::config::profile::RetryState {
                 consecutive_failures: 2,
                 retry_at: Local::now() - chrono::Duration::seconds(1),
                 attempt_date: None,
@@ -479,7 +476,7 @@ mod tests {
             auto_update: SubscriptionAutoUpdate::Every1d,
             last_updated: None,
             next_auto_update: Some(today.date_naive()),
-            retry_state: Some(crate::config::profile::SubscriptionRetryState {
+            retry_state: Some(crate::config::profile::RetryState {
                 consecutive_failures: 5,
                 retry_at: today,
                 attempt_date: Some(today.date_naive()),
