@@ -52,14 +52,10 @@ pub(in crate::app::update) fn on_service_rule_sets_ready(
         return effects;
     }
     if model.connection != ConnectionState::Connected {
-        // Disconnected while the download ran — the files are on
-        // disk and apply on whatever connect happens next.
         effects.push(Effect::BroadcastState);
         return effects;
     }
     effects.push(Effect::BroadcastState);
-    // Reconnect the ACTIVE profile explicitly — never the cursor's
-    // row, which may have moved since the routing change.
     let active = model
         .active_profile_id
         .and_then(|id| model.config.profiles.iter().find(|p| p.id == id).cloned());
@@ -82,9 +78,6 @@ pub(in crate::app::update) fn on_service_rule_sets_ready(
     effects
 }
 
-/// Commit a routing-mode change: shared by the routing overlay's Enter key
-/// and the `SetRoutingMode` IPC command so both run identical logic.
-/// Rejects modes unavailable for the current geo region.
 pub(in crate::app::update) fn commit_routing_mode(
     model: &mut Model,
     mode: RoutingMode,
@@ -251,10 +244,6 @@ pub(in crate::app::update) fn commit_routing_settings(
     effects
 }
 
-/// Commit a geo-region switch: shared by the region overlay's Enter key and
-/// the `SetGeoRegion` IPC command. Persists the old region's routing mode,
-/// restores the new region's stored mode, kicks off missing-database
-/// downloads, and reconnects/auto-connects as the overlay does.
 pub(in crate::app::update) fn commit_geo_region(
     model: &mut Model,
     region: GeoRegion,
@@ -276,8 +265,6 @@ pub(in crate::app::update) fn commit_geo_region(
         AppStatus::Info(format!("Geo region selected: {}", region.as_str())),
     );
 
-    // If the region changed and is not Global, check whether geo databases
-    // are present and download them automatically if they are missing.
     if changed && region != GeoRegion::Global {
         if download_allowed(model) {
             model.geo_updating = true;
@@ -294,8 +281,6 @@ pub(in crate::app::update) fn commit_geo_region(
         }
     }
 
-    // Persist the previously active routing mode under the old region
-    // and restore the mode stored for the newly selected region.
     if changed {
         if let Some(old_region) = old_region {
             model
@@ -346,7 +331,6 @@ mod tests {
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(active_id);
         model.pending_service_reconnect = true;
-        // Cursor rests on profile B — the reconnect must still target A.
         model.select_next();
         update(
             &mut model,
@@ -475,8 +459,6 @@ mod tests {
 
     #[test]
     fn service_rule_sets_ready_without_pending_commit_is_noop() {
-        // The post-connect backstop download also reports readiness; it must
-        // not trigger a reconnect loop.
         let profile = Profile::new_vless("A".into(), "e".into(), 1, "u".into());
         let mut model = model_with_profiles(vec![profile.clone()]);
         model.connection = ConnectionState::Connected;
@@ -520,7 +502,6 @@ mod tests {
         let profile = Profile::new_vless("A".into(), "e".into(), 1, "u".into());
         let mut model = model_with_profiles(vec![profile]);
         model.connection = ConnectionState::Connected;
-        // Active profile id points at a profile that no longer exists.
         model.active_profile_id = Some(uuid::Uuid::new_v4());
         model.pending_service_reconnect = true;
         let effects = update(
@@ -534,8 +515,6 @@ mod tests {
         );
         assert!(!model.pending_service_reconnect);
         assert!(!effects.iter().any(|e| matches!(e, Effect::Connect { .. })));
-        // Never drop to Connecting without a resolvable target — that path
-        // ends in Idle-with-live-tunnel on the next Tick.
         assert_eq!(model.connection, ConnectionState::Connected);
     }
 }

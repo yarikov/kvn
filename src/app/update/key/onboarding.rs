@@ -25,25 +25,16 @@ pub(in crate::app::update) fn handle_onboarding(
         KeyCode::Char('K') if step == OnboardingStep::KillSwitch => {
             set_kill_switch(model, !model.config.settings.kill_switch)
         }
-        // The last card tells the user Space opens settings, so it does. The
-        // card comes back through `card_pending` once that screen is closed —
-        // the tour is not finished until Enter.
         KeyCode::Char(' ') if step == OnboardingStep::Finish => {
             model.onboarding.card_pending = true;
             model.settings_menu_selected = 0;
             model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
             vec![]
         }
-        // The tour only moves forward, one step at a time: there is no skip, no
-        // way back and no early exit, and the card is modal so q/Esc cannot
-        // dismiss it either.
         _ => vec![],
     }
 }
 
-// The handoff is never skipped because a step already looks satisfied: a
-// routing mode always has a value, so gating Enter on that would make the
-// Routing card's real screen unreachable.
 fn primary_action(model: &mut Model, step: OnboardingStep) -> Vec<Effect> {
     if step.handoff_screen(&model.config).is_some() {
         return onboarding::handoff(model, step);
@@ -72,8 +63,6 @@ mod tests {
 
     #[test]
     fn the_tour_only_moves_forward_and_only_through_enter() {
-        // No skip and no way back: every navigation key a user might reach for
-        // leaves the card exactly where it is.
         for code in [
             KeyCode::Char('n'),
             KeyCode::Char('l'),
@@ -121,7 +110,6 @@ mod tests {
 
         handle_key(&mut model, enter());
 
-        // Nothing to choose under Global, so the card simply moves on.
         assert_eq!(model.overlay, Overlay::Onboarding(OnboardingStep::Profiles));
         assert_eq!(model.onboarding.awaiting, None);
     }
@@ -183,8 +171,6 @@ mod tests {
 
     #[test]
     fn turning_a_protection_off_on_its_card_skips_the_confirm_dialog() {
-        // `Overlay::ConfirmDisable` would replace the card and close to the
-        // main screen, stranding the tour.
         let mut model = tour_at(OnboardingStep::AutoConnect);
         model.config.settings.auto_connect = true;
         handle_key(&mut model, key('A'));
@@ -235,7 +221,6 @@ mod tests {
             "Space must not finish the tour"
         );
 
-        // The card waits rather than replacing the screen the user just opened.
         handle_tick(&mut model);
         assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
 
@@ -306,8 +291,6 @@ mod tests {
 
     #[test]
     fn the_region_picker_cannot_be_left_without_choosing_one() {
-        // Even with a region already stored, the tour's own step ends only by
-        // committing one.
         for region in [None, Some(GeoRegion::Ru)] {
             let mut model = tour_at(OnboardingStep::Region);
             model.config.settings.geo_routing.current_region = region;
@@ -352,7 +335,6 @@ mod tests {
         let mut model = tour_at(OnboardingStep::Routing);
         handle_key(&mut model, enter());
 
-        // Only reachable through IPC, which does not filter by availability.
         commit_routing_mode(&mut model, RoutingMode::Bypass(GeoRegion::Cn));
 
         assert!(model.status_is_error());
@@ -400,7 +382,6 @@ mod tests {
         handle_key(&mut model, enter());
         assert_eq!(model.onboarding.awaiting, Some(OnboardingStep::Profiles));
 
-        // Pasting a standalone profile is not enough.
         update(
             &mut model,
             Msg::IpcCommand(IpcCommand::Paste {
@@ -410,7 +391,6 @@ mod tests {
         assert_eq!(model.config.profiles.len(), 1);
         assert_eq!(model.onboarding.state.step, OnboardingStep::Profiles);
 
-        // Neither is a subscription that imports profiles.
         update(
             &mut model,
             Msg::SubscriptionFetched {
@@ -426,7 +406,6 @@ mod tests {
         assert_eq!(model.onboarding.state.step, OnboardingStep::Profiles);
         assert_eq!(model.onboarding.awaiting, Some(OnboardingStep::Profiles));
 
-        // Connecting with one of them is.
         let profile_id = model.config.profiles[0].id;
         let attempt_id = model.connect_attempt_id;
         model.connection = ConnectionState::Connecting;

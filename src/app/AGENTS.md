@@ -234,6 +234,11 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 - The user can toggle `auto_connect` at runtime with the `Shift+A` keybinding, the Connection settings overlay, or IPC `SetAutoConnect`. Disabling saves immediately. Enabling first emits `Effect::CheckAutoConnectPolkit` (with `Model::auto_connect_pending` set): the daemon runs `doctor::polkit_readiness()` and replies with `Msg::AutoConnectPolkitChecked`. The flag is flipped and saved only when passwordless polkit is set up and the `kvn-tui` group is active in the daemon's session; otherwise auto-connect stays off and the reason is shown as an error toast and written to the app log.
 - `sudo kvn clean --polkit` / `--killswitch` connect to the invoking user's daemon (`/run/user/$SUDO_UID/kvn-tui.sock`) and send `SetAutoConnect`/`SetKillSwitch { enabled: false }`, so the daemon saves the config as the user. If the daemon is not running, startup reconciliation handles it: `reconcile_kill_switch_state` for the kill switch, and `reconcile_auto_connect_state` turns auto-connect off (before the first tick connects) when `doctor::polkit_authorization_denied()`.
 
+## Kill Switch and Background Work
+
+- While the kill switch is on, ordinary application traffic cannot leave through the physical interface, so the tick holds back geo update checks and subscription auto-updates until the tunnel is `Connected`; started earlier, they race startup auto-connect and nftables drops them.
+- `settings.kill_switch` follows the firewall, not the other way round: only `Msg::KillSwitchApplied` changes it, after the helper succeeds. A config reload keeps the old value and reports an edited one as ignored.
+
 ## Mouse Wheel Viewports
 
 - `app/scroll.rs` owns pure viewport and selection movement. Wheel scrolling preserves the selected item until it reaches the first visible row (down) or last visible row (up), skipping nonselectable separators toward the inside. At an exhausted viewport edge the remaining steps move selection. Wrapped log rows share a record index.

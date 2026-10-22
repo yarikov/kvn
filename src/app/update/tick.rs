@@ -37,7 +37,6 @@ fn handle_tick_at(model: &mut Model, now: chrono::DateTime<Local>) -> Vec<Effect
         }
     }
 
-    // Auto-update subscriptions that are due.
     effects.extend(check_due_subscriptions_at(model, now));
 
     effects.extend(crate::app::update::onboarding::open_when_idle(model));
@@ -49,7 +48,6 @@ fn handle_tick_at(model: &mut Model, now: chrono::DateTime<Local>) -> Vec<Effect
 fn tick_running_work(model: &mut Model) -> Vec<Effect> {
     let mut effects = Vec::new();
 
-    // Connection handling
     if model.connection == ConnectionState::Connecting {
         let profile = model.connecting_profile_id.and_then(|id| {
             model
@@ -74,7 +72,6 @@ fn tick_running_work(model: &mut Model) -> Vec<Effect> {
         }
     }
 
-    // Dispatch pending profile tests, max 4 concurrent.
     while model.testing_profiles.len() < 4 {
         let Some(id) = model.pending_tests.pop_front() else {
             break;
@@ -83,7 +80,6 @@ fn tick_running_work(model: &mut Model) -> Vec<Effect> {
         effects.push(Effect::TestProfile { id });
     }
 
-    // Throttled Clash-API poll for live traffic stats.
     if model.connection == ConnectionState::Connected {
         let now = Instant::now();
         let due = match model.last_traffic_fetch_at {
@@ -140,10 +136,6 @@ fn geo_update_due(model: &Model, now: chrono::DateTime<Local>) -> bool {
     if model.geo_updating {
         return false;
     }
-    // With the kill switch active, ordinary application traffic cannot leave
-    // through the physical interface. Wait for sing-box to bring up the TUN
-    // before starting the HTTP check; otherwise startup auto-connect and the
-    // geo download race each other and the request is dropped by nftables.
     if model.config.settings.kill_switch && model.connection != ConnectionState::Connected {
         return false;
     }
@@ -185,8 +177,6 @@ fn geo_update_due(model: &Model, now: chrono::DateTime<Local>) -> bool {
 }
 
 fn check_due_subscriptions_at(model: &mut Model, now: chrono::DateTime<Local>) -> Vec<Effect> {
-    // Subscription fetches use ordinary application networking, so with the
-    // kill switch active they must wait until sing-box has created the TUN.
     if model.config.settings.kill_switch && model.connection != ConnectionState::Connected {
         return Vec::new();
     }
@@ -616,7 +606,6 @@ mod tests {
     #[test]
     fn tick_dispatches_up_to_4_tests_from_pending() {
         let profiles = sample_profiles();
-        // Need 5 profiles — add two more manually.
         let mut profiles5 = profiles;
         let extra_a = crate::config::profile::Profile::new_vless(
             "D".into(),
@@ -633,11 +622,9 @@ mod tests {
         profiles5.push(extra_a);
         profiles5.push(extra_b);
         let mut model = model_with_profiles(profiles5);
-        // Enqueue all 5.
         let key = KeyEvent::new(KeyCode::Char('T'), crossterm::event::KeyModifiers::NONE);
         let _ = update(&mut model, Msg::Key(key));
         assert_eq!(model.pending_tests.len(), 5);
-        // Tick should dispatch first 4.
         let effects = update(&mut model, Msg::Tick);
         let test_effects: Vec<_> = effects
             .iter()

@@ -245,8 +245,6 @@ mod tests {
         );
         assert!(model.status_is_error(), "status: {:?}", model.status);
         assert_eq!(model.status_text(), "Edit rejected: bad UUID");
-        // set_status also pushes into the in-memory log panel so the message
-        // survives a later status overwrite.
         assert!(model.logs.iter().any(|l| l.contains("Edit rejected")));
     }
 
@@ -343,7 +341,6 @@ mod tests {
     #[test]
     fn ipc_command_set_routing_mode_rejects_unavailable_mode() {
         let mut model = model_with_profiles(vec![]);
-        // No region selected (or Global) → only RoutingMode::Global is valid.
         let effects = handle_ipc_command(
             &mut model,
             crate::app::msg::IpcCommand::SetRoutingMode {
@@ -419,7 +416,6 @@ mod tests {
             ]
         );
 
-        // While the first toggle is still in flight, a second is ignored.
         let effects = handle_ipc_command(
             &mut model,
             crate::app::msg::IpcCommand::SetKillSwitch { enabled: false },
@@ -464,7 +460,6 @@ mod tests {
             ]
         );
 
-        // Setting the same value again is a no-op (no redundant save).
         let effects = handle_ipc_command(
             &mut model,
             crate::app::msg::IpcCommand::SetAutoConnect { enabled: true },
@@ -518,8 +513,6 @@ mod tests {
         assert_eq!(backspace.modifiers, KeyModifiers::empty());
     }
 
-    // ---- rebuild_key_event ----
-
     #[test]
     fn rebuild_key_event_named_codes() {
         use crossterm::event::{KeyCode, KeyModifiers};
@@ -566,8 +559,6 @@ mod tests {
         assert!(rebuild_key_event("F1", None, false, false).is_none());
         assert!(rebuild_key_event("", None, false, false).is_none());
     }
-
-    // ---- handle_ipc_command gaps ----
 
     #[test]
     fn ipc_command_detach_emits_broadcast_only() {

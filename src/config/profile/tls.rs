@@ -132,8 +132,6 @@ pub struct TlsCommon {
 }
 
 impl TlsCommon {
-    /// `TlsCommon::default()` represents "no TLS" — we treat a TLS block as
-    /// enabled when the user supplied at least one TLS-related field.
     pub fn is_configured(&self) -> bool {
         self.server_name.is_some()
             || self.insecure
@@ -144,8 +142,6 @@ impl TlsCommon {
             || self.ech.as_ref().is_some_and(|e| e.enabled)
     }
 
-    /// REALITY and ECH cannot be enabled simultaneously — REALITY uses its
-    /// own SNI-cloaking mechanism that conflicts with ECH's `ECHConfigList`.
     pub fn diagnostics(&self) -> Vec<ConfigDiagnostic> {
         if self.reality.is_some() && self.ech.as_ref().is_some_and(|e| e.enabled) {
             return vec![ConfigDiagnostic::new(
@@ -270,8 +266,6 @@ impl TransportConfig {
 mod tests {
     use super::*;
 
-    // ---- TlsCommon::diagnostics ----
-
     #[test]
     fn tls_common_validate_accepts_plain() {
         assert_eq!(TlsCommon::default().diagnostics(), []);
@@ -305,7 +299,6 @@ mod tests {
 
     #[test]
     fn tls_common_validate_accepts_reality_with_disabled_ech() {
-        // The mutual-exclusion check fires only when ECH is *enabled*.
         let tls = TlsCommon {
             reality: Some(RealitySettings {
                 public_key: "pk".into(),

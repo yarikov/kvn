@@ -134,7 +134,6 @@ mod tests {
             send_hwid: false,
             hwid: None,
         });
-        // source_rows: [SubscriptionHeader(0), SubscriptionProfile { sub_idx: 0, profile_idx: 0 }]
         model.selected = 0;
         model.overlay = Overlay::ConfirmDelete;
 
@@ -171,8 +170,6 @@ mod tests {
         assert_eq!(model.status_text(), "Delete failed: disconnect first");
         assert!(!effects.contains(&Effect::SaveConfig));
     }
-
-    // ---- handle_confirm_delete gaps ----
 
     #[test]
     fn confirm_delete_enter_on_profile_deletes() {
@@ -260,7 +257,6 @@ mod tests {
         model.overlay = Overlay::ConfirmDelete;
         let effects = handle_confirm_delete(&mut model, key('z'));
         assert_eq!(model.config.profiles.len(), 1);
-        // Unknown key leaves overlay open.
         assert_eq!(model.overlay, Overlay::ConfirmDelete);
         assert!(effects.is_empty());
     }

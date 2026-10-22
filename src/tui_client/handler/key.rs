@@ -108,8 +108,6 @@ pub(super) struct GoFirstSequence {
 }
 
 impl GoFirstSequence {
-    /// Consume one key and report whether it completes a consecutive `gg`.
-    /// Any non-g key cancels a pending prefix before continuing normally.
     fn feed(&mut self, code: &crossterm::event::KeyCode) -> bool {
         if *code != crossterm::event::KeyCode::Char('g') {
             self.pending = false;

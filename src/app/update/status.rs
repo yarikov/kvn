@@ -2,8 +2,6 @@ use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey};
 use crate::app::msg::CopiedTarget;
 
-/// Set the application status (pure, in-memory) and return an effect that
-/// appends the same message to the on-disk log file.
 pub(in crate::app::update) fn set_status(
     model: &mut Model,
     key: StatusKey,

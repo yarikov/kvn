@@ -27,14 +27,8 @@ pub struct Subscription {
     pub next_auto_update: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_state: Option<SubscriptionRetryState>,
-    /// When true, HWID identification headers are sent with subscription
-    /// requests (see [`Subscription::effective_hwid`]). Default false: raw
-    /// identifiers must not reach unrelated hosts.
     #[serde(default, skip_serializing_if = "is_false")]
     pub send_hwid: bool,
-    /// Per-subscription HWID override; requires `send_hwid` to take effect.
-    /// When absent, `settings.hwid` is used. Its presence alone never enables
-    /// sending.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hwid: Option<String>,
 }
@@ -50,15 +44,6 @@ pub struct SubscriptionRetryState {
 }
 
 impl Subscription {
-    /// Resolve the HWID to send for this subscription.
-    ///
-    /// Resolution rules:
-    /// - `send_hwid` absent or false → `None` (no device headers are sent);
-    /// - `send_hwid: true` with a per-subscription `hwid` override → the
-    ///   override;
-    /// - otherwise → fall back to `settings.hwid`.
-    ///
-    /// The presence of `self.hwid` alone never enables sending.
     pub fn effective_hwid<'a>(&'a self, settings: &'a Settings) -> Option<&'a str> {
         if !self.send_hwid {
             return None;
@@ -66,8 +51,6 @@ impl Subscription {
         self.hwid.as_deref().or(Some(settings.hwid.as_str()))
     }
 
-    /// Record a failed fetch and schedule the next retry using the bounded
-    /// 1/5/15/60-minute backoff sequence.
     pub fn record_fetch_failure(&mut self, now: DateTime<Local>) {
         let today = now.date_naive();
         let consecutive_failures = self
@@ -215,7 +198,6 @@ mod tests {
 
     #[test]
     fn effective_hwid_absent_send_hwid_sends_nothing() {
-        // Backward compat: `send_hwid` missing from JSON defaults to false.
         let sub: Subscription =
             serde_json::from_str(r#"{"name":"S","url":"https://e.com/s"}"#).unwrap();
         assert!(!sub.send_hwid);
@@ -247,7 +229,6 @@ mod tests {
             r#"{"name":"S","url":"https://e.com/s","send_hwid":false,"hwid":"custom"}"#,
         )
         .unwrap();
-        // The presence of `hwid` alone must not enable sending.
         assert_eq!(sub.effective_hwid(&settings_with_hwid()), None);
     }
 

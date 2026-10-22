@@ -14,10 +14,6 @@ pub(crate) fn handle_config_reloaded(
         Ok(mut config) => {
             let old_settings = model.config.settings.clone();
             let kill_switch_ignored = config.settings.kill_switch != old_settings.kill_switch;
-            // The persisted flag is not the source of truth for the live
-            // firewall. Only ApplyKillSwitch may change it after the helper
-            // succeeds, so an editor reload must not create config/systemd
-            // drift.
             config.settings.kill_switch = old_settings.kill_switch;
             let runtime_settings_changed =
                 connection_settings_changed(&old_settings, &config.settings);
@@ -65,8 +61,6 @@ pub(crate) fn handle_config_reloaded(
                         ConnectionState::Connected | ConnectionState::ConnectPending => {
                             reconnect_with_new_settings(model);
                         }
-                        // A queued attempt has not captured its Profile and
-                        // Settings yet; the next Tick reads the new config.
                         ConnectionState::Connecting | ConnectionState::Idle => {}
                     }
                 }

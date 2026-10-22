@@ -13,7 +13,6 @@ use crate::app::update::status::{
 pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
     let mut effects = Vec::new();
     match key.code {
-        // Navigation
         KeyCode::Char('j') | KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT) => {
             return move_selected_source(model, Direction::Down);
         }
@@ -24,9 +23,6 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
         KeyCode::Char('k') | KeyCode::Up => model.select_prev(),
         KeyCode::Char('G') => model.select_last(),
 
-        // Actions. Note: 'p' (paste) and 'e' (edit profiles) are handled in
-        // the TUI client directly, not routed through the daemon, so they
-        // don't appear here.
         KeyCode::Enter => return handle_enter_on_sources(model),
         KeyCode::Char('d')
             if model.selected_profile().is_some() || model.selected_subscription().is_some() =>
@@ -406,7 +402,7 @@ mod tests {
         let _ = handle_sources(&mut model, key('G'));
         assert_eq!(model.selected, 1);
         let _ = handle_sources(&mut model, key('g'));
-        assert_eq!(model.selected, 1); // a lone g is only a client-side prefix
+        assert_eq!(model.selected, 1);
         let _ = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::GoFirst);
         assert_eq!(model.selected, 0);
     }
@@ -422,7 +418,6 @@ mod tests {
         assert_eq!(model.connecting_profile_id, Some(a_id));
         assert_eq!(effects, vec![app_log_info("Connecting to A…")]);
 
-        // Moving the cursor before the daemon tick must not retarget the attempt.
         model.select_next();
         let effects = handle_tick(&mut model);
         assert!(
@@ -468,7 +463,7 @@ mod tests {
             send_hwid: false,
             hwid: None,
         });
-        model.selected = 0; // subscription header
+        model.selected = 0;
         let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(model.connection, ConnectionState::Idle);
         assert!(effects.is_empty());
@@ -492,7 +487,7 @@ mod tests {
             send_hwid: false,
             hwid: None,
         });
-        model.selected = 0; // subscription header
+        model.selected = 0;
         let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Enter));
         assert!(model.subscription_fetching);
         assert!(effects.contains(&Effect::UpdateSubscription { id: sub_id }));
@@ -865,8 +860,6 @@ mod tests {
         }
     }
 
-    // ── Profile testing ──────────────────────────────────────────────────────
-
     #[test]
     fn t_key_with_no_profile_does_nothing() {
         let mut model = model_with_profiles(vec![]);
@@ -972,8 +965,6 @@ mod tests {
         assert!(effects.contains(&Effect::DownloadGeo));
     }
 
-    // ---- handle_sources gaps ----
-
     #[test]
     fn sources_d_blocked_when_active_profile_selected() {
         let mut model = model_with_profiles(vec![Profile::new_vless(
@@ -989,13 +980,11 @@ mod tests {
         assert_eq!(model.overlay, Overlay::None);
         assert!(model.status_is_error());
         assert_eq!(model.status_text(), "Delete failed: disconnect first");
-        // Effect carries the AppendAppLog only (no SaveConfig, no opening overlay).
         assert!(!effects.iter().any(|e| matches!(e, Effect::SaveConfig)));
     }
 
     #[test]
     fn sources_d_blocked_when_active_profile_under_subscription_header() {
-        // Create a subscription with one profile that's currently active.
         let sub_id = Uuid::new_v4();
         let mut profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u".into());
         profile.subscription_id = Some(sub_id);
@@ -1013,7 +1002,6 @@ mod tests {
         });
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[0].id);
-        // Select the subscription header (first row now that the standalone group is empty).
         model.selected = crate::app::model::row_for_subscription_header(&model.config, 0);
         let _ = handle_sources(&mut model, key('d'));
         assert_eq!(model.overlay, Overlay::None);
@@ -1062,7 +1050,6 @@ mod tests {
             443,
             "u".into(),
         )]);
-        // Idle by default.
         let effects = handle_sources(&mut model, key('r'));
         assert!(effects.is_empty());
         assert_eq!(model.connection, ConnectionState::Idle);
@@ -1076,7 +1063,6 @@ mod tests {
             443,
             "u".into(),
         )]);
-        // Cursor on standalone profile, not on a subscription header.
         let effects = handle_sources(&mut model, key('i'));
         assert!(effects.is_empty());
     }
@@ -1113,13 +1099,10 @@ mod tests {
         assert!(effects.contains(&Effect::DownloadGeo));
     }
 
-    // ---- handle_enter_on_sources gaps ----
-
     #[test]
     fn enter_on_empty_sources_lists_a_message() {
         let mut model = model_with_profiles(vec![]);
         let effects = handle_enter_on_sources(&mut model);
-        // No profile, no subscription → status message, no effects beyond log.
         assert!(model.status_text().contains("Sources empty"));
         assert!(!effects.iter().any(|e| matches!(e, Effect::Connect { .. })));
     }

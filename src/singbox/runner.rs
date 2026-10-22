@@ -18,12 +18,10 @@ fn resolve_singbox_binary() -> String {
 
 static SINGBOX_BINARY: OnceLock<String> = OnceLock::new();
 
-/// Path to the sing-box binary. Can be overridden by SING_BOX_PATH env variable.
 fn singbox_binary() -> &'static str {
     SINGBOX_BINARY.get_or_init(resolve_singbox_binary)
 }
 
-/// Write the generated sing-box configuration to a temporary file.
 fn write_config(
     profile: &Profile,
     settings: &Settings,
@@ -46,7 +44,6 @@ fn write_config(
     Ok(path)
 }
 
-/// Validate the sing-box configuration by running `sing-box check`.
 fn check_config(path: &PathBuf, cancelled: &dyn Fn() -> bool) -> Result<()> {
     let mut command = Command::new(singbox_binary());
     command
@@ -128,8 +125,6 @@ pub struct StartedSingBox {
     pub routing_fallback: Option<RoutingFallback>,
 }
 
-/// Start the sing-box process with the given profile.
-/// Validates config first, then spawns the process and verifies it stays alive.
 pub fn start(
     profile: &Profile,
     settings: &Settings,
@@ -244,10 +239,6 @@ fn spawn_and_wait(
     clash_api_port: u16,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<ProcessHandle> {
-    // We don't consume sing-box stdout; drop it to /dev/null so a verbose
-    // logger can't fill the pipe buffer (~64K) and wedge the child on write.
-    // stderr stays piped — on immediate exit we read it for diagnostics, and
-    // on success we hand it to a drain thread (see `spawn_stderr_drain`).
     let mut child = spawn_singbox(
         Command::new(singbox_binary())
             .arg("run")
@@ -258,11 +249,6 @@ fn spawn_and_wait(
     )
     .with_context(|| format!("Failed to start sing-box (binary: {})", singbox_binary()))?;
 
-    // Poll for either an immediate exit (config rejected, port busy, etc.)
-    // or a stable run. The 300ms budget is the same heuristic as before —
-    // sing-box that survives this window is considered up — but we now
-    // detect an early failure within ~10ms instead of always waiting the
-    // full window.
     let deadline = std::time::Instant::now() + Duration::from_millis(300);
     loop {
         match child.try_wait() {
@@ -285,9 +271,6 @@ fn spawn_and_wait(
                     anyhow::bail!(START_CANCELLED);
                 }
                 if std::time::Instant::now() >= deadline {
-                    // Process survived the readiness window — drain stderr so
-                    // the child doesn't block on a full pipe buffer, then hand
-                    // the child off.
                     if let Some(stderr) = child.stderr.take() {
                         spawn_stderr_drain(stderr);
                     }
@@ -302,9 +285,6 @@ fn spawn_and_wait(
     }
 }
 
-/// Forward sing-box stderr lines to the `singbox` tracing target so verbose
-/// output never wedges the child. The thread exits naturally on EOF (i.e.
-/// when sing-box is killed and the pipe closes).
 fn spawn_stderr_drain(stderr: ChildStderr) {
     thread::spawn(move || {
         let reader = BufReader::new(stderr);
@@ -330,11 +310,9 @@ mod tests {
     #[test]
     fn singbox_binary_resolution() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        // Default (no env override)
         unsafe { std::env::remove_var("SING_BOX_PATH") };
         assert_eq!(resolve_singbox_binary(), "sing-box");
 
-        // With env override
         unsafe { std::env::set_var("SING_BOX_PATH", "/usr/local/bin/sing-box") };
         assert_eq!(resolve_singbox_binary(), "/usr/local/bin/sing-box");
         unsafe { std::env::remove_var("SING_BOX_PATH") };
@@ -342,8 +320,6 @@ mod tests {
 
     #[test]
     fn write_config_creates_valid_json() {
-        // temp_singbox_config_path() reads XDG_RUNTIME_DIR, which other tests
-        // point at short-lived tempdirs — hold ENV_LOCK so the path stays valid.
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let runtime = tempfile::tempdir().unwrap();
         let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());
@@ -377,7 +353,6 @@ mod tests {
             0o600
         );
 
-        // Clean up
         let _ = fs::remove_file(&path);
     }
 
@@ -398,8 +373,6 @@ mod tests {
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = crate::geo::GeoManager::new().unwrap();
 
-        // Add one region at a time, asserting that prior regions remain
-        // available and unconfigured regions stay absent.
         let mut written = Vec::new();
         for region in [GeoRegion::Ru, GeoRegion::Cn, GeoRegion::Ir] {
             let (geoip, geosite) = gm.local_paths(region).unwrap();
@@ -429,7 +402,6 @@ mod tests {
         let gm = crate::geo::GeoManager::new().unwrap();
         let (geoip_ru, _) = gm.local_paths(GeoRegion::Ru).unwrap();
         fs::write(&geoip_ru, crate::test_helpers::RULE_SET_BYTES).unwrap();
-        // geosite missing → Ru must stay absent.
         let geo = collect_geo_availability();
         assert!(!geo.regions.contains_key(&GeoRegion::Ru));
     }
@@ -501,11 +473,8 @@ mod tests {
         profile
     }
 
-    /// Validation against the real `sing-box` binary. Skipped automatically
-    /// when the binary is not on PATH so CI without sing-box stays green.
     #[test]
     fn check_config_accepts_a_minimal_profile() {
-        // Same XDG_RUNTIME_DIR dependency as write_config_creates_valid_json.
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let runtime = tempfile::tempdir().unwrap();
         let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", runtime.path());

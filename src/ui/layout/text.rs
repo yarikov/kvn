@@ -1,12 +1,9 @@
 use unicode_width::UnicodeWidthChar;
 
-/// Visual width of a string, counting Unicode characters according to their
-/// display width.
 pub(super) fn visual_width(s: &str) -> usize {
     s.chars().filter_map(UnicodeWidthChar::width).sum()
 }
 
-/// Truncate a string to fit within a visual width, appending "..." if truncated.
 pub(super) fn truncate_to_visual_width(s: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
@@ -33,7 +30,6 @@ pub(super) fn truncate_to_visual_width(s: &str, max_width: usize) -> String {
     result
 }
 
-/// Pad a string on the right with spaces up to the target visual width.
 pub(super) fn pad_to_visual_width(s: &str, target: usize) -> String {
     let mut result = s.to_string();
     let width = visual_width(s);
@@ -43,12 +39,10 @@ pub(super) fn pad_to_visual_width(s: &str, target: usize) -> String {
     result
 }
 
-/// Truncate and pad a string to exactly the target visual width.
 pub(super) fn fit_to_visual_width(s: &str, target: usize) -> String {
     pad_to_visual_width(&truncate_to_visual_width(s, target), target)
 }
 
-/// Left-align a string within a column that is centered in the target width.
 pub(super) fn align_in_centered_column(s: &str, target: usize, column_width: usize) -> String {
     let text = truncate_to_visual_width(s, column_width);
     let left = target.saturating_sub(column_width) / 2;

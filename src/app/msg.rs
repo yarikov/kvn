@@ -10,11 +10,6 @@ use chrono::{DateTime, Local};
 use crossterm::event::{KeyEvent, MouseEvent};
 use uuid::Uuid;
 
-/// Structured error carried inside `Msg` variants.
-///
-/// `chain` is ordered outermost first, matching `anyhow::Error::chain()` —
-/// element 0 is the high-level summary (suitable for the status bar), and
-/// later elements are the root causes added through `.context(...)`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IpcError {
     pub chain: Vec<String>,
@@ -75,9 +70,6 @@ pub enum Msg {
     Connected {
         pid: u32,
         attempt_id: u64,
-        /// The profile that actually connected. Carried through the connect
-        /// flow because the cursor may have moved since the connect was
-        /// issued — attribution must not depend on the selection.
         profile_id: Uuid,
         routing_fallback: Option<crate::config::profile::RoutingFallback>,
     },
@@ -90,18 +82,11 @@ pub enum Msg {
         reason: ConnectRetryReason,
         limit: std::time::Duration,
     },
-    /// The managed sing-box child exited after passing its initial readiness
-    /// check. Bound to the connection generation so a late notification from
-    /// an old process cannot tear down a newer connection.
     SingBoxExited {
         attempt_id: u64,
         code: Option<i32>,
         signal: Option<i32>,
     },
-    /// A service rule-set download pass finished (files may still be missing
-    /// if individual downloads failed — absence degrades to "no rule for
-    /// that service"). Consumed by the reducer to report the result and run
-    /// any reconnect deferred by a service-routing commit.
     ServiceRuleSetsReady {
         checked_at: ServiceCheckTimes,
         schedule: Option<ServiceSchedule>,
@@ -121,8 +106,6 @@ pub enum Msg {
     StateUpdate {
         snapshot: Box<StateSnapshot>,
     },
-    /// The local TUI's IPC reader received a snapshot it could not decode.
-    /// Daemon-side reducers ignore this; the TUI turns it into a visible error.
     IpcReadFailed {
         message: String,
     },
@@ -136,9 +119,6 @@ pub enum Msg {
         error: Option<IpcError>,
     },
     IntegrationSetupChecked(crate::onboarding::IntegrationSetup),
-    /// Raw sample of cumulative byte counters from sing-box's Clash API,
-    /// timestamped so the pure-layer can compute a per-second rate against
-    /// the previous sample stored in `Model::traffic`.
     TrafficStatsUpdated {
         attempt_id: u64,
         request_id: u64,
@@ -147,13 +127,7 @@ pub enum Msg {
         conn_count: usize,
         sampled_at_ms: u64,
     },
-    /// New UI theme resolved from Omarchy's `theme.name` file (or a manual
-    /// override). Carries a fully constructed [`Theme`] so the pure reducer
-    /// can swap it in without performing any I/O.
     ThemeChanged(Theme),
-    /// Result of a profile latency test initiated via `Effect::TestProfile`.
-    /// `latency_ms` is `None` when the test timed out or the endpoint was
-    /// unreachable.
     TestResult {
         id: Uuid,
         latency_ms: Option<u64>,
@@ -201,22 +175,14 @@ pub enum GeoResult {
     },
 }
 
-/// Commands sent from the TUI client to the daemon over the Unix socket.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "cmd")]
 pub enum IpcCommand {
     Attach,
-    /// Clear an error after a TUI rendered its toast. The revision prevents a
-    /// delayed client from clearing a newer error.
     ClearErrorStatus {
         status_revision: u64,
     },
-    /// Ask the daemon to resume an unfinished first-run tour. Only a fresh TUI
-    /// launch sends this command, and it is sent before `CheckSupportPrompt` so
-    /// the two can never stack.
     CheckOnboarding,
-    /// Ask the daemon to show the support prompt when its persisted deadline
-    /// is due. Only a fresh TUI launch sends this command.
     CheckSupportPrompt,
     Detach,
     Key {
@@ -241,35 +207,22 @@ pub enum IpcCommand {
     SetMainPaneFocus {
         focus: MainPaneFocus,
     },
-    /// Semantic result of a client-local `gg` sequence. The daemon applies
-    /// it to whichever selectable main view or overlay is currently active.
     GoFirst,
     ConnectProfile {
         profile_id: Uuid,
     },
-    /// Disconnect the active tunnel or cancel an in-progress connection.
     Disconnect,
-    /// Reconnect the active or currently connecting profile.
     Reconnect,
     Toggle,
-    /// Set the routing mode outright, bypassing the TUI overlay. Rejected
-    /// (status error, no state change) when the mode is unavailable for the
-    /// current geo region — mirrors the overlay's available-modes list.
     SetRoutingMode {
         mode: RoutingMode,
     },
-    /// Switch the geo region: saves the old region's routing mode, restores
-    /// the new region's stored mode, downloads missing geo databases, and
-    /// reconnects when a tunnel is active — same commit as the region overlay.
     SetGeoRegion {
         region: GeoRegion,
     },
-    /// Enable or disable the nftables kill switch. No-op when a toggle is
-    /// already in flight or the requested state is already set.
     SetKillSwitch {
         enabled: bool,
     },
-    /// Enable or disable auto-connect on startup.
     SetAutoConnect {
         enabled: bool,
     },
@@ -289,9 +242,6 @@ pub enum IpcCommand {
         edited: Box<crate::config::profile::Config>,
     },
     Quit,
-    /// Client-side failure the daemon owns none of — e.g. the external editor
-    /// path rejecting an edit. The daemon writes it into its model's status
-    /// and overlay so the next broadcast surfaces it in the TUI.
     ClientError {
         message: String,
     },
@@ -418,7 +368,6 @@ mod tests {
         for cmd in cmds {
             let json = serde_json::to_string(&cmd).unwrap();
             let back: IpcCommand = serde_json::from_str(&json).unwrap();
-            // Round-trip via Debug since IpcCommand isn't PartialEq.
             assert_eq!(format!("{:?}", cmd), format!("{:?}", back));
         }
     }
@@ -447,15 +396,10 @@ pub enum ConfigEditResult {
     },
 }
 
-/// State snapshot pushed from the daemon to TUI clients.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StateSnapshot {
-    /// Version of the daemon binary that produced this snapshot. An empty
-    /// value identifies daemons predating the versioned IPC handshake.
     #[serde(default)]
     pub daemon_version: String,
-    /// Schema epoch for daemon/client IPC. Bump when wire compatibility is
-    /// intentionally broken independently of the application version.
     #[serde(default)]
     pub ipc_version: u32,
     #[serde(default)]
@@ -469,8 +413,6 @@ pub struct StateSnapshot {
     pub connection: ConnectionState,
     pub status: String,
     pub status_is_error: bool,
-    /// Monotonic identity of the status event, allowing clients to
-    /// distinguish repeated messages with identical text.
     #[serde(default)]
     pub status_revision: u64,
     #[serde(default)]
@@ -487,18 +429,12 @@ pub struct StateSnapshot {
     pub dns_fakeip_draft: Option<bool>,
     #[serde(default)]
     pub theme_draft: Option<String>,
-    /// Step whose real screen the first-run tour is waiting on. The pickers
-    /// render differently while it is set, so it has to reach the client.
     #[serde(default)]
     pub onboarding_awaiting: Option<crate::onboarding::OnboardingStep>,
-    /// Whether the tour includes its Omarchy card. The daemon decides it, since
-    /// the card's own command installs the plugin that removes it — a client
-    /// started afterwards would otherwise count a shorter tour than the daemon.
     #[serde(default)]
     pub onboarding_omarchy: bool,
     #[serde(default)]
     pub onboarding_complete: bool,
-    /// Setup state of the privileged integrations the protection cards ask for.
     #[serde(default)]
     pub integration_setup: crate::onboarding::IntegrationSetup,
     #[serde(default)]
@@ -517,10 +453,8 @@ pub struct StateSnapshot {
     #[serde(default)]
     pub routing_fallback: Option<crate::config::profile::RoutingFallback>,
     pub geo_last_updated: Option<String>,
-    /// Last successful check of the active regional rule sets.
     #[serde(default)]
     pub geo_last_checked_at: Option<DateTime<Local>>,
-    /// Last successful check of each service rule set.
     #[serde(default)]
     pub service_checked_at: std::collections::HashMap<RoutedService, DateTime<Local>>,
     pub overlay: Overlay,
@@ -531,15 +465,10 @@ pub struct StateSnapshot {
     pub settings: Settings,
     #[serde(default)]
     pub traffic: TrafficStats,
-    /// Byte offsets of the log files at daemon startup. A TUI client uses
-    /// them to restore only the current daemon session when it attaches.
     #[serde(default)]
     pub log_session_offsets: Option<LogSessionOffsets>,
-    /// Latency results keyed by profile UUID string. `null` = error, number =
-    /// ms. Absent key = not yet tested. Transient — not persisted to disk.
     #[serde(default)]
     pub profile_latencies: std::collections::HashMap<String, Option<u64>>,
-    /// Profile UUIDs whose test is currently in-flight (spinner indicator).
     #[serde(default)]
     pub testing_profiles: Vec<String>,
 }

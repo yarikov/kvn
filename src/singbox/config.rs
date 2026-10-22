@@ -18,16 +18,9 @@ use crate::singbox::outbound::{
 
 const DNS_STRATEGY: &str = "ipv4_only";
 
-/// Availability of local geoip/geosite rule-sets used when building routes.
-/// A region is present only when both its files exist.
 #[derive(Debug, Clone, Default)]
 pub struct GeoAvailability {
-    /// `(geoip_path, geosite_path)` per region. Populated by the runner from
-    /// disk; `build_route` reads via `get`. Regions without rule-sets
-    /// (`GeoRegion::Global`) never appear here.
     pub regions: HashMap<GeoRegion, (PathBuf, PathBuf)>,
-    /// `(tag, path)` per rule-set, in rule order, for each service whose
-    /// defined rule-set files all exist on disk.
     pub services: HashMap<RoutedService, Vec<(&'static str, PathBuf)>>,
 }
 
@@ -50,7 +43,6 @@ impl GeoAvailability {
             .then(|| RoutingFallback::for_mode(routing_mode))
     }
 
-    /// All rule-sets available with dummy paths under `/geo/`, for tests.
     #[cfg(test)]
     pub fn all() -> Self {
         let mut regions = HashMap::new();
@@ -80,9 +72,6 @@ impl GeoAvailability {
     }
 }
 
-/// Generate a minimal sing-box config for latency testing: one SOCKS5 inbound
-/// on `socks_port` (localhost only), the profile's outbound, and a route that
-/// sends all traffic to that outbound.
 pub fn generate_test_config(profile: &Profile, socks_port: u16) -> anyhow::Result<Value> {
     let outbounds = build_outbound(profile)?;
     Ok(json!({
@@ -98,8 +87,6 @@ pub fn generate_test_config(profile: &Profile, socks_port: u16) -> anyhow::Resul
     }))
 }
 
-/// Generate a complete sing-box JSON configuration from a profile.
-/// Uses the sing-box 1.14+ format.
 pub fn generate_config(
     profile: &Profile,
     settings: &Settings,
@@ -210,7 +197,6 @@ fn build_config(
         }
     });
 
-    // Merge rule_sets into route if any exist.
     if !rule_sets.is_empty() {
         config["route"]["rule_set"] = json!(rule_sets);
     }
@@ -218,10 +204,6 @@ fn build_config(
     Ok(config)
 }
 
-/// Build the `dns` section from the active DNS preset. Maps onto sing-box
-/// 1.14's `dns` schema: the fake-IP server carries its own ranges (no legacy
-/// top-level `dns.fakeip` block), and when fake-IP is on we append an
-/// `A`/`AAAA`-routing rule so the fake-IP server actually receives queries.
 fn build_dns(
     upstreams: &DnsUpstreams,
     bootstrap: BootstrapResolver,
@@ -690,8 +672,6 @@ impl RuleSetRules {
     }
 }
 
-/// Build route object and local rule-sets based on routing mode.
-/// Returns (route_value, rule_sets_vec).
 fn build_route(
     routing_mode: &RoutingMode,
     resolvers: RouteResolvers,
@@ -714,13 +694,6 @@ fn build_route(
         }),
     ];
 
-    // Per-service routing overrides, placed before the regional geo rules so
-    // an explicit override wins in every routing mode (`Direct` beats a
-    // region's `Only` → proxy; `Proxy` beats its `Bypass` → direct). A
-    // service is skipped while its rule-set files are missing — a pending
-    // download must never fail the connection. Iterates `RoutedService::ALL`,
-    // not the map: `HashMap` iteration order is nondeterministic and would
-    // make the generated config unstable across runs.
     let mut services = RuleSetRules::default();
     for service in RoutedService::ALL {
         let outbound = match service_routes.get(&service).copied().unwrap_or_default() {
@@ -743,8 +716,6 @@ fn build_route(
         RoutingMode::Bypass(geo_region) | RoutingMode::Only(geo_region)
             if !matches!(geo_region, GeoRegion::Global) =>
         {
-            // `Bypass` sends matching traffic out the direct outbound; `Only`
-            // sends matching traffic through the proxy.
             let outbound = if matches!(routing_mode, RoutingMode::Bypass(_)) {
                 "direct"
             } else {
@@ -757,14 +728,10 @@ fn build_route(
             if let (Some(assets), Some((geoip_path, geosite_path))) =
                 (crate::geo::region_assets(*geo_region), geo.get(*geo_region))
             {
-                // Existing order: geosite rule first, then geoip. Tags are
-                // derived from filenames (`geoip-ru.srs` → `geoip-ru`).
                 region.push(assets.geosite.tag(), geosite_path, outbound);
                 region.push(assets.geoip.tag(), geoip_path, outbound);
             }
         }
-        // Bypass(Global) / Only(Global) are unreachable through `available()`
-        // but the enum permits them — degrade to a no-op.
         RoutingMode::Bypass(_) | RoutingMode::Only(_) => {}
     }
 
@@ -798,10 +765,6 @@ fn build_route(
     let mut rule_sets = services.definitions;
     rule_sets.append(&mut region.definitions);
 
-    // `default_mark` tags every packet sing-box sends to the network with a
-    // Linux fwmark. The kvn-tui kill switch's nft ruleset allowlists this mark,
-    // so traffic from sing-box's `direct` outbound (used by Bypass/Only routing
-    // modes) can reach the physical interface while everything else is dropped.
     let route = json!({
         "default_domain_resolver": resolvers.default_domain,
         "rules": rules,
@@ -820,9 +783,6 @@ fn final_outbound(routing_mode: &RoutingMode) -> &'static str {
     }
 }
 
-/// Build the proxy outbound list for a profile. Most protocols return a
-/// single outbound tagged `proxy`; ShadowTLS returns two (the wrapper plus
-/// an inner Shadowsocks detour, with the SS half tagged `proxy`).
 fn build_outbound(profile: &Profile) -> anyhow::Result<Vec<Value>> {
     let mut outbounds = match &profile.config {
         ProtocolConfig::Vless(cfg) => vec![build_vless_outbound(profile, cfg)?],
@@ -1134,8 +1094,6 @@ mod tests {
         let tls = &outbound["tls"];
         assert_eq!(tls["enabled"], true);
         assert_eq!(tls["server_name"], "1.2.3.4");
-        // sing-box treats absent `insecure` as false; we now omit it when
-        // unset (shared shape with VMess/Trojan via `build_tls_block`).
         assert!(
             tls.get("insecure")
                 .is_none_or(|v| v.as_bool() == Some(false))
@@ -1145,8 +1103,6 @@ mod tests {
 
     #[test]
     fn vless_outbound_plain_tls_uses_custom_sni() {
-        // P0 regression: a profile with cfg.tls.server_name = Some("cdn...")
-        // must emit `tls.server_name == "cdn..."`, not profile.address.
         let mut profile = Profile::new_vless(
             "CDN".to_string(),
             "1.2.3.4".to_string(),
@@ -1242,7 +1198,6 @@ mod tests {
         assert_eq!(outbound["alter_id"], 0);
         assert_eq!(outbound["packet_encoding"], "xudp");
         assert!(outbound.get("tls").is_some());
-        // Sing-box 1.12 forbids the legacy stream cipher.
         assert_ne!(outbound["security"], "aes-128-cfb");
     }
 
@@ -1593,9 +1548,7 @@ mod tests {
         assert_eq!(outbound["down_mbps"], 200);
         assert_eq!(outbound["obfs"]["type"], "salamander");
         assert_eq!(outbound["obfs"]["password"], "obfs-pass");
-        // The legacy top-level obfs_password key must not appear.
         assert!(outbound.get("obfs_password").is_none());
-        // Hysteria2 is QUIC-based — ALPN defaults to h3 when not set.
         assert_eq!(outbound["tls"]["alpn"][0], "h3");
     }
 
@@ -2187,7 +2140,7 @@ mod tests {
         );
         assert!(rule_sets.is_empty());
         let rules = route["rules"].as_array().unwrap();
-        assert_eq!(rules.len(), 3); // ipv6 reject, dns hijack, direct cidr
+        assert_eq!(rules.len(), 3);
         assert_eq!(route["final"], "proxy");
         assert_eq!(
             route["default_domain_resolver"],
@@ -2204,7 +2157,7 @@ mod tests {
             &no_services(),
         );
         let rules = route["rules"].as_array().unwrap();
-        assert!(rules.len() >= 4); // basic 3 + ip_is_private
+        assert!(rules.len() >= 4);
         assert_eq!(route["final"], "direct");
     }
 
@@ -2217,7 +2170,7 @@ mod tests {
             &no_services(),
         );
         let rules = route["rules"].as_array().unwrap();
-        assert!(rules.len() >= 4); // basic 3 + ip_is_private
+        assert!(rules.len() >= 4);
         assert_eq!(route["final"], "proxy");
     }
 
@@ -2230,7 +2183,7 @@ mod tests {
             &no_services(),
         );
         let rules = route["rules"].as_array().unwrap();
-        assert!(rules.len() >= 4); // basic 3 + ip_is_private
+        assert!(rules.len() >= 4);
         assert_eq!(route["final"], "direct");
     }
 
@@ -2282,8 +2235,6 @@ mod tests {
         };
         let dns = with_fakeip(active(vec![local()], "local"), vec![lan_rule]);
         let block = build(&direct(dns), &HashSet::new());
-        // Sing-box 1.12 no longer accepts the top-level `dns.fakeip` block;
-        // the ranges live inside the server entry instead.
         assert!(block.get("fakeip").is_none());
         let fake_server = block["servers"]
             .as_array()
@@ -2978,8 +2929,6 @@ mod tests {
         );
     }
 
-    // ---- Iran routing modes (previously only Ru/Cn covered) ----
-
     #[test]
     fn build_route_bypass_ir_has_private_rule_and_final_proxy() {
         let (route, rule_sets) = build_route(
@@ -2991,7 +2940,6 @@ mod tests {
         let rules = route["rules"].as_array().unwrap();
         assert!(rules.len() >= 4);
         assert_eq!(route["final"], "proxy");
-        // BypassIr with geo data must register both geoip-ir and geosite-category-ir.
         let tags: Vec<&str> = rule_sets
             .iter()
             .map(|rs| rs["tag"].as_str().unwrap())
@@ -3016,7 +2964,6 @@ mod tests {
 
     #[test]
     fn build_route_bypass_ru_has_private_rule_and_final_proxy() {
-        // Only the OnlyRu variant was tested explicitly; Bypass had no direct test.
         let (route, rule_sets) = build_route(
             &RoutingMode::Bypass(GeoRegion::Ru),
             default_resolver(),
@@ -3103,8 +3050,6 @@ mod tests {
         }
     }
 
-    // ---- Per-service routing overrides ----
-
     fn no_services() -> HashMap<RoutedService, ServiceRoute> {
         HashMap::new()
     }
@@ -3154,7 +3099,6 @@ mod tests {
                 .expect("telegram rule present");
             assert_eq!(tg_rule["outbound"], "proxy");
         }
-        // Telegram's 2 rule-sets + the region's 2.
         assert_eq!(rule_sets.len(), 4);
     }
 
@@ -3184,8 +3128,6 @@ mod tests {
 
     #[test]
     fn build_route_service_rules_follow_all_order() {
-        // Same config must always yield the same rule order, regardless of
-        // HashMap internals — services appear in RoutedService::ALL order.
         let (route, _) = build_route(
             &RoutingMode::Global,
             default_resolver(),
@@ -3304,8 +3246,6 @@ mod tests {
         assert!(config["route"].get("rule_set").is_none());
     }
 
-    // ---- dns_server_value for every variant ----
-
     #[test]
     fn dns_server_value_emits_local_shape() {
         let v = dns_server_value(&DnsServer::Local {
@@ -3360,8 +3300,6 @@ mod tests {
         assert_eq!(v["inet4_range"], "198.18.0.0/15");
         assert_eq!(v["inet6_range"], "fc00::/18");
     }
-
-    // ---- plain DNS rule branches ----
 
     fn plain_rule(rule: &DnsRule) -> Value {
         dns_rule_values(0, rule, "final").remove(0)
@@ -3444,7 +3382,6 @@ mod tests {
         let cfg = generate_test_config(&profile, 9999).unwrap();
         let outbounds = cfg["outbounds"].as_array().unwrap();
         assert!(!outbounds.is_empty());
-        // The primary outbound should have tag "proxy" (VLESS convention).
         assert!(outbounds.iter().any(|o| o["tag"] == "proxy"));
     }
 

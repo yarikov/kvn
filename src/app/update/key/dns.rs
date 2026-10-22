@@ -5,7 +5,6 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::app::update::connection::reconnect_with_new_settings;
 use crate::app::update::status::push_status;
 
-/// Items in the DNS settings overlay, in display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::app::update) enum DnsSettingsItem {
     Preset,
@@ -160,8 +159,6 @@ mod tests {
             .position(|candidate| *candidate == item)
             .unwrap();
     }
-
-    // ---- handle_dns_settings ----
 
     #[test]
     fn dns_settings_navigation_wraps() {

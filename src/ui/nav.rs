@@ -1,4 +1,3 @@
-/// Move `selected` down by one, clamping at `len.saturating_sub(1)`.
 pub fn select_next(selected: &mut usize, len: usize) {
     if len == 0 {
         return;
@@ -6,17 +5,14 @@ pub fn select_next(selected: &mut usize, len: usize) {
     *selected = (*selected + 1).min(len - 1);
 }
 
-/// Move `selected` up by one, saturating at 0.
 pub fn select_prev(selected: &mut usize) {
     *selected = selected.saturating_sub(1);
 }
 
-/// Jump to the first item.
 pub fn select_first(selected: &mut usize) {
     *selected = 0;
 }
 
-/// Jump to the last item.
 pub fn select_last(selected: &mut usize, len: usize) {
     if len == 0 {
         return;

@@ -21,17 +21,12 @@ pub(in crate::app::update) fn on_connected(
     model.region_download_deferred = false;
     model.connection = ConnectionState::Connected;
     model.connecting_profile_id = None;
-    // Fresh sing-box → fresh counters. Drop the previous sample so the
-    // first delta is computed against zero rather than a stale value.
     reset_traffic_state(model);
     let mut effects = crate::app::update::onboarding::outcome(
         model,
         crate::app::update::onboarding::Trigger::TunnelUp,
     );
     effects.push(Effect::WriteState);
-    // The tunnel is up — fetch rule-sets for enabled service routes
-    // through it if any are still missing (they apply on the next
-    // reconnect).
     if routing_fallback.is_none()
         && !model
             .config
@@ -43,9 +38,6 @@ pub(in crate::app::update) fn on_connected(
         model.geo_updating = true;
         effects.push(Effect::DownloadServiceRuleSetsIfMissing);
     }
-    // Attribute the connection to the profile that actually connected
-    // (carried in the message) — never to the cursor's row, which may
-    // have moved since the connect was issued.
     model.active_profile_id = Some(profile_id);
     let profile = model.config.profiles.iter().find(|p| p.id == profile_id);
     let profile_name = profile.map(|p| p.name.clone());
@@ -70,7 +62,6 @@ pub(in crate::app::update) fn on_connected(
         StatusKey::Connection,
         AppStatus::Info(match profile_name {
             Some(name) => format!("Connected to {}", name),
-            // Profile deleted while the connect was in flight.
             None => "Connected".to_string(),
         }),
     );
@@ -87,7 +78,6 @@ pub(in crate::app::update) fn on_connected(
             AppStatus::Error(warning),
         );
     }
-    // Persist last connected profile for auto-connect on next startup.
     if model.config.settings.last_connected_profile != Some(profile_id) {
         model.config.settings.last_connected_profile = Some(profile_id);
         effects.push(Effect::PersistConfirmedState);
@@ -151,8 +141,6 @@ pub(in crate::app::update) fn on_singbox_exited(
     if attempt_id != model.connect_attempt_id {
         return vec![];
     }
-    // Invalidate any Connected/traffic reply that was already queued
-    // by the worker for the process that just exited.
     model.connect_attempt_id = model.connect_attempt_id.wrapping_add(1);
     clear_connection(model);
 
@@ -593,8 +581,6 @@ mod tests {
         );
         assert_eq!(model.connection, ConnectionState::Connected);
         assert_eq!(model.overlay, Overlay::None);
-        // The connection is attributed to the carried id even when the
-        // profile is no longer in the list (deleted mid-connect).
         assert_eq!(model.active_profile_id, Some(id));
         assert_eq!(
             effects,
@@ -643,7 +629,6 @@ mod tests {
         let a_id = a.id;
         let mut model = model_with_profiles(vec![a, b]);
         model.connection = ConnectionState::ConnectPending;
-        // Cursor rests on B while A's connect completes.
         model.select_next();
         let effects = update(
             &mut model,
@@ -746,7 +731,6 @@ mod tests {
         );
         assert!(effects.contains(&Effect::DownloadServiceRuleSetsIfMissing));
 
-        // Explicitly-disabled entries don't count as enabled.
         let mut model = Model::test_new(crate::config::profile::Config::default());
         model
             .config

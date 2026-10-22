@@ -79,13 +79,6 @@ pub(super) fn poll_process_exit(process_slot: &Arc<Mutex<ProcessSlot>>) -> Optio
     })
 }
 
-/// Lock the sing-box process slot, recovering from poisoned-mutex state.
-///
-/// If a worker thread panicked while holding this lock, the standard
-/// `lock().unwrap()` would re-panic on the next access and we'd lose our
-/// chance to kill sing-box on shutdown. The invariant we care about — an
-/// `Option<ProcessHandle>` — cannot be left half-written across an `unwind`
-/// boundary, so taking the inner guard is safe.
 pub(super) fn lock_process_slot(
     slot: &Arc<Mutex<ProcessSlot>>,
 ) -> std::sync::MutexGuard<'_, ProcessSlot> {

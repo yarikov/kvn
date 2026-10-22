@@ -17,8 +17,6 @@ use super::scrollbar::{ScrollWindow, draw_scrollbar, right_border_track};
 use super::sources::{draw_sources, source_visual_rows, sources_window_start};
 use super::{TRAFFIC_PANEL_HEIGHT, terminal_size_supported};
 
-/// Minimum terminal width that leaves enough room for both main panes. At
-/// narrower widths the Profiles pane uses the full row and Logs is hidden.
 pub(super) const TWO_PANE_MIN_WIDTH: u16 = 90;
 
 pub(super) fn main_panes(terminal_area: Rect) -> (Rect, Rect) {
@@ -122,8 +120,6 @@ pub(crate) fn main_pane_at(
     }
 }
 
-/// Return the selectable Sources row under a terminal cell. Borders, group
-/// labels, separators, Logs, clipped rows, and every overlay are inert.
 pub(crate) fn source_hit_test(
     model: &Model,
     terminal_area: Rect,
@@ -149,7 +145,6 @@ pub(crate) fn source_hit_test(
     visual_rows.get(line).copied().flatten()
 }
 
-/// Draw the main content area with the Sources list and logs.
 pub(super) fn draw_main(
     frame: &mut Frame,
     model: &Model,
@@ -219,10 +214,6 @@ pub(super) fn draw_main(
     );
 }
 
-/// Render the full-width traffic header: instantaneous ↑/↓ rate, cumulative
-/// totals, and active connection count laid out on a single content row
-/// inside a bordered block. Driven by `model.traffic`, updated ~1 Hz by the
-/// daemon.
 pub(super) fn draw_traffic_panel(frame: &mut Frame, model: &Model, area: Rect) {
     let theme = &model.theme;
     let t = &model.traffic;
@@ -253,7 +244,6 @@ pub(super) fn draw_traffic_panel(frame: &mut Frame, model: &Model, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-/// Draw the bottom status bar.
 pub(super) fn draw_status_bar(frame: &mut Frame, model: &Model, area: Rect) {
     let status = StatusBar::new(model);
     frame.render_widget(status, area);
@@ -273,7 +263,6 @@ mod tests {
     #[test]
     fn source_hit_test_maps_rows_and_rejects_unsupported_height() {
         let model = model_with_subscription();
-        // Tall: traffic panel occupies rows 0..=2, Sources content starts at 4.
         assert_eq!(
             source_hit_test(&model, Rect::new(0, 0, 80, 20), 2, 4),
             Some(0)
@@ -293,10 +282,10 @@ mod tests {
     fn source_hit_test_ignores_labels_borders_separators_logs_clipping_and_overlays() {
         let mut model = model_with_subscription();
         let area = Rect::new(0, 0, 90, 20);
-        assert_eq!(source_hit_test(&model, area, 2, 5), None); // separator
-        assert_eq!(source_hit_test(&model, area, 0, 4), None); // border
-        assert_eq!(source_hit_test(&model, area, 1, 4), None); // padding
-        assert_eq!(source_hit_test(&model, area, 50, 4), None); // Logs
+        assert_eq!(source_hit_test(&model, area, 2, 5), None);
+        assert_eq!(source_hit_test(&model, area, 0, 4), None);
+        assert_eq!(source_hit_test(&model, area, 1, 4), None);
+        assert_eq!(source_hit_test(&model, area, 50, 4), None);
         assert_eq!(source_hit_test(&model, Rect::new(0, 0, 90, 5), 2, 4), None);
         model.overlay = Overlay::Help(crate::app::model::HelpState::default());
         assert_eq!(source_hit_test(&model, area, 2, 5), None);
@@ -514,7 +503,6 @@ mod tests {
         }
     }
 
-    /// Pin the `[error]`-prefixed log styling path in `draw_main`.
     #[test]
     fn draw_main_error_log_styling_snapshot() {
         let mut model = model_with_profiles(vec![Profile::new_vless(

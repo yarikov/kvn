@@ -1,11 +1,3 @@
-//! Color palettes that drive every UI style.
-//!
-//! At build time `build.rs` parses `themes/*.toml` and emits a static
-//! `BUNDLED` table — see `bundled_palettes.rs` in `OUT_DIR`. At runtime the
-//! The TUI client reads Omarchy's active `colors.toml` in auto-follow mode;
-//! explicitly selected themes continue to resolve against the bundled table.
-//! [`Palette::legacy`] reproduces the original hardcoded look of kvn.
-
 use ratatui::style::Color;
 use serde::Deserialize;
 
@@ -31,8 +23,6 @@ struct OmarchyColors {
     bright_magenta: String,
 }
 
-/// A self-contained color palette derived at build time from Omarchy 4's
-/// semantic `colors.toml` schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
     pub accent: Color,
@@ -47,9 +37,6 @@ pub struct Palette {
 include!(concat!(env!("OUT_DIR"), "/bundled_palettes.rs"));
 
 impl Palette {
-    /// Parse Omarchy's semantic `colors.toml` format into a runtime palette.
-    /// Extra fields are accepted so custom themes may use the complete
-    /// Omarchy schema while kvn consumes only the colors it needs.
     pub fn from_omarchy_toml(raw: &str) -> Result<Palette, String> {
         let colors: OmarchyColors = toml::from_str(raw).map_err(|error| error.to_string())?;
         let parse = |value: &str| parse_hex_color(value);
@@ -82,20 +69,14 @@ impl Palette {
         })
     }
 
-    /// Look up a bundled palette by Omarchy theme name (snake-case slug from
-    /// active `theme.name`).
     pub fn lookup(name: &str) -> Option<Palette> {
         BUNDLED.iter().find(|(n, _)| *n == name).map(|(_, p)| *p)
     }
 
-    /// Names of every bundled palette, sorted alphabetically. Used by
-    /// Settings › Interface to build its theme list.
     pub fn bundled_names() -> Vec<&'static str> {
         BUNDLED.iter().map(|(n, _)| *n).collect()
     }
 
-    /// Fallback palette that reproduces the pre-theming look: cyan accents,
-    /// gray text, named ANSI colors throughout.
     pub const fn legacy() -> Palette {
         Palette {
             accent: Color::Cyan,
@@ -141,9 +122,6 @@ fn parse_hex_color(value: &str) -> Result<Color, String> {
     ))
 }
 
-/// Linear interpolation between two colors in sRGB space. Used to derive a
-/// "darkened" highlight (the active-connection row background) from the
-/// palette's green and background. `t` is the weight of `b` in the result.
 pub fn mix(a: Color, b: Color, t: f32) -> Color {
     let (ar, ag, ab) = to_rgb(a);
     let (br, bg, bb) = to_rgb(b);
@@ -154,10 +132,6 @@ pub fn mix(a: Color, b: Color, t: f32) -> Color {
     Color::Rgb(lerp(ar, br), lerp(ag, bg), lerp(ab, bb))
 }
 
-/// Best-effort RGB resolution for a `ratatui` `Color`. Named ANSI colors use
-/// the conventional VGA-ish triples; non-RGB exotic variants fall through to
-/// black, which is fine because [`mix`] and the OSC 11 emitter only operate
-/// on palette colors that are either RGB or familiar ANSI names.
 pub fn to_rgb(c: Color) -> (u8, u8, u8) {
     match c {
         Color::Rgb(r, g, b) => (r, g, b),
@@ -220,9 +194,7 @@ mod tests {
     #[test]
     fn lookup_returns_known_gruvbox_palette() {
         let p = Palette::lookup("gruvbox").expect("gruvbox");
-        // Spot-check accent — matches themes/gruvbox.toml.
         assert_eq!(p.accent, Color::Rgb(0x7d, 0xae, 0xa3));
-        // color1 (red) used by error().
         assert_eq!(p.ansi[1], Color::Rgb(0xea, 0x69, 0x62));
     }
 
@@ -298,7 +270,6 @@ mod tests {
 
     #[test]
     fn mix_blends_named_colors_via_rgb_table() {
-        // Green=(0,170,0), Black=(0,0,0); 75% toward black ≈ (0, 43, 0).
         let blended = mix(Color::Green, Color::Black, 0.75);
         assert_eq!(blended, Color::Rgb(0, 43, 0));
     }

@@ -261,7 +261,6 @@ impl ProtocolConfig {
             ProtocolConfig::Anytls(c) => Some(&c.tls),
             ProtocolConfig::Naive(c) => Some(&c.tls),
             ProtocolConfig::Http(c) => Some(&c.tls),
-            // VLESS keeps reality/ech flat on VlessConfig; no shared block.
             ProtocolConfig::Vless(_)
             | ProtocolConfig::Shadowsocks(_)
             | ProtocolConfig::Socks(_)
@@ -418,8 +417,6 @@ mod tests {
 
     #[test]
     fn config_rejects_unknown_field_in_shadowsocks_config() {
-        // deny_unknown_fields on ShadowsocksConfig catches typos in the
-        // per-protocol block. Verifies point 2 of the validation hardening.
         let json = r#"{
             "profiles": [{
                 "name": "SS",
@@ -437,10 +434,6 @@ mod tests {
 
     #[test]
     fn legacy_vless_json_deserializes_into_new_shape() {
-        // A pre-v2 profiles.json: top-level `reality` / `ech` / `fingerprint`
-        // alongside the new flat layout. `reality` and `ech` are picked up
-        // by `#[serde(flatten)] tls: TlsCommon` automatically; `fingerprint`
-        // is captured into `legacy_fingerprint` and promoted by migrate().
         let json = r#"{
             "schema_version": 1,
             "profiles": [{
@@ -466,8 +459,6 @@ mod tests {
             }]
         }"#;
         let mut config: Config = serde_json::from_str(json).unwrap();
-        // Before migrate(): legacy_fingerprint holds the raw value, the new
-        // slot is still empty.
         {
             let cfg = vless_cfg(&config.profiles[0]);
             assert_eq!(cfg.legacy_fingerprint.as_deref(), Some("chrome"));

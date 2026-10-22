@@ -1,11 +1,3 @@
-//! Keyboard input dispatchers for every overlay state.
-//!
-//! Entry point is `handle_key`, which routes by `Model.overlay`. Each
-//! overlay has its own handler that returns the same `Vec<Effect>`
-//! contract as the top-level `update` function. All handlers stay pure —
-//! they mutate the `Model` and return effects; actual I/O happens in
-//! the daemon.
-
 pub(super) mod confirm_delete;
 pub(super) mod confirm_disable;
 pub(super) mod dns;
@@ -50,8 +42,6 @@ pub(in crate::app::update) fn handle_key(model: &mut Model, key: KeyEvent) -> Ve
         Overlay::GeoRegions => handle_geo_region(model, key),
         Overlay::DnsSettings => handle_dns_settings(model, key),
         Overlay::Onboarding(step) => handle_onboarding(model, step, key),
-        // Navigation and activation are client-local because the selected
-        // action may need to launch a browser in that client's GUI session.
         Overlay::Support => vec![],
     }
 }

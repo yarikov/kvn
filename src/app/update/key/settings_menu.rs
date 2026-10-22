@@ -376,7 +376,6 @@ mod tests {
         assert!(!model.config.settings.kill_switch);
 
         let effects = handle_sources(&mut model, key('K'));
-        // Bool is NOT flipped synchronously — it waits for KillSwitchApplied.
         assert!(!model.config.settings.kill_switch);
         assert_eq!(model.kill_switch_pending, Some(true));
         assert!(model.status_text().contains("Enabling"));

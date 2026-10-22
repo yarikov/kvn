@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-/// Return the private directory used for secret runtime files.
 pub fn runtime_dir() -> anyhow::Result<PathBuf> {
     namespaced_runtime_dir("kvn-tui")
 }
@@ -12,7 +11,6 @@ fn namespaced_runtime_dir(namespace: &str) -> anyhow::Result<PathBuf> {
     Ok(base.join(namespace))
 }
 
-/// Create and validate the private runtime directory with owner-only access.
 pub fn ensure_runtime_dir() -> anyhow::Result<PathBuf> {
     ensure_private_runtime_dir(runtime_dir()?)
 }
@@ -48,26 +46,18 @@ fn ensure_private_runtime_dir(dir: PathBuf) -> anyhow::Result<PathBuf> {
     Ok(dir)
 }
 
-/// Return the application configuration directory (`~/.config/kvn-tui`).
-///
-/// When running under `sudo` the calling user's home directory is used
-/// instead of `/root/.config`, so that different users on the same system
-/// do not share profiles.
 pub fn config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("kvn-tui"))
 }
 
-/// Return the per-user application state directory.
 pub fn state_dir() -> Option<PathBuf> {
     dirs::state_dir().map(|d| d.join("kvn"))
 }
 
-/// Return the persisted support-prompt schedule.
 pub fn support_prompt_path() -> Option<PathBuf> {
     state_dir().map(|d| d.join("support-prompt.json"))
 }
 
-/// Return the persisted first-run onboarding progress.
 pub fn onboarding_path() -> Option<PathBuf> {
     state_dir().map(|d| d.join("onboarding.json"))
 }
@@ -76,38 +66,30 @@ pub fn singbox_cache_path() -> Option<PathBuf> {
     state_dir().map(|d| d.join("singbox-cache.db"))
 }
 
-/// Return the path to `profiles.json`.
 pub fn profiles_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("profiles.json"))
 }
 
-/// Return the path to the sing-box log file.
 pub fn singbox_log_path() -> PathBuf {
     config_dir()
         .map(|d| d.join("logs/sing-box.log"))
         .unwrap_or_else(|| PathBuf::from("sing-box.log"))
 }
 
-/// Return the path to the application log file.
 pub fn app_log_path() -> PathBuf {
     config_dir()
         .map(|d| d.join("logs/app.log"))
         .unwrap_or_else(|| PathBuf::from("app.log"))
 }
 
-/// Return the path to the temporary sing-box JSON configuration.
 pub fn temp_singbox_config_path() -> anyhow::Result<PathBuf> {
     Ok(runtime_dir()?.join("singbox.json"))
 }
 
-/// Return the path to a temporary sing-box config used for profile latency
-/// tests. Each test gets its own file keyed by profile UUID so concurrent
-/// tests don't collide.
 pub fn temp_test_config_path(id: &uuid::Uuid) -> anyhow::Result<PathBuf> {
     Ok(runtime_dir()?.join(format!("test-{id}.json")))
 }
 
-/// Return the directory for geo rule-set databases.
 pub fn geo_dir() -> PathBuf {
     config_dir()
         .map(|d| d.join("geo"))
@@ -128,8 +110,6 @@ pub(crate) fn legacy_state_json_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join(STATE_JSON))
 }
 
-/// Ensure the configuration directory and its sub-directories exist.
-/// Returns the config directory on success.
 pub fn ensure_config_dirs() -> anyhow::Result<PathBuf> {
     use anyhow::Context;
     use std::fs;
@@ -233,8 +213,6 @@ mod tests {
 
     #[test]
     fn profiles_path_inside_config_dir() {
-        // Reads XDG_CONFIG_HOME twice; hold ENV_LOCK so a concurrent
-        // env-mutating test can't swap it between the two reads.
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let config = config_dir().unwrap();
         let profiles = profiles_path().unwrap();

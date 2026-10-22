@@ -15,8 +15,8 @@ pub(super) fn fetch(tx: &Sender<Msg>, shared: &DaemonShared, attempt_id: u64, re
         return;
     };
     let tx = tx.clone();
-    thread::spawn(move || {
-        match crate::singbox::clash_api::fetch_connections(clash_api_port) {
+    thread::spawn(
+        move || match crate::singbox::clash_api::fetch_connections(clash_api_port) {
             Ok(snap) => {
                 let sampled_at_ms = unix_now_ms();
                 let _ = tx.send(Msg::TrafficStatsUpdated {
@@ -29,16 +29,12 @@ pub(super) fn fetch(tx: &Sender<Msg>, shared: &DaemonShared, attempt_id: u64, re
                 });
             }
             Err(e) => {
-                // The endpoint may legitimately be unreachable for a few
-                // hundred ms after sing-box spawns; don't surface this to
-                // the user.
                 tracing::debug!("clash_api fetch failed: {e}");
             }
-        }
-    });
+        },
+    );
 }
 
-/// Wall-clock time in milliseconds since the Unix epoch.
 fn unix_now_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()

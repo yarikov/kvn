@@ -27,31 +27,22 @@ fn rule_set_usable(path: &Path) -> bool {
         && is_rule_set(&header)
 }
 
-/// One downloadable rule-set file (geoip *or* geosite) for a region.
 pub(crate) struct GeoAsset {
     pub(crate) filename: &'static str,
     pub(crate) url: &'static str,
 }
 
 impl GeoAsset {
-    /// sing-box rule-set tag — the filename without the `.srs` extension
-    /// (`"geoip-ru.srs"` → `"geoip-ru"`). The tag is what's referenced from
-    /// route rules in the generated sing-box config.
     pub(crate) fn tag(&self) -> &'static str {
         self.filename.trim_end_matches(".srs")
     }
 }
 
-/// Both rule-sets (geoip + geosite) a region downloads.
 pub(crate) struct RegionAssets {
     pub(crate) geoip: GeoAsset,
     pub(crate) geosite: GeoAsset,
 }
 
-/// Single source of truth for which files / URLs back each region. Adding a
-/// new country = add one match arm here plus a `GeoRegion::ALL` entry.
-///
-/// Returns `None` for `GeoRegion::Global`, which has no rule-sets.
 pub(crate) fn region_assets(region: GeoRegion) -> Option<RegionAssets> {
     match region {
         GeoRegion::Global => None,
@@ -88,16 +79,12 @@ pub(crate) fn region_assets(region: GeoRegion) -> Option<RegionAssets> {
     }
 }
 
-/// Rule-sets backing one service's routing override (`service_routes`).
-/// Either side may be absent when no suitable upstream file exists.
 pub(crate) struct ServiceAssets {
     pub(crate) geoip: Option<GeoAsset>,
     pub(crate) geosite: Option<GeoAsset>,
 }
 
 impl ServiceAssets {
-    /// Defined assets in rule order: geosite first, then geoip — matching
-    /// the order rule-set tags are referenced from generated route rules.
     pub(crate) fn present(&self) -> Vec<&GeoAsset> {
         [self.geosite.as_ref(), self.geoip.as_ref()]
             .into_iter()
@@ -106,20 +93,6 @@ impl ServiceAssets {
     }
 }
 
-/// Single source of truth for which files / URLs back each routable service.
-///
-/// Steam: the geosite file covers Steam domains; the "geoip" file is Valve's
-/// AS32590 announced ranges, which catch content servers the Steam client
-/// contacts by bare IP (no domain to match on). Local filenames are
-/// normalized to the `geoip-`/`geosite-` scheme even though the ASN file's
-/// upstream basename differs.
-///
-/// Telegram: clients mostly connect by bare IP, so the geoip side is what
-/// actually matches; the geosite file catches web/API domains.
-///
-/// All service assets come from MetaCubeX/meta-rules-dat so the subsystem has
-/// one provider and one branch layout (the regional RU/CN/IR assets are a
-/// separate, SagerNet-backed pipeline).
 pub(crate) fn service_assets(service: RoutedService) -> ServiceAssets {
     match service {
         RoutedService::Steam => ServiceAssets {
@@ -157,16 +130,12 @@ pub(crate) fn is_ip_rule_set_tag(tag: &str) -> bool {
     region_tags.chain(service_tags).any(|ip_tag| ip_tag == tag)
 }
 
-/// Metadata tracking ETags and update time for geo rule-sets.
 #[derive(Debug, Clone, Default, Serialize)]
 struct GeoMetadata {
-    /// Maps filename (e.g. `"geoip-ru.srs"`) → ETag returned by the server on
-    /// the last successful download. Used to short-circuit re-downloads.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     etags: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     updated_at: HashMap<GeoRegion, DateTime<Local>>,
-    /// Last successful HTTP check, including checks that found no changes.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     checked_at: HashMap<GeoRegion, DateTime<Local>>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -218,8 +187,6 @@ pub struct GeoRetryState {
     pub attempt_date: Option<NaiveDate>,
 }
 
-/// Deserialization shape that also accepts the legacy per-country etag fields
-/// written by older builds. Folded into the modern map-shaped `GeoMetadata`.
 #[derive(Debug, Default, Deserialize)]
 struct GeoMetadataRaw {
     #[serde(default)]
@@ -282,14 +249,8 @@ impl From<GeoMetadataRaw> for GeoMetadata {
     }
 }
 
-/// Serializes read-modify-write cycles on `metadata.json`. The daemon runs
-/// downloads on detached threads (periodic geo updates, region-change fetch,
-/// post-connect Steam fetch); without this, two interleaved
-/// `load_metadata → save_metadata` cycles lose each other's ETags, forcing
-/// spurious re-downloads. Atomic renames prevent corruption, not lost updates.
 static METADATA_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Manages downloading and updating geoip/geosite rule-sets for sing-box.
 pub struct GeoManager {
     geo_dir: PathBuf,
     metadata_path: PathBuf,
@@ -298,7 +259,6 @@ pub struct GeoManager {
 }
 
 impl GeoManager {
-    /// Create a new GeoManager, ensuring the geo directory exists.
     pub fn new() -> Result<Self> {
         let geo_dir = crate::paths::geo_dir();
 
@@ -306,9 +266,6 @@ impl GeoManager {
             .with_context(|| format!("Failed to create geo dir {:?}", geo_dir))?;
 
         let metadata_path = geo_dir.join("metadata.json");
-        // Setup phases retain their tighter limits. `check_single` and
-        // `download_file` additionally cap each complete request (including
-        // its body) at 60 seconds and share a three-minute batch deadline.
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_resolve(Some(std::time::Duration::from_secs(15)))
             .timeout_connect(Some(std::time::Duration::from_secs(15)))
@@ -324,9 +281,6 @@ impl GeoManager {
         })
     }
 
-    /// Return `(geoip, geosite)` local paths for `region`, or `None` for
-    /// regions without rule-sets (`Global`). Paths are computed; the files
-    /// may not exist yet.
     pub fn local_paths(&self, region: GeoRegion) -> Option<(PathBuf, PathBuf)> {
         region_assets(region).map(|a| {
             (
@@ -336,8 +290,6 @@ impl GeoManager {
         })
     }
 
-    /// Return whether local rule-set files for the given region are present.
-    /// `Global` always returns `true` (nothing to download).
     pub fn has_databases(&self, region: GeoRegion) -> bool {
         match region_assets(region) {
             None => true,
@@ -348,9 +300,6 @@ impl GeoManager {
         }
     }
 
-    /// Return `(tag, local_path)` for each of `service`'s defined rule-sets,
-    /// in rule order (geosite first). Paths are computed; the files may not
-    /// exist yet.
     pub(crate) fn service_local_paths(
         &self,
         service: RoutedService,
@@ -362,15 +311,12 @@ impl GeoManager {
             .collect()
     }
 
-    /// Return whether every rule-set file defined for `service` is present.
     pub fn has_service_databases(&self, service: RoutedService) -> bool {
         self.service_local_paths(service)
             .iter()
             .all(|(_, path)| rule_set_usable(path))
     }
 
-    /// Check and, if stale or missing, download `service`'s rule-sets.
-    /// Returns `true` when at least one file was (re)downloaded.
     pub fn update_service_if_needed(&self, service: RoutedService) -> Result<bool> {
         self.update_service_assets(service, &service_assets(service).present())
     }
@@ -384,12 +330,6 @@ impl GeoManager {
         Ok(updated)
     }
 
-    /// ETag-checked download of a set of assets. Every asset is attempted
-    /// even when an earlier one fails (a transient error on one file must
-    /// not starve its siblings), and ETags are persisted for whatever
-    /// succeeded — otherwise a partial failure would force a spurious
-    /// re-download of the successful file next time. The first error is
-    /// still returned.
     fn update_assets_if_needed(&self, assets: &[&GeoAsset]) -> Result<bool> {
         let saved_etags = self.load_metadata().unwrap_or_default().etags;
         let mut downloaded_etags = Vec::new();
@@ -438,8 +378,6 @@ impl GeoManager {
         }
     }
 
-    /// Return a human-readable string of the last successful synchronization
-    /// time for the given region, or `None`.
     pub fn last_updated(&self, region: GeoRegion) -> Option<String> {
         if matches!(region, GeoRegion::Global) {
             return None;
@@ -450,7 +388,6 @@ impl GeoManager {
             .map(|dt| dt.format("%d %b %H:%M").to_string())
     }
 
-    /// Return the last successful update check for a region.
     pub fn last_checked_at(&self, region: GeoRegion) -> Option<DateTime<Local>> {
         if matches!(region, GeoRegion::Global) {
             return None;
@@ -655,8 +592,6 @@ impl GeoManager {
         Ok(())
     }
 
-    /// Check whether a region's rule-sets have updates available.
-    /// Returns `(geoip_has_update, geosite_has_update)`.
     fn check_update_available(&self, assets: &RegionAssets) -> Result<(bool, bool)> {
         let meta = self.load_metadata().unwrap_or_default();
         let needs = |asset: &GeoAsset| -> Result<bool> {
@@ -665,9 +600,6 @@ impl GeoManager {
         Ok((needs(&assets.geoip)?, needs(&assets.geosite)?))
     }
 
-    /// Download rule-sets for the given region and update metadata atomically.
-    /// `Global` is a no-op returning `Ok(false)`. Entry point kept for
-    /// tests; production code reaches downloads via `update_if_needed`.
     #[cfg(test)]
     pub fn download_databases(&self, region: GeoRegion) -> Result<bool> {
         match region_assets(region) {
@@ -676,10 +608,6 @@ impl GeoManager {
         }
     }
 
-    /// Body of [`Self::download_databases`]. Shares the asset orchestration
-    /// with the service rule-sets, so a partial failure keeps the successful
-    /// file's ETag instead of forcing a re-download next cycle; the region
-    /// timestamps are only stamped on a fully successful pass.
     fn download_region_assets(&self, region: GeoRegion, assets: &RegionAssets) -> Result<bool> {
         let updated = self.update_assets_if_needed(&[&assets.geoip, &assets.geosite])?;
         if updated {
@@ -693,8 +621,6 @@ impl GeoManager {
         Ok(updated)
     }
 
-    /// Full update flow: check then download if needed.
-    /// Returns typed result describing what happened.
     pub fn update_if_needed(&self, region: GeoRegion) -> Result<RegionUpdate> {
         let Some(assets) = region_assets(region) else {
             return Ok(RegionUpdate::UpToDate { checked_at: None });
@@ -739,10 +665,6 @@ impl GeoManager {
             })
         }
     }
-
-    // ------------------------------------------------------------------
-    // Helpers
-    // ------------------------------------------------------------------
 
     fn load_metadata(&self) -> Result<GeoMetadata> {
         if !self.metadata_path.exists() {
@@ -798,7 +720,7 @@ impl GeoManager {
         .with_context(|| format!("HEAD request failed for {}", url))?;
 
         if resp.status() != 200 {
-            return Ok(true); // assume update needed if we can't check
+            return Ok(true);
         }
 
         let remote_etag = resp.headers().get("etag").and_then(|v| v.to_str().ok());
@@ -810,7 +732,6 @@ impl GeoManager {
         }
     }
 
-    /// Download a file and return its ETag on success.
     fn download_file(&self, url: &str, dest: &Path) -> Result<Option<String>> {
         let deadline = Instant::now() + self.request_timeout()?;
         let resp = crate::http::retry_interrupted(deadline, |remaining| {
@@ -931,8 +852,6 @@ mod tests {
             .unwrap()
     }
 
-    /// Regions that actually have rule-sets (all of `GeoRegion::ALL` except
-    /// `Global`). Used to parametrize per-country tests.
     const RULE_REGIONS: [GeoRegion; 3] = [GeoRegion::Ru, GeoRegion::Cn, GeoRegion::Ir];
 
     #[test]
@@ -996,7 +915,6 @@ mod tests {
         let steam = service_assets(RoutedService::Steam);
         let tags: Vec<&str> = steam.present().iter().map(|a| a.tag()).collect();
         assert_eq!(tags, ["geosite-steam", "geoip-steam"]);
-        // The ASN file's upstream basename differs from the local filename.
         assert!(steam.geoip.as_ref().unwrap().url.ends_with("AS32590.srs"));
 
         let telegram = service_assets(RoutedService::Telegram);
@@ -1033,9 +951,6 @@ mod tests {
         assert!(gm.has_service_databases(RoutedService::Steam));
     }
 
-    /// Minimal scripted HTTP/1.1 server for exercising the download paths
-    /// without the network. `handler(method, path)` returns
-    /// `(status, etag, body)`. Serves at most `max_requests` connections.
     fn spawn_stub_http(
         max_requests: usize,
         handler: impl Fn(&str, &str) -> (u16, Option<String>, Vec<u8>) + Send + 'static,
@@ -1115,8 +1030,6 @@ mod tests {
         let refs: Vec<&GeoAsset> = assets.iter().collect();
         let err = gm.update_assets_if_needed(&refs).unwrap_err().to_string();
         assert!(err.contains("geosite-stub.srs"), "{err}");
-        // The successful first download and its ETag must survive the
-        // failure of the second, or the next attempt re-downloads it.
         assert!(gm.geo_dir.join("geoip-stub.srs").exists());
         assert!(!gm.geo_dir.join("geosite-stub.srs").exists());
         let meta = gm.load_metadata().unwrap();
@@ -1148,7 +1061,6 @@ mod tests {
             fs::read(gm.geo_dir.join("geosite-stub.srs")).unwrap(),
             b"SRS\x01DATA"
         );
-        // Second run: files exist and ETags match — HEAD only, no downloads.
         assert!(!gm.update_assets_if_needed(&refs).unwrap());
     }
 
@@ -1214,8 +1126,6 @@ mod tests {
             (200, Some("e1".to_string()), b"SRS\x01NEW".to_vec())
         });
         let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
-        // First asset: file present, but its HEAD check fails at transport
-        // level (closed port). Second asset: file missing, live server.
         let assets = [
             GeoAsset {
                 filename: "geoip-stub.srs",
@@ -1229,10 +1139,8 @@ mod tests {
         fs::write(gm.geo_dir.join("geoip-stub.srs"), b"SRS\x01OLD").unwrap();
 
         let refs: Vec<&GeoAsset> = assets.iter().collect();
-        // The check error is surfaced…
         let err = gm.update_assets_if_needed(&refs).unwrap_err().to_string();
         assert!(err.contains("HEAD request failed"), "{err}");
-        // …but the missing sibling was still fetched this same cycle.
         assert_eq!(
             fs::read(gm.geo_dir.join("geosite-stub.srs")).unwrap(),
             b"SRS\x01NEW"
@@ -1530,7 +1438,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = GeoManager::new().unwrap();
-        // Hand-crafted legacy shape (no `etags` map, just the named fields).
         let legacy = r#"{
             "geoip_ru_etag": "legacy-ru-ip",
             "geosite_ru_etag": "legacy-ru-site",
@@ -1558,7 +1465,6 @@ mod tests {
             loaded.etags.get("geoip-ir.srs").map(String::as_str),
             Some("legacy-ir-ip")
         );
-        // Absent legacy fields stay absent.
         assert!(!loaded.etags.contains_key("geosite-cn.srs"));
         assert!(!loaded.etags.contains_key("geosite-category-ir.srs"));
     }

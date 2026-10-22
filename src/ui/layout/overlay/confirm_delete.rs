@@ -7,7 +7,6 @@ use crate::app::model::Model;
 use super::popup::draw_modal;
 use super::{CONFIRM_ACTION, overlay_footer};
 
-/// Draw the delete confirmation dialog.
 pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
     use crate::app::model::SourceRow;
     let theme = &model.theme;

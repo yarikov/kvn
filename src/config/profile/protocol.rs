@@ -1,10 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// Supported VPN protocols.
-///
-/// This enum is the discriminant for [`ProtocolConfig`](crate::config::profile::ProtocolConfig) and is also used as
-/// a lightweight label for UI rendering. Per-protocol fields live on the
-/// corresponding [`ProtocolConfig`](crate::config::profile::ProtocolConfig) variant, not on this enum.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
@@ -23,7 +18,6 @@ pub enum Protocol {
 }
 
 impl Protocol {
-    /// Lowercase identifier used in JSON serialization and internal dispatch.
     pub fn as_str(self) -> &'static str {
         match self {
             Protocol::Vless => "vless",
@@ -41,7 +35,6 @@ impl Protocol {
         }
     }
 
-    /// Short label for the UI protocol column (fits within 6 characters).
     pub fn ui_label(self) -> &'static str {
         match self {
             Protocol::Shadowsocks => "ss",

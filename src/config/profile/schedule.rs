@@ -23,7 +23,6 @@ pub enum SubscriptionAutoUpdate {
 }
 
 impl SubscriptionAutoUpdate {
-    /// Return the interval in minutes.
     pub fn interval_minutes(self) -> u64 {
         match self {
             Self::Off => 0,
@@ -34,7 +33,6 @@ impl SubscriptionAutoUpdate {
         }
     }
 
-    /// Cycle to the next schedule.
     pub fn next(self) -> Self {
         match self {
             Self::Off => Self::Every1d,
@@ -45,12 +43,10 @@ impl SubscriptionAutoUpdate {
         }
     }
 
-    /// Compact display label shared with rule-set auto-update controls.
     pub fn label(self) -> String {
         auto_update_label(self.interval_label())
     }
 
-    /// Short interval label without icon.
     pub fn interval_label(self) -> &'static str {
         match self {
             Self::Off => "off",

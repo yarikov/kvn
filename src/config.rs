@@ -10,7 +10,6 @@ pub mod subscription;
 
 use profile::Config;
 
-/// Load configuration from a specific path.
 pub fn load_config_at(path: &Path) -> Result<Config> {
     if !path.exists() {
         return Ok(Config::for_first_run());
@@ -55,7 +54,6 @@ fn parse_supported_config(contents: &str, path: &Path) -> Result<Config> {
     Ok(config)
 }
 
-/// Load and migrate a configuration without modifying the source file.
 pub(crate) fn load_config_at_read_only(path: &Path) -> Result<Config> {
     if !path.exists() {
         return Ok(Config::for_first_run());
@@ -76,8 +74,6 @@ pub(crate) fn load_config_bytes_read_only(contents: &[u8], path: &Path) -> Resul
     Ok(config)
 }
 
-/// Load and migrate a configuration supplied explicitly for recovery without
-/// modifying the source file.
 pub(crate) fn load_config_for_recovery(path: &Path) -> Result<Config> {
     let contents =
         fs::read_to_string(path).with_context(|| format!("Failed to read {:?}", path))?;
@@ -100,10 +96,6 @@ fn normalize_and_validate_migrated(mut config: Config, path: &Path) -> Result<Co
     Ok(config)
 }
 
-/// Save configuration to a specific path atomically.
-///
-/// Fail-close on invalid input: [`Config::validate`] runs before the file is
-/// touched, so a broken in-memory state cannot overwrite a good `profiles.json`.
 pub fn save_config_at(path: &Path, config: &Config) -> Result<()> {
     let dir = path.parent().context("Invalid config path")?;
     fs::create_dir_all(dir)?;
@@ -144,7 +136,6 @@ fn normalized_for_disk(config: &Config, json_schema: Option<String>) -> Config {
     serializable
 }
 
-/// Save only if `profiles.json` has not changed since `expected` was read.
 pub(crate) fn save_config_at_revision(
     path: &Path,
     config: &Config,
@@ -156,11 +147,6 @@ pub(crate) fn save_config_at_revision(
     crate::atomic_write::write_if_unchanged(path, json.as_bytes(), expected)
 }
 
-/// Load configuration from disk, or return default if not present.
-///
-/// Also generates the installation HWID once (UUID v4) and persists it
-/// immediately through the atomic config write path, so every later start —
-/// and every subscription server — sees the same identifier.
 pub fn load_config() -> Result<Config> {
     let path = crate::paths::profiles_path().context("Failed to determine profiles path")?;
     let mut config = load_config_at(&path)?;
@@ -168,18 +154,12 @@ pub fn load_config() -> Result<Config> {
     Ok(config)
 }
 
-/// Generate the installation HWID once and persist it immediately through the
-/// existing atomic config write path. Idempotent: an existing non-empty
-/// `settings.hwid` is never regenerated.
 fn ensure_hwid(config: &mut Config, path: &Path) -> Result<()> {
     if !config.settings.hwid.is_empty() {
         return Ok(());
     }
     config.settings.hwid = subscription::generate_hwid();
 
-    // Validation errors belong to the caller's existing config-validation
-    // path. Do not turn an unrelated invalid profile into an HWID persistence
-    // error merely because this load also generated the missing identifier.
     if config.validate().is_err() {
         return Ok(());
     }
@@ -188,7 +168,6 @@ fn ensure_hwid(config: &mut Config, path: &Path) -> Result<()> {
     save_config_at(path, config).context("Failed to persist generated HWID")
 }
 
-/// Save configuration to disk atomically.
 #[cfg(test)]
 pub fn save_config(config: &Config) -> Result<()> {
     let path = crate::paths::profiles_path().context("Failed to determine profiles path")?;
@@ -370,11 +349,9 @@ mod tests {
         assert!(hwid.starts_with("lnx-"));
         assert_eq!(hwid.len(), "lnx-".len() + 32);
 
-        // The generated HWID is immediately written through the atomic path.
         let persisted = std::fs::read_to_string(crate::paths::profiles_path().unwrap()).unwrap();
         assert!(persisted.contains(&hwid));
 
-        // A second load retains the same installation HWID.
         let reloaded = load_config().unwrap();
         assert_eq!(reloaded.settings.hwid, hwid);
     }
@@ -410,8 +387,6 @@ mod tests {
 
     #[test]
     fn settings_and_subscriptions_without_hwid_fields_are_backward_compatible() {
-        // Pre-HWID config shape: no `settings.hwid`, no `send_hwid`/`hwid` on
-        // subscriptions — and no legacy `subscription_headers` either.
         let legacy = r#"{
             "schema_version": 3,
             "profiles": [],
@@ -461,7 +436,6 @@ mod tests {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        // Remove any existing file
         let _ = std::fs::remove_file(crate::paths::profiles_path().unwrap());
 
         let config = load_config().unwrap();

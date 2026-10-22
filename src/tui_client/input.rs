@@ -1,12 +1,3 @@
-//! Terminal input with layout-independent shortcut support.
-//!
-//! Crossterm 0.29 can request Kitty keyboard enhancements, but it discards the
-//! protocol's third (US base-layout) key code. That code is exactly what a
-//! command-oriented TUI needs: the physical key that is `j` on a PC-101
-//! layout remains `j` while the active layout produces Cyrillic, Arabic, or
-//! another script. This small reader keeps using Crossterm's public event
-//! types while decoding the subset of terminal input used by kvn.
-
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::os::fd::AsFd;
@@ -24,10 +15,7 @@ use signal_hook::iterator::Signals;
 
 use crate::app::msg::Msg;
 
-/// Push Kitty keyboard flags in the alternate screen:
-/// disambiguate escape codes, report alternate keys, and encode all keys.
 pub(super) const PUSH_KEYBOARD_PROTOCOL: &str = "\x1b[>13u";
-/// Restore the keyboard flags that were active before kvn started.
 pub(super) const POP_KEYBOARD_PROTOCOL: &str = "\x1b[<1u";
 pub(super) const ENABLE_MOUSE_CAPTURE: &str = "\x1b[?1003h\x1b[?1006h";
 pub(super) const DISABLE_MOUSE_CAPTURE: &str = "\x1b[?1006l\x1b[?1003l";
@@ -52,7 +40,6 @@ impl EventReaderControl {
         }
     }
 
-    /// Stop the reader and wait until it can no longer consume editor input.
     pub(super) fn pause(&self) -> bool {
         self.reading_enabled.store(false, Ordering::Release);
         let deadline = Instant::now() + Duration::from_millis(250);
@@ -197,14 +184,10 @@ fn spawn_resize_reader(tx: Sender<Msg>) {
     });
 }
 
-/// Drop keystrokes queued while the external editor owned the terminal.
 #[allow(unsafe_code)]
 pub(super) fn discard_pending_input() {
     let mut bytes = [0_u8; 64];
     while matches!(stdin_ready(Duration::ZERO), Ok(true)) {
-        // SAFETY: `bytes` is a valid writable allocation and STDIN_FILENO is
-        // borrowed, not closed or retained. A nonblocking readiness check is
-        // performed immediately before every read.
         let read =
             unsafe { libc::read(libc::STDIN_FILENO, bytes.as_mut_ptr().cast(), bytes.len()) };
         if read <= 0 {
@@ -221,8 +204,6 @@ fn stdin_ready(timeout: Duration) -> io::Result<bool> {
         events: libc::POLLIN,
         revents: 0,
     };
-    // SAFETY: `fd` points to one initialized pollfd for the duration of the
-    // call. poll neither owns nor outlives the referenced file descriptor.
     let result = unsafe { libc::poll(&mut fd, 1, millis) };
     if result < 0 {
         return Err(io::Error::last_os_error());
@@ -650,14 +631,12 @@ mod tests {
 
     #[test]
     fn russian_layout_uses_us_base_key() {
-        // Cyrillic о occupies the J key on the standard Russian layout.
         let key = decode(b"\x1b[1086::106;1u");
         assert_eq!(key.code, KeyCode::Char('j'));
     }
 
     #[test]
     fn base_key_support_is_not_language_specific() {
-        // The primary codepoint is Arabic; the terminal reports physical S.
         let key = decode(b"\x1b[1587::115;1u");
         assert_eq!(key.code, KeyCode::Char('s'));
     }

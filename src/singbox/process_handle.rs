@@ -21,8 +21,6 @@ impl ProcessHandle {
         }
     }
 
-    /// Check whether the child has exited without blocking. A returned status
-    /// means the OS process has also been reaped by `Child::try_wait`.
     pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
         self.child
             .try_wait()
@@ -81,7 +79,6 @@ impl ProcessHandle {
 
 pub fn signal_process(pid: u32, signal: libc::c_int) -> Result<()> {
     let target = libc::pid_t::try_from(pid).context("sing-box PID exceeds pid_t")?;
-    // SAFETY: kill does not dereference pointers.
     #[allow(unsafe_code)]
     let result = unsafe { libc::kill(target, signal) };
     if result == 0 {
@@ -98,9 +95,6 @@ mod tests {
 
     #[test]
     fn process_handle_lifecycle() {
-        // spawn() resolves `sleep` via PATH, i.e. reads the process env —
-        // racing the ENV_LOCK-guarded tests that call env::set_var, which
-        // intermittently fails the lookup with ENOENT. Serialize with them.
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let child = std::process::Command::new("sleep")
             .arg("10")

@@ -9,7 +9,6 @@ use crate::app::model::{AppStatus, ConnectionState, Model, TrafficStats};
 
 use super::{TerminalSession, apply_terminal_colors};
 
-/// Render a fixed, side-effect-free application state for documentation captures.
 pub fn run_docs_preview(theme_slug: &str) -> Result<()> {
     use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 

@@ -6,8 +6,6 @@ use std::sync::mpsc::Sender;
 use zbus::export::futures_core::Stream;
 use zbus::{Connection, MatchRule, MessageStream};
 
-/// Spawn a blocking D-Bus listener that watches for systemd-logind
-/// `PrepareForSleep` signals and notifies the caller on resume.
 pub fn listen_blocking(tx: Sender<Msg>) {
     zbus::block_on(listen(tx));
 }

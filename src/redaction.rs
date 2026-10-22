@@ -1,5 +1,3 @@
-/// Return a diagnostic representation of a URL or share link without
-/// credentials, path tokens, query parameters, or fragments.
 pub fn redact_url_for_log(input: &str) -> String {
     let Ok(url) = url::Url::parse(input) else {
         return "<redacted URL>".to_string();
