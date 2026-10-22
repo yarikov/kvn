@@ -9,17 +9,6 @@ use crate::tui_client::TuiExit;
 
 use super::super::{ClientLoop, Flow};
 
-pub(super) fn handle_restart_required(state: &mut ClientLoop, key: KeyEvent) -> Result<Flow> {
-    if key.code == KeyCode::Enter {
-        let _ = state.client.send(&IpcCommand::Detach);
-        return Ok(Flow::Exit(TuiExit::RestartDaemon));
-    }
-    if is_interrupt(&key) {
-        return Ok(stop_daemon(state));
-    }
-    Ok(Flow::Continue)
-}
-
 pub(super) fn handle_unsupported_size(state: &mut ClientLoop, key: KeyEvent) -> Result<Flow> {
     if is_interrupt(&key) {
         return Ok(stop_daemon(state));

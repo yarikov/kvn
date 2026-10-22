@@ -14,9 +14,6 @@ use crate::app::msg::IpcCommand;
 use super::{ClientLoop, Flow};
 
 pub(super) fn handle(state: &mut ClientLoop, key: KeyEvent) -> Result<Flow> {
-    if state.model.overlay == Overlay::RestartRequired {
-        return quit::handle_restart_required(state, key);
-    }
     if !crate::ui::layout::terminal_size_supported(state.terminal_area()?) {
         return quit::handle_unsupported_size(state, key);
     }

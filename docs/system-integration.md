@@ -13,8 +13,7 @@ The Arch package installs:
 | `/usr/bin/kvn-tui` | `0755` | Application binary |
 | `/usr/bin/kvn` | symlink | Canonical command pointing to `kvn-tui` |
 | `/usr/lib/systemd/user/kvn-tui.service` | `0644` | Per-user daemon service |
-| `/usr/lib/kvn/migrations/` | `0755` | Root-owned, ordered migration scripts |
-| `/var/lib/kvn/migration-baseline` | `0644` | Scripts older than the first installed version, which never run; written by the install scriptlet and removed with the package |
+| `/var/lib/kvn/` | `0755` | Created by the install scriptlet; marks an earlier installation and holds the integration stamps |
 | `/usr/share/libalpm/hooks/kvn-tui-sing-box-capabilities.hook` | `0644` | Restores sing-box capabilities after package updates |
 | `/usr/share/licenses/kvn-tui/LICENSE` | `0644` | MIT license for the source package |
 | `/usr/share/licenses/kvn-bin/LICENSE` | `0644` | MIT license for the binary package |
@@ -48,53 +47,6 @@ sudo setcap -r /usr/bin/sing-box
 ```
 
 Do not revoke them while another TUN client relies on the same sing-box binary.
-
-## Package migrations
-
-Package upgrades may include ordered migration scripts installed under
-`/usr/lib/kvn/migrations/`. Updates installed through `yay` or `paru` are
-detected on the next `kvn` launch, or run them explicitly with `kvn migrate`.
-
-The runner takes `$XDG_RUNTIME_DIR/kvn/migrate.lock`, waits for an active
-pacman transaction that is updating kvn or sing-box, backs `profiles.json` up into `~/.config/kvn-tui/recovery/`,
-then runs the pending scripts in order, recording each under
-`$XDG_STATE_HOME/kvn/migrations/` as soon as it succeeds; machine-wide
-operations use `/var/lib/kvn/migrations/`. A run that fails stops there and the
-next run resumes from the script that failed, so each script must be safe to
-rerun.
-
-Migration scripts do not touch `profiles.json`. Its schema migrates itself when
-the config is loaded, and the pre-migration file is kept in the recovery
-directory.
-
-The daemon, the VPN and the kill switch stay up while the scripts run. Once the
-queue finishes, the daemon is still running the previous version and
-configuration, so the runner restarts `kvn-tui.service` — unless a TUI session
-is attached, in which case that session shows a modal prompt instead — `Enter`
-restarts, `Ctrl+C` stops the daemon. Until it is restarted, the daemon keeps
-the current connection but ignores every command except quitting, rejects
-connect, disconnect, reconnect, and toggle requests with an error, and pauses
-scheduled rule-set and subscription updates.
-
-> [!IMPORTANT]
-> While any migration is pending, the daemon does not start. After a package
-> upgrade followed by a reboot, the VPN stays down until you run `kvn` or
-> `kvn migrate` — and with the kill switch enabled, the computer has no
-> network access until then. Apply migrations right after upgrading.
-
-Use:
-
-```bash
-kvn migrate --pending
-```
-
-to inspect pending migrations, or:
-
-```bash
-kvn doctor
-```
-
-to check migration state and related issues.
 
 ## Polkit setup
 
@@ -354,9 +306,9 @@ it:
 
    ```text
    ~/.config/kvn-tui/          profiles, settings, geo rule-sets, logs, state, recovery copies
-   ~/.local/state/kvn/         first-run tour, support prompt, applied migrations, sing-box cache
+   ~/.local/state/kvn/         first-run tour, support prompt, sing-box cache
    /run/user/$UID/kvn-tui/     temporary sing-box and latency-test configurations
-   /run/user/$UID/kvn/         migration and daemon locks
+   /run/user/$UID/kvn/         daemon lock, state.json, editor JSON Schema
    /run/user/$UID/kvn-tui.sock daemon socket
    ```
 

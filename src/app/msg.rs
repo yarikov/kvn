@@ -195,7 +195,6 @@ pub enum GeoResult {
 #[serde(tag = "cmd")]
 pub enum IpcCommand {
     Attach,
-    AttachSession,
     /// Clear an error after a TUI rendered its toast. The revision prevents a
     /// delayed client from clearing a newer error.
     ClearErrorStatus {
@@ -278,7 +277,6 @@ pub enum IpcCommand {
         base: Box<crate::config::profile::Config>,
         edited: Box<crate::config::profile::Config>,
     },
-    RestartRequired,
     Quit,
     /// Client-side failure the daemon owns none of — e.g. the external editor
     /// path rejecting an edit. The daemon writes it into its model's status
@@ -342,7 +340,6 @@ mod tests {
     fn ipc_command_serde_roundtrip_each_variant() {
         let cmds = vec![
             IpcCommand::Attach,
-            IpcCommand::AttachSession,
             IpcCommand::ClearErrorStatus { status_revision: 7 },
             IpcCommand::CheckOnboarding,
             IpcCommand::CheckSupportPrompt,
@@ -405,7 +402,6 @@ mod tests {
                 base: Box::new(crate::config::profile::Config::default()),
                 edited: Box::new(crate::config::profile::Config::default()),
             },
-            IpcCommand::RestartRequired,
             IpcCommand::Quit,
         ];
         for cmd in cmds {
@@ -453,14 +449,8 @@ pub struct StateSnapshot {
     pub ipc_version: u32,
     #[serde(default)]
     pub supports_viewport_scroll: bool,
-    #[serde(default)]
-    pub tui_sessions: usize,
-    #[serde(default)]
-    pub restart_required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_to: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_edit_result: Option<ConfigEditResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

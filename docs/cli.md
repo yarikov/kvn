@@ -1,9 +1,8 @@
 # Command-line interface
 
 Running `kvn` without arguments opens the TUI, starting the background daemon
-first when it is not running. Before that it runs any pending
-[package migrations](#migrate) in the terminal. The `--daemon` flag runs the
-persistent background process; the other commands below run once and exit.
+first when it is not running. The `--daemon` flag runs the persistent
+background process; the other commands below run once and exit.
 
 The package also installs the legacy `kvn-tui` name. It still works, but every
 command run through it, except plain `kvn-tui`, `kvn-tui --daemon` and
@@ -25,7 +24,6 @@ kvn --version
 | [`kvn toggle`](#toggle) | Connect the last profile, or disconnect |
 | [`kvn enable` / `kvn disable`](#enable-and-disable) | Turn the kill switch on or off, or hide the support prompt |
 | [`kvn doctor`](#doctor) | Check that kvn is ready to use |
-| [`kvn migrate`](#migrate) | Run package migrations |
 | [`kvn config`](#config) | Reset or recover `profiles.json` |
 | [`kvn setup`](#setup) | Install optional integrations |
 | [`kvn refresh`](#refresh) | Update installed polkit and kill-switch files |
@@ -149,26 +147,10 @@ not the daemon is running and cannot be combined with `--killswitch`.
 kvn doctor
 ```
 
-Runs a read-only check of sing-box, the configuration, pending package
-migrations, the daemon, the clipboard, and the optional integrations, with a
-remediation hint for each problem. It exits with a non-zero status when a
+Runs a read-only check of sing-box, the configuration, the daemon, the
+clipboard, and the optional integrations, with a remediation hint for each
+problem. It exits with a non-zero status when a
 required check fails; warnings alone do not change the exit status.
-
-### migrate
-
-```bash
-kvn migrate [--pending]
-```
-
-Runs the package migrations installed by a newer kvn package. They also run
-automatically on the next `kvn` launch. While any migration is pending, the
-daemon refuses to start (see [`--daemon`](#--daemon)). `--pending` only lists them, one
-`<id>⇥<summary>` line each, without running anything. If a pacman transaction
-is updating kvn or sing-box, it also prints a `pacman-transaction` line. With
-neither pending migrations nor such a transaction, it prints
-`No pending kvn migrations.` See
-[Package migrations](system-integration.md#package-migrations) and
-[Upgrading kvn](upgrading.md).
 
 ## config
 
@@ -306,11 +288,6 @@ Runs the headless daemon that owns sing-box, the configuration, and the
 background services. It is normally started by `kvn-tui.service`, or on demand
 by `kvn`, `kvn connect`, and `kvn toggle`; run it by hand only in a custom
 service, with `ExecStart` pointing at this command.
-
-While a package migration is pending, the daemon does not start: it prints
-`N kvn migration(s) are pending. Launch kvn in a terminal to apply them` and
-exits with status 0, so systemd does not restart it. Run `kvn` or
-`kvn migrate` to apply them; until then no VPN connection can be made.
 
 The daemon runs `sing-box` from `PATH`, or the binary named by the
 `SING_BOX_PATH` environment variable. Set it in the service environment, for

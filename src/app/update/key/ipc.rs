@@ -22,19 +22,11 @@ pub(in crate::app::update) fn handle_ipc_command(
             model.clear_error_status(status_revision);
             return finish_ipc_effects(vec![]);
         }
-        IpcCommand::RestartRequired => {
-            model.restart_required = true;
-            model.overlay = Overlay::RestartRequired;
-            return finish_ipc_effects(vec![]);
-        }
         IpcCommand::Quit => return finish_ipc_effects(vec![Effect::Quit]),
-        _ if model.restart_required => {
-            return finish_ipc_effects(vec![]);
-        }
         _ => {}
     }
     let effects = match cmd {
-        IpcCommand::Attach | IpcCommand::AttachSession | IpcCommand::Detach => vec![],
+        IpcCommand::Attach | IpcCommand::Detach => vec![],
         IpcCommand::CheckOnboarding => onboarding::resume(model),
         IpcCommand::CheckSupportPrompt => support::check_prompt(model),
         IpcCommand::ResolveSupportPrompt { resolution } => {
@@ -110,7 +102,7 @@ pub(in crate::app::update) fn handle_ipc_command(
             );
             effects
         }
-        IpcCommand::ClearErrorStatus { .. } | IpcCommand::RestartRequired | IpcCommand::Quit => {
+        IpcCommand::ClearErrorStatus { .. } | IpcCommand::Quit => {
             unreachable!("handled above")
         }
     };
@@ -156,7 +148,6 @@ pub(in crate::app::update) fn handle_go_first(model: &mut Model) -> Vec<Effect> 
         }
         Overlay::ConfirmDelete => {}
         Overlay::ConfirmDisable(_) => {}
-        Overlay::RestartRequired => {}
     }
     vec![]
 }
@@ -206,34 +197,6 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Attach);
         assert_eq!(effects, vec![Effect::BroadcastState]);
-    }
-
-    #[test]
-    fn restart_required_opens_the_overlay_and_freezes_further_commands() {
-        let mut model = model_with_profiles(vec![]);
-
-        let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::RestartRequired);
-
-        assert!(model.restart_required);
-        assert_eq!(model.overlay, Overlay::RestartRequired);
-        assert_eq!(effects, vec![Effect::BroadcastState]);
-
-        let effects = handle_ipc_command(
-            &mut model,
-            crate::app::msg::IpcCommand::SetAutoConnect { enabled: true },
-        );
-        assert!(!model.config.settings.auto_connect);
-        assert_eq!(effects, vec![Effect::BroadcastState]);
-    }
-
-    #[test]
-    fn a_frozen_daemon_still_shuts_down_on_quit() {
-        let mut model = model_with_profiles(vec![]);
-        handle_ipc_command(&mut model, crate::app::msg::IpcCommand::RestartRequired);
-
-        let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Quit);
-
-        assert!(effects.contains(&Effect::Quit));
     }
 
     #[test]

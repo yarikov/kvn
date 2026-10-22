@@ -21,10 +21,6 @@ pub(crate) fn ensure_kvn_runtime_dir() -> anyhow::Result<PathBuf> {
     ensure_private_runtime_dir(namespaced_runtime_dir("kvn")?)
 }
 
-pub(crate) fn migration_lock_path() -> anyhow::Result<PathBuf> {
-    Ok(ensure_kvn_runtime_dir()?.join("migrate.lock"))
-}
-
 pub(crate) fn daemon_lock_path() -> anyhow::Result<PathBuf> {
     Ok(ensure_kvn_runtime_dir()?.join("daemon.lock"))
 }

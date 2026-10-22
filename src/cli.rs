@@ -88,13 +88,6 @@ enum Command {
     /// Check whether kvn and its runtime dependencies are ready.
     Doctor,
 
-    /// Run migrations installed by newer kvn packages.
-    Migrate {
-        /// List pending migrations without running them.
-        #[arg(long)]
-        pending: bool,
-    },
-
     /// Show the daemon's current status as a summary line.
     Status {
         /// Print the full state snapshot as JSON instead of a summary.
@@ -657,18 +650,7 @@ fn send_command(client: &mut IpcClient, cmd: IpcCommand) -> Result<StateSnapshot
     client.read_response(request_id, SNAPSHOT_TIMEOUT)
 }
 
-fn ensure_commands_available(snapshot: &StateSnapshot) -> Result<()> {
-    anyhow::ensure!(
-        !snapshot.restart_required,
-        "Restart the kvn daemon to finish the upgrade"
-    );
-    Ok(())
-}
-
 fn print_command_result(snapshot: &StateSnapshot) -> Result<()> {
-    if let Some(error) = &snapshot.response_error {
-        anyhow::bail!(error.clone());
-    }
     if snapshot.status_is_error {
         anyhow::bail!(snapshot.status.clone());
     }
@@ -690,7 +672,6 @@ fn run_status(json: bool) -> Result<()> {
 fn run_connect(query: &str) -> Result<()> {
     let mut client = attach_or_start_client()?;
     let snap = fetch_snapshot(&mut client)?;
-    ensure_commands_available(&snap)?;
     let id = resolve_profile(&snap, query)?;
     let snap = send_command(&mut client, IpcCommand::ConnectProfile { profile_id: id })?;
     print_command_result(&snap)
@@ -702,8 +683,7 @@ fn run_disconnect() -> Result<()> {
         return Ok(());
     }
     let mut client = attach_client()?;
-    let snap = fetch_snapshot(&mut client)?;
-    ensure_commands_available(&snap)?;
+    fetch_snapshot(&mut client)?;
     let snap = send_command(&mut client, IpcCommand::Disconnect)?;
     print_command_result(&snap)
 }
@@ -715,7 +695,6 @@ fn run_reconnect() -> Result<()> {
     );
     let mut client = attach_client()?;
     let snap = fetch_snapshot(&mut client)?;
-    ensure_commands_available(&snap)?;
     ensure_can_reconnect(snap.connection)?;
     let snap = send_command(&mut client, IpcCommand::Reconnect)?;
     print_command_result(&snap)
@@ -731,8 +710,7 @@ fn ensure_can_reconnect(connection: ConnectionState) -> Result<()> {
 
 fn run_toggle() -> Result<()> {
     let mut client = attach_or_start_client()?;
-    let snap = fetch_snapshot(&mut client)?;
-    ensure_commands_available(&snap)?;
+    fetch_snapshot(&mut client)?;
     let snap = send_command(&mut client, IpcCommand::Toggle)?;
     print_command_result(&snap)
 }
@@ -753,7 +731,6 @@ fn run_dismiss_support_prompt() -> Result<()> {
     if crate::ipc::is_daemon_running() {
         let mut client = attach_client()?;
         let before = fetch_snapshot(&mut client)?;
-        ensure_commands_available(&before)?;
         let status_revision_before = before.status_revision;
         let snap = send_command(&mut client, IpcCommand::DismissSupportPrompt)?;
         ensure_support_prompt_dismissed(&snap, status_revision_before)?;
@@ -770,10 +747,6 @@ fn ensure_support_prompt_dismissed(
     snapshot: &StateSnapshot,
     status_revision_before: u64,
 ) -> Result<()> {
-    if let Some(error) = &snapshot.response_error {
-        anyhow::bail!(error.clone());
-    }
-    ensure_commands_available(snapshot)?;
     let failed_now = snapshot.status_is_error && snapshot.status_revision != status_revision_before;
     anyhow::ensure!(!failed_now, snapshot.status.clone());
     Ok(())
@@ -955,13 +928,6 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
             return Some(crate::tui_client::run_docs_preview(theme));
         }
         Some(Command::Doctor) => return Some(crate::doctor::run()),
-        Some(Command::Migrate { pending }) => {
-            return Some(if *pending {
-                crate::migrations::print_pending().map(|_| ())
-            } else {
-                crate::migrations::run_command()
-            });
-        }
         Some(Command::Status { json }) => return Some(run_status(*json)),
         Some(Command::Connect { profile }) => return Some(run_connect(profile)),
         Some(Command::Disconnect) => return Some(run_disconnect()),
@@ -1430,14 +1396,6 @@ esac
         assert!(ensure_support_prompt_dismissed(&snapshot, 4).is_ok());
         let error = ensure_support_prompt_dismissed(&snapshot, 3).unwrap_err();
         assert_eq!(error.to_string(), "Support prompt save failed: denied");
-
-        snapshot.status_is_error = false;
-        snapshot.restart_required = true;
-        assert!(ensure_support_prompt_dismissed(&snapshot, 4).is_err());
-
-        snapshot.restart_required = false;
-        snapshot.response_error = Some("daemon restarting".into());
-        assert!(ensure_support_prompt_dismissed(&snapshot, 4).is_err());
     }
 
     #[test]
@@ -1882,18 +1840,6 @@ esac
     }
 
     #[test]
-    fn migrate_subcommands_are_parsed() {
-        assert!(matches!(
-            Cli::parse_from(["kvn", "migrate"]).command,
-            Some(Command::Migrate { pending: false })
-        ));
-        assert!(matches!(
-            Cli::parse_from(["kvn", "migrate", "--pending"]).command,
-            Some(Command::Migrate { pending: true })
-        ));
-    }
-
-    #[test]
     fn docs_preview_subcommand_is_parseable_but_hidden() {
         use clap::CommandFactory;
 
@@ -1936,10 +1882,7 @@ esac
             daemon_version: env!("CARGO_PKG_VERSION").into(),
             ipc_version: crate::ipc::IPC_VERSION,
             supports_viewport_scroll: true,
-            tui_sessions: 0,
-            restart_required: false,
             response_to: None,
-            response_error: None,
             config_edit_result: None,
             scroll_result: None,
             connection: ConnectionState::Idle,
@@ -2085,10 +2028,9 @@ esac
     }
 
     #[test]
-    fn one_shot_commands_reject_incompatible_daemons_and_stale_daemons() {
+    fn one_shot_commands_reject_incompatible_daemons() {
         let mut snap = snapshot_with_profiles();
         assert!(ensure_snapshot_compatible(&serde_json::to_value(&snap).unwrap()).is_ok());
-        assert!(ensure_commands_available(&snap).is_ok());
 
         snap.daemon_version = "0.0.0".into();
         assert!(
@@ -2097,27 +2039,11 @@ esac
                 .to_string()
                 .contains("incompatible")
         );
-
-        snap.daemon_version = env!("CARGO_PKG_VERSION").into();
-        snap.restart_required = true;
-        assert!(
-            ensure_commands_available(&snap)
-                .unwrap_err()
-                .to_string()
-                .contains("Restart the kvn daemon")
-        );
     }
 
     #[test]
-    fn command_result_surfaces_correlated_and_status_errors() {
+    fn command_result_surfaces_status_errors() {
         let mut snap = snapshot_with_profiles();
-        snap.response_error = Some("command rejected".into());
-        assert_eq!(
-            print_command_result(&snap).unwrap_err().to_string(),
-            "command rejected"
-        );
-
-        snap.response_error = None;
         snap.status_is_error = true;
         snap.status = "connection failed".into();
         assert_eq!(

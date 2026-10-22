@@ -22,7 +22,6 @@ pub enum Overlay {
     DnsSettings,
     Support,
     Onboarding(crate::onboarding::OnboardingStep),
-    RestartRequired,
 }
 
 /// Setting a confirmation dialog is about to turn off.
@@ -315,7 +314,6 @@ pub struct Model {
     /// config. Cleared only after a successful reload from disk.
     pub config_persistence_blocked: bool,
     pub unsaved_state_merge_base: Option<Config>,
-    pub restart_required: bool,
     /// Persisted schedule for the optional project-support prompt.
     pub support_prompt: crate::support_prompt::SupportPromptState,
     /// First-run tour progress. Daemon-owned: clients read the active card from
@@ -626,7 +624,6 @@ impl Model {
             config,
             config_persistence_blocked,
             unsaved_state_merge_base: None,
-            restart_required: false,
             support_prompt,
             onboarding,
             integration_setup: crate::onboarding::IntegrationSetup::default(),
@@ -750,7 +747,6 @@ impl Model {
             config,
             config_persistence_blocked: false,
             unsaved_state_merge_base: None,
-            restart_required: false,
             support_prompt: crate::support_prompt::SupportPromptState::default(),
             onboarding: crate::onboarding::OnboardingProgress::new(
                 crate::onboarding::OnboardingState::default(),
@@ -1033,7 +1029,6 @@ impl Model {
             config,
             config_persistence_blocked: false,
             unsaved_state_merge_base: None,
-            restart_required: false,
             support_prompt: crate::support_prompt::SupportPromptState::default(),
             onboarding: crate::onboarding::OnboardingProgress::default(),
             integration_setup: crate::onboarding::IntegrationSetup::default(),

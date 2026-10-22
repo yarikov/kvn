@@ -137,21 +137,6 @@ fn run_loop(
             Msg::IpcRequest { request_id, .. } => Some(*request_id),
             _ => None,
         };
-        let response_error = match &msg {
-            Msg::IpcRequest { command, .. }
-                if model.restart_required
-                    && matches!(
-                        command,
-                        IpcCommand::ConnectProfile { .. }
-                            | IpcCommand::Disconnect
-                            | IpcCommand::Reconnect
-                            | IpcCommand::Toggle
-                    ) =>
-            {
-                Some("Restart the kvn daemon to finish the upgrade".into())
-            }
-            _ => None,
-        };
         let edit_requested = matches!(
             &msg,
             Msg::IpcRequest {
@@ -159,8 +144,7 @@ fn run_loop(
                 ..
             }
         );
-        let mut config_edit_result =
-            edit_requested.then(|| missing_edit_result(model.restart_required));
+        let mut config_edit_result = edit_requested.then(missing_edit_result);
         let before = config_io::UpdateBaseline::capture(model);
         let mut effects = update(model, msg);
         config_io::persist_config_changes(model, before, &mut effects);
@@ -206,13 +190,7 @@ fn run_loop(
         }
 
         if should_broadcast {
-            let mut snapshot = build_snapshot(
-                model,
-                log_session_offsets,
-                ipc_server.tui_sessions(),
-                response_to,
-                response_error,
-            );
+            let mut snapshot = build_snapshot(model, log_session_offsets, response_to);
             snapshot.config_edit_result = config_edit_result;
             if response_to.is_some() {
                 snapshot.scroll_result = model.scroll_result.take();
@@ -223,14 +201,9 @@ fn run_loop(
     Ok(())
 }
 
-fn missing_edit_result(restart_required: bool) -> crate::app::msg::ConfigEditResult {
+fn missing_edit_result() -> crate::app::msg::ConfigEditResult {
     crate::app::msg::ConfigEditResult::Failed {
-        message: if restart_required {
-            "Restart the kvn daemon to finish the upgrade"
-        } else {
-            "Internal error: the daemon did not produce a configuration save result"
-        }
-        .into(),
+        message: "Internal error: the daemon did not produce a configuration save result".into(),
     }
 }
 
@@ -310,18 +283,13 @@ fn cancel_startup_auto_connect(model: &mut Model) {
 pub(crate) fn build_snapshot(
     model: &Model,
     log_session_offsets: LogSessionOffsets,
-    tui_sessions: usize,
     response_to: Option<uuid::Uuid>,
-    response_error: Option<String>,
 ) -> StateSnapshot {
     StateSnapshot {
         daemon_version: env!("CARGO_PKG_VERSION").to_string(),
         ipc_version: crate::ipc::IPC_VERSION,
         supports_viewport_scroll: true,
-        tui_sessions,
-        restart_required: model.restart_required,
         response_to,
-        response_error,
         config_edit_result: None,
         scroll_result: None,
         connection: model.connection,
@@ -408,21 +376,6 @@ mod tests {
     use super::cancel_startup_auto_connect;
 
     #[test]
-    fn missing_editor_result_only_requests_restart_when_required() {
-        use crate::app::msg::ConfigEditResult;
-
-        let ConfigEditResult::Failed { message } = super::missing_edit_result(false) else {
-            panic!("expected failure")
-        };
-        assert!(message.contains("Internal error"));
-        assert!(!message.contains("Restart"));
-        let ConfigEditResult::Failed { message } = super::missing_edit_result(true) else {
-            panic!("expected failure")
-        };
-        assert!(message.contains("Restart the kvn daemon"));
-    }
-
-    #[test]
     fn editor_requests_report_commit_results_without_leaking_into_later_snapshots() {
         use super::*;
         use crate::app::msg::ConfigEditResult;
@@ -495,14 +448,6 @@ mod tests {
             .unwrap()
             .join("recovery");
         assert!(!recovery.exists());
-        request(IpcCommand::RestartRequired);
-        let response = request(IpcCommand::ApplyEditedConfig {
-            base: Box::new(edited.clone()),
-            edited: Box::new(edited),
-        });
-        assert!(
-            matches!(response.config_edit_result, Some(ConfigEditResult::Failed { message }) if message.contains("Restart"))
-        );
         client.send(&IpcCommand::Quit).unwrap();
         worker.join().unwrap();
         cleanup_socket();

@@ -213,8 +213,7 @@ systemd user service, set its `ExecStart` to `/usr/local/bin/kvn --daemon`.
 kvn doctor
 ```
 
-Runs a read-only check of sing-box, configuration, pending package migrations,
-the daemon, clipboard, and optional integrations, with remediation hints for
+Runs a read-only check of sing-box, configuration, the daemon, clipboard, and optional integrations, with remediation hints for
 detected problems.
 
 ---

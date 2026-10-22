@@ -4,7 +4,6 @@ use std::net::Shutdown;
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -75,7 +74,6 @@ pub fn wait_for_daemon_exit(timeout: Duration) -> bool {
 /// Daemon-side IPC server.
 pub struct IpcServer {
     clients: Arc<Mutex<Vec<UnixStream>>>,
-    tui_sessions: Arc<AtomicUsize>,
 }
 
 impl IpcServer {
@@ -94,8 +92,6 @@ impl IpcServer {
             .context("Failed to chmod IPC socket")?;
         let clients: Arc<Mutex<Vec<UnixStream>>> = Arc::new(Mutex::new(Vec::new()));
         let clients_clone = clients.clone();
-        let tui_sessions = Arc::new(AtomicUsize::new(0));
-        let sessions_clone = tui_sessions.clone();
         thread::spawn(move || {
             for stream in listener.incoming() {
                 match stream {
@@ -112,10 +108,8 @@ impl IpcServer {
                         }
                         let tx = tx.clone();
                         let clients = clients_clone.clone();
-                        let sessions = sessions_clone.clone();
                         clients.lock().unwrap().push(writer);
                         thread::spawn(move || {
-                            let mut session = false;
                             let reader = BufReader::new(stream);
                             for line in reader.lines() {
                                 match line {
@@ -131,12 +125,6 @@ impl IpcServer {
                                             if let Ok(command) =
                                                 serde_json::from_value::<IpcCommand>(value)
                                             {
-                                                if matches!(command, IpcCommand::AttachSession)
-                                                    && !session
-                                                {
-                                                    session = true;
-                                                    sessions.fetch_add(1, Ordering::SeqCst);
-                                                }
                                                 let message = match request_id {
                                                     Some(request_id) => Msg::IpcRequest {
                                                         command,
@@ -151,19 +139,13 @@ impl IpcServer {
                                     Err(_) => break,
                                 }
                             }
-                            if session {
-                                sessions.fetch_sub(1, Ordering::SeqCst);
-                            }
                         });
                     }
                     Err(_) => break,
                 }
             }
         });
-        Ok(Self {
-            clients,
-            tui_sessions,
-        })
+        Ok(Self { clients })
     }
 
     /// Send a state snapshot to every connected TUI client.
@@ -205,10 +187,6 @@ impl IpcServer {
             let mut guard = self.clients.lock().unwrap();
             guard.retain(|s| !dead_fds.contains(&s.as_raw_fd()));
         }
-    }
-
-    pub fn tui_sessions(&self) -> usize {
-        self.tui_sessions.load(Ordering::SeqCst)
     }
 }
 
@@ -429,10 +407,7 @@ mod tests {
             daemon_version: env!("CARGO_PKG_VERSION").into(),
             ipc_version: IPC_VERSION,
             supports_viewport_scroll: true,
-            tui_sessions: 0,
-            restart_required: false,
             response_to: None,
-            response_error: None,
             config_edit_result: None,
             scroll_result: None,
             connection: ConnectionState::Idle,
@@ -851,42 +826,6 @@ mod tests {
     }
 
     #[test]
-    fn only_attach_session_connections_count_as_tui_sessions() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let tmp = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_RUNTIME_DIR", tmp.path()) };
-        cleanup_socket();
-
-        let (server_tx, _server_rx) = channel::<Msg>();
-        let server = IpcServer::bind(server_tx).expect("server bind");
-        assert_eq!(server.tui_sessions(), 0);
-
-        drop(IpcClient::connect().expect("probe connect"));
-        let mut oneshot = IpcClient::connect().expect("cli connect");
-        oneshot.send(&IpcCommand::Attach).expect("cli attach");
-        thread::sleep(Duration::from_millis(50));
-        assert_eq!(server.tui_sessions(), 0);
-
-        let mut tui = IpcClient::connect().expect("tui connect");
-        tui.send(&IpcCommand::AttachSession).expect("tui attach");
-        thread::sleep(Duration::from_millis(50));
-        assert_eq!(server.tui_sessions(), 1);
-
-        drop(tui);
-        for _ in 0..20 {
-            if server.tui_sessions() == 0 {
-                break;
-            }
-            thread::sleep(Duration::from_millis(25));
-        }
-        assert_eq!(server.tui_sessions(), 0, "a closed window must not count");
-
-        drop(oneshot);
-        cleanup_socket();
-        unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
-    }
-
-    #[test]
     fn broadcast_drops_dead_clients() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
@@ -929,11 +868,10 @@ mod tests {
         let server = IpcServer::bind(server_tx).expect("server bind");
 
         let mut stalled = IpcClient::connect().expect("stalled connect");
-        stalled.send(&IpcCommand::AttachSession).unwrap();
+        stalled.send(&IpcCommand::Attach).unwrap();
         server_rx
             .recv_timeout(Duration::from_secs(2))
-            .expect("AttachSession reaches the daemon");
-        assert_eq!(server.tui_sessions(), 1);
+            .expect("Attach reaches the daemon");
 
         let mut large = sample_snapshot();
         large.status = "x".repeat(256 * 1024);
@@ -952,13 +890,6 @@ mod tests {
             .stream
             .read_to_end(&mut Vec::new())
             .expect("stalled client reaches EOF");
-        for _ in 0..40 {
-            if server.tui_sessions() == 0 {
-                break;
-            }
-            thread::sleep(Duration::from_millis(25));
-        }
-        assert_eq!(server.tui_sessions(), 0);
 
         cleanup_socket();
     }

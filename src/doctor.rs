@@ -61,11 +61,11 @@ impl Check {
 /// Run all diagnostics, print the report, and fail when a required component
 /// is not usable.
 pub fn run() -> Result<()> {
-    run_at(Path::new("/"), check_migrations())
+    run_at(Path::new("/"))
 }
 
-fn run_at(root: &Path, migrations: Check) -> Result<()> {
-    let checks = collect(root, migrations);
+fn run_at(root: &Path) -> Result<()> {
+    let checks = collect(root);
     print_report(&checks)?;
     let failures = checks
         .iter()
@@ -77,10 +77,8 @@ fn run_at(root: &Path, migrations: Check) -> Result<()> {
     Ok(())
 }
 
-fn collect(root: &Path, migrations: Check) -> Vec<Check> {
+fn collect(root: &Path) -> Vec<Check> {
     let mut checks = vec![Check::pass(format!("kvn {}", env!("CARGO_PKG_VERSION")))];
-
-    checks.push(migrations);
 
     match find_singbox() {
         Some(path) => {
@@ -100,40 +98,6 @@ fn collect(root: &Path, migrations: Check) -> Vec<Check> {
     checks.push(check_polkit(root));
     checks.push(check_omarchy());
     checks
-}
-
-fn check_migrations() -> Check {
-    check_migration_result(
-        crate::migrations::pending(),
-        crate::migrations::package_transaction_active(),
-    )
-}
-
-fn check_migration_result(
-    result: anyhow::Result<Vec<crate::migrations::Migration>>,
-    package_transaction: bool,
-) -> Check {
-    if package_transaction {
-        return Check::failure(
-            "A pacman transaction is updating kvn or sing-box; migrations cannot run yet",
-            "Wait for pacman/AUR updates to finish, then run `kvn migrate`.",
-        );
-    }
-    match result {
-        Ok(pending) if pending.is_empty() => Check::pass("All kvn migrations are applied"),
-        Ok(pending) => Check::failure(
-            format!(
-                "{} kvn migration(s) are pending (first: {})",
-                pending.len(),
-                pending[0].id
-            ),
-            "Run `kvn migrate` in an interactive terminal.",
-        ),
-        Err(error) => Check::failure(
-            format!("kvn migration state could not be inspected: {error:#}"),
-            "Repair the reported permissions or files, then run `kvn migrate`.",
-        ),
-    }
 }
 
 fn print_report(checks: &[Check]) -> io::Result<()> {
@@ -765,31 +729,6 @@ mod tests {
     fn stale_autostart_units_tolerates_a_missing_directory() {
         let root = tempfile::tempdir().unwrap();
         assert!(stale_autostart_units(&root.path().join("nope")).is_empty());
-    }
-
-    #[test]
-    fn migration_check_reports_pass_pending_and_inspection_error() {
-        assert_eq!(
-            check_migration_result(Ok(Vec::new()), false).level,
-            Level::Pass
-        );
-        let pending = crate::migrations::Migration {
-            id: "123-test.sh".into(),
-            path: PathBuf::from("/migration"),
-            summary: "Test".into(),
-        };
-        let check = check_migration_result(Ok(vec![pending]), false);
-        assert_eq!(check.level, Level::Failure);
-        assert!(check.message.contains("123-test.sh"));
-        assert!(check.remedy.unwrap().contains("Run `kvn migrate`"));
-
-        let check = check_migration_result(Err(anyhow::anyhow!("broken state")), false);
-        assert_eq!(check.level, Level::Failure);
-        assert!(check.message.contains("broken state"));
-
-        let check = check_migration_result(Ok(Vec::new()), true);
-        assert_eq!(check.level, Level::Failure);
-        assert!(check.message.contains("pacman"));
     }
 
     struct EnvGuard {
@@ -1434,7 +1373,7 @@ mod tests {
         let _xdg = EnvGuard::set("XDG_CONFIG_HOME", config.path());
         let _wayland = EnvGuard::set("WAYLAND_DISPLAY", "wayland-test");
         let root = current_polkit_root();
-        assert!(run_at(root.path(), Check::pass("All kvn migrations are applied")).is_ok());
+        assert!(run_at(root.path()).is_ok());
     }
 
     #[test]
@@ -1450,6 +1389,6 @@ mod tests {
         let _xdg = EnvGuard::set("XDG_CONFIG_HOME", config.path());
         let _wayland = EnvGuard::remove("WAYLAND_DISPLAY");
         let _session = EnvGuard::remove("XDG_SESSION_TYPE");
-        assert!(run_at(config.path(), Check::pass("All kvn migrations are applied")).is_err());
+        assert!(run_at(config.path()).is_err());
     }
 }

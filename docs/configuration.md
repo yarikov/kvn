@@ -501,8 +501,7 @@ cannot read it.
 | Geo and service rule-sets | `~/.config/kvn-tui/geo/` |
 | Application log | `~/.config/kvn-tui/logs/app.log` |
 | sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |
-| Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema or package migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved) |
-| Applied migration markers | `$XDG_STATE_HOME/kvn/migrations/` |
+| Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved) |
 | First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
 | sing-box cache (fake-IP map) | `$XDG_STATE_HOME/kvn/singbox-cache.db` |
@@ -510,11 +509,9 @@ cannot read it.
 | Generated sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
 | Latency-test configs | `$XDG_RUNTIME_DIR/kvn-tui/test-<uuid>.json` |
 | Private editor copy | `$XDG_RUNTIME_DIR/kvn-tui/profiles-edit-<pid>.json` |
-| Migration lock | `$XDG_RUNTIME_DIR/kvn/migrate.lock` |
 | Daemon instance lock | `$XDG_RUNTIME_DIR/kvn/daemon.lock` |
 | Waybar and recovery state | `$XDG_RUNTIME_DIR/kvn/state.json` |
 | Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
-| Migration baseline (system-wide) | `/var/lib/kvn/migration-baseline` |
 
 The application-owned runtime directory is created with mode `0700`; generated
 sing-box configs and the IPC socket use mode `0600`. No secret-bearing config is
