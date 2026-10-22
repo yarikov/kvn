@@ -25,9 +25,6 @@ fn handle_subscription_result_at(
 ) -> Vec<Effect> {
     let automatic = model.automatic_subscription_updates.remove(&id);
     model.subscription_updates.remove(&id);
-    if model.subscription_updates.is_empty() {
-        model.subscription_fetching = false;
-    }
     let Some(sub_idx) = model.config.subscriptions.iter().position(|s| s.id == id) else {
         return vec![Effect::AppendAppLog {
             level: "INFO".into(),
@@ -317,7 +314,6 @@ mod tests {
 
         let effects = handle_subscription_result(&mut model, sub_id, Ok(profiles));
 
-        assert!(!model.subscription_fetching);
         assert_eq!(model.config.profiles.len(), 2);
         assert_eq!(
             effects,
@@ -429,7 +425,6 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         let deleted_id = Uuid::new_v4();
         model.subscription_updates.insert(deleted_id);
-        model.subscription_fetching = true;
         let fetched = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
 
         let effects = handle_subscription_result(&mut model, deleted_id, Ok(vec![fetched]));
@@ -441,7 +436,7 @@ mod tests {
             )]
         );
         assert!(model.config.profiles.is_empty());
-        assert!(!model.subscription_fetching);
+        assert!(model.subscription_updates.is_empty());
         model.config.validate().unwrap();
     }
 
@@ -495,7 +490,6 @@ mod tests {
             failed_at,
         );
 
-        assert!(!model.subscription_fetching);
         assert_eq!(model.config.profiles.len(), 1);
         assert_eq!(model.config.profiles[0].id, existing_id);
         assert_eq!(
