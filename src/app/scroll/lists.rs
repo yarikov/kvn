@@ -1,4 +1,4 @@
-use crate::app::model::{Model, Overlay, SourceRow};
+use crate::app::model::{DnsSettingsItem, Model, Overlay, SourceRow};
 use crate::config::profile::GeoRegion;
 
 pub(crate) fn context(overlay: Overlay) -> Overlay {
@@ -48,7 +48,7 @@ pub(crate) fn list(model: &Model) -> Option<(Vec<Option<usize>>, usize)> {
             model.routing_selected,
         ),
         Overlay::GeoRegions => (GeoRegion::ALL.len(), model.geo_region_selected),
-        Overlay::DnsSettings => (3, model.dns_selected),
+        Overlay::DnsSettings => (DnsSettingsItem::ALL.len(), model.dns_selected),
         Overlay::SettingsMenu(page) => {
             (model.settings_menu_len(page), model.settings_menu_selected)
         }
@@ -75,6 +75,16 @@ pub(crate) fn select(model: &mut Model, selected: usize) {
 mod tests {
     use super::*;
     use crate::app::model::{HelpState, RoutingSettingsDraft, SettingsMenuPage};
+
+    #[test]
+    fn dns_settings_wheel_stops_on_the_last_dns_row() {
+        let mut model = crate::test_helpers::model_with_profiles(vec![]);
+        model.overlay = Overlay::DnsSettings;
+
+        let (rows, _) = list(&model).unwrap();
+
+        assert_eq!(rows.len(), DnsSettingsItem::ALL.len());
+    }
 
     #[test]
     fn each_selectable_context_updates_its_own_selection() {
