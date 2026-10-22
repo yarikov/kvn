@@ -23,14 +23,18 @@ fn handle_subscription_result_at(
     result: Result<Vec<Profile>, crate::app::msg::IpcError>,
     now: chrono::DateTime<Local>,
 ) -> Vec<Effect> {
-    let managed = !id.is_nil();
     let automatic = model.automatic_subscription_updates.remove(&id);
     model.subscription_updates.remove(&id);
     if model.subscription_updates.is_empty() {
         model.subscription_fetching = false;
     }
+    let Some(sub_idx) = model.config.subscriptions.iter().position(|s| s.id == id) else {
+        return vec![Effect::AppendAppLog {
+            level: "INFO".into(),
+            message: "Subscription update discarded: the subscription was removed".into(),
+        }];
+    };
 
-    let saved_selected = model.selected;
     let old_active_profile = model
         .active_profile_id
         .and_then(|id| model.config.profiles.iter().find(|p| p.id == id).cloned());
@@ -50,25 +54,20 @@ fn handle_subscription_result_at(
         Ok(mut profiles) => {
             let reused_ids = reuse_previous_ids(&previous_profiles, &mut profiles);
             let fetched = keep_previous_order(&previous_profiles, profiles, reused_ids);
-            if managed {
-                if let Some(sub) = model.config.subscriptions.iter_mut().find(|s| s.id == id) {
-                    sub.last_updated = Some(now);
-                    if automatic {
-                        sub.schedule_next_after_success(now);
-                    }
-                }
-                model
-                    .config
-                    .profiles
-                    .retain(|p| p.subscription_id != Some(id));
+            let sub = &mut model.config.subscriptions[sub_idx];
+            sub.last_updated = Some(now);
+            if automatic {
+                sub.schedule_next_after_success(now);
             }
+            model
+                .config
+                .profiles
+                .retain(|p| p.subscription_id != Some(id));
             let mut imported = 0;
             for (mut profile, reused_id) in fetched {
                 let key = profile.dedup_key();
+                profile.subscription_id = Some(id);
                 if reused_id {
-                    if managed {
-                        profile.subscription_id = Some(id);
-                    }
                     model.add_profile(profile);
                     imported += 1;
                 } else if let Some(idx) = model
@@ -80,28 +79,17 @@ fn handle_subscription_result_at(
                     let existing = &model.config.profiles[idx];
                     if existing.subscription_id.is_none() {
                         profile.id = existing.id;
-                        if managed {
-                            profile.subscription_id = Some(id);
-                            model.config.profiles.remove(idx);
-                            model.add_profile(profile);
-                        } else {
-                            model.config.profiles[idx] = profile;
-                        }
+                        model.config.profiles.remove(idx);
+                        model.add_profile(profile);
                         imported += 1;
                     }
                 } else {
-                    if managed {
-                        profile.subscription_id = Some(id);
-                    }
                     model.add_profile(profile);
                     imported += 1;
                 }
             }
 
-            let mut effects = Vec::new();
-            if imported > 0 || managed {
-                effects.push(Effect::SaveConfig);
-            }
+            let mut effects = vec![Effect::SaveConfig];
             if imported > 0 {
                 push_status(
                     &mut effects,
@@ -122,19 +110,12 @@ fn handle_subscription_result_at(
             effects
         }
         Err(err) => {
-            let mut effects = if managed {
-                if let Some(sub) = model.config.subscriptions.iter_mut().find(|s| s.id == id)
-                    && automatic
-                    && sub.auto_update != SubscriptionAutoUpdate::Off
-                {
-                    sub.record_fetch_failure(now);
-                    vec![Effect::SaveConfig]
-                } else {
-                    Vec::new()
-                }
-            } else {
-                Vec::new()
-            };
+            let mut effects = Vec::new();
+            let sub = &mut model.config.subscriptions[sub_idx];
+            if automatic && sub.auto_update != SubscriptionAutoUpdate::Off {
+                sub.record_fetch_failure(now);
+                effects.push(Effect::SaveConfig);
+            }
             push_status(
                 &mut effects,
                 model,
@@ -191,13 +172,7 @@ fn handle_subscription_result_at(
         }
     }
 
-    if managed {
-        if let Some(sub_idx) = model.config.subscriptions.iter().position(|s| s.id == id) {
-            model.selected = crate::app::model::row_for_subscription_header(&model.config, sub_idx);
-        }
-    } else {
-        model.selected = saved_selected;
-    }
+    model.selected = crate::app::model::row_for_subscription_header(&model.config, sub_idx);
 
     effects
 }
@@ -324,7 +299,7 @@ mod tests {
 
     #[test]
     fn subscription_fetched_adds_profiles_and_saves() {
-        let mut model = model_with_profiles(vec![]);
+        let (mut model, sub_id) = model_with_subscribed_servers(vec![], &[]);
         let profiles = vec![
             Profile::new_vless(
                 "Sub1".to_string(),
@@ -340,41 +315,9 @@ mod tests {
             ),
         ];
 
-        let effects = handle_subscription_result(&mut model, Uuid::nil(), Ok(profiles));
+        let effects = handle_subscription_result(&mut model, sub_id, Ok(profiles));
 
         assert!(!model.subscription_fetching);
-        assert_eq!(model.config.profiles.len(), 2);
-        assert_eq!(
-            effects,
-            vec![Effect::SaveConfig, app_log_info("Profiles imported: 2")]
-        );
-    }
-
-    #[test]
-    fn subscription_fetched_updates_standalone_duplicate() {
-        let mut model = model_with_profiles(vec![Profile::new_vless(
-            "Existing".to_string(),
-            "1.1.1.1".to_string(),
-            443,
-            "u1".to_string(),
-        )]);
-        let profiles = vec![
-            Profile::new_vless(
-                "Existing".to_string(),
-                "1.1.1.1".to_string(),
-                443,
-                "u1".to_string(),
-            ),
-            Profile::new_vless(
-                "New".to_string(),
-                "2.2.2.2".to_string(),
-                443,
-                "u2".to_string(),
-            ),
-        ];
-
-        let effects = handle_subscription_result(&mut model, Uuid::nil(), Ok(profiles));
-
         assert_eq!(model.config.profiles.len(), 2);
         assert_eq!(
             effects,
@@ -482,15 +425,39 @@ mod tests {
     }
 
     #[test]
-    fn subscription_fetched_empty_logs_no_new_profiles() {
+    fn subscription_fetched_after_its_subscription_was_deleted_is_dropped() {
         let mut model = model_with_profiles(vec![]);
+        let deleted_id = Uuid::new_v4();
+        model.subscription_updates.insert(deleted_id);
+        model.subscription_fetching = true;
+        let fetched = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
 
-        let effects = handle_subscription_result(&mut model, Uuid::nil(), Ok(vec![]));
+        let effects = handle_subscription_result(&mut model, deleted_id, Ok(vec![fetched]));
+
+        assert_eq!(
+            effects,
+            vec![app_log_info(
+                "Subscription update discarded: the subscription was removed"
+            )]
+        );
+        assert!(model.config.profiles.is_empty());
+        assert!(!model.subscription_fetching);
+        model.config.validate().unwrap();
+    }
+
+    #[test]
+    fn subscription_fetched_empty_logs_no_new_profiles() {
+        let (mut model, sub_id) = model_with_subscribed_servers(vec![], &[]);
+
+        let effects = handle_subscription_result(&mut model, sub_id, Ok(vec![]));
 
         assert_eq!(model.config.profiles.len(), 0);
         assert_eq!(
             effects,
-            vec![app_log_info("Subscription unchanged: no new profiles")]
+            vec![
+                Effect::SaveConfig,
+                app_log_info("Subscription unchanged: no new profiles")
+            ]
         );
     }
 
@@ -559,11 +526,11 @@ mod tests {
 
     #[test]
     fn subscription_fetched_error_broadcasts_state_without_other_effects() {
-        let mut model = model_with_profiles(vec![]);
+        let (mut model, sub_id) = model_with_subscribed_servers(vec![], &[]);
         let effects = update(
             &mut model,
             Msg::SubscriptionFetched {
-                id: Uuid::nil(),
+                id: sub_id,
                 result: Err(crate::app::msg::IpcError::new("network down")),
             },
         );
@@ -880,17 +847,9 @@ mod tests {
 
     #[test]
     fn subscription_fetched_clears_active_profile_id_when_profile_removed() {
-        let sub_id = Uuid::new_v4();
-        let mut existing = Profile::new_vless(
-            "Old Server".to_string(),
-            "1.1.1.1".to_string(),
-            443,
-            "old-uuid".to_string(),
-        );
-        existing.subscription_id = Some(sub_id);
-        let old_profile_id = existing.id;
-        let mut model = model_with_profiles(vec![existing]);
-        model.active_profile_id = Some(old_profile_id);
+        let (mut model, sub_id) =
+            model_with_subscribed_servers(vec![], &[("Old Server", "1.1.1.1")]);
+        model.active_profile_id = Some(model.config.profiles[0].id);
 
         let new_server = Profile::new_vless(
             "New Server".to_string(),
