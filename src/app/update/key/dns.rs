@@ -1,25 +1,11 @@
 use crate::app::effect::Effect;
 use crate::app::model::{
-    AppStatus, Model, Overlay, SettingsMenuEntry, SettingsMenuPage, StatusKey,
+    AppStatus, DnsSettingsItem, Model, Overlay, SettingsMenuEntry, SettingsMenuPage, StatusKey,
 };
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::update::connection::reconnect_with_new_settings;
 use crate::app::update::status::push_status;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app::update) enum DnsSettingsItem {
-    Preset,
-    ToggleFakeIp,
-}
-
-impl DnsSettingsItem {
-    pub const ALL: [DnsSettingsItem; 2] = [DnsSettingsItem::Preset, DnsSettingsItem::ToggleFakeIp];
-
-    pub fn from_index(idx: usize) -> Option<Self> {
-        Self::ALL.get(idx).copied()
-    }
-}
 
 pub(in crate::app::update) fn handle_dns_settings(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
     let len = DnsSettingsItem::ALL.len();

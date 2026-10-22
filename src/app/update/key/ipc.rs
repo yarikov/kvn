@@ -186,8 +186,8 @@ fn rebuild_key_event(
 mod tests {
     use super::*;
     use crate::app::model::ConnectionState;
+    use crate::app::model::DnsSettingsItem;
     use crate::app::msg::Msg;
-    use crate::app::update::key::dns::DnsSettingsItem;
     use crate::app::update::update;
     use crate::config::profile::{GeoRegion, Profile, RoutingMode};
     use crate::test_helpers::*;

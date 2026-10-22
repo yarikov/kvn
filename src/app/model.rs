@@ -124,6 +124,20 @@ pub struct ConnectionSettings {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DnsSettingsItem {
+    Preset,
+    ToggleFakeIp,
+}
+
+impl DnsSettingsItem {
+    pub const ALL: [DnsSettingsItem; 2] = [DnsSettingsItem::Preset, DnsSettingsItem::ToggleFakeIp];
+
+    pub fn from_index(idx: usize) -> Option<Self> {
+        Self::ALL.get(idx).copied()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoutingSettingsItem {
     Region,
     Mode,
