@@ -23,9 +23,6 @@ pub enum OnboardingStep {
     Finish,
 }
 
-/// How far the system setup a protection card depends on has got. Produced by
-/// `doctor::integration_setup`, so the card can tell the user what is still
-/// missing instead of always repeating the setup command.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SetupState {
@@ -41,22 +38,15 @@ pub struct IntegrationSetup {
     pub polkit: SetupState,
     #[serde(default)]
     pub kill_switch: SetupState,
-    /// The `kvn-tui` group both integrations gate on is already active in this
-    /// session, so a fresh setup takes effect without a reboot.
     #[serde(default)]
     pub group_active: bool,
     #[serde(default)]
     pub omarchy_plugin: bool,
 }
 
-/// What a failed progress write has to put back on screen. The tour's own
-/// screen is gone by then, so the recovery says where the card belongs rather
-/// than where the transition came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnboardingRecovery {
-    /// Show the card again right away: the transition owned the screen.
     RestoreCard,
-    /// Wait for a free screen: a real screen is still in front of the user.
     WaitForIdle,
 }
 
@@ -85,9 +75,6 @@ impl OnboardingStep {
         Self::Finish,
     ];
 
-    /// The cards actually shown on this machine. `Omarchy` is dropped when
-    /// Omarchy is not installed, so the counter, `next` and what is rendered
-    /// all agree.
     pub fn sequence(include_omarchy_card: bool) -> impl Iterator<Item = Self> {
         Self::ORDER
             .into_iter()
@@ -111,12 +98,6 @@ impl OnboardingStep {
             .unwrap_or(Self::Finish)
     }
 
-    /// The shell command this card shows, if any, written the way the README
-    /// writes it — a setup command comes with the `pacman` install it needs,
-    /// split over two lines on a `\` continuation. It also gates what `y`
-    /// copies, so a card without a command offers no copy. The two
-    /// protection cards offer theirs only while their integration is still
-    /// missing — an install that already has it needs the toggle, not the setup.
     pub fn command(self, setup: IntegrationSetup) -> Option<&'static str> {
         match self {
             Self::Doctor => Some("kvn doctor"),
@@ -134,16 +115,10 @@ impl OnboardingStep {
         }
     }
 
-    /// The displayed command folded back into one line for the clipboard: a
-    /// pasted `\` continuation survives in a shell but not in every terminal's
-    /// bracketed paste, and `&&` alone runs the same two commands.
     pub fn clipboard_command(self, setup: IntegrationSetup) -> Option<String> {
         Some(self.command(setup)?.replace(" \\\n  ", " "))
     }
 
-    /// The real screen this step hands off to, if any. `Routing` has one only
-    /// for a country region: under `Global` there are no modes to choose, so
-    /// the card is informational and `Enter` simply moves on.
     pub fn handoff_screen(self, config: &Config) -> Option<HandoffScreen> {
         match self {
             Self::Region => Some(HandoffScreen::GeoRegions),
@@ -163,8 +138,6 @@ impl OnboardingStep {
     }
 }
 
-/// Small, non-config UX state. Keeping it outside profiles.json avoids making a
-/// one-off first-run flow part of the versioned VPN configuration schema.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OnboardingState {
@@ -184,25 +157,17 @@ impl OnboardingState {
     }
 }
 
-/// Persisted progress plus the session-local bookkeeping of an in-flight tour.
-/// Only `state` reaches the disk; `awaiting` and `card_pending` describe a
-/// handoff that a restart legitimately forgets.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OnboardingProgress {
     pub state: OnboardingState,
     pub awaiting: Option<OnboardingStep>,
     pub card_pending: bool,
-    /// Whether the tour includes the `Omarchy` card: an Omarchy desktop that
-    /// does not have the plugin yet. Decided once when the model is built rather
-    /// than re-read while rendering. It is an environment fact, not progress, and
-    /// so is never persisted.
     pub include_omarchy_card: bool,
 }
 
 impl OnboardingProgress {
     pub fn new(state: OnboardingState, include_omarchy_card: bool) -> Self {
         let step = match (state.step, include_omarchy_card) {
-            // A step recorded on an Omarchy machine, resumed on one without it.
             (OnboardingStep::Omarchy, false) => OnboardingStep::AutoConnect,
             (step, _) => step,
         };
@@ -325,7 +290,6 @@ mod tests {
         assert!(OnboardingStep::sequence(true).any(|s| s == OnboardingStep::Omarchy));
         assert!(!OnboardingStep::sequence(false).any(|s| s == OnboardingStep::Omarchy));
 
-        // Without it the diagnostics card leads straight to auto-connect.
         assert_eq!(
             OnboardingStep::Doctor.next(false),
             OnboardingStep::AutoConnect
@@ -351,7 +315,6 @@ mod tests {
 
     #[test]
     fn only_the_cards_that_show_a_command_offer_one_to_copy() {
-        // Asserted over ORDER so a new card cannot quietly skip the decision.
         let with_commands = |setup| -> Vec<_> {
             OnboardingStep::ORDER
                 .into_iter()

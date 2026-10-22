@@ -89,7 +89,6 @@ fn rule_set_badge(
     Some((format!(" {refresh} {schedule} {text} "), style))
 }
 
-/// Widget that renders the bottom status bar.
 pub struct StatusBar<'a> {
     model: &'a Model,
 }
@@ -100,11 +99,6 @@ impl<'a> StatusBar<'a> {
     }
 }
 
-/// Render a bytes-per-second rate as a short human-readable string.
-/// Uses 1024-based units (KiB-style) to match typical bandwidth-monitor
-/// conventions. Rates always use at least KB/s so the unit stays aligned.
-/// Examples: `0 → "0.0 KB/s"`, `1024 → "1.0 KB/s"`,
-/// `1_500_000 → "1.4 MB/s"`.
 pub fn format_bps(bps: u64) -> String {
     format_quantity(bps, true)
 }
@@ -127,9 +121,6 @@ fn format_quantity(bytes: u64, per_second: bool) -> String {
     format!("{number} {}{suffix}", UNITS[unit_index])
 }
 
-/// Render a cumulative byte count as a short human-readable string (no `/s`
-/// suffix). Totals always use at least KB. Examples: `0 → "0.0 KB"`,
-/// `1_500_000 → "1.4 MB"`.
 pub fn format_bytes(bytes: u64) -> String {
     format_quantity(bytes, false)
 }
@@ -147,17 +138,14 @@ fn fixed_width_field(value: String, width: usize, overflow: &str) -> String {
     format!("{value:>width$}")
 }
 
-/// Format a traffic rate into the fixed-width column used by the traffic panel.
 pub fn format_bps_field(bps: u64) -> String {
     fixed_width_field(format_bps(bps), TRAFFIC_RATE_WIDTH, ">9 EB/s")
 }
 
-/// Format a cumulative traffic total into the fixed-width traffic panel column.
 pub fn format_bytes_field(bytes: u64) -> String {
     fixed_width_field(format_bytes(bytes), TRAFFIC_TOTAL_WIDTH, ">9 EB")
 }
 
-/// Format the active connection count without allowing its column to grow.
 pub fn format_connections_field(connections: usize) -> String {
     if connections > 99_999 {
         "99999+".to_string()
@@ -170,7 +158,6 @@ pub fn format_connections_padding(connections: usize) -> String {
     " ".repeat(TRAFFIC_CONNECTIONS_COUNT_WIDTH - format_connections_field(connections).len())
 }
 
-/// Truncate a string to fit within a visual width, appending "..." if truncated.
 fn truncate_to_width(s: &str, max_width: usize) -> String {
     if max_width <= 3 {
         return ".".repeat(max_width);
@@ -309,8 +296,6 @@ impl<'a> Widget for StatusBar<'a> {
     }
 }
 
-/// Temporary status notification rendered above the application rather than
-/// consuming space in the persistent bottom bar.
 struct Toast<'a> {
     status: &'a AppStatus,
     theme: &'a crate::ui::styles::Theme,
@@ -729,7 +714,6 @@ mod tests {
         assert!(content.contains("DISCONNECTED"));
     }
 
-    /// Both phases of connection establishment use the same stable badge.
     #[test]
     fn status_bar_connecting_snapshot() {
         let mut model = model_with_profiles(vec![Profile::new_vless(
@@ -745,7 +729,6 @@ mod tests {
         insta::assert_snapshot!(buffer_to_string(&buf));
     }
 
-    /// ConnectPending uses the same badge while the worker is starting.
     #[test]
     fn status_bar_connect_pending_snapshot() {
         let mut model = model_with_profiles(vec![Profile::new_vless(

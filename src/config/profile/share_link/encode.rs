@@ -5,9 +5,6 @@ use super::finalmask::export_hysteria2_finalmask;
 use super::parse::vmess_b64_field_keys;
 use crate::config::profile::*;
 
-/// Encode a Profile to a share link URI. Inverse of [`parse_share_link`]:
-/// `parse_share_link(encode_share_link(&p)?)` reproduces `p` modulo `id`
-/// (which is regenerated on parse) and fields the parser does not extract.
 pub fn encode_share_link(profile: &Profile) -> Result<String> {
     let link: Result<String> = match &profile.config {
         ProtocolConfig::Vless(cfg) => Ok(encode_vless(profile, cfg)),
@@ -205,8 +202,6 @@ fn encode_vless(profile: &Profile, cfg: &VlessConfig) -> String {
     if cfg.flow == Some(Flow::XtlsRprxVision) {
         pairs.push(("flow", "xtls-rprx-vision".to_string()));
     }
-    // `append_tls_common_query` already emits `security=reality` when
-    // `tls.reality` is set; only the plain-TLS case needs an explicit hint.
     if cfg.security == Some(Security::None) {
         if cfg.tls.reality.is_some() {
             pairs.push(("security", "none".to_string()));
@@ -604,9 +599,6 @@ mod tests {
     use std::collections::HashMap;
     use uuid::Uuid;
 
-    // ---- Round-trip: encode → parse must reproduce the input profile
-    // (modulo `id`, which is regenerated on every parse).
-
     fn assert_link_round_trips(link: &str) {
         let parsed = parse_share_link(link).unwrap();
         let mut reparsed = parse_share_link(&encode_share_link(&parsed).unwrap()).unwrap();
@@ -703,8 +695,6 @@ mod tests {
         let mut parsed =
             parse_share_link(&link).unwrap_or_else(|e| panic!("parse failed for `{link}`: {e}"));
         parsed.id = profile.id;
-        // `tags` and `subscription_id` are not transported via share links;
-        // strip them from both sides for the comparison.
         profile.tags.clear();
         profile.subscription_id = None;
         assert_eq!(parsed, profile, "round-trip mismatch for `{link}`");

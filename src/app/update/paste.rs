@@ -141,7 +141,6 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         let uri = "vless://671c62c7-6768-4b98-ac6b-572c9c707be0@203.0.113.42:443#Test";
 
-        // First paste succeeds
         let effects = handle_clipboard_text(&mut model, uri);
         assert_eq!(model.config.profiles.len(), 1);
         assert_eq!(
@@ -150,7 +149,6 @@ mod tests {
         );
         assert!(model.status_text().contains("Profile imported"));
 
-        // Second paste with same UUID fails
         let effects = handle_clipboard_text(&mut model, uri);
         assert_eq!(model.config.profiles.len(), 1);
         assert_eq!(
@@ -350,8 +348,6 @@ mod tests {
         );
     }
 
-    // ---- derive_subscription_name ----
-
     #[test]
     fn derive_subscription_name_uses_host_when_present() {
         assert_eq!(
@@ -376,7 +372,6 @@ mod tests {
 
     #[test]
     fn derive_subscription_name_url_without_host_fallback() {
-        // `file:` URLs parse but have no host.
         assert_eq!(derive_subscription_name("file:///tmp/sub"), "Subscription");
     }
 }

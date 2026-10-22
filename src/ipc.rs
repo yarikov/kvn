@@ -14,14 +14,10 @@ use anyhow::Context;
 
 use crate::app::msg::{IpcCommand, Msg, StateSnapshot};
 
-/// Per-client write timeout. A wedged TUI must not block the daemon main loop
-/// — anything slower than this is treated as a dead client and disconnected.
 const BROADCAST_WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 
-/// Current daemon/client wire-schema epoch.
 pub const IPC_VERSION: u32 = 1;
 
-/// Return the path to the Unix domain socket used for IPC.
 pub fn socket_path() -> anyhow::Result<std::path::PathBuf> {
     let dir = dirs::runtime_dir().ok_or_else(|| {
         anyhow::anyhow!("XDG_RUNTIME_DIR is not set; kvn requires a desktop user session")
@@ -29,22 +25,16 @@ pub fn socket_path() -> anyhow::Result<std::path::PathBuf> {
     Ok(dir.join("kvn-tui.sock"))
 }
 
-/// Remove the socket file.
 pub fn cleanup_socket() {
     if let Ok(path) = socket_path() {
         let _ = std::fs::remove_file(path);
     }
 }
 
-/// Check whether the daemon socket is accepting connections.
 pub fn is_daemon_running() -> bool {
     socket_path().is_ok_and(|path| UnixStream::connect(path).is_ok())
 }
 
-/// Poll for daemon readiness with exponential backoff (10ms → 320ms cap),
-/// returning as soon as the socket accepts a connection. Replaces a fixed
-/// `sleep(300ms)` that was too short on cold/slow systems and too long on
-/// warm ones.
 pub fn wait_for_daemon(timeout: Duration) -> bool {
     let start = std::time::Instant::now();
     let mut delay = Duration::from_millis(10);
@@ -59,7 +49,6 @@ pub fn wait_for_daemon(timeout: Duration) -> bool {
     is_daemon_running()
 }
 
-/// Wait until the daemon socket stops accepting connections.
 pub fn wait_for_daemon_exit(timeout: Duration) -> bool {
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {
@@ -71,7 +60,6 @@ pub fn wait_for_daemon_exit(timeout: Duration) -> bool {
     !is_daemon_running()
 }
 
-/// Daemon-side IPC server.
 pub struct IpcServer {
     clients: Arc<Mutex<Vec<UnixStream>>>,
 }
@@ -87,7 +75,6 @@ impl IpcServer {
                 .with_context(|| format!("Failed to remove stale socket {}", path.display()))?;
         }
         let listener = UnixListener::bind(&path)?;
-        // Defense in depth on top of the private 0700 runtime directory.
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
             .context("Failed to chmod IPC socket")?;
         let clients: Arc<Mutex<Vec<UnixStream>>> = Arc::new(Mutex::new(Vec::new()));
@@ -148,12 +135,6 @@ impl IpcServer {
         Ok(Self { clients })
     }
 
-    /// Send a state snapshot to every connected TUI client.
-    ///
-    /// Writes are performed *without* holding the clients mutex: one slow or
-    /// wedged TUI must not stall the daemon main loop or other clients.
-    /// Per-stream `set_write_timeout` provides the upper bound on how long
-    /// a single client can hold us up.
     pub fn broadcast(&self, snapshot: &StateSnapshot) {
         let json = match serde_json::to_string(snapshot) {
             Ok(s) => s + "\n",
@@ -163,9 +144,6 @@ impl IpcServer {
             }
         };
 
-        // Dup the stream fds under a short lock so writes happen without it.
-        // We tag each clone with the original fd so cleanup can identify dead
-        // clients even if `clients` was mutated by accept-loop concurrently.
         let writers: Vec<(RawFd, UnixStream)> = {
             let guard = self.clients.lock().unwrap();
             guard
@@ -199,7 +177,6 @@ impl std::fmt::Display for DaemonConnectionLost {
     }
 }
 
-/// TUI client-side IPC connection.
 pub struct IpcClient {
     stream: UnixStream,
 }
@@ -303,18 +280,11 @@ impl IpcClient {
         }
     }
 
-    /// Read a single state snapshot line, for one-shot CLI clients
-    /// (`kvn status`, `kvn connect`). Reads byte-wise from the raw
-    /// stream so nothing past the first `\n` is consumed — a follow-up read
-    /// after sending a command still sees the daemon's next broadcast.
     pub fn read_snapshot(&mut self, timeout: Duration) -> anyhow::Result<StateSnapshot> {
         let value = self.read_snapshot_value(timeout)?;
         serde_json::from_value(value).context("Malformed state snapshot from the daemon")
     }
 
-    /// Read one snapshot as untyped JSON. The TUI uses this for the initial
-    /// version handshake so it can recognize an old daemon even when the full
-    /// old snapshot no longer deserializes into the current Rust type.
     pub fn read_snapshot_value(&mut self, timeout: Duration) -> anyhow::Result<serde_json::Value> {
         use std::io::Read;
         self.stream
@@ -339,17 +309,11 @@ impl IpcClient {
         serde_json::from_slice(&line).context("Malformed JSON from the daemon")
     }
 
-    /// Spawn a background thread that reads state snapshots from the daemon
-    /// and forwards them into the given mpsc channel.
     pub fn spawn_reader(&self, tx: Sender<Msg>) -> anyhow::Result<()> {
         let stream = self
             .stream
             .try_clone()
             .context("Failed to clone IPC socket for snapshot reader")?;
-        // The initial snapshot handshake uses a bounded read, and cloned Unix
-        // streams share the underlying socket timeout. The long-lived reader
-        // must wait indefinitely while the daemon has no state changes to
-        // broadcast (most notably while disconnected).
         stream
             .set_read_timeout(None)
             .context("Failed to clear IPC read timeout")?;
@@ -451,9 +415,6 @@ mod tests {
         }
     }
 
-    /// End-to-end: client → server command, server → client broadcast.
-    /// Pins XDG_RUNTIME_DIR to a tempdir so we don't collide with a real
-    /// daemon's socket.
     #[test]
     fn ipc_roundtrip_command_and_broadcast() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
@@ -468,7 +429,6 @@ mod tests {
         let (client_tx, client_rx) = channel::<Msg>();
         client.spawn_reader(client_tx).expect("reader spawn");
 
-        // Client → server.
         client.send(&IpcCommand::Quit).expect("send quit");
         match drain_one(&server_rx, Duration::from_secs(2)) {
             Some(Msg::IpcCommand(IpcCommand::Quit)) => {}
@@ -476,8 +436,6 @@ mod tests {
             None => panic!("timed out waiting for Msg::IpcCommand(Quit)"),
         }
 
-        // Server → client. Broadcast happens off the accept thread, so give
-        // the client side a moment to register before we send.
         thread::sleep(Duration::from_millis(50));
         server.broadcast(&sample_snapshot());
         match drain_one(&client_rx, Duration::from_secs(2)) {
@@ -557,8 +515,6 @@ mod tests {
         let (tx, rx) = channel();
         client.spawn_reader(tx).unwrap();
 
-        // Wait well past the inherited handshake timeout before publishing a
-        // snapshot. The persistent reader must still be alive and blocked.
         thread::sleep(Duration::from_millis(100));
         serde_json::to_writer(&mut daemon_stream, &sample_snapshot()).unwrap();
         daemon_stream.write_all(b"\n").unwrap();
@@ -792,7 +748,6 @@ mod tests {
         unsafe { std::env::set_var("XDG_RUNTIME_DIR", tmp.path()) };
         let started = std::time::Instant::now();
         assert!(!wait_for_daemon(Duration::from_millis(50)));
-        // Sanity: it must have actually polled and not returned instantly.
         assert!(started.elapsed() >= Duration::from_millis(40));
         unsafe {
             match prev {
@@ -818,7 +773,6 @@ mod tests {
             .expect("write garbage");
         stream.flush().unwrap();
 
-        // Server must NOT forward a Msg for an unparseable line.
         assert!(drain_one(&server_rx, Duration::from_millis(200)).is_none());
 
         cleanup_socket();
@@ -835,20 +789,14 @@ mod tests {
         let (server_tx, _server_rx) = channel::<Msg>();
         let server = IpcServer::bind(server_tx).expect("server bind");
 
-        // Connect a client and immediately drop it without reading anything.
         {
             let _client = IpcClient::connect().expect("connect");
         }
-        // Give the accept thread time to register the client.
         thread::sleep(Duration::from_millis(50));
 
-        // First broadcast may succeed (kernel buffers the line); a subsequent
-        // shutdown means at least one will encounter EPIPE. Loop a few times
-        // so the dead client is reaped.
         for _ in 0..5 {
             server.broadcast(&sample_snapshot());
         }
-        // After reaping there should be zero live clients tracked.
         let live = server.clients.lock().unwrap().len();
         assert_eq!(live, 0, "expected dead client to be reaped");
 

@@ -58,9 +58,6 @@ pub(super) fn download(tx: &Sender<Msg>, model: &mut Model) {
 }
 
 pub(super) fn download_service_rule_sets_if_missing(tx: &Sender<Msg>, model: &mut Model) {
-    // May run directly when the kill switch is off, or through a
-    // tunnel after connect. Always report partial failures so the
-    // reducer can log them and run any pending reconnect.
     model.geo_updating = true;
     let services = model.config.settings.geo_routing.enabled_services();
     let schedule_enabled = model.config.settings.geo_routing.auto_update != GeoAutoUpdate::Off;
@@ -270,10 +267,6 @@ fn interval_days(model: &Model) -> i64 {
         / 1_440) as i64
 }
 
-/// Best-effort check/download of service rule-sets, shared by the periodic
-/// geo-update thread and the post-connect fetch. Failures are logged, never
-/// surfaced — the route builder just omits a service's rules until its files
-/// appear.
 fn refresh_service_rule_sets(
     gm: &crate::geo::GeoManager,
     services: &[RoutedService],

@@ -42,7 +42,6 @@ pub fn start() -> Result<()> {
     run(Model::new()?)
 }
 
-/// Run the daemon main loop.
 fn run(mut model: Model) -> Result<()> {
     if let Err(error) = crate::config::recovery::maintain() {
         tracing::warn!("Failed to maintain config recovery files: {error:#}");
@@ -106,7 +105,6 @@ fn run(mut model: Model) -> Result<()> {
         log_session_offsets,
     );
 
-    // Cleanup
     {
         let mut slot = lock_process_slot(&shared.process_slot);
         slot.attempt_id = slot.attempt_id.wrapping_add(1);
@@ -152,9 +150,6 @@ fn run_loop(
         let before = config_io::UpdateBaseline::capture(model);
         let mut effects = update(model, msg);
         config_io::persist_config_changes(model, before, &mut effects);
-        // `queue_connect` advances the generation before the next Tick emits
-        // `Effect::Connect`. Publish that invalidation immediately so an old
-        // worker cannot install its process during the intervening 250 ms.
         lock_process_slot(&shared.process_slot).attempt_id = model.connect_attempt_id;
         let mut should_broadcast = false;
 
@@ -211,10 +206,6 @@ fn missing_edit_result() -> crate::app::msg::ConfigEditResult {
     }
 }
 
-/// At daemon startup, align `settings.kill_switch` with the actual systemd
-/// unit state. systemd is the source of truth — if a user disabled the unit
-/// manually or never installed the helper, the persisted bool would otherwise
-/// drift and the TUI would render `[KS]` against an open firewall.
 fn reconcile_kill_switch_state(model: &mut Model) {
     let active = match crate::services::killswitch::is_active() {
         Ok(v) => v,
@@ -242,9 +233,6 @@ fn reconcile_kill_switch_state(model: &mut Model) {
     }
 }
 
-/// Seed the state the tour's protection and Omarchy cards render, so the first
-/// card is painted from a real answer rather than the default. While the tour is
-/// open the cards keep it fresh themselves through `Effect::CheckIntegrationSetup`.
 fn probe_integration_setup(model: &mut Model) {
     if model.onboarding.is_complete() {
         return;
@@ -357,10 +345,6 @@ fn spawn_suspend_watcher(tx: Sender<Msg>) {
     });
 }
 
-/// Translate SIGTERM/SIGINT into an `IpcCommand::Quit` message so the daemon
-/// can run its normal cleanup path (kill sing-box, remove socket) instead of
-/// being torn down mid-flight by the kernel. Only the first signal is acted
-/// on; further signals fall through to the default disposition.
 fn spawn_signal_handler(tx: Sender<Msg>) -> Result<()> {
     use signal_hook::consts::{SIGINT, SIGTERM};
     use signal_hook::iterator::Signals;

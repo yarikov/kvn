@@ -19,8 +19,6 @@ fn preset_label(name: &str) -> &str {
     }
 }
 
-/// Draw the DNS settings overlay: preset and fake-IP selectors.
-/// Custom presets are written in profiles.json and selected here.
 pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
     let dns = &model.config.settings.dns;
     let displayed_preset = model

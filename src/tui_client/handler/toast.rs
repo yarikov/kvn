@@ -19,8 +19,6 @@ struct Toast {
     expires_at: Instant,
 }
 
-/// Presentation-only lifetime for daemon status events. Keeping the deadline
-/// here avoids leaking wall-clock concerns into the shared TEA model.
 pub(super) struct ToastState {
     last_revision: u64,
     newest_first: Vec<Toast>,

@@ -10,14 +10,9 @@ pub enum Effect {
         attempt_id: u64,
     },
     Disconnect,
-    /// Revoke temporary endpoint/DNS exceptions after sing-box exits without
-    /// going through the normal disconnect path. The kill switch itself stays
-    /// enabled.
     RevokeKillSwitchExceptions,
     DownloadGeo,
     DownloadGeoIfMissing,
-    /// Fetch rule-sets for enabled service routes if absent. This may run
-    /// directly when the kill switch is off, or through an active tunnel.
     DownloadServiceRuleSetsIfMissing,
     RetryServiceRuleSets {
         services: Vec<crate::config::profile::RoutedService>,
@@ -36,8 +31,6 @@ pub enum Effect {
     },
     PersistOnboarding {
         previous: crate::onboarding::OnboardingProgress,
-        /// How a failed write has to repair the screen — see
-        /// `daemon::config_io::restore_onboarding_after_failure`.
         recovery: crate::onboarding::OnboardingRecovery,
     },
     SaveConfigConflict {
@@ -62,17 +55,11 @@ pub enum Effect {
         enabled: bool,
     },
     CheckAutoConnectPolkit,
-    /// Re-probe the privileged integrations behind the tour's protection and
-    /// Omarchy cards, so their copy follows a setup run in another terminal.
     CheckIntegrationSetup,
-    /// Ask the daemon to scrape the Clash API once. IDs bind the asynchronous
-    /// reply to the current connection and order overlapping requests.
     FetchTrafficStats {
         attempt_id: u64,
         request_id: u64,
     },
-    /// Test a profile's reachability and measure latency via a temporary
-    /// sing-box SOCKS5 inbound. Result is sent back as `Msg::TestResult`.
     TestProfile {
         id: Uuid,
     },

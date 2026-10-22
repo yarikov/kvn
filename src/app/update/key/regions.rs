@@ -91,7 +91,7 @@ mod tests {
         let _ = handle_routing_mode(&mut model, key('j'));
         assert_eq!(model.routing_selected, 2);
         let _ = handle_routing_mode(&mut model, key('j'));
-        assert_eq!(model.routing_selected, 2); // clamp
+        assert_eq!(model.routing_selected, 2);
 
         let _ = handle_routing_mode(&mut model, key('k'));
         assert_eq!(model.routing_selected, 1);
@@ -108,7 +108,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model.overlay = Overlay::RoutingMode;
-        model.routing_selected = 2; // OnlyRu
+        model.routing_selected = 2;
 
         let effects = handle_routing_mode(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
@@ -157,7 +157,7 @@ mod tests {
         let _ = handle_geo_region(&mut model, key('j'));
         assert_eq!(model.geo_region_selected, 3);
         let _ = handle_geo_region(&mut model, key('j'));
-        assert_eq!(model.geo_region_selected, 3); // clamp
+        assert_eq!(model.geo_region_selected, 3);
 
         let _ = handle_geo_region(&mut model, key('k'));
         assert_eq!(model.geo_region_selected, 2);
@@ -173,7 +173,7 @@ mod tests {
     fn geo_region_enter_changes_region() {
         let mut model = model_with_profiles(vec![]);
         model.overlay = Overlay::GeoRegions;
-        model.geo_region_selected = 1; // Cn
+        model.geo_region_selected = 1;
 
         let effects = handle_geo_region(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
@@ -229,7 +229,7 @@ mod tests {
             .geo_routing
             .set_mode(RoutingMode::Only(GeoRegion::Ru));
         model.overlay = Overlay::GeoRegions;
-        model.geo_region_selected = 3; // Global
+        model.geo_region_selected = 3;
 
         let effects = handle_geo_region(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
@@ -273,9 +273,8 @@ mod tests {
             .geo_routing
             .set_mode(RoutingMode::Bypass(GeoRegion::Ru));
         model.overlay = Overlay::GeoRegions;
-        model.geo_region_selected = 1; // Cn
+        model.geo_region_selected = 1;
 
-        // Switch to Cn: routing mode falls back to Global.
         let effects = handle_geo_region(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
             model.config.settings.geo_routing.current_region,
@@ -287,9 +286,8 @@ mod tests {
         );
         assert!(effects.contains(&Effect::DownloadGeoIfMissing));
 
-        // Switch back to Ru: routing mode is restored to BypassRu.
         model.overlay = Overlay::GeoRegions;
-        model.geo_region_selected = 0; // Ru
+        model.geo_region_selected = 0;
         let effects = handle_geo_region(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
             model.config.settings.geo_routing.current_region,
@@ -307,7 +305,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model.overlay = Overlay::RoutingMode;
-        model.routing_selected = 1; // BypassRu
+        model.routing_selected = 1;
 
         handle_routing_mode(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
@@ -332,7 +330,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Cn);
         model.overlay = Overlay::GeoRegions;
-        model.geo_region_selected = 1; // Cn
+        model.geo_region_selected = 1;
 
         let effects = handle_geo_region(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
@@ -347,7 +345,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model.overlay = Overlay::GeoRegions;
-        model.geo_region_selected = 3; // Global
+        model.geo_region_selected = 3;
 
         let effects = handle_geo_region(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(

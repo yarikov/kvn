@@ -18,7 +18,6 @@ pub(super) struct LogDisplayRow {
     hard_break_after: bool,
     error: bool,
     log_index: usize,
-    /// Character offset of this wrapped row in the complete formatted line.
     source_offset: usize,
     level: LogLevel,
     structured: bool,
@@ -54,9 +53,6 @@ pub(super) struct FormattedLog {
     structured: bool,
 }
 
-/// Convert the tailer's `[source] HH:MM:SS LEVEL ...` representation into the
-/// compact presentation used by the log pane. The connection context emitted
-/// by sing-box (`[id duration]`) is useful in raw logs but too noisy for the TUI.
 pub(super) fn format_log_for_display(line: &str) -> FormattedLog {
     let Some(close_source) = line.strip_prefix('[').and_then(|rest| rest.find(']')) else {
         return FormattedLog {
@@ -124,7 +120,6 @@ pub(super) fn is_singbox_connection_context(value: &str) -> bool {
         && is_go_duration(duration)
 }
 
-/// Recognize the representation produced by Go's `time.Duration.String`.
 pub(super) fn is_go_duration(value: &str) -> bool {
     let mut remainder = value
         .strip_prefix('-')
@@ -269,9 +264,6 @@ fn log_viewport_start(
             start = first;
         } else if last >= start.saturating_add(keep) {
             let candidate = last.saturating_add(1).saturating_sub(keep);
-            // Prefer the first complete record boundary that still keeps
-            // the cursor visible. This prevents a wrapped log from becoming
-            // several keyboard navigation positions.
             start = (candidate..=first)
                 .find(|&index| {
                     index == 0 || all_rows[index - 1].log_index != all_rows[index].log_index

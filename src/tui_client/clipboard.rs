@@ -11,7 +11,6 @@ enum Backend {
     XselX11,
 }
 
-/// Read text from the system clipboard. Auto-detects Wayland vs X11.
 pub fn read_clipboard_text() -> Result<String> {
     let backend = backend()?;
     let (cmd, args): (&str, &[&str]) = match backend {
@@ -27,7 +26,6 @@ pub fn read_clipboard_text() -> Result<String> {
     }
 }
 
-/// Write text to the system clipboard. Auto-detects Wayland vs X11.
 pub fn write_clipboard_text(text: &str) -> Result<()> {
     match backend()? {
         Backend::Wayland => write_via_daemon("wl-copy", &[], text),
@@ -36,13 +34,6 @@ pub fn write_clipboard_text(text: &str) -> Result<()> {
     }
 }
 
-/// `wl-copy` reads stdin, then forks itself into a background daemon that
-/// serves the selection until something else claims the clipboard. We must
-/// (a) close our stdin handle before waiting so wl-copy can finish reading,
-/// and (b) redirect stdout/stderr to /dev/null so the inherited fds in the
-/// background daemon don't keep their pipes open forever (which would hang
-/// `wait_with_output`). We use `wait()` here (parent exits promptly after
-/// forking the daemon) rather than `wait_with_output`.
 fn write_via_daemon(cmd: &str, args: &[&str], text: &str) -> Result<()> {
     let mut child = Command::new(cmd)
         .args(args)

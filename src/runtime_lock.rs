@@ -39,9 +39,6 @@ impl RuntimeLock {
 
 impl Drop for RuntimeLock {
     fn drop(&mut self) {
-        // close() alone can leave the lock held by a concurrently forked child
-        // until exec closes its inherited CLOEXEC descriptor. Release it
-        // explicitly when the holder finishes, regardless of those copies.
         if let Err(error) = self.file.unlock() {
             tracing::warn!(%error, "Failed to release runtime lock");
         }

@@ -1,7 +1,4 @@
 #![warn(unsafe_code)]
-// Tests touch `std::env::set_var` (Rust 2024 unsafe) and other test-only
-// shims that are inherently `unsafe`. These are scoped through
-// `test_helpers::ENV_LOCK` and don't need to fight the lint.
 #![cfg_attr(test, allow(unsafe_code))]
 
 mod app;
@@ -36,7 +33,6 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitEx
 
 use crate::paths::ensure_config_dirs;
 
-/// Entry point for the TUI VPN client.
 fn main() -> Result<()> {
     let args = std::env::args_os().collect::<Vec<_>>();
     cli::warn_if_legacy_invocation(&args);
@@ -63,8 +59,6 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Initialize logging without mutating profiles.json. In particular, this
-/// must remain safe while an older daemon is still serving the active VPN.
 fn initialize_logging() -> Result<()> {
     ensure_config_dirs()?;
     let cfg = crate::paths::profiles_path()
@@ -84,10 +78,6 @@ fn initialize_logging() -> Result<()> {
     Ok(())
 }
 
-/// Resolve the tracing filter from environment and config. Precedence:
-/// `RUST_LOG` > `settings.logs.level` (if it parses as one of the five
-/// canonical levels) > `info`. Returns the bad value as the second tuple
-/// element so the caller can warn after the subscriber is live.
 fn resolve_log_filter(level: &str) -> (EnvFilter, Option<String>) {
     if let Ok(filter) = EnvFilter::try_from_default_env() {
         return (filter, None);
@@ -100,9 +90,6 @@ fn resolve_log_filter(level: &str) -> (EnvFilter, Option<String>) {
     }
 }
 
-/// Start the packaged systemd user service when available. Source builds and
-/// manual installations may not have the unit, so retain the detached-process
-/// fallback that lets the TUI remain self-contained.
 pub(crate) fn start_daemon() -> Result<()> {
     use std::process::{Command, Stdio};
 
@@ -120,11 +107,6 @@ pub(crate) fn start_daemon() -> Result<()> {
     spawn_daemon_process()
 }
 
-/// Start the daemon binary that corresponds to this client after an upgrade.
-///
-/// The packaged executable keeps using its systemd unit (and therefore its
-/// supervision). A source or manual build bypasses that unit so it cannot
-/// accidentally restart an older `/usr/bin/kvn-tui`.
 pub(crate) fn start_current_daemon() -> Result<()> {
     let current = std::env::current_exe().context("Failed to determine current executable path")?;
     if paths_refer_to_same_file(&current, std::path::Path::new("/usr/bin/kvn-tui")) {
@@ -141,8 +123,6 @@ fn paths_refer_to_same_file(left: &std::path::Path, right: &std::path::Path) -> 
     }
 }
 
-/// Re-exec ourselves as `kvn-tui --daemon` in a fresh process group so the
-/// daemon outlives the TUI when no packaged systemd unit is available.
 fn spawn_daemon_process() -> Result<()> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};

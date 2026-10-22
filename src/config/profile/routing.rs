@@ -16,9 +16,6 @@ pub enum GeoRegion {
 }
 
 impl GeoRegion {
-    /// All regions in their canonical UI / cycle order. Single source of truth
-    /// for region listings — adding a country here propagates to overlays,
-    /// key navigation, and runner availability scans.
     pub const ALL: [GeoRegion; 4] = [
         GeoRegion::Ru,
         GeoRegion::Cn,
@@ -35,7 +32,6 @@ impl GeoRegion {
         }
     }
 
-    /// Uppercase two-letter code used in user-facing labels ("Bypass RU").
     pub fn code_upper(&self) -> &'static str {
         match self {
             GeoRegion::Global => "GLOBAL",
@@ -46,9 +42,6 @@ impl GeoRegion {
     }
 }
 
-/// Routing mode for geoip/geosite rules. Generic over the active geo region so
-/// adding a country requires no new variants — `RoutingMode::Bypass(GeoRegion::Br)`
-/// just works.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RoutingMode {
     #[default]
@@ -58,7 +51,6 @@ pub enum RoutingMode {
 }
 
 impl RoutingMode {
-    /// Return the list of routing modes available for the given geo region.
     pub fn available(region: Option<GeoRegion>) -> Vec<RoutingMode> {
         match region {
             Some(r) if !matches!(r, GeoRegion::Global) => vec![
@@ -106,8 +98,6 @@ impl std::fmt::Display for RoutingMode {
     }
 }
 
-// Custom (de)serialization preserves the legacy on-disk shape
-// ("global", "bypass_ru", "only_cn", ...) so existing profiles.json files load.
 impl Serialize for RoutingMode {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
@@ -167,14 +157,9 @@ impl<'de> Deserialize<'de> for RoutingMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceRoute {
-    /// No override — the service follows the regional routing mode.
     #[default]
     Disabled,
-    /// Force the service through the VPN tunnel, even under `Bypass`.
     Proxy,
-    /// Send the service out the `direct` outbound (real network location),
-    /// even under `Only`. Deliberately bypasses the tunnel — and the kill
-    /// switch, which allowlists the `direct` outbound's fwmark by design.
     Direct,
 }
 
@@ -187,7 +172,6 @@ impl ServiceRoute {
         }
     }
 
-    /// Cycle order in the TUI overlay: Disabled → Proxy → Direct → Disabled.
     pub const fn next(self) -> Self {
         match self {
             Self::Disabled => Self::Proxy,
@@ -216,9 +200,6 @@ pub enum RoutedService {
 }
 
 impl RoutedService {
-    /// Display / rule-generation order. Iterate this instead of the
-    /// `service_routes` map — `HashMap` iteration order is nondeterministic,
-    /// which would make the generated sing-box config unstable across runs.
     pub const ALL: [Self; 2] = [Self::Steam, Self::Telegram];
 
     pub const fn label(self) -> &'static str {
@@ -245,8 +226,6 @@ pub struct GeoRouting {
 }
 
 impl GeoRouting {
-    /// Return the active routing mode for the current region.
-    /// Falls back to `Global` when no region is selected or no mode is stored.
     pub fn mode(&self) -> RoutingMode {
         self.current_region
             .and_then(|r| self.selected_region_modes.get(&r).copied())
@@ -254,19 +233,16 @@ impl GeoRouting {
             .unwrap_or(RoutingMode::Global)
     }
 
-    /// Change the active geo region.
     pub fn set_region(&mut self, region: GeoRegion) {
         self.current_region = Some(region);
     }
 
-    /// Store the routing mode for the current region.
     pub fn set_mode(&mut self, mode: RoutingMode) {
         if let Some(region) = self.current_region {
             self.selected_region_modes.insert(region, mode);
         }
     }
 
-    /// Return the routing override for `service` (absent = `Disabled`).
     pub fn service_route(&self, service: RoutedService) -> ServiceRoute {
         self.service_routes
             .get(&service)
@@ -274,8 +250,6 @@ impl GeoRouting {
             .unwrap_or_default()
     }
 
-    /// Services with an active (non-`Disabled`) routing override, in
-    /// [`RoutedService::ALL`] order.
     pub fn enabled_services(&self) -> Vec<RoutedService> {
         RoutedService::ALL
             .into_iter()
@@ -283,7 +257,6 @@ impl GeoRouting {
             .collect()
     }
 
-    /// Return routing modes available for the current region.
     pub fn available_modes(&self) -> Vec<RoutingMode> {
         RoutingMode::available(self.current_region)
     }
@@ -325,9 +298,6 @@ mod tests {
 
     #[test]
     fn routing_mode_serde_round_trip_matches_legacy_wire_format() {
-        // Every variant maps to its on-disk string and back, preserving
-        // backward compatibility with profiles.json files written by builds
-        // that used the flat enum (`bypass_ru`, `only_cn`, etc.).
         let cases: &[(RoutingMode, &str)] = &[
             (RoutingMode::Global, r#""global""#),
             (RoutingMode::Bypass(GeoRegion::Ru), r#""bypass_ru""#),
@@ -358,9 +328,6 @@ mod tests {
 
     #[test]
     fn geo_region_all_contains_every_variant() {
-        // Smoke test: GeoRegion::ALL must enumerate all enum variants.
-        // The match-statement below fails to compile if a variant is added
-        // to the enum without being listed in ALL.
         for r in GeoRegion::ALL {
             match r {
                 GeoRegion::Global | GeoRegion::Ru | GeoRegion::Cn | GeoRegion::Ir => {}
@@ -431,8 +398,6 @@ mod tests {
 
     #[test]
     fn service_routes_default_to_disabled() {
-        // Opt-in: overriding a service's route must never happen without an
-        // explicit user decision — absent map entries mean Disabled.
         let g = GeoRouting::default();
         assert!(g.service_routes.is_empty());
         for service in RoutedService::ALL {
@@ -451,7 +416,6 @@ mod tests {
         }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
         assert!(s.geo_routing.service_routes.is_empty());
-        // Empty map is skipped on serialize — no noise in profiles.json.
         assert!(
             !serde_json::to_string(&s)
                 .unwrap()
@@ -485,7 +449,6 @@ mod tests {
     #[test]
     fn enabled_services_follow_all_order() {
         let mut g = GeoRouting::default();
-        // Inserted in reverse of ALL order; a Disabled entry is excluded.
         g.service_routes
             .insert(RoutedService::Telegram, ServiceRoute::Proxy);
         g.service_routes

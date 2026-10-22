@@ -12,7 +12,6 @@ use super::popup::{centered_fixed_width_rect, centered_rect};
 
 pub(super) const HELP_POPUP_WIDTH: u16 = 51;
 
-/// Draw the help popup overlay.
 pub(super) fn draw(
     frame: &mut Frame,
     model: &Model,

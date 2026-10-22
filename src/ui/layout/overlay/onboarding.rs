@@ -84,14 +84,11 @@ fn title_line(model: &Model, step: OnboardingStep) -> Line<'static> {
     Line::from(Span::styled(title(model, step), model.theme.normal())).centered()
 }
 
-/// A stretch of a paragraph sharing one style.
 struct Run {
     text: String,
     style: Option<Style>,
 }
 
-/// One body paragraph. Prose is stored unbroken so it can be filled to the
-/// card's width at render time; the card is the only place that knows it.
 enum Passage {
     Blank,
     Text(Vec<Run>),
@@ -121,12 +118,10 @@ impl Run {
     }
 }
 
-/// A paragraph mixing prose with picked-out keys or commands.
 fn runs(runs: Vec<Run>) -> Passage {
     Passage::Text(runs)
 }
 
-/// The common single-key case of [`runs`].
 fn marked(before: &str, marked: &str, after: &str, style: Style) -> Passage {
     runs(vec![
         Run::plain(before),
@@ -135,8 +130,6 @@ fn marked(before: &str, marked: &str, after: &str, style: Style) -> Passage {
     ])
 }
 
-/// A command as written, one rendered line per source line, so a `\`
-/// continuation stays where it was put instead of being refilled as prose.
 fn command_lines(text: &str, style: Style) -> Vec<Line<'static>> {
     let indent = " ".repeat(TEXT_MARGIN);
     text.lines()
@@ -150,9 +143,6 @@ fn command_lines(text: &str, style: Style) -> Vec<Line<'static>> {
         .collect()
 }
 
-/// Fill the runs across `width`, breaking between words only and indenting each
-/// row by the card's margin. Styles travel with their words, so a highlighted
-/// stretch keeps its colour wherever the break lands.
 fn wrap(runs: &[Run], width: usize) -> Vec<Line<'static>> {
     let usable = width.saturating_sub(TEXT_MARGIN * 2).max(1);
     let indent = " ".repeat(TEXT_MARGIN);
@@ -246,8 +236,6 @@ fn command(model: &Model, step: OnboardingStep) -> Option<&'static str> {
     step.command(model.integration_setup)
 }
 
-/// The command a card shows, styled so it reads as something to run. `y` copies
-/// `OnboardingStep::clipboard_command`, the same command folded into one line.
 fn command_block(model: &Model, step: OnboardingStep) -> Passage {
     Passage::Command {
         text: command(model, step).unwrap_or_default().to_string(),
@@ -336,8 +324,6 @@ fn body(model: &Model, step: OnboardingStep) -> Vec<Passage> {
     }
 }
 
-/// The selected region when it actually has country modes to offer. `Global`
-/// and an unset region both read as "no country-specific modes".
 fn country_region(model: &Model) -> Option<GeoRegion> {
     match model.config.settings.geo_routing.current_region {
         Some(GeoRegion::Global) | None => None,
@@ -365,9 +351,6 @@ fn routing_body(model: &Model) -> Vec<Passage> {
     ]
 }
 
-/// One of the two protection cards, as data: everything that differs between
-/// auto-connect and the kill switch, so a single renderer covers the three
-/// setup states.
 struct ProtectionCard {
     step: OnboardingStep,
     intro: &'static str,
@@ -396,8 +379,6 @@ const KILL_SWITCH_CARD: ProtectionCard = ProtectionCard {
     subject: "the kill switch",
 };
 
-/// Both integrations gate on the same `kvn-tui` group, so a single reboot
-/// activates them and the copy asks for one.
 fn protection_body(model: &Model, card: &ProtectionCard, setup: SetupState) -> Vec<Passage> {
     let key = model.theme.success();
     let toggle_sentence = |lead: &str| {
@@ -439,7 +420,6 @@ mod tests {
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model.onboarding.state.step = step;
-        // Render every card, Omarchy included, with one consistent counter.
         model.onboarding.include_omarchy_card = true;
         model.overlay = Overlay::Onboarding(step);
         model
@@ -495,9 +475,6 @@ mod tests {
 
     #[test]
     fn protection_cards_follow_their_setup_state_snapshot() {
-        // `Missing` with an inactive group is the default the every-card sweep
-        // already renders; here it pairs with an active group, which asks for no
-        // reboot.
         let cases = [
             (SetupState::Missing, true, "missing-groupactive"),
             (SetupState::PendingReboot, false, "pendingreboot"),

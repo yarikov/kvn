@@ -9,19 +9,10 @@ use super::{
 };
 
 impl Config {
-    /// Bring a loaded config up to [`CURRENT_SCHEMA_VERSION`]. Every config
-    /// load runs this (`load_config_at`, the read-only and recovery loads).
-    /// Each migration step is idempotent.
-    ///
-    /// Files written by a newer kvn version (higher `schema_version` than
-    /// this build knows about) are rejected here — loading them would silently
-    /// drop future-only fields; the user must upgrade the client instead.
     pub fn migrate(&mut self) -> anyhow::Result<()> {
         self.migrate_to(CURRENT_SCHEMA_VERSION)
     }
 
-    /// Apply the ordered schema steps up to `target_version`. [`Self::migrate`]
-    /// passes [`CURRENT_SCHEMA_VERSION`]; tests stop at an intermediate version.
     pub(crate) fn migrate_to(&mut self, target_version: u32) -> anyhow::Result<()> {
         self.migrate_with_update_date_to(target_version, next_update_window_date(Local::now()))
     }
@@ -78,8 +69,6 @@ impl Config {
         Ok(())
     }
 
-    /// v0 → v1: promote the legacy `Settings.dns_strategy` field into
-    /// `Settings.dns.strategy`. Idempotent.
     fn migrate_v0_to_v1(&mut self) {
         if let Some(legacy) = self.settings.legacy_dns_strategy.take()
             && self
@@ -93,11 +82,6 @@ impl Config {
         }
     }
 
-    /// v1 → v2: promote the legacy top-level VLESS `fingerprint` field into
-    /// `cfg.tls.utls_fingerprint`. The pre-v2 sibling fields `reality` and
-    /// `ech` already deserialize straight into `cfg.tls.*` via
-    /// `#[serde(flatten)]` (identical key names), so they need no code path
-    /// here. Idempotent: `.take()` clears the legacy slot on the first run.
     fn migrate_v1_to_v2(&mut self) {
         for profile in &mut self.profiles {
             if let ProtocolConfig::Vless(cfg) = &mut profile.config
@@ -135,9 +119,6 @@ impl Config {
         }
     }
 
-    /// v4 → v5: preserve the historical always-on latency probe and HTTP
-    /// subscription support while making both behaviors configurable, and
-    /// reset the TUN interface name to the app-specific one.
     fn migrate_v4_to_v5(&mut self) {
         self.settings.connectivity_probe = ConnectivityProbeConfig::default();
         self.settings.allow_insecure_http_subscriptions = true;
@@ -206,8 +187,6 @@ mod tests {
     use crate::test_helpers::vless_cfg;
     use uuid::Uuid;
 
-    // ---- migrate: reject configs from the future ----
-
     #[test]
     fn migrate_rejects_schema_version_from_the_future() {
         let mut cfg = Config {
@@ -266,15 +245,12 @@ mod tests {
         assert_eq!(current.schema_version, CURRENT_SCHEMA_VERSION);
     }
 
-    // ---- Config::migrate ----
-
     #[test]
     fn migrate_v0_promotes_legacy_dns_strategy() {
         let mut cfg = Config {
             schema_version: 0,
             ..Config::default()
         };
-        // Legacy field set, new field at default → promote.
         cfg.settings.legacy_dns_strategy = Some(DnsStrategy::OnlyIpv4);
         cfg.settings.dns.legacy_strategy = None;
         cfg.migrate_to(1).unwrap();
@@ -375,7 +351,6 @@ mod tests {
         cfg.settings.dns.legacy_strategy = Some(DnsStrategy::OnlyIpv4);
         cfg.settings.legacy_dns_strategy = Some(DnsStrategy::default());
         cfg.migrate_to(1).unwrap();
-        // New field wins.
         assert_eq!(
             cfg.settings.dns.legacy_strategy,
             Some(DnsStrategy::OnlyIpv4)
@@ -391,7 +366,6 @@ mod tests {
         cfg.settings.legacy_dns_strategy = Some(DnsStrategy::OnlyIpv6);
         cfg.settings.dns.legacy_strategy = Some(DnsStrategy::OnlyIpv4);
         cfg.migrate().unwrap();
-        // No promotion when schema_version != 0.
         assert_eq!(
             cfg.settings.dns.legacy_strategy,
             Some(DnsStrategy::OnlyIpv4)
@@ -445,8 +419,6 @@ mod tests {
 
     #[test]
     fn migrate_v1_to_v2_keeps_new_fingerprint_when_both_set() {
-        // If a future writer somehow produced both, the new slot wins
-        // (legacy is treated purely as a one-way input).
         let mut cfg = Config {
             schema_version: 1,
             ..Config::default()
@@ -497,7 +469,6 @@ mod tests {
         });
         cfg.migrate().unwrap();
         assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);
-        // No panic, no mutation.
     }
 
     #[test]
@@ -606,7 +577,6 @@ mod tests {
 
     #[test]
     fn migrate_chains_v0_through_current() {
-        // schema_version=0 must arrive at the current version in one call.
         let mut cfg = Config {
             schema_version: 0,
             ..Config::default()

@@ -71,15 +71,11 @@ pub(crate) use panes::{
     source_hit_test, sync_log_scroll, sync_sources_scroll,
 };
 
-/// Height (including borders) of the full-width traffic header rendered at
-/// the very top of the UI when the VPN is connected. One content row plus
-/// top/bottom borders = 3 lines.
 const TRAFFIC_PANEL_HEIGHT: u16 = 3;
 
 pub(crate) const MIN_TERMINAL_WIDTH: u16 = 70;
 pub(crate) const MIN_TERMINAL_HEIGHT: u16 = 15;
 
-/// Render the full application UI into the terminal frame.
 #[cfg(test)]
 pub(crate) fn draw(frame: &mut Frame, model: &Model) {
     draw_impl(frame, model, MainPaneFocus::Sources, None, None, &[]);
@@ -140,10 +136,6 @@ fn draw_impl(
 ) {
     let area = frame.area();
 
-    // Paint the palette's background across the whole frame first so that
-    // every widget below — most of which set only `fg` — inherits a
-    // theme-consistent background instead of the terminal default. Popups
-    // override with their own `popup_bg()` (currently the same color).
     frame.render_widget(Block::default().style(model.theme.background()), area);
 
     if !terminal_size_supported(area) {
@@ -151,8 +143,6 @@ fn draw_impl(
         return;
     }
 
-    // Top-level vertical layout: traffic header, main content, status bar. The
-    // minimum-size guard above guarantees enough room for every section.
     let split = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

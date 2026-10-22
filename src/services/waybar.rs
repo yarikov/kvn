@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 use std::os::unix::fs::MetadataExt;
 use std::time::{Duration, Instant};
 
-/// Write current connection state to the state JSON file.
 pub fn write_state(model: &Model) {
     let state = build_state(model);
     if let Err(e) =
@@ -30,7 +29,6 @@ fn build_state(model: &Model) -> AppState {
     }
 }
 
-/// Clear the state file (used on startup to recover from a crash).
 pub fn clear_state() {
     if let Err(e) = crate::paths::ensure_state_json_path()
         .and_then(|path| write_state_to(&AppState::default(), &path))
@@ -66,7 +64,6 @@ fn read_state_from(path: impl AsRef<std::path::Path>) -> AppState {
         .unwrap_or_default()
 }
 
-/// Read the current state from disk.
 pub fn read_state() -> AppState {
     match crate::paths::state_json_path() {
         Ok(path) if path.exists() => read_state_from(&path),
@@ -76,12 +73,6 @@ pub fn read_state() -> AppState {
     }
 }
 
-/// Stop a sing-box process left behind by a crashed daemon.
-///
-/// A healthy daemon retains the child handle and keeps running when the TUI
-/// detaches, so finding a live PID in `state.json` during daemon startup means
-/// the previous daemon died. The new daemon cannot safely manage that process
-/// as a `Child`; terminate it before applying the normal auto-connect policy.
 pub fn cleanup_stale_session() -> Result<Option<u32>> {
     let state = read_state();
     let Some(pid) = state.singbox_pid else {
@@ -99,7 +90,6 @@ pub fn cleanup_stale_session() -> Result<Option<u32>> {
             return Err(e).with_context(|| format!("Failed to inspect stale sing-box PID {pid}"));
         }
     };
-    // SAFETY: getuid has no preconditions and does not dereference pointers.
     #[allow(unsafe_code)]
     let current_uid = unsafe { libc::getuid() };
     anyhow::ensure!(
@@ -112,8 +102,6 @@ pub fn cleanup_stale_session() -> Result<Option<u32>> {
         return Ok(Some(pid));
     }
 
-    // Re-check identity before escalating so a rapidly reused PID cannot make
-    // us signal an unrelated process.
     anyhow::ensure!(
         is_singbox_alive(pid),
         "Stale sing-box PID {pid} changed identity while stopping"
@@ -137,7 +125,6 @@ fn wait_until_stopped(pid: u32, timeout: Duration) -> bool {
     !is_singbox_alive(pid)
 }
 
-/// Print waybar status JSON to stdout.
 pub fn print_status() {
     print_waybar_from_state(&displayed_state(read_state()));
 }
@@ -150,9 +137,6 @@ fn displayed_state(state: AppState) -> AppState {
 }
 
 pub fn is_singbox_alive(pid: u32) -> bool {
-    // Use /proc/{pid}/comm instead of /proc/{pid}/exe because the kernel
-    // blocks read_link on /proc/{pid}/exe for processes with file
-    // capabilities (cap_net_admin,cap_net_raw=ep) even for the owning user.
     let comm = std::path::PathBuf::from(format!("/proc/{pid}/comm"));
     let named_singbox = std::fs::read_to_string(&comm)
         .map(|name| name.trim() == "sing-box")
@@ -161,9 +145,6 @@ pub fn is_singbox_alive(pid: u32) -> bool {
         return false;
     }
 
-    // A terminated child remains in /proc as a zombie until its parent reaps
-    // it. It no longer owns the TUN or routes and must not be reported as a
-    // live VPN session during monitoring or crash recovery.
     let status = std::path::PathBuf::from(format!("/proc/{pid}/status"));
     std::fs::read_to_string(status)
         .map(|contents| {
@@ -392,7 +373,6 @@ mod tests {
             active_profile_id: None,
             singbox_pid: None,
         };
-        // Just ensure it doesn't panic and produces output
         print_waybar_from_state(&state);
 
         let state = AppState {

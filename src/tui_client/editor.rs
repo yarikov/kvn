@@ -24,7 +24,6 @@ const OMARCHY_BLOCKING_EDITORS: [&str; 8] = [
     "nvim", "vim", "nano", "micro", "hx", "helix", "fresh", "emacs",
 ];
 
-/// Config object that should be selected when the editor opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EditorTarget {
     Profile(usize),
@@ -43,7 +42,6 @@ impl From<SourceRow> for EditorTarget {
     }
 }
 
-/// Detect the user's preferred editor using $VISUAL, $EDITOR, or a fallback chain.
 fn detect_editor() -> String {
     env::var("VISUAL")
         .or_else(|_| env::var("EDITOR"))
@@ -70,11 +68,6 @@ struct EditorCommand {
 }
 
 impl EditorCommand {
-    /// Split an editor command into program and leading arguments.
-    ///
-    /// $VISUAL/$EDITOR may contain flags, not just a binary — Omarchy 4 sets
-    /// `EDITOR="omarchy-launch-editor --inline"` — so the value cannot be passed
-    /// to `Command::new` whole.
     fn parse(editor: &str) -> Self {
         let mut parts = editor.split_whitespace().map(String::from);
         let program = parts.next().unwrap_or_else(|| "vi".to_string());
@@ -152,7 +145,6 @@ fn find_target_line(path: &Path, target: EditorTarget) -> Option<usize> {
     JsonIndex::new(&content).line(&pointer)
 }
 
-/// Build editor command-line arguments that jump to `line` in `path`.
 fn editor_args(editor: &str, path: &Path, line: usize) -> Vec<String> {
     let path_with_line = format!("{}:{}", path.display(), line);
     match line_jump(editor) {
@@ -223,7 +215,6 @@ fn preserve_invalid_edit(snapshot: EditorSnapshot) -> Result<PathBuf> {
     }
 }
 
-/// Edit an isolated snapshot. The live `profiles.json` remains daemon-owned.
 pub fn open_profiles_editor(target: Option<EditorTarget>, base: Config) -> Result<EditorOutcome> {
     let editor = detect_editor();
     let editor = EditorCommand::parse(&editor)
@@ -783,7 +774,6 @@ mod tests {
         let content = fs::read_to_string(&path).unwrap();
         let lines: Vec<_> = content.lines().collect();
         assert_eq!(lines[line.unwrap() - 1].trim(), "{");
-        // The line after the opening brace should contain the first profile's id
         assert!(lines[line.unwrap()].contains("id"));
     }
 
@@ -919,8 +909,6 @@ mod tests {
         );
     }
 
-    // ---- editor_args ----
-
     fn editor(program: &str, args: &[&str]) -> EditorCommand {
         EditorCommand {
             program: program.to_string(),
@@ -1006,7 +994,6 @@ mod tests {
 
     #[test]
     fn editor_args_handles_full_path_to_editor() {
-        // Full path: only the file_name is matched against the switch table.
         let args = editor_args("/usr/bin/code", Path::new("/p.json"), 2);
         assert_eq!(args[0], "--goto");
     }
@@ -1061,14 +1048,11 @@ mod tests {
         assert_eq!(vim.clone().bypass_omarchy_launcher().unwrap(), vim);
     }
 
-    // ---- detect_editor ----
-
     #[test]
     fn detect_editor_prefers_visual_over_editor() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let prev_visual = env::var("VISUAL").ok();
         let prev_editor = env::var("EDITOR").ok();
-        // SAFETY: tests using ENV_LOCK serialize env mutation.
         unsafe {
             env::set_var("VISUAL", "my-visual-editor");
             env::set_var("EDITOR", "my-other-editor");
@@ -1095,9 +1079,6 @@ mod tests {
             env::remove_var("VISUAL");
             env::remove_var("EDITOR");
         }
-        // On any reasonable dev/CI box at least one of nvim/vim/vi/nano is
-        // present; the function must return one of those (or "vi" as the
-        // hard-coded last resort).
         let editor = detect_editor();
         assert!(
             ["nvim", "vim", "vi", "nano"].contains(&editor.as_str()),

@@ -76,7 +76,6 @@ pub(super) fn content_sized_rect_in(
     )
 }
 
-/// Helper to render a centered popup with a border and text.
 pub(super) fn draw_modal(frame: &mut Frame, theme: &Theme, area: Rect, lines: Vec<Line>) {
     let popup_area = content_sized_rect(DIALOG_POPUP_WIDTH, area, &lines);
 
@@ -200,7 +199,6 @@ pub(super) fn draw_selection_modal(
     );
 }
 
-/// Compute a centered rectangle with given percentage sizes.
 pub(super) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)

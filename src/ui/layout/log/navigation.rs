@@ -8,8 +8,6 @@ use super::{LogDisplayRow, format_log_for_display, text_between_columns};
 
 const LOG_CURSOR_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// TUI-client-local keyboard state for the log pane. Log contents are local
-/// to the client as well, so none of this belongs in the daemon snapshot.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LogNavigation {
     pub(super) cursor: Option<usize>,
@@ -399,7 +397,7 @@ mod tests {
         for index in 0..12 {
             model.push_log(format!("line {index}"));
         }
-        let area = Rect::new(0, 0, 90, 15); // nine log content rows
+        let area = Rect::new(0, 0, 90, 15);
         let viewport = log_viewport(&model, area).unwrap();
         assert_eq!(viewport.first_log_index(), Some(3));
         assert_eq!(viewport.last_log_index(), Some(11));

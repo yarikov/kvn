@@ -5,20 +5,10 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-/// Write `data` to `dest` atomically and durably.
-///
-/// Writes to `<dest>.tmp`, fsyncs the data to disk, renames over `dest`, then
-/// fsyncs the parent directory so the rename itself survives a crash. Without
-/// the parent-dir fsync, on ext4 with the default `data=ordered` the rename
-/// metadata can be lost after a power cut even though the file contents are
-/// persisted — leaving the user with an empty or stale `dest`.
 pub fn write(dest: &Path, data: &[u8]) -> Result<()> {
     write_inner(dest, data, None)
 }
 
-/// Atomically write `data` only while the destination still has the bytes the
-/// caller previously read. The comparison happens after the temporary file is
-/// durable and immediately before rename.
 pub fn write_if_unchanged(dest: &Path, data: &[u8], expected: Option<&[u8]>) -> Result<()> {
     write_inner(dest, data, Some(expected))
 }
@@ -62,9 +52,6 @@ fn write_inner(dest: &Path, data: &[u8], expected: Option<Option<&[u8]>>) -> Res
         .map_err(|error| error.error)
         .with_context(|| format!("Failed to publish temp file as {:?}", dest))?;
 
-    // Persist the rename itself. Best-effort: some filesystems (tmpfs, certain
-    // FUSE mounts) return errors here even though the rename is safe in
-    // practice — we don't want to fail the whole save for that.
     match fs::File::open(dir) {
         Ok(handle) => {
             if let Err(e) = handle.sync_all() {
@@ -173,8 +160,6 @@ mod tests {
 
     #[test]
     fn atomic_write_tightens_permissions_on_existing_loose_file() {
-        // Upgrade path: a pre-existing file written by an older build with
-        // umask-derived 0644 must end up at 0600 after the next save.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("profiles.json");
         fs::write(&path, b"old").unwrap();

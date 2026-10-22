@@ -149,9 +149,6 @@ pub(super) fn commit_config_change(
 }
 
 pub(super) fn report_uncommitted_save(model: &mut Model) {
-    // The main loop must consume this marker through
-    // `commit_config_change` before executing effects. Never fall
-    // back to an unconditional write here.
     model.set_status(
         StatusKey::Config,
         AppStatus::Error("Configuration save failed: uncommitted SaveConfig effect".into()),
@@ -196,13 +193,6 @@ pub(super) fn persist_onboarding(
     }
 }
 
-/// Revert a failed progress write so the user can repeat the action. Settings
-/// the same update already committed are deliberately left alone.
-///
-/// `awaiting` is cleared rather than restored: the handed-off screen has closed
-/// by now and will never report again, so keeping it would strand the tour.
-/// The `recovery` says where the card belongs, which the post-transition
-/// `model.overlay` can no longer tell us.
 pub(super) fn restore_onboarding_after_failure(
     model: &mut Model,
     previous: OnboardingProgress,
@@ -219,10 +209,6 @@ pub(super) fn restore_onboarding_after_failure(
     }
 }
 
-/// How this update would have to be undone, when it moved the tour at all. Read
-/// before the error path filters the effect list: only a tour transition may
-/// revert tour progress, or an unrelated failed save would reopen a finished
-/// tour.
 fn onboarding_transition(effects: &[Effect]) -> Option<OnboardingRecovery> {
     effects.iter().find_map(|effect| match effect {
         Effect::PersistOnboarding { recovery, .. } => Some(*recovery),
@@ -330,8 +316,6 @@ mod tests {
     use crate::test_helpers::{ENV_LOCK, EnvVarGuard, enter, model_with_profiles};
     use std::path::Path;
 
-    /// A state home whose `kvn` directory is occupied by a regular file, so
-    /// every progress write fails without touching the real one.
     fn unwritable_state_home(dir: &Path) -> EnvVarGuard {
         let guard = EnvVarGuard::set("XDG_STATE_HOME", dir);
         std::fs::write(dir.join("kvn"), "not a directory").unwrap();
@@ -375,7 +359,6 @@ mod tests {
         assert_eq!(model.onboarding.awaiting, None);
         assert!(model.status_is_error());
 
-        // With a writable path the very same key press now works.
         let writable = tempfile::tempdir().unwrap();
         let _writable_home = EnvVarGuard::set("XDG_STATE_HOME", writable.path());
         let effects = update(&mut model, Msg::Key(enter()));
@@ -400,7 +383,6 @@ mod tests {
         update(&mut model, Msg::Key(enter()));
         assert_eq!(model.overlay, Overlay::RoutingMode);
 
-        // Confirm the current mode, which is also the retry path.
         let effects = update(&mut model, Msg::Key(enter()));
         assert!(matches!(
             effects.first(),
@@ -415,8 +397,6 @@ mod tests {
         assert_eq!(model.onboarding.state.step, OnboardingStep::Routing);
         assert_eq!(model.onboarding.awaiting, None);
         assert!(model.onboarding.card_pending);
-        // The screen owned the transition, so the card waits for the tick
-        // rather than being restored in place.
         assert_eq!(model.overlay, Overlay::None);
         assert_eq!(model.config.settings.geo_routing.mode(), committed);
         assert_eq!(

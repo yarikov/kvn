@@ -6,9 +6,6 @@ use crate::onboarding::{HandoffScreen, IntegrationSetup, OnboardingRecovery, Onb
 pub(in crate::app::update) enum Trigger {
     RegionCommitted,
     RoutingCommitted,
-    /// Raised by `Msg::Connected`. Adding a profile is deliberately not enough:
-    /// the step is done once the user has actually connected with one, from a
-    /// subscription or standalone alike.
     TunnelUp,
 }
 
@@ -22,19 +19,10 @@ impl Trigger {
     }
 }
 
-/// `Msg::Connected` is raised once per connection, so a `Profiles` step taken
-/// while the tunnel is already up would wait for an event that has already
-/// happened. A failed progress write restores the card, and a client can attach
-/// long after the connection came up, so both ends allow for it.
 fn tunnel_already_up(model: &Model, step: OnboardingStep) -> bool {
     step == OnboardingStep::Profiles && model.connection == ConnectionState::Connected
 }
 
-/// Open the real screen a card points at. Nothing durable changes, so this
-/// cannot fail and emits no effect: a restart mid-handoff legitimately forgets
-/// the pending screen and reopens the same card. The one exception is a step
-/// whose outcome is already in: it has nothing to wait for, so it moves the card
-/// on like an informational one.
 pub(in crate::app::update) fn handoff(model: &mut Model, step: OnboardingStep) -> Vec<Effect> {
     let Some(screen) = step.handoff_screen(&model.config) else {
         return vec![];
@@ -58,10 +46,6 @@ pub(in crate::app::update) fn handoff(model: &mut Model, step: OnboardingStep) -
     vec![]
 }
 
-/// A TUI attaching mid-tour. A handoff in flight is left alone — the screen it
-/// opened is the one the user has to act on — unless what it waits for has
-/// already happened, which would otherwise strand the tour behind an event that
-/// cannot repeat.
 pub(in crate::app::update) fn resume(model: &mut Model) -> Vec<Effect> {
     if model.onboarding.is_complete() {
         return vec![];
@@ -89,11 +73,6 @@ fn card_reports_integration(step: OnboardingStep) -> bool {
     )
 }
 
-/// Re-probe the integration the card on screen reports, so a setup command run
-/// in another terminal shows up on it. Called both as a card opens and from the
-/// 250 ms tick, with one gate for both: the probe spawns `pkcheck` / `id`, so it
-/// runs at most every `PROBE_INTERVAL`, and never while one is still out — two
-/// overlapping probes could report back out of order and restore a stale state.
 pub(in crate::app::update) fn probe_visible_card(model: &mut Model) -> Vec<Effect> {
     let Overlay::Onboarding(step) = model.overlay else {
         return vec![];
@@ -222,7 +201,6 @@ mod tests {
     fn one_throttle_covers_both_the_card_and_the_tick() {
         use crate::app::update::tick::handle_tick;
 
-        // Opening the card probes, and the tick right after must not repeat it.
         let mut model = tour_at(OnboardingStep::Doctor);
         assert!(
             advance(&mut model, OnboardingStep::AutoConnect)
@@ -233,7 +211,6 @@ mod tests {
         assert!(!handle_tick(&mut model).contains(&Effect::CheckIntegrationSetup));
         assert_eq!(model.last_integration_check_at, opened_at);
 
-        // The interval has passed, but the first probe is still out.
         model.last_integration_check_at = opened_at.and_then(|at| at.checked_sub(PROBE_INTERVAL));
         assert!(probe_visible_card(&mut model).is_empty());
 

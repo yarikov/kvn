@@ -29,10 +29,6 @@ pub(super) fn open(state: &mut ClientLoop) -> Result<()> {
     state.event_reader_control.resume();
     let status = editor_status(result);
     let reported = if let Some(AppStatus::Error(message)) = &status {
-        // The live config was never opened by the
-        // editor. Route the snapshot error through
-        // the daemon so it survives the next state
-        // broadcast and appears in app.log.
         state.report_error(message.clone())
     } else {
         if let Some(AppStatus::Info(message)) = &status {

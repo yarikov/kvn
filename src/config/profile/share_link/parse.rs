@@ -7,7 +7,6 @@ use uuid::Uuid;
 use super::{FINALMASK_PARAM, read_hysteria2_finalmask};
 use crate::config::profile::*;
 
-/// Parse a share link text into a Profile. Dispatches on URI scheme.
 pub fn parse_share_link(text: &str) -> Result<Profile> {
     let trimmed = text.trim();
     let scheme_end = trimmed.find("://").context("Missing URI scheme")?;
@@ -105,7 +104,6 @@ fn fragment_name(url: &Url, fallback: &str) -> Result<String> {
 pub(crate) fn decode_b64_lenient(s: &str) -> Result<Vec<u8>> {
     use base64::Engine;
     let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    // Try URL-safe-no-pad first (ss://, vmess JSON often), then standard.
     if let Ok(b) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&cleaned) {
         return Ok(b);
     }
@@ -280,8 +278,6 @@ fn parse_bool_param(s: &str) -> bool {
     matches!(s, "1" | "true" | "yes")
 }
 
-/// Apply transport/SNI/utls/reality/ech parameters that VLESS/VMess/Trojan
-/// share when their share-link is in plain URI form (not VMess base64-JSON).
 fn extract_tls_common_from_query(q: &std::collections::HashMap<String, String>) -> TlsCommon {
     let mut tls = TlsCommon::default();
     if let Some(sni) = q.get("sni") {
@@ -311,9 +307,6 @@ fn extract_tls_common_from_query(q: &std::collections::HashMap<String, String>) 
             server_name: q.get("sni").cloned().unwrap_or_default(),
             spider_x: q.get("spx").cloned().unwrap_or_default(),
         });
-        // sing-box honors `reality.server_name` exclusively when REALITY is
-        // enabled; keeping a duplicate in `tls.server_name` would break the
-        // encode→parse round-trip (one input `sni` becomes two destinations).
         tls.server_name = None;
     }
     tls.ech = q.get("ech").map(|value| ech_from_link(value, &tls));
@@ -360,7 +353,6 @@ fn transport_from_params(params: &BTreeMap<String, serde_json::Value>) -> Option
     Some(transport)
 }
 
-/// Parse a VLESS URI fragment.
 fn parse_vless(rest: &str) -> Result<Profile> {
     let url = parse_uri("vless", rest)?;
     let uuid = url.username().to_string();
@@ -385,17 +377,12 @@ fn parse_vless(rest: &str) -> Result<Profile> {
         };
     }
     cfg.transport = extract_transport_from_query(&query);
-    // Shared with VMess/Trojan: handles sni / alpn / fp / insecure and
-    // routes pbk+sid+spx+sni into a `RealitySettings` block when present.
     cfg.tls = extract_tls_common_from_query(&query);
     cfg.security = stream_security(query.get("security").map(String::as_str), &cfg.tls);
 
     Ok(profile)
 }
 
-/// Parse a VMess share link. Supports both formats:
-/// (a) Base64 JSON: `vmess://<base64 JSON>` with v/ps/add/port/id/aid/scy/net/type/host/path/tls/sni/alpn/fp.
-/// (b) Plain URI: `vmess://uuid@host:port?security=tls&type=ws&path=&host=#name`.
 fn parse_vmess(rest: &str) -> Result<Profile> {
     if !rest.contains('@') {
         return parse_vmess_b64(rest);
@@ -586,7 +573,6 @@ fn parse_vmess_security(s: Option<&str>) -> VmessSecurity {
     }
 }
 
-/// Parse `trojan://password@host:port?sni=&type=&path=&host=#name`. TLS is implicit.
 fn parse_trojan(rest: &str) -> Result<Profile> {
     let url = parse_uri("trojan", rest)?;
     let password = urlencoding::decode(url.username())?.to_string();
@@ -616,10 +602,7 @@ fn parse_trojan(rest: &str) -> Result<Profile> {
     })
 }
 
-/// Parse Shadowsocks share link. Supports SIP002 (`ss://b64(method:pw)@host:port#name`)
-/// and the legacy fully-base64 form (`ss://b64(method:pw@host:port)#name`).
 fn parse_shadowsocks(rest: &str) -> Result<Profile> {
-    // Split fragment off so we don't accidentally base64-decode the name.
     let (body, fragment) = match rest.split_once('#') {
         Some((body, fragment)) => (body, Some(fragment)),
         None => (rest, None),
@@ -632,7 +615,6 @@ fn parse_shadowsocks(rest: &str) -> Result<Profile> {
         let (host, port) = shadowsocks_host_port(hostport)?;
         (method, password, host, port)
     } else {
-        // Legacy: entire body is base64.
         let bytes = decode_b64_lenient(body).context("Shadowsocks base64")?;
         let s = String::from_utf8(bytes).context("Shadowsocks base64 utf8")?;
         let (creds, hostport) = s
@@ -706,7 +688,6 @@ fn parse_shadowsocks_cipher(s: &str) -> Option<ShadowsocksCipher> {
     })
 }
 
-/// Parse `hysteria2://password@host:port?obfs=&obfs-password=&sni=&insecure=&alpn=#name`.
 fn parse_hysteria2(rest: &str) -> Result<Profile> {
     let url = parse_uri("hysteria2", rest)?;
     let password = urlencoding::decode(url.username())?.to_string();
@@ -791,7 +772,6 @@ fn mbps(query: &HashMap<String, String>, key: &str, alias: &str) -> Option<u32> 
         .and_then(|s| s.parse().ok())
 }
 
-/// Parse `tuic://uuid:password@host:port?congestion_control=&udp_relay_mode=&alpn=&sni=#name`.
 fn parse_tuic(rest: &str) -> Result<Profile> {
     let url = parse_uri("tuic", rest)?;
     let uuid = urlencoding::decode(url.username())?.to_string();
@@ -840,7 +820,6 @@ fn parse_tuic(rest: &str) -> Result<Profile> {
     })
 }
 
-/// Parse `socks5://user:pass@host:port#name` (also `socks://`).
 fn parse_socks(scheme: &str, rest: &str, version: SocksVersion) -> Result<Profile> {
     let url = parse_uri(scheme, rest)?;
     let host = url
@@ -871,8 +850,6 @@ fn parse_socks(scheme: &str, rest: &str, version: SocksVersion) -> Result<Profil
     })
 }
 
-/// Parse `http://user:pass@host:port#name` / `https://...#name`. The `tls` flag
-/// is set when the scheme is `https`.
 fn parse_http(scheme: &str, rest: &str) -> Result<Profile> {
     let tls_enabled = scheme == "https";
     let url = parse_uri(scheme, rest)?;
@@ -965,7 +942,6 @@ fn parse_naive_base64(rest: &str) -> Result<Profile> {
     parse_naive("naive+https", &format!("{userinfo}@{host_port}{tail}"))
 }
 
-/// Parse `ssh://user@host:port#name` (optional `?password=&private_key_path=`).
 fn parse_ssh(rest: &str) -> Result<Profile> {
     let url = parse_uri("ssh", rest)?;
     let host = url
@@ -1000,7 +976,6 @@ fn parse_ssh(rest: &str) -> Result<Profile> {
     })
 }
 
-/// Parse `anytls://password@host:port?sni=#name`.
 fn parse_anytls(rest: &str) -> Result<Profile> {
     let url = parse_uri("anytls", rest)?;
     let password = urlencoding::decode(url.username())?.to_string();
@@ -1030,10 +1005,6 @@ fn parse_anytls(rest: &str) -> Result<Profile> {
     })
 }
 
-/// Parse `shadowtls://stpassword@host:port?version=3&ss-method=&ss-password=&sni=#name`.
-/// There is no widely-deployed standard URI for ShadowTLS; this form follows the
-/// closest community convention. The inner Shadowsocks cipher and password are
-/// required (they configure the detour outbound that carries actual traffic).
 fn parse_shadowtls(rest: &str) -> Result<Profile> {
     let url = parse_uri("shadowtls", rest)?;
     let password = urlencoding::decode(url.username())?.to_string();
@@ -1088,26 +1059,20 @@ mod tests {
     use super::*;
     use crate::test_helpers::vless_cfg;
 
-    // ---- decode_b64_lenient: accept all four base64 variants users find
-    // in the wild (Shadowsocks legacy, SIP002, VMess JSON payloads).
-
     #[test]
     fn decode_b64_lenient_accepts_url_safe_no_pad() {
-        // "hello" → aGVsbG8 (URL-safe, no padding)
         let out = decode_b64_lenient("aGVsbG8").unwrap();
         assert_eq!(out, b"hello");
     }
 
     #[test]
     fn decode_b64_lenient_accepts_url_safe_padded() {
-        // "hello" → aGVsbG8= (URL-safe, padded)
         let out = decode_b64_lenient("aGVsbG8=").unwrap();
         assert_eq!(out, b"hello");
     }
 
     #[test]
     fn decode_b64_lenient_accepts_standard_no_pad() {
-        // 0xFB,0xFF → +/8 (standard alphabet uses +/, URL-safe uses -_)
         let out = decode_b64_lenient("+/8").unwrap();
         assert_eq!(out, vec![0xFB, 0xFF]);
     }
@@ -1120,14 +1085,12 @@ mod tests {
 
     #[test]
     fn decode_b64_lenient_strips_whitespace() {
-        // Wrapped base64 from email/Telegram pastes.
         let out = decode_b64_lenient("aGVs\nbG8=\n").unwrap();
         assert_eq!(out, b"hello");
     }
 
     #[test]
     fn decode_b64_lenient_rejects_garbage() {
-        // `!` is not in any base64 alphabet — must error, not panic.
         assert!(decode_b64_lenient("not!!base64").is_err());
     }
 
@@ -1135,8 +1098,6 @@ mod tests {
     fn decode_b64_lenient_empty_input_is_empty_output() {
         assert_eq!(decode_b64_lenient("").unwrap(), Vec::<u8>::new());
     }
-
-    // ---- parse_alpn: comma-separated list, trims whitespace, drops empties.
 
     #[test]
     fn parse_alpn_single_entry() {
@@ -1161,12 +1122,9 @@ mod tests {
 
     #[test]
     fn parse_alpn_drops_empty_entries() {
-        // Trailing / repeated commas in user-pasted URIs.
         assert_eq!(parse_alpn("h2,,"), vec!["h2".to_string()]);
         assert_eq!(parse_alpn(""), Vec::<String>::new());
     }
-
-    // ---- parse_bool_param: accept the wire values producers actually use.
 
     #[test]
     fn parse_bool_param_accepts_truthy_strings() {
@@ -1181,7 +1139,6 @@ mod tests {
         assert!(!parse_bool_param("false"));
         assert!(!parse_bool_param("no"));
         assert!(!parse_bool_param(""));
-        // Case-sensitive: producers normalise to lowercase.
         assert!(!parse_bool_param("True"));
         assert!(!parse_bool_param("YES"));
     }
@@ -1587,8 +1544,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ---- VMess ----
-
     #[test]
     fn parse_vmess_uri_form() {
         let uri = "vmess://vm-uuid@1.1.1.1:443?security=tls&type=ws&path=/ws&host=host.example&sni=sni.example#VMess-1";
@@ -1636,8 +1591,6 @@ mod tests {
         assert_eq!(t.path.as_deref(), Some("/wp"));
     }
 
-    // ---- Trojan ----
-
     #[test]
     fn parse_trojan_basic() {
         let uri = "trojan://secret@trojan.example:443?sni=sni.example&type=ws&path=/p#Trojan-1";
@@ -1660,8 +1613,6 @@ mod tests {
         };
         assert_eq!(cfg.password, "hello world");
     }
-
-    // ---- Shadowsocks ----
 
     #[test]
     fn parse_shadowsocks_sip002() {
@@ -1704,8 +1655,6 @@ mod tests {
         let uri = format!("ss://{}@1.2.3.4:8388#X", creds);
         assert!(parse_share_link(&uri).is_err());
     }
-
-    // ---- Hysteria2 ----
 
     #[test]
     fn parse_hysteria2_with_obfs_and_alias() {
@@ -1952,8 +1901,6 @@ mod tests {
         assert!(cfg.tls.diagnostics().is_empty());
     }
 
-    // ---- TUIC ----
-
     #[test]
     fn parse_tuic_basic() {
         let uri = "tuic://tu-uuid:tp@tuic.example:443?congestion_control=cubic&udp_relay_mode=quic&zero_rtt_handshake=1&alpn=h3&sni=sni.example#TUIC";
@@ -1969,8 +1916,6 @@ mod tests {
         assert!(cfg.zero_rtt_handshake);
         assert_eq!(cfg.tls.alpn, vec!["h3".to_string()]);
     }
-
-    // ---- NaiveProxy ----
 
     #[test]
     fn parse_naive_links_in_s_ui_form() {
@@ -2016,8 +1961,6 @@ mod tests {
         assert_eq!(cfg.tls.server_name.as_deref(), Some("sni.example"));
         assert_eq!(p.share_link_params, params(&[("padding", "1".into())]));
     }
-
-    // ---- SOCKS / HTTP / SSH / AnyTLS / ShadowTLS ----
 
     #[test]
     fn parse_socks5_with_auth() {
@@ -2099,13 +2042,9 @@ mod tests {
 
     #[test]
     fn parse_shadowtls_requires_inner_ss_password() {
-        // No ss-password means we can't build the SS detour.
         let uri = "shadowtls://stp@st.example:443?version=3&ss-method=aes-128-gcm#X";
         assert!(parse_share_link(uri).is_err());
     }
-
-    // ---- P0 regression: VLESS plain-TLS share links must preserve
-    // sni / alpn / insecure end-to-end.
 
     #[test]
     fn parse_vless_plain_tls_preserves_sni() {
@@ -2127,21 +2066,14 @@ mod tests {
         assert_eq!(cfg.tls.utls_fingerprint.as_deref(), Some("chrome"));
     }
 
-    // ---- Error-path coverage: malformed share links must surface as
-    // Result::Err rather than panic, and must not silently construct a
-    // profile with empty credentials. Closes the "user pasted a broken
-    // URI from a Telegram channel" gap that share_link.rs guards.
-
     #[test]
     fn parse_vmess_b64_rejects_invalid_base64() {
-        // `!` is outside every base64 alphabet.
         assert!(parse_share_link("vmess://not!!base64").is_err());
     }
 
     #[test]
     fn parse_vmess_b64_rejects_missing_id() {
         use base64::Engine;
-        // Valid base64 + valid JSON, but no `id` field.
         let json = r#"{"add":"1.1.1.1","port":443,"ps":"X"}"#;
         let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes());
         let err = parse_share_link(&format!("vmess://{b64}"))
@@ -2288,7 +2220,6 @@ mod tests {
 
     #[test]
     fn parse_tuic_rejects_missing_password() {
-        // `uuid:` with empty password.
         assert!(parse_share_link("tuic://uuid:@tuic.example:443#X").is_err());
     }
 
@@ -2324,7 +2255,6 @@ mod tests {
 
     #[test]
     fn parse_socks_rejects_missing_port() {
-        // socks5:// without an explicit port — there's no protocol default.
         assert!(parse_share_link("socks5://user:pass@socks.example#X").is_err());
     }
 }

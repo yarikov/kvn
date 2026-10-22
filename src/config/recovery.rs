@@ -33,7 +33,6 @@ impl RecoveryKind {
 }
 
 fn classify(name: &str) -> Option<RecoveryKind> {
-    // `conflict-invalid` also starts with `conflict-`, so test it first.
     if has_generated_suffix(name, RecoveryKind::InvalidEdit.prefix()) {
         Some(RecoveryKind::InvalidEdit)
     } else if has_generated_suffix(name, RecoveryKind::Conflict.prefix()) {
@@ -150,7 +149,6 @@ fn refresh(path: &Path, dir: &Path, kind: RecoveryKind) -> PathBuf {
     refreshed
 }
 
-/// Enforce retention for files already in the recovery directory.
 pub(crate) fn maintain() -> Result<()> {
     let profiles_path =
         crate::paths::profiles_path().context("Failed to determine profiles path")?;
@@ -161,7 +159,6 @@ pub(crate) fn maintain() -> Result<()> {
     Ok(())
 }
 
-/// Preserve bytes for manual recovery, deduplicating within the same category.
 pub(crate) fn preserve(kind: RecoveryKind, contents: &[u8]) -> Result<PathBuf> {
     let profiles_path =
         crate::paths::profiles_path().context("Failed to determine profiles path")?;

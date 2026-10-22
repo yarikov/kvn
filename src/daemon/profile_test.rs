@@ -33,12 +33,6 @@ pub(super) fn start(tx: &Sender<Msg>, model: &Model, id: Uuid) {
     });
 }
 
-/// Test a profile's reachability using a temporary sing-box instance.
-///
-/// Allocates a free loopback port, writes a minimal SOCKS5-inbound config,
-/// spawns sing-box, waits for the port to open, then performs a SOCKS5
-/// CONNECT to the configured HTTP(S) endpoint through the proxy and returns
-/// the end-to-end request latency in milliseconds.
 fn run_test(profile: &Profile, id: uuid::Uuid, probe_url: &str) -> anyhow::Result<u64> {
     use std::process::{Command, Stdio};
 
@@ -63,7 +57,6 @@ fn run_test(profile: &Profile, id: uuid::Uuid, probe_url: &str) -> anyhow::Resul
         let _ = std::fs::remove_file(&config_path);
     };
 
-    // Wait up to 3 s for sing-box to open the SOCKS5 port.
     let addr = format!("127.0.0.1:{socks_port}");
     let deadline = Instant::now() + Duration::from_secs(3);
     let ready = loop {
@@ -98,12 +91,6 @@ fn write_test_config(
     Ok(path)
 }
 
-/// Tunnel through the SOCKS5 proxy at `addr`, send a minimal HTTP(S) GET, and
-/// return the time from request/TLS start to the first response byte.
-///
-/// sing-box replies to SOCKS5 CONNECT before the outbound tunnel is open, so
-/// measuring CONNECT RTT gives ~0 ms. The HTTP round-trip through the actual
-/// VPN tunnel is the meaningful latency number.
 fn socks5_connect_latency(addr: &str, probe: &url::Url) -> anyhow::Result<u64> {
     let host = probe
         .host_str()
@@ -120,21 +107,17 @@ fn socks5_connect_latency(addr: &str, probe: &url::Url) -> anyhow::Result<u64> {
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
 
-    // SOCKS5 greeting: no-auth method selection.
     stream.write_all(&[0x05, 0x01, 0x00])?;
     let mut resp = [0u8; 2];
     stream.read_exact(&mut resp)?;
     anyhow::ensure!(resp == [0x05, 0x00], "SOCKS5 auth negotiation failed");
 
-    // SOCKS5 CONNECT to target host (domain ATYP 0x03).
     let mut req = vec![0x05, 0x01, 0x00, 0x03, host_bytes.len() as u8];
     req.extend_from_slice(host_bytes);
     req.push((port >> 8) as u8);
     req.push((port & 0xff) as u8);
     stream.write_all(&req)?;
 
-    // Read and discard CONNECT reply — sing-box answers before the tunnel is
-    // actually open, so this RTT is not meaningful.
     let mut hdr = [0u8; 4];
     stream.read_exact(&mut hdr)?;
     anyhow::ensure!(hdr[0] == 0x05 && hdr[1] == 0x00, "SOCKS5 CONNECT rejected");
@@ -171,9 +154,6 @@ fn socks5_connect_latency(addr: &str, probe: &url::Url) -> anyhow::Result<u64> {
         "GET {request_target} HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\n\r\n"
     );
 
-    // sing-box acknowledges SOCKS CONNECT before the outbound connection is
-    // ready. For HTTPS, starting here includes TLS setup in the user-visible
-    // end-to-end latency, matching ordinary web traffic more closely.
     let start = Instant::now();
     let mut buf = [0u8; 16];
     if probe.scheme() == "https" {

@@ -16,11 +16,6 @@ use crate::config::profile::{
     VlessConfig,
 };
 
-/// Mutex that recovers after a test panics while holding the lock.
-///
-/// A failed environment-sensitive test must not turn every later test into a
-/// `PoisonError`. Returning an infallible `Result` preserves the familiar
-/// `ENV_LOCK.lock().unwrap()` call sites while making them poison-tolerant.
 pub struct RecoverableMutex(Mutex<()>);
 
 impl RecoverableMutex {
@@ -36,12 +31,8 @@ impl RecoverableMutex {
     }
 }
 
-/// Global lock for tests that mutate environment variables.
-/// Prevents race conditions when running tests in parallel.
 pub static ENV_LOCK: RecoverableMutex = RecoverableMutex::new();
 
-/// Restores an environment variable when an environment-sensitive test ends,
-/// including during panic unwinding.
 pub struct EnvVarGuard {
     key: &'static str,
     previous: Option<OsString>,
@@ -72,7 +63,6 @@ impl Drop for EnvVarGuard {
     }
 }
 
-/// Convert a ratatui Buffer to a multi-line string for snapshot testing.
 pub fn buffer_to_string(buffer: &Buffer) -> String {
     let rows = buffer
         .content
@@ -164,11 +154,8 @@ pub const APP_WINDOW_ROWS: u16 = 35;
 
 pub const RULE_SET_BYTES: &[u8] = b"SRS\x01rules";
 
-/// A canonical valid UUID string for tests that need to pass
-/// [`Config::validate`] without caring about the specific value.
 pub const TEST_UUID: &str = "11111111-1111-1111-1111-111111111111";
 
-/// Generate a small set of sample profiles for unit tests.
 pub fn sample_profiles() -> Vec<Profile> {
     vec![
         Profile::new_vless(
@@ -192,7 +179,6 @@ pub fn sample_profiles() -> Vec<Profile> {
     ]
 }
 
-/// Build a `Model` pre-filled with the given profiles for testing.
 pub fn model_with_profiles(profiles: Vec<Profile>) -> Model {
     let config = Config {
         profiles,
@@ -231,7 +217,6 @@ pub fn snapshot_styles(model: &Model, width: u16, height: u16) -> String {
     }))
 }
 
-/// Create a simple `KeyEvent` from a character for testing input handlers.
 pub fn key(c: char) -> KeyEvent {
     KeyEvent::from(KeyCode::Char(c))
 }

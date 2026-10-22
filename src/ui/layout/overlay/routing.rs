@@ -7,7 +7,6 @@ use crate::onboarding::OnboardingStep;
 use super::popup::draw_selection_modal;
 use super::{APPLY_ACTION, overlay_footer};
 
-/// Draw the routing mode selection modal.
 pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
     let modes = model.config.settings.geo_routing.available_modes();
     let label_strings: Vec<String> = modes.iter().map(|m| m.to_string()).collect();
@@ -32,7 +31,6 @@ pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
     );
 }
 
-/// Draw the geo region selection modal.
 pub(super) fn draw_region(frame: &mut Frame, model: &Model, area: Rect) {
     use crate::config::profile::GeoRegion;
     let labels = GeoRegion::ALL.map(geo_region_label);
@@ -59,8 +57,6 @@ pub(super) fn draw_region(frame: &mut Frame, model: &Model, area: Rect) {
     );
 }
 
-/// While the tour waits on a picker the user is choosing for the first time,
-/// so no row is marked as already active.
 fn awaits(model: &Model, step: OnboardingStep) -> bool {
     model.onboarding.awaiting == Some(step)
 }
@@ -168,8 +164,6 @@ mod tests {
         ));
     }
 
-    /// Routing-mode overlay in Global region: `available_modes()` returns a
-    /// single entry, exercising the small-list rendering path.
     #[test]
     fn draw_routing_mode_overlay_global_snapshot() {
         let mut model = model_with_profiles(vec![]);

@@ -4,9 +4,6 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::path::PathBuf;
 
-/// Atomically retain at most the last `max_lines` physical lines of a log.
-/// Scans backward from the end so a large file does not need to be loaded
-/// into memory; only the retained tail is allocated for the atomic rewrite.
 pub fn prune_log_to_lines(path: &Path, max_lines: u32) -> anyhow::Result<()> {
     let mut file = match File::open(path) {
         Ok(file) => file,
@@ -57,8 +54,6 @@ fn tail_start(file: &mut File, file_len: u64, max_lines: usize) -> std::io::Resu
     Ok(0)
 }
 
-/// Append an app-generated log line to the application log file.
-/// Format matches sing-box style: `+HHMM YYYY-MM-DD HH:MM:SS LEVEL message`
 pub fn append_app_log(level: &str, message: &str) {
     let now = Local::now();
     let path = crate::paths::app_log_path();
@@ -74,9 +69,6 @@ pub fn append_app_log(level: &str, message: &str) {
     }
 }
 
-/// Tails log files and returns new lines formatted for the TUI.
-/// Each line is tagged with its source and shows a short time:
-/// `[tag] HH:MM:SS LEVEL message`
 pub struct LogTailer {
     files: Vec<(PathBuf, &'static str, u64)>,
 }
@@ -133,9 +125,6 @@ impl LogTailer {
         entries.into_iter().map(|(_, line)| line).collect()
     }
 
-    /// Load at most `max_lines` entries written since the supplied byte
-    /// offsets, then continue tailing from the current ends of the files.
-    /// A truncated/rotated file starts at byte zero for the new session.
     pub fn load_history(&mut self, start_positions: &[u64], max_lines: usize) -> Vec<String> {
         if max_lines == 0 {
             return Vec::new();
@@ -220,13 +209,7 @@ fn read_last_lines(file: &mut File, start: u64, end: u64, limit: usize) -> Vec<S
         .collect()
 }
 
-/// Parse a sing-box style timestamp from the start of a line.
-/// Returns the parsed value and the byte length of the timestamp prefix.
 fn parse_timestamp(line: &str) -> Option<(DateTime<FixedOffset>, usize)> {
-    // Try the longer form first. Its first 25 bytes are also a valid seconds
-    // timestamp, so reversing this order would leave `.123` in the rendered
-    // message. `str::get` makes malformed Unicode boundaries a normal miss
-    // instead of a slicing panic.
     if let Some(prefix) = line.get(..29)
         && let Ok(dt) = DateTime::parse_from_str(prefix, "%z %Y-%m-%d %H:%M:%S%.3f")
     {
@@ -369,7 +352,6 @@ mod tests {
         let lines = tailer.tail();
         assert_eq!(lines.len(), 1);
 
-        // Simulate rotation: file shrinks
         let mut file = std::fs::File::create(&path).unwrap();
         writeln!(file, "+0000 2024-01-01 00:00:00 INFO new").unwrap();
         drop(file);

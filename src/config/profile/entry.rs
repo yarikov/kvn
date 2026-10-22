@@ -32,8 +32,6 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Create a new VLESS profile with a generated UUID. Other protocols
-    /// gain dedicated constructors as their share-link parsers land.
     pub fn new_vless(name: String, address: String, port: u16, uuid: String) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -50,12 +48,10 @@ impl Profile {
         }
     }
 
-    /// Protocol discriminant.
     pub fn protocol(&self) -> Protocol {
         self.config.protocol()
     }
 
-    /// Short label for the UI protocol column (≤6 chars).
     pub fn protocol_label(&self) -> &'static str {
         self.protocol().ui_label()
     }
@@ -117,8 +113,6 @@ impl Profile {
         })
     }
 
-    /// Stable key identifying the credentials and endpoint behind this profile,
-    /// used by the subscription importer to detect duplicates.
     pub fn dedup_key(&self) -> String {
         format!("{}@{}", self.credential_key(), self.endpoint())
     }
@@ -176,10 +170,6 @@ impl Profile {
     }
 }
 
-/// Accept `address` if it parses as a bare IPv4/IPv6 literal or as a hostname.
-/// sing-box wants the on-wire form (unbracketed for IPv6), so we try
-/// [`IpAddr`](std::net::IpAddr) first and fall back to [`url::Host::parse`]
-/// for domain names. Bracketed IPv6 (`[::1]`) is accepted via `Host::parse`.
 fn validate_host(address: &str) -> anyhow::Result<()> {
     use std::net::IpAddr;
     if address.parse::<IpAddr>().is_ok() {

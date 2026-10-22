@@ -12,7 +12,6 @@ use super::text::{
     fit_to_visual_width, pad_to_visual_width, truncate_to_visual_width, visual_width,
 };
 
-/// Draw the unified Sources list: standalone profiles and subscription trees.
 pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused: bool) {
     let theme = &model.theme;
     let border_style = if focused {
@@ -38,8 +37,6 @@ pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused
             ),
         ]));
     } else {
-        // Global address-column width: max across all visible profiles so every
-        // row shares the same column layout and aligns vertically.
         let show_latency =
             !model.profile_latencies.is_empty() || !model.testing_profiles.is_empty();
         let overhead = FIXED_OVERHEAD_BASE + if show_latency { LATENCY_WIDTH } else { 0 };
@@ -54,9 +51,8 @@ pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused
             .min(MAX_ADDR_WIDTH)
             .min(remaining.saturating_sub(MIN_NAME_WIDTH));
 
-        // Single pass over rows to collect indices — avoids O(n²) position() searches.
         let sub_count = model.config.subscriptions.len();
-        let mut standalone: Vec<(usize, usize)> = Vec::new(); // (row_idx, profile_idx)
+        let mut standalone: Vec<(usize, usize)> = Vec::new();
         let mut sub_header_idx = vec![0usize; sub_count];
         let mut sub_profile_rows: Vec<Vec<(usize, usize)>> = vec![Vec::new(); sub_count];
         for (i, row) in rows.iter().enumerate() {
@@ -72,7 +68,6 @@ pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused
             }
         }
 
-        // Standalone profiles group.
         if !standalone.is_empty() {
             let last = standalone.len() - 1;
             for (pos, (row_idx, profile_idx)) in standalone.iter().enumerate() {
@@ -88,7 +83,6 @@ pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused
             }
         }
 
-        // Subscription groups.
         for (sub_idx, sub) in model.config.subscriptions.iter().enumerate() {
             let header_idx = sub_header_idx[sub_idx];
             let is_selected = model.selected == header_idx;
@@ -167,25 +161,14 @@ pub(super) fn sources_window_start(model: &Model, visible: usize) -> usize {
     }
 }
 
-/// Width reserved for the tree prefix at the start of a profile row.
 pub(super) const PREFIX_WIDTH: usize = 2;
-/// Minimum width for the profile name column.
 const MIN_NAME_WIDTH: usize = 8;
-/// Width reserved for the protocol column.
 const PROTOCOL_WIDTH: usize = 6;
-/// Minimum width for the address:port column.
 const MIN_ADDR_WIDTH: usize = 11;
-/// Maximum width for the address:port column (covers full IPv4 `255.255.255.255:65535`).
-/// Caps the address column so the name is never squeezed below MIN_NAME_WIDTH
-/// even when a profile has a very long hostname.
 const MAX_ADDR_WIDTH: usize = 21;
-/// Width of the latency column including its leading space: " 9999ms" = 7 chars.
 const LATENCY_WIDTH: usize = 7;
-/// Fixed overhead without latency column: prefix + protocol + two spaces between columns.
 const FIXED_OVERHEAD_BASE: usize = PREFIX_WIDTH + PROTOCOL_WIDTH + 2;
 
-/// Build one profile row for the Sources list.
-/// `addr_width` is pre-computed globally so all rows share the same column layout.
 pub(super) fn profile_line(
     model: &Model,
     profile_idx: usize,
@@ -333,7 +316,6 @@ mod tests {
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
-    /// A very long hostname must not push the name column below MIN_NAME_WIDTH.
     #[test]
     fn draw_sources_long_address_does_not_hide_name() {
         let profiles = vec![
@@ -354,7 +336,6 @@ mod tests {
         model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.selected = 0;
         let output = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
-        // Name "MyProfile" must still be visible (truncated to MIN_NAME_WIDTH).
         assert!(
             output.contains("MyPro"),
             "name column vanished with long address"
@@ -384,7 +365,6 @@ mod tests {
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
-    /// Verify every protocol's UI badge renders without truncation.
     #[test]
     fn draw_sources_multi_protocol_badges_snapshot() {
         use crate::config::profile::{
@@ -534,8 +514,6 @@ mod tests {
         insta::assert_snapshot!(snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
-    /// Empty Sources pane: pins the "No sources." placeholder at
-    /// `draw_sources` L402–405, which currently has no visual regression guard.
     #[test]
     fn draw_sources_empty_state_snapshot() {
         let mut model = model_with_profiles(vec![]);
@@ -543,9 +521,6 @@ mod tests {
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
-    /// Subscription rendered with a populated `last_updated` and a non-default
-    /// `auto_update` interval — covers the subscription-header formatting path
-    /// when `Every1d` is active.
     #[test]
     fn draw_sources_subscription_with_last_updated_snapshot() {
         use crate::config::profile::{Subscription, SubscriptionAutoUpdate};

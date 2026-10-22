@@ -1,10 +1,3 @@
-//! Detection of an Omarchy installation: its active theme and its version.
-//!
-//! Kept as a neutral top-level module so the daemon-side config loader (which
-//! sets the first-launch default theme), the TUI-side theme watcher (which
-//! follows Omarchy's active theme at runtime) and `doctor` can share it
-//! without `config` having to depend on `tui_client`.
-
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -12,11 +5,6 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, ensure};
 use semver::Version;
 
-/// Read the currently active Omarchy theme slug.
-///
-/// Omarchy stores runtime state below
-/// `$XDG_STATE_HOME/omarchy/current/theme.name`. Returns `None` when that file
-/// does not contain a theme name.
 pub fn detect_omarchy_theme() -> Option<String> {
     let current = omarchy_current_dir()?;
     let raw = std::fs::read_to_string(current.join("theme.name")).ok()?;
@@ -24,7 +12,6 @@ pub fn detect_omarchy_theme() -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-/// Path to the active Omarchy `current/` state directory.
 pub fn omarchy_current_dir() -> Option<PathBuf> {
     Some(state_home()?.join("omarchy").join("current"))
 }
@@ -39,16 +26,12 @@ pub fn default_editor() -> Option<String> {
     (!editor.is_empty()).then(|| editor.to_string())
 }
 
-/// Path to the semantic palette of the active Omarchy theme.
 pub fn theme_colors_path() -> Option<PathBuf> {
     Some(omarchy_current_dir()?.join("theme").join("colors.toml"))
 }
 
 pub const OMAKVN_PLUGIN_ID: &str = "yarikov.omakvn";
 
-/// Whether the Omarchy Shell bar plugin is already installed. Shared by
-/// `doctor` and the first-run tour, which drops its Omarchy card once the
-/// plugin is in place.
 pub fn omakvn_plugin_installed() -> bool {
     let Some(manifest) = dirs::config_dir().map(|config| {
         config
@@ -67,8 +50,6 @@ pub fn omakvn_plugin_installed() -> bool {
         .is_some_and(|id| id == OMAKVN_PLUGIN_ID)
 }
 
-/// Major version of the installed Omarchy, or `None` when Omarchy is absent
-/// or its version cannot be determined.
 pub fn installed_major_version() -> Option<u64> {
     let version = detect_omarchy_version().ok().flatten()?;
     Some(parse_omarchy_version(&version)?.major)

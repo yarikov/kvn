@@ -29,26 +29,16 @@ use crate::services::LogTailer;
 use crate::ui::palette::to_rgb;
 use ratatui::style::Color;
 
-/// Format the OSC 11 escape sequence that asks the terminal emulator to
-/// repaint its own background (the pixel padding around the character
-/// grid that no TUI widget can reach). Most modern emulators
-/// (Alacritty, Foot, Kitty, Ghostty, Konsole, xterm, WezTerm…) honor it;
-/// the rest silently ignore the unknown OSC and stay as-is.
 pub(crate) fn osc_color(slot: u8, color: Color) -> String {
     let (r, g, b) = to_rgb(color);
     format!("\x1b]{slot};#{r:02x}{g:02x}{b:02x}\x1b\\")
 }
 
-/// Reset terminal foreground and background to their configured defaults.
 pub(crate) const OSC_RESET_COLORS: &str = "\x1b]110\x1b\\\x1b]111\x1b\\";
-/// Show a pointing hand over clickable rows; an empty shape list restores the
-/// terminal's contextual default (usually an I-beam over terminal text).
 pub(crate) const OSC_POINTER_INTERACTIVE: &str = "\x1b]22;pointer\x1b\\";
 pub(crate) const OSC_POINTER_TEXT: &str = "\x1b]22;text\x1b\\";
 pub(crate) const OSC_POINTER_DEFAULT: &str = "\x1b]22;\x1b\\";
 
-/// Owns the terminal modes enabled by the TUI and restores them on every
-/// return path (including an error from the render loop).
 struct TerminalSession;
 
 impl TerminalSession {
@@ -96,9 +86,6 @@ impl Drop for TerminalSession {
     }
 }
 
-/// Write OSC 11 to stdout (no-op when stdout isn't a TTY — pipes, CI,
-/// captured output). Errors are swallowed: a terminal that doesn't
-/// recognise the sequence is not a failure mode worth surfacing.
 fn apply_terminal_colors(foreground: Color, background: Color) {
     let mut stdout = io::stdout();
     if !stdout.is_terminal() {
@@ -109,7 +96,6 @@ fn apply_terminal_colors(foreground: Color, background: Color) {
     let _ = stdout.flush();
 }
 
-/// Counterpart to [`apply_terminal_colors`]: restore terminal defaults.
 fn reset_terminal_colors() {
     let mut stdout = io::stdout();
     if !stdout.is_terminal() {
@@ -119,13 +105,9 @@ fn reset_terminal_colors() {
     let _ = stdout.flush();
 }
 
-/// Run the TUI client: connects to daemon, renders UI, forwards input.
 pub fn run() -> Result<()> {
     let (mut client, initial_snapshot) = connect_to_current_daemon()?;
 
-    // The daemon snapshot is canonical. Reading profiles.json here would let
-    // the client normalize or otherwise rewrite a file concurrently owned by
-    // the daemon.
     let config = crate::config::profile::Config {
         profiles: initial_snapshot.profiles.clone(),
         subscriptions: initial_snapshot.subscriptions.clone(),
@@ -208,9 +190,6 @@ fn reconnect_profile_from_snapshot(value: &serde_json::Value) -> Option<uuid::Uu
         .and_then(|id| uuid::Uuid::parse_str(id).ok())
 }
 
-/// Attach to a daemon built from the same package as this client. Upgrades can
-/// leave the previous daemon alive, so inspect the first response as generic
-/// JSON before attempting to decode the full (possibly changed) snapshot.
 fn connect_to_current_daemon() -> Result<(IpcClient, crate::app::msg::StateSnapshot)> {
     let mut reconnect_profile = None;
 
@@ -386,8 +365,6 @@ fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
         .into_iter()
         .filter_map(|s| uuid::Uuid::parse_str(&s).ok())
         .collect();
-    // Resolve the effective theme: live-preview draft wins while the
-    // picker is open, otherwise honor the committed `Settings.theme`.
     let effective_slug = model
         .theme_draft
         .as_deref()
@@ -558,7 +535,6 @@ mod tests {
 
     #[test]
     fn osc_color_formats_rgb_color_as_hex_triplet() {
-        // Tokyo Night accent — typical RGB value.
         assert_eq!(
             osc_color(11, Color::Rgb(0x7a, 0xa2, 0xf7)),
             "\x1b]11;#7aa2f7\x1b\\"
@@ -567,7 +543,6 @@ mod tests {
 
     #[test]
     fn osc_color_formats_named_ansi_colors_via_to_rgb_table() {
-        // Color::Black maps to (0, 0, 0) in palette::to_rgb.
         assert_eq!(osc_color(10, Color::Black), "\x1b]10;#000000\x1b\\");
     }
 

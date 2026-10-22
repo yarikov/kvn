@@ -13,8 +13,6 @@ use crate::services::waybar;
 
 mod clean_all;
 
-/// How long a one-shot CLI client waits for the daemon to answer with a
-/// state snapshot before giving up.
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
 
 const LEGACY_COMMAND_WARNING: &str = "Warning: `kvn-tui` is a legacy command and will be removed in a future release.\nUse `kvn` instead.\n\n";
@@ -36,16 +34,11 @@ pub struct Cli {
     pub daemon: bool,
 }
 
-/// Warn when the legacy executable name is used for a CLI invocation.
-///
-/// Plain TUI launches and machine-facing integrations stay quiet.
 pub fn warn_if_legacy_invocation(args: &[OsString]) {
     if !should_warn_for_legacy_invocation(args) {
         return;
     }
 
-    // A deprecation notice must never turn an otherwise successful command
-    // into a failure when stderr is unavailable.
     let stderr = std::io::stderr();
     let warning = legacy_command_warning(stderr.is_terminal());
     let _ = stderr.lock().write_all(warning.as_bytes());
@@ -332,9 +325,6 @@ fn run_config_recover(file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Run a trusted, compile-time embedded shell script without materializing it
-/// in a predictable temporary file. `bash -c` preserves the caller's stdin,
-/// which the interactive Omarchy installer needs for its prompts.
 fn run_embedded_script(name: &str, script: &str, args: &[&str]) -> Result<()> {
     run_embedded_script_command(name, embedded_script_command(name, script, args))
 }
@@ -355,7 +345,6 @@ fn run_embedded_script_command(name: &str, mut command: std::process::Command) -
     Ok(())
 }
 
-/// Run the embedded Omarchy integration installer script.
 fn install_omarchy() -> Result<()> {
     run_embedded_script(
         "setup-omarchy.sh",
@@ -364,7 +353,6 @@ fn install_omarchy() -> Result<()> {
     )
 }
 
-/// Run the embedded Omarchy integration cleanup script.
 fn clean_omarchy() -> Result<()> {
     run_embedded_script(
         "clean-omarchy.sh",
@@ -381,12 +369,10 @@ fn remove_omarchy() -> Result<()> {
     )
 }
 
-/// Run the embedded polkit rule installer script.
 fn install_polkit() -> Result<()> {
     run_embedded_script_command("setup-polkit.sh", polkit_setup_command())
 }
 
-/// Run the embedded kill switch installer script.
 fn install_killswitch() -> Result<()> {
     run_embedded_script_command("setup-killswitch.sh", killswitch_setup_command())
 }
@@ -593,10 +579,6 @@ fn validate_current_integration_privileges(
     )
 }
 
-// ---- one-shot IPC clients (CLI + Omarchy bar module backends) ----
-
-/// Connect to the daemon without starting it. For read-only commands where
-/// silently spawning a daemon would be surprising.
 fn attach_client() -> Result<IpcClient> {
     IpcClient::connect().context(
         "Cannot reach the kvn daemon. Start it with `kvn` or \
@@ -604,8 +586,6 @@ fn attach_client() -> Result<IpcClient> {
     )
 }
 
-/// Connect to the daemon, auto-starting it first when it is not running
-/// (same startup path as launching the TUI).
 fn attach_or_start_client() -> Result<IpcClient> {
     if !crate::ipc::is_daemon_running() {
         crate::start_daemon()?;
@@ -644,7 +624,6 @@ fn ensure_snapshot_compatible(value: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
-/// Send a command and return the snapshot the daemon broadcasts in response.
 fn send_command(client: &mut IpcClient, cmd: IpcCommand) -> Result<StateSnapshot> {
     let request_id = client.send_request(&cmd)?;
     client.read_response(request_id, SNAPSHOT_TIMEOUT)
@@ -819,8 +798,6 @@ fn kill_switch_result(
     }
 }
 
-/// Resolve a profile query: exact UUID, exact (case-insensitive) name, or
-/// unique case-insensitive name prefix. Ambiguous prefixes resolve to none.
 fn resolve_profile(snap: &StateSnapshot, query: &str) -> Result<Uuid> {
     if let Ok(id) = Uuid::parse_str(query) {
         anyhow::ensure!(
@@ -866,8 +843,6 @@ fn active_profile_name(snap: &StateSnapshot) -> Option<&str> {
         .map(|p| p.name.as_str())
 }
 
-/// One-line human summary of a snapshot, e.g.
-/// `Connected to Work VPN (↑ 1.2 MiB/s · ↓ 3.4 MiB/s) [kill switch]`.
 fn format_status_line(snap: &StateSnapshot) -> String {
     match snap.connection {
         ConnectionState::Connected => {
@@ -902,7 +877,6 @@ fn format_status_line(snap: &StateSnapshot) -> String {
     }
 }
 
-/// Human-readable byte rate (input is bytes per second).
 fn format_rate(bytes_per_sec: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes_per_sec as f64;
@@ -918,10 +892,6 @@ fn format_rate(bytes_per_sec: u64) -> String {
     }
 }
 
-/// Execute any non-TUI command from an already-parsed `Cli`.
-///
-/// Returns `Some(Ok(()))` or `Some(Err(_))` if a CLI action was handled
-/// and the application should exit. Returns `None` if the TUI should start.
 pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
     match &cli.command {
         Some(Command::DocsPreview { theme }) => {
@@ -1014,8 +984,6 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
                 if *omarchy || *omarchy_backups {
                     clean_omarchy()?;
                 }
-                // Stop and remove the firewall before removing the shared
-                // group's remaining polkit authorization.
                 if *killswitch {
                     clean_killswitch()?;
                     report_daemon_setting_off(
@@ -1105,7 +1073,6 @@ esac
         );
         write_executable(&bin.join("pgrep"), "#!/bin/bash\nexit 0\n");
         write_executable(&bin.join("sleep"), "#!/bin/bash\nexit 0\n");
-        // Avoid sending rescanPlugins IPC to the user's live Omarchy Shell.
         write_executable(&bin.join("omarchy-shell"), "#!/bin/bash\nexit 0\n");
         (root, home)
     }
@@ -1249,9 +1216,8 @@ esac
 
     #[test]
     fn version_via_clap() {
-        // clap handles --version automatically
         let cli = Cli::try_parse_from(["kvn-tui", "--version"]);
-        assert!(cli.is_err()); // clap exits on --version, but in test it returns Err
+        assert!(cli.is_err());
     }
 
     #[test]
@@ -2081,7 +2047,6 @@ esac
                 .count(),
             1
         );
-        // The legacy command-module entry must be gone.
         assert_eq!(
             right
                 .iter()
@@ -2098,11 +2063,9 @@ esac
             .position(|entry| entry["id"] == "omarchy.bluetooth")
             .unwrap();
         assert_eq!(kvn_index + 1, bluetooth_index);
-        // A plugin entry carries no command-module fields.
         assert!(right[kvn_index].get("exec").is_none());
         assert!(right[kvn_index].get("type").is_none());
 
-        // Plugin files are installed.
         let plugin = home.join(".config/omarchy/plugins/yarikov.omakvn");
         for file in ["manifest.json", "Widget.qml", "KvnService.qml"] {
             assert!(plugin.join(file).is_file(), "missing {file}");
@@ -2166,7 +2129,6 @@ esac
     #[test]
     fn omarchy_installer_requires_the_shell_plugin_registry() {
         let (root, home) = installer_fixture(4);
-        // Simulate an Omarchy 4 build without the shell plugin registry.
         write_executable(
             &root.path().join("bin/omarchy"),
             "#!/bin/bash\ncase ${1:-} in version) echo '4.0.0-1';; plugin) exit 1;; esac\n",
@@ -2237,7 +2199,6 @@ esac
         let (root, home) = installer_fixture(4);
         let shell_config = home.join(".config/omarchy/shell.json");
         write_omarchy_v4_config(&home);
-        // Simulate the previous release's command module.
         let mut shell: serde_json::Value =
             serde_json::from_slice(&fs::read(&shell_config).unwrap()).unwrap();
         shell["bar"]["layout"]["right"]

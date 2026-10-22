@@ -1,15 +1,3 @@
-//! Follow the active Omarchy theme at runtime.
-//!
-//! Omarchy stores its active theme as a single-line slug in
-//! `~/.local/state/omarchy/current/theme.name`, and this watcher follows the
-//! enclosing `current/` directory.
-//!
-//! On non-Omarchy systems the watched directory does not exist and the
-//! watcher exits immediately without spawning any background work.
-//!
-//! The filesystem-level detection helpers live in [`crate::omarchy`] so the
-//! daemon-side config loader can share them without depending on the TUI.
-
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -22,19 +10,10 @@ use crate::omarchy::{detect_omarchy_theme, omarchy_current_dir, theme_colors_pat
 use crate::ui::palette::Palette;
 use crate::ui::styles::Theme;
 
-/// Sentinel slug stored in `Settings.theme` to mean "follow Omarchy's
-/// current theme.name". The in-TUI picker writes this when the user
-/// selects the "Auto (Omarchy)" entry.
 pub const OMARCHY_SENTINEL: &str = "omarchy";
 
-/// Default fallback theme used when `OMARCHY_SENTINEL` is set but
-/// Omarchy isn't installed. Matches `Settings::default().theme`.
 pub const DEFAULT_THEME: &str = "tokyo-night";
 
-/// Resolve a `Settings.theme` slug into a concrete [`Theme`]. The reserved
-/// slug [`OMARCHY_SENTINEL`] loads Omarchy's current `theme/colors.toml`, then
-/// falls back to a bundled palette with the active name or [`DEFAULT_THEME`].
-/// Any other slug is looked up only as a bundled palette.
 pub fn resolve_active(settings_theme: &str) -> Theme {
     if settings_theme == OMARCHY_SENTINEL {
         load_current_theme().unwrap_or_else(|| {
@@ -56,9 +35,6 @@ fn load_current_theme() -> Option<Theme> {
         .map(Theme::from_palette)
 }
 
-/// Spawn a background thread that watches Omarchy's active `current/` directory
-/// for theme changes and sends [`Msg::ThemeChanged`] when the active palette
-/// changes. Returns immediately and does nothing if Omarchy isn't installed.
 pub fn spawn_theme_watcher(tx: Sender<Msg>) {
     let Some(watch_dir) = omarchy_current_dir() else {
         return;
@@ -85,8 +61,6 @@ fn run_watcher(tx: Sender<Msg>, watch_dir: PathBuf) {
     let mut last_theme = load_current_theme();
 
     loop {
-        // Block until at least one event arrives, then drain any follow-ups
-        // (Omarchy's atomic swap fires several events in quick succession).
         let Ok(_first) = notify_rx.recv() else {
             return;
         };
@@ -107,7 +81,6 @@ fn run_watcher(tx: Sender<Msg>, watch_dir: PathBuf) {
 mod tests {
     use super::*;
 
-    /// `ENV_LOCK` is shared with other tests that mutate `XDG_CONFIG_HOME`.
     use crate::test_helpers::ENV_LOCK;
 
     #[test]
@@ -118,7 +91,6 @@ mod tests {
         unsafe { std::env::set_var("XDG_CONFIG_HOME", config.path()) };
         unsafe { std::env::set_var("XDG_STATE_HOME", state.path()) };
         let theme = resolve_active("gruvbox");
-        // Gruvbox accent is #7daea3 — matches themes/gruvbox.toml.
         assert_eq!(
             theme.accent().fg,
             Some(ratatui::style::Color::Rgb(0x7d, 0xae, 0xa3))
@@ -133,7 +105,6 @@ mod tests {
         unsafe { std::env::set_var("XDG_CONFIG_HOME", config.path()) };
         unsafe { std::env::set_var("XDG_STATE_HOME", state.path()) };
         let theme = resolve_active(OMARCHY_SENTINEL);
-        // Default fallback is tokyo-night (#7aa2f7 accent).
         assert_eq!(
             theme.accent().fg,
             Some(ratatui::style::Color::Rgb(0x7a, 0xa2, 0xf7))

@@ -39,7 +39,6 @@ pub(crate) enum SubscriptionUrlTransport {
     DeprecatedHttp,
 }
 
-/// Validate a subscription URL against the configured transport policy.
 pub(crate) fn validate_subscription_url(
     input: &str,
     allow_insecure_http: bool,
@@ -71,16 +70,10 @@ pub(crate) fn deprecated_http_warning(sub: &Subscription, settings: &Settings) -
     })
 }
 
-/// Generate a stable installation identifier once: `lnx-` + UUID v4.
-/// Never derived from the subscription URL — rotating a token or changing a
-/// domain must not make the provider treat the same installation as a new
-/// device.
 pub(crate) fn generate_hwid() -> String {
     format!("lnx-{}", Uuid::new_v4().simple())
 }
 
-/// Platform facts read at request time (never persisted) so device headers
-/// cannot go stale in `profiles.json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceEnv {
     pub kernel_version: String,
@@ -88,9 +81,6 @@ pub struct DeviceEnv {
 }
 
 impl DeviceEnv {
-    /// Read platform facts from the running system. Must never be called from
-    /// `app::update` — platform detection stays outside the pure update
-    /// boundary; this module is only invoked by the daemon runtime.
     pub fn detect() -> Self {
         Self {
             kernel_version: kernel_version(),
@@ -99,9 +89,6 @@ impl DeviceEnv {
     }
 }
 
-/// Build the request headers for a subscription fetch. Every request carries
-/// `User-Agent: kvn-tui/<version>`; when `sub.effective_hwid(settings)` yields
-/// an HWID, the Linux device headers are added as well.
 fn build_request_headers(
     sub: &Subscription,
     settings: &Settings,
@@ -119,10 +106,6 @@ fn build_request_headers(
     headers
 }
 
-/// Normalize a Linux locale identifier to a compact `language[-REGION]` form
-/// for the `X-Device-Locale` header: `ru_RU.UTF-8` → `ru-RU`,
-/// `de_DE.utf8` → `de-DE`, `sr_RS@latin` → `sr-RS`, `en` → `en`,
-/// `C`/`POSIX`/empty → `en`.
 pub fn normalize_locale(raw: &str) -> String {
     let base = raw.split('@').next().unwrap_or(raw);
     let base = base.split('.').next().unwrap_or(base).trim();
@@ -161,9 +144,6 @@ fn kernel_version() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// Decode the Remnawave `Announce` response header value. The documented form
-/// is `base64:<payload>`; anything undecodable is returned as-is so the
-/// provider's text is never silently dropped.
 fn decode_announce(raw: &str) -> String {
     let payload = raw.strip_prefix("base64:").unwrap_or(raw);
     base64::engine::general_purpose::STANDARD
@@ -175,23 +155,6 @@ fn decode_announce(raw: &str) -> String {
         .unwrap_or_else(|| raw.to_string())
 }
 
-/// Inspect the Remnawave and 3x-ui HWID response headers *before* parsing the
-/// body and produce the user-facing message when the server rejected the
-/// request.
-///
-/// Header semantics:
-/// - `X-Hwid-Not-Supported: true` — HWID identification is required but no
-///   acceptable HWID arrived. When the client did not send HWID headers the
-///   message asks to enable `send_hwid`; when it did, the panel rejected the
-///   value it got.
-/// - `X-Hwid-Max-Devices-Reached: true` — the device limit for this HWID is
-///   exhausted.
-/// - `X-Hwid-Active: true` — the panel enforces a device limit; nothing to
-///   report. `X-Hwid-Limit: true` comes with every Remnawave rejection and
-///   with 3x-ui's rejections and the success that takes the last slot, so it
-///   never decides the outcome alone.
-/// - `Announce: base64:...` — decoded and appended to an HWID rejection, but
-///   never turns an otherwise successful response into an error on its own.
 pub fn hwid_response_error(headers: &HashMap<String, String>, hwid_sent: bool) -> Option<String> {
     let is_true =
         |name: &str| header_value(headers, name).is_some_and(|v| v.eq_ignore_ascii_case("true"));
@@ -215,9 +178,6 @@ pub fn hwid_response_error(headers: &HashMap<String, String>, hwid_sent: bool) -
                 .to_string(),
         ));
     }
-    // `X-Hwid-Active` and `X-Hwid-Limit` alone never reject the request:
-    // 3x-ui sends `X-Hwid-Limit` on the success that takes the last slot. An
-    // announcement alone is advisory.
     None
 }
 
@@ -363,8 +323,6 @@ fn fetch_response(
         .new_agent();
     let deadline = std::time::Instant::now() + timeouts.total;
 
-    // Do not retain ureq's error as a source: its Display output may contain
-    // the complete request URL, including subscription credentials.
     let resp = crate::http::retry_interrupted(deadline, |remaining| {
         let mut req = agent
             .get(url)
@@ -402,7 +360,6 @@ fn fetch_response(
     }
 
     if resp.status() != 200 {
-        // Remnawave reports HWID problems on non-200 responses too.
         let hwid_sent = headers.contains_key("X-Hwid");
         if let Some(message) = hwid_response_error(&resp_headers, hwid_sent) {
             anyhow::bail!("{} (HTTP {} for {})", message, resp.status(), redacted_url);
@@ -413,8 +370,6 @@ fn fetch_response(
         );
     }
 
-    // Read one byte beyond the application limit so an exact-limit body is
-    // accepted while any larger response is rejected deterministically.
     let body = resp
         .into_body()
         .into_with_config()
@@ -432,22 +387,11 @@ fn fetch_response(
     Ok((body, resp_headers))
 }
 
-/// Fetch a subscription URL, decode its body (Base64 or plain text), and parse
-/// every share link it contains. Mixed-protocol subscriptions are supported;
-/// individual malformed lines are logged and skipped.
-///
-/// Every request identifies the client with `User-Agent: kvn-tui/<version>`;
-/// when `send_hwid` is enabled, the HWID + Linux device headers are added.
-/// Remnawave HWID response headers are inspected before the body is parsed so
-/// rejection reasons surface directly instead of failing deep inside body
-/// parsing.
 pub fn fetch_subscription(sub: &Subscription, settings: &Settings) -> Result<Vec<Profile>> {
     validate_subscription_url(&sub.url, settings.allow_insecure_http_subscriptions)?;
     fetch_subscription_after_validation(sub, settings)
 }
 
-/// Perform the request after the caller has enforced the subscription URL
-/// policy. Request-level tests call this directly to use a local HTTP fixture.
 fn fetch_subscription_after_validation(
     sub: &Subscription,
     settings: &Settings,
@@ -464,7 +408,6 @@ fn fetch_subscription_after_validation(
     without_status_stubs(parse_subscription_body(&body)?, &resp_headers, now_unix())
 }
 
-/// True when `line` (already trimmed) starts with any supported share-link scheme.
 fn line_has_supported_scheme(line: &str) -> bool {
     SUPPORTED_SHARE_SCHEMES.iter().any(|prefix| {
         line.get(..prefix.len())
@@ -514,7 +457,6 @@ fn xray_vless_link(remarks: Option<&str>, ob: &serde_json::Value) -> Result<Opti
         return Ok(None);
     }
 
-    // settings.vnext[0]: address, port
     let vnext = ob
         .get("settings")
         .and_then(|s| s.get("vnext"))
@@ -535,7 +477,6 @@ fn xray_vless_link(remarks: Option<&str>, ob: &serde_json::Value) -> Result<Opti
         .context("missing port")?;
     let port = u16::try_from(port).with_context(|| format!("port {port} is out of range"))?;
 
-    // settings.vnext[0].users[0]: id, flow, encryption
     let user = vnext
         .get("users")
         .and_then(|u| u.as_array())
@@ -558,7 +499,6 @@ fn xray_vless_link(remarks: Option<&str>, ob: &serde_json::Value) -> Result<Opti
         .unwrap_or("none")
         .to_string();
 
-    // streamSettings: network, security, + transport / tls / reality
     let ss = ob.get("streamSettings").cloned().unwrap_or(Value::Null);
     let network = ss
         .get("network")
@@ -571,7 +511,6 @@ fn xray_vless_link(remarks: Option<&str>, ob: &serde_json::Value) -> Result<Opti
         .unwrap_or("")
         .to_string();
 
-    // собираем query-параметры в порядке, который ждёт парсер share-link
     let mut q = vec![
         ("type", network.as_str()),
         ("encryption", encryption.as_str()),
@@ -631,7 +570,6 @@ fn xray_vless_link(remarks: Option<&str>, ob: &serde_json::Value) -> Result<Opti
 
     let transport = ss.get("wsSettings");
 
-    // транспорт (для ws / grpc / http)
     match network.as_str() {
         "ws" => {
             if let Some(ws) = transport {
@@ -664,7 +602,6 @@ fn xray_vless_link(remarks: Option<&str>, ob: &serde_json::Value) -> Result<Opti
         .collect::<Vec<_>>()
         .join("&");
 
-    // имя — поле `remarks` если есть, иначе адрес
     let name = remarks.map_or_else(|| addr.clone(), str::to_string);
 
     Ok(Some(format!(
@@ -696,8 +633,6 @@ struct SubscriptionBody {
     every_line_parsed: bool,
 }
 
-/// Parse a subscription body that is either Base64-encoded or plain text.
-/// Each non-empty line is interpreted as a share link in any supported scheme.
 fn parse_subscription_body(body: &str) -> Result<SubscriptionBody> {
     ensure_subscription_size(body.len(), "body")?;
     let trimmed = body.trim();
@@ -741,9 +676,6 @@ fn parse_subscription_body(body: &str) -> Result<SubscriptionBody> {
     })
 }
 
-/// Attempt to Base64-decode `text`. Returns `Some(decoded)` only when decoding
-/// succeeds and the result looks like a subscription (contains at least one
-/// supported scheme prefix). This prevents treating plain text as binary garbage.
 fn try_decode_base64(text: &str) -> Result<Option<String>> {
     let Ok(decoded_bytes) = decode_b64_lenient(text) else {
         return Ok(None);
@@ -875,7 +807,6 @@ mod tests {
         let uuid_part = &hwid["lnx-".len()..];
         assert_eq!(uuid_part.len(), 32);
         assert!(uuid_part.chars().all(|c| c.is_ascii_hexdigit()));
-        // UUID v4: two independent generations must never collide.
         assert_ne!(generate_hwid(), generate_hwid());
     }
 
@@ -995,7 +926,6 @@ mod tests {
             kernel_version: "6.12.0-arch1-1".into(),
             locale: "ru-RU".into(),
         };
-        // Even a per-subscription override must not be sent when send_hwid is false.
         let sub = sub_with(
             "https://example.com/sub".into(),
             false,
@@ -1218,15 +1148,10 @@ mod tests {
 
     #[test]
     fn parse_xray_json_malformed_outbound_fields_are_skipped() {
-        // vless outbound missing `settings.vnext` — must not panic; the body
-        // falls through to text parsing and fails cleanly.
         let body = r#"{"outbounds": [{"protocol": "vless"}]}"#;
         assert!(parse_subscription_body(body).is_err());
     }
 
-    /// Minimal one-shot HTTP server for request tests: captures the request
-    /// headers and replies with a fixed status line, extra headers and body.
-    /// Keeps request tests independent of any external subscription provider.
     fn spawn_http_server(
         status_line: &str,
         extra_headers: &[(&str, String)],
@@ -1313,7 +1238,6 @@ mod tests {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let settings = settings_with_hwid();
 
-        // Subscription A carries a provider-registered HWID override...
         let (url_a, rx_a) = spawn_http_server("HTTP/1.1 200 OK", &[], sample_vless());
         let sub_a = sub_with(url_a, true, Some("provider-registered-device-id"));
         fetch_subscription_after_validation(&sub_a, &settings).unwrap();
@@ -1322,8 +1246,6 @@ mod tests {
             Some("provider-registered-device-id"),
         );
 
-        // ...and subscription B (no override) falls back to settings.hwid,
-        // never to A's override.
         let (url_b, rx_b) = spawn_http_server("HTTP/1.1 200 OK", &[], sample_vless());
         let sub_b = sub_with(url_b, true, None);
         fetch_subscription_after_validation(&sub_b, &settings).unwrap();
@@ -1332,7 +1254,6 @@ mod tests {
             Some("lnx-installation-hwid"),
         );
 
-        // ...and subscription C (send_hwid: false) sends no HWID at all.
         let (url_c, rx_c) = spawn_http_server("HTTP/1.1 200 OK", &[], sample_vless());
         let sub_c = sub_with(url_c, false, None);
         fetch_subscription_after_validation(&sub_c, &settings).unwrap();

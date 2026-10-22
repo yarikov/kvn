@@ -1,5 +1,3 @@
-//! Read-only diagnostics for the runtime environment.
-
 use std::env;
 use std::fs;
 use std::io::{self, IsTerminal, Write};
@@ -58,8 +56,6 @@ impl Check {
     }
 }
 
-/// Run all diagnostics, print the report, and fail when a required component
-/// is not usable.
 pub fn run() -> Result<()> {
     run_at(Path::new("/"))
 }
@@ -315,8 +311,6 @@ fn autostart_wants_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|dir| dir.join("systemd/user/default.target.wants"))
 }
 
-/// Report enable symlinks left behind by a unit the package no longer ships,
-/// which is how autostart silently stops working after a unit is renamed.
 fn stale_autostart_units(wants_dir: &Path) -> Vec<String> {
     let Ok(entries) = fs::read_dir(wants_dir) else {
         return Vec::new();
@@ -485,8 +479,6 @@ fn polkit_status_for(group: Option<crate::services::killswitch::IntegrationGroup
 
         match output.status.code() {
             Some(0) => {}
-            // 1 means denied. 2 means authorization would require interaction;
-            // doctor deliberately never opens an authentication prompt.
             Some(1 | 2) => return PolkitStatus::Denied { action },
             _ => {
                 return PolkitStatus::CheckFailed {
@@ -531,9 +523,6 @@ fn polkit_readiness_from(status: PolkitStatus) -> Result<()> {
     }
 }
 
-/// The setup state of both privileged integrations, for the first-run tour's
-/// protection cards. Both gate on the same `kvn-tui` group, so one reboot
-/// activates them together.
 pub(crate) fn integration_setup(root: &Path) -> IntegrationSetup {
     let group = crate::services::killswitch::integration_group_status();
     IntegrationSetup {
@@ -652,7 +641,6 @@ fn polkit_group_pending_check() -> Check {
     )
 }
 
-/// Build the non-racy `PID,START_TIME,UID` identity recommended by pkcheck.
 fn polkit_process_identity() -> Option<String> {
     use std::os::unix::fs::MetadataExt;
 
@@ -664,9 +652,6 @@ fn polkit_process_identity() -> Option<String> {
 }
 
 fn proc_start_time(stat: &str) -> Option<&str> {
-    // `/proc/<pid>/stat` fields 2 and 3 are `(comm)` and state. The command
-    // may contain spaces or parentheses, so split only after its final `)`.
-    // starttime is field 22, i.e. token 19 when counting from field 3.
     stat.rsplit_once(") ")?.1.split_whitespace().nth(19)
 }
 
@@ -821,8 +806,6 @@ mod tests {
 
     #[test]
     fn singbox_version_check_covers_success_and_failures() {
-        // Spawns the stub scripts (execve reads the process env) — hold
-        // ENV_LOCK against env-mutating tests.
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
 
@@ -1124,9 +1107,6 @@ mod tests {
                 }
             }
 
-            // An installed rule that does not grant access is one reboot away
-            // only while the group is pending: an active group means the rule is
-            // not effective, and a non-member needs `setup --polkit` to be added.
             let installed = match group {
                 Some(IntegrationGroup::PendingActivation) => SetupState::PendingReboot,
                 _ => SetupState::Missing,

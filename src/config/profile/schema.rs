@@ -10,13 +10,9 @@ use super::{
     into_result,
 };
 
-/// Current schema version for `profiles.json`. Bumped on every breaking
-/// change to the persisted shape; new migrations go in `Config::migrate`.
 pub const CURRENT_SCHEMA_VERSION: u32 = 7;
 
 fn default_schema_version() -> u32 {
-    // Files written before the version was introduced are treated as v0 by
-    // the schema migration path.
     0
 }
 
@@ -27,9 +23,6 @@ fn default_schema_version() -> u32 {
 pub struct Config {
     #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
     pub json_schema: Option<String>,
-    /// Schema version of the persisted file. See [`CURRENT_SCHEMA_VERSION`].
-    /// Absent in pre-versioned files; defaults to 0 for the schema migration
-    /// path.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     #[serde(default)]
@@ -54,10 +47,6 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Preferences for a machine that has never run kvn. Deliberately separate
-    /// from `Default`, which also backs every `#[serde(default)]` in the tree:
-    /// a config file that merely omits a field or a whole section must keep its
-    /// current meaning rather than silently gain background downloads.
     pub fn for_first_run() -> Self {
         let mut config = Self {
             settings: Settings::for_this_desktop(),
@@ -103,15 +92,6 @@ impl Config {
         true
     }
 
-    /// Validate semantic constraints that serde cannot enforce.
-    ///
-    /// Checks:
-    /// - Profile and subscription IDs are unique.
-    /// - Subscription-owned profiles reference an existing subscription.
-    /// - Each profile has non-empty `name`, `address`, and `uuid`.
-    /// - `dns.current_preset` names a built-in or custom preset; custom preset
-    ///   names are unique, and within each preset server tags are unique and
-    ///   `final_server` and every `rules[*].server` reference one of them.
     pub fn validate(&self) -> anyhow::Result<()> {
         into_result(self.diagnostics())
     }
@@ -279,8 +259,6 @@ mod tests {
             Config::for_first_run().settings.geo_routing.auto_update,
             GeoAutoUpdate::Every7d
         );
-        // Every `#[serde(default)]` in the chain must keep meaning "off", at
-        // whichever level the field or section is missing.
         for json in [
             r#"{"settings": {"geo_routing": {"auto_update": "off"}}}"#,
             r#"{"settings": {"geo_routing": {}}}"#,
@@ -507,8 +485,6 @@ mod tests {
 
     #[test]
     fn save_config_at_rejects_invalid_config() {
-        // Fail-close: save must run Config::validate first so a corrupted
-        // in-memory state cannot overwrite a good profiles.json on disk.
         let file = tempfile::NamedTempFile::new().unwrap();
         let mut config = Config::default();
         config.profiles.push(Profile::new_vless(

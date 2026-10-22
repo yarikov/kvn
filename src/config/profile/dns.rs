@@ -1,8 +1,3 @@
-//! DNS configuration: servers, rules, and validation.
-//!
-//! `DnsConfig` is the source of truth used both by sing-box config generation
-//! (`singbox::config`) and by the TUI's settings overlay.
-
 use std::collections::HashSet;
 use std::net::IpAddr;
 
@@ -13,7 +8,6 @@ use super::ConfigDiagnostic;
 
 pub const FAKEIP_SERVER_TAG: &str = "fakeip";
 
-// (body appended by sed)
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
 pub(crate) enum DnsStrategy {
     #[default]
@@ -27,7 +21,6 @@ pub(crate) enum DnsStrategy {
     OnlyIpv6,
 }
 
-/// Built-in DNS server presets exposed by the TUI settings overlay.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DnsPreset {
@@ -210,7 +203,6 @@ impl DnsServer {
         server
     }
 
-    /// Short label used in the status bar, e.g. "DoH", "DoT".
     pub fn kind_label(&self) -> &'static str {
         match self {
             DnsServer::Local { .. } => "local",
@@ -237,7 +229,6 @@ pub struct DnsRule {
     pub domain_regex: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rule_set: Vec<String>,
-    /// Must match a server tag of the same preset.
     pub server: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disable_cache: bool,

@@ -132,7 +132,6 @@ impl TuicUdpRelayMode {
     }
 }
 
-/// ShadowTLS protocol version. v1/v2 are deprecated; v3 is the default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ShadowtlsVersion {
     V1,
@@ -199,8 +198,6 @@ pub enum SocksVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ---- ShadowtlsVersion ----
 
     #[test]
     fn shadowtls_version_as_u8_maps_each_variant() {

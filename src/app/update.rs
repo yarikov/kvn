@@ -27,8 +27,6 @@ use traffic::handle_traffic_stats_updated;
 
 pub(crate) use config_reload::handle_config_reloaded;
 
-/// Pure function: Model + Msg → updated Model + list of Effects.
-/// No I/O, no threads, no system calls.
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     match msg {
         Msg::Key(key) => handle_key(model, key),
@@ -112,8 +110,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             sampled_at_ms,
         ),
         Msg::ThemeChanged(theme) => {
-            // Manual picker override wins: ignore Omarchy watcher events
-            // unless the user has explicitly opted into auto-follow.
             if model.config.settings.theme != "omarchy" {
                 return vec![];
             }
@@ -151,8 +147,6 @@ mod tests {
         assert!(model.config.profiles.is_empty());
     }
 
-    /// `Msg::ThemeChanged` from the Omarchy watcher is a no-op whenever
-    /// the user has picked an explicit non-`"omarchy"` theme.
     #[test]
     fn theme_changed_msg_ignored_when_manual_override_set() {
         let mut model = model_with_profiles(vec![]);
@@ -165,7 +159,6 @@ mod tests {
         assert_eq!(model.theme, original, "manual override blocks watcher");
     }
 
-    /// `Msg::ThemeChanged` applies when the user is in Auto-follow mode.
     #[test]
     fn theme_changed_msg_applies_in_omarchy_mode() {
         let mut model = model_with_profiles(vec![]);

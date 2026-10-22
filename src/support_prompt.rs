@@ -9,8 +9,6 @@ pub const INITIAL_DELAY_DAYS: i64 = 14;
 pub const REMINDER_DELAY_DAYS: i64 = 30;
 pub const SUPPORT_URL: &str = "https://web.tribute.tg/d/QUv";
 
-/// Small, non-config UX state. Keeping it outside profiles.json avoids making
-/// an optional prompt part of the versioned VPN configuration schema.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SupportPromptState {
@@ -226,7 +224,6 @@ mod tests {
         assert_eq!(load_for_daemon(None), SupportPromptState::default());
         assert!(!path.exists());
 
-        // A restart days later must not push the deadline out again.
         let completed_at = now() - Duration::days(3);
         let state = load_for_daemon(Some(completed_at));
         assert_eq!(

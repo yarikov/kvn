@@ -1,14 +1,3 @@
-//! Per-protocol outbound builders for sing-box 1.12 JSON config.
-//!
-//! `build_outbound` in the parent module dispatches on `ProtocolConfig` and
-//! calls into one of these `build_*_outbound` helpers. They each take the
-//! protocol-specific config plus the parent `Profile` (for shared fields
-//! like address/port) and return a single outbound JSON object — except
-//! ShadowTLS, which emits a wrapper + detour pair.
-//!
-//! `build_tls_block` and `build_transport_block` are the shared helpers
-//! used by every TLS-capable protocol.
-
 use std::collections::{BTreeMap, HashMap};
 
 use serde_json::{Map, Value, json};
@@ -21,10 +10,6 @@ use crate::config::profile::{
 };
 use crate::config::profile::{FINALMASK_PARAM, read_hysteria2_finalmask};
 
-/// Render the sing-box 1.12 `tls` block from [`TlsCommon`].
-/// `default_sni` is used when `tls.server_name` is unset (typically the
-/// profile address). `default_alpn` is used when `tls.alpn` is empty
-/// (e.g. `["h3"]` for QUIC-based protocols).
 fn build_tls_block(default_sni: &str, default_alpn: &[&str], tls: &TlsCommon) -> Value {
     let mut block = Map::new();
     block.insert("enabled".to_string(), json!(true));
@@ -71,7 +56,6 @@ fn build_tls_block(default_sni: &str, default_alpn: &[&str], tls: &TlsCommon) ->
     Value::Object(block)
 }
 
-/// Render the sing-box 1.12 `transport` block from [`TransportConfig`].
 fn build_transport_block(
     t: &TransportConfig,
     tls_enabled: bool,
@@ -190,13 +174,10 @@ fn split_hosts(hosts: &str) -> Vec<&str> {
         .collect()
 }
 
-/// Build VLESS outbound with optional REALITY / XTLS Vision / ECH.
 pub(super) fn build_vless_outbound(profile: &Profile, cfg: &VlessConfig) -> anyhow::Result<Value> {
     if let Some(encryption) = enabled_option(&profile.share_link_params, "encryption") {
         anyhow::bail!("sing-box does not support VLESS Encryption (encryption={encryption})");
     }
-    // REALITY requires a utls fingerprint to be useful; preserve the
-    // pre-v2 default of "chrome" when the profile didn't specify one.
     let tls_input = if cfg.tls.reality.is_some() && cfg.tls.utls_fingerprint.is_none() {
         let mut t = cfg.tls.clone();
         t.utls_fingerprint = Some("chrome".to_string());
@@ -230,8 +211,6 @@ pub(super) fn build_vless_outbound(profile: &Profile, cfg: &VlessConfig) -> anyh
     Ok(outbound)
 }
 
-/// Build VMess outbound (sing-box 1.12: explicit `security` cipher, no
-/// deprecated `aes-128-cfb`; `alter_id: 0` for AEAD-only mode).
 pub(super) fn build_vmess_outbound(profile: &Profile, cfg: &VmessConfig) -> anyhow::Result<Value> {
     let mut outbound = json!({
         "type": "vmess",
@@ -258,7 +237,6 @@ pub(super) fn build_vmess_outbound(profile: &Profile, cfg: &VmessConfig) -> anyh
     Ok(outbound)
 }
 
-/// Build Trojan outbound.
 pub(super) fn build_trojan_outbound(
     profile: &Profile,
     cfg: &TrojanConfig,
@@ -281,7 +259,6 @@ pub(super) fn build_trojan_outbound(
     Ok(outbound)
 }
 
-/// Build Shadowsocks outbound (AEAD/AEAD-2022 ciphers only).
 pub(super) fn build_shadowsocks_outbound(
     profile: &Profile,
     cfg: &ShadowsocksConfig,
@@ -304,11 +281,6 @@ pub(super) fn build_shadowsocks_outbound(
     Ok(outbound)
 }
 
-/// Build Hysteria2 outbound.
-///
-/// QUIC-based; ALPN defaults to `["h3"]` when not explicitly set.
-/// Uses the sing-box 1.12 nested `obfs: { type, password }` form (the
-/// legacy top-level `obfs_password` field is not emitted).
 pub(super) fn build_hysteria2_outbound(
     profile: &Profile,
     cfg: &Hysteria2Config,
@@ -394,7 +366,6 @@ fn hysteria2_port_ranges(ports: &str) -> Vec<String> {
         .collect()
 }
 
-/// Build TUIC v5 outbound.
 pub(super) fn build_tuic_outbound(profile: &Profile, cfg: &TuicConfig) -> anyhow::Result<Value> {
     let mut outbound = json!({
         "type": "tuic",
@@ -413,9 +384,6 @@ pub(super) fn build_tuic_outbound(profile: &Profile, cfg: &TuicConfig) -> anyhow
     Ok(outbound)
 }
 
-/// Build the ShadowTLS wrapper + inner Shadowsocks detour pair.
-/// The Shadowsocks outbound is tagged `proxy` (referenced by routing rules);
-/// the ShadowTLS outbound is tagged internally and chained via `detour`.
 pub(super) fn build_shadowtls_outbounds(
     profile: &Profile,
     cfg: &ShadowtlsConfig,
@@ -447,7 +415,6 @@ pub(super) fn build_shadowtls_outbounds(
     Ok(vec![shadowtls, shadowsocks])
 }
 
-/// Build AnyTLS outbound.
 pub(super) fn build_anytls_outbound(
     profile: &Profile,
     cfg: &AnytlsConfig,
@@ -489,7 +456,6 @@ pub(super) fn build_naive_outbound(profile: &Profile, cfg: &NaiveConfig) -> anyh
     Ok(outbound)
 }
 
-/// Build SOCKS outbound (no TLS layer in sing-box; use ShadowTLS for that).
 pub(super) fn build_socks_outbound(profile: &Profile, cfg: &SocksConfig) -> anyhow::Result<Value> {
     let mut outbound = json!({
         "type": "socks",
@@ -516,7 +482,6 @@ fn socks_version_str(v: &crate::config::profile::SocksVersion) -> &'static str {
     }
 }
 
-/// Build HTTP CONNECT outbound (TLS optional via [`TlsCommon`]).
 pub(super) fn build_http_outbound(profile: &Profile, cfg: &HttpConfig) -> anyhow::Result<Value> {
     let mut outbound = json!({
         "type": "http",
@@ -536,7 +501,6 @@ pub(super) fn build_http_outbound(profile: &Profile, cfg: &HttpConfig) -> anyhow
     Ok(outbound)
 }
 
-/// Build SSH outbound.
 pub(super) fn build_ssh_outbound(profile: &Profile, cfg: &SshConfig) -> anyhow::Result<Value> {
     let mut outbound = json!({
         "type": "ssh",
