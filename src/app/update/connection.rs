@@ -1,5 +1,6 @@
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey, TrafficStats};
+use crate::app::msg::ConnectRetryReason;
 use crate::config::profile::RoutingFallback;
 use uuid::Uuid;
 
@@ -109,6 +110,34 @@ pub(in crate::app::update) fn on_connect_failed(
         model,
         StatusKey::Connection,
         AppStatus::Error(format!("Connection failed: {}", error)),
+    );
+    effects
+}
+
+pub(in crate::app::update) fn on_connect_retrying(
+    model: &mut Model,
+    attempt_id: u64,
+    reason: ConnectRetryReason,
+    limit: std::time::Duration,
+) -> Vec<Effect> {
+    if attempt_id != model.connect_attempt_id {
+        return vec![];
+    }
+    let limit = limit.as_secs();
+    let status = match reason {
+        ConnectRetryReason::BinaryBeingWritten => {
+            format!("The sing-box binary is being written; retrying for up to {limit} seconds")
+        }
+        ConnectRetryReason::TunNotPermitted => format!(
+            "sing-box is not allowed to create the TUN interface yet; retrying for up to {limit} seconds"
+        ),
+    };
+    let mut effects = vec![Effect::BroadcastState];
+    push_status(
+        &mut effects,
+        model,
+        StatusKey::Connection,
+        AppStatus::Info(status),
     );
     effects
 }
@@ -376,6 +405,37 @@ mod tests {
         assert_eq!(model.connection, ConnectionState::Connected);
         assert_eq!(model.active_profile_id, Some(profile_id));
         assert_eq!(model.singbox_pid, Some(42));
+    }
+
+    #[test]
+    fn connect_retry_is_reported_with_its_reason_for_the_current_attempt_only() {
+        let mut model = Model::test_new(crate::config::profile::Config::default());
+        model.connection = ConnectionState::ConnectPending;
+        model.connect_attempt_id = 3;
+        let retrying = |attempt_id, reason| Msg::ConnectRetrying {
+            attempt_id,
+            reason,
+            limit: std::time::Duration::from_secs(90),
+        };
+
+        assert!(update(&mut model, retrying(2, ConnectRetryReason::TunNotPermitted)).is_empty());
+        assert!(model.status.is_none());
+
+        for (reason, message) in [
+            (
+                ConnectRetryReason::BinaryBeingWritten,
+                "The sing-box binary is being written; retrying for up to 90 seconds",
+            ),
+            (
+                ConnectRetryReason::TunNotPermitted,
+                "sing-box is not allowed to create the TUN interface yet; retrying for up to 90 seconds",
+            ),
+        ] {
+            let effects = update(&mut model, retrying(3, reason));
+            assert_eq!(model.connection, ConnectionState::ConnectPending);
+            assert_eq!(model.status_text(), message);
+            assert_eq!(effects, vec![Effect::BroadcastState, app_log_info(message)]);
+        }
     }
 
     #[test]

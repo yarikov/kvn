@@ -68,10 +68,7 @@ fn run_until_exit(
     mut command: Command,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(ExitStatus, String)> {
-    let mut child = command
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let mut child = spawn_singbox(command.stdout(Stdio::null()).stderr(Stdio::piped()))?;
     let stderr = child.stderr.take().map(|mut stderr| {
         thread::spawn(move || {
             let mut text = String::new();
@@ -188,6 +185,48 @@ fn start_with<T>(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotReady {
+    BinaryBeingWritten,
+    TunNotPermitted,
+}
+
+#[derive(Debug)]
+struct BinaryBeingWritten;
+
+impl std::fmt::Display for BinaryBeingWritten {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the sing-box binary is being written")
+    }
+}
+
+fn spawn_singbox(command: &mut Command) -> Result<Child> {
+    command.spawn().map_err(|error| {
+        let being_written = error.raw_os_error() == Some(libc::ETXTBSY);
+        let error = anyhow::Error::from(error);
+        if being_written {
+            error.context(BinaryBeingWritten)
+        } else {
+            error
+        }
+    })
+}
+
+pub fn not_ready(error: &anyhow::Error) -> Option<NotReady> {
+    if error.downcast_ref::<BinaryBeingWritten>().is_some() {
+        return Some(NotReady::BinaryBeingWritten);
+    }
+    mentions_tun_permission_denied(&format!("{error:#}")).then_some(NotReady::TunNotPermitted)
+}
+
+fn mentions_tun_permission_denied(error: &str) -> bool {
+    error.lines().any(|line| {
+        let line = line.to_ascii_lowercase();
+        (line.contains("tun interface") || line.contains("/dev/net/tun"))
+            && line.contains("operation not permitted")
+    })
+}
+
 fn is_clash_port_conflict(error: &str, port: u16) -> bool {
     let error = error.to_ascii_lowercase();
     error.contains("address already in use") && mentions_exact_loopback_port(&error, port)
@@ -209,14 +248,15 @@ fn spawn_and_wait(
     // logger can't fill the pipe buffer (~64K) and wedge the child on write.
     // stderr stays piped — on immediate exit we read it for diagnostics, and
     // on success we hand it to a drain thread (see `spawn_stderr_drain`).
-    let mut child = Command::new(singbox_binary())
-        .arg("run")
-        .arg("-c")
-        .arg(config_path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("Failed to start sing-box (binary: {})", singbox_binary()))?;
+    let mut child = spawn_singbox(
+        Command::new(singbox_binary())
+            .arg("run")
+            .arg("-c")
+            .arg(config_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped()),
+    )
+    .with_context(|| format!("Failed to start sing-box (binary: {})", singbox_binary()))?;
 
     // Poll for either an immediate exit (config rejected, port busy, etc.)
     // or a stable run. The 300ms budget is the same heuristic as before —
@@ -723,6 +763,45 @@ mod tests {
         anyhow::anyhow!(
             "sing-box exited immediately (code: Some(1)). stderr: FATAL[0000] start service: listen tcp 127.0.0.1:{port}: bind: address already in use"
         )
+    }
+
+    #[test]
+    fn only_a_spawn_of_a_binary_still_open_for_writing_reads_as_being_written() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("sing-box");
+        let writer = fs::File::create(&binary).unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+        let spawn_failure = |path: &std::path::Path| {
+            let error = spawn_singbox(&mut Command::new(path)).unwrap_err();
+            not_ready(&error.context("Failed to run sing-box check"))
+        };
+
+        assert_eq!(spawn_failure(&binary), Some(NotReady::BinaryBeingWritten));
+        drop(writer);
+        assert_eq!(spawn_failure(&dir.path().join("missing")), None);
+
+        let write_failure = anyhow::Error::from(std::io::Error::from_raw_os_error(libc::ETXTBSY))
+            .context("Failed to write config");
+        assert_eq!(not_ready(&write_failure), None);
+    }
+
+    #[test]
+    fn tun_permission_denial_is_recognized_only_on_a_tun_line() {
+        assert!(mentions_tun_permission_denied(
+            "sing-box exited immediately (code: Some(1)). stderr: FATAL[0000] start service: start inbound/tun[tun-in]: configure tun interface: operation not permitted"
+        ));
+        assert!(!mentions_tun_permission_denied(
+            "sing-box exited immediately (code: Some(1)). stderr: WARN[0000] set socket mark: operation not permitted\nFATAL[0000] decode config: bad outbound"
+        ));
+        assert!(!mentions_tun_permission_denied(
+            "sing-box config validation failed: FATAL[0000] start inbound/tun[tun-in]: invalid address"
+        ));
+        assert!(!mentions_tun_permission_denied(
+            "sing-box exited immediately (code: Some(1)). stderr: FATAL[0000] start endpoint: open tunnel: operation not permitted"
+        ));
     }
 
     #[test]
