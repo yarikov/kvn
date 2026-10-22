@@ -108,7 +108,7 @@ happy path. Network-dependent logic should use a local test server or be split
 so that its decisions can be tested as pure functions; tests must not depend on
 an external subscription provider.
 
-Total region and line coverage must remain at or above 85%. Before opening a
+Total region and line coverage must remain at or above 90%. Before opening a
 pull request, run:
 
 ```bash
