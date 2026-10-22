@@ -110,7 +110,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             sampled_at_ms,
         ),
         Msg::ThemeChanged(theme) => {
-            if model.config.settings.theme != "omarchy" {
+            if !model.config.settings.follows_omarchy_theme() {
                 return vec![];
             }
             model.theme = theme;

@@ -259,7 +259,7 @@ fn shorten_theme_name(name: &str) -> String {
 }
 
 pub(super) fn theme_value_label(slug: &str) -> &str {
-    if slug == crate::tui_client::theme_watch::OMARCHY_SENTINEL {
+    if slug == crate::config::profile::OMARCHY_THEME_SENTINEL {
         AUTO_THEME_LABEL
     } else {
         slug

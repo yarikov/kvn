@@ -118,7 +118,7 @@ pub(in crate::app::update) fn handle_settings_menu(
 fn theme_slugs() -> Vec<String> {
     let mut out = Vec::new();
     if crate::omarchy::detect_omarchy_theme().is_some() {
-        out.push(crate::tui_client::theme_watch::OMARCHY_SENTINEL.to_string());
+        out.push(crate::config::profile::OMARCHY_THEME_SENTINEL.to_string());
     }
     out.extend(
         crate::ui::palette::Palette::bundled_names()

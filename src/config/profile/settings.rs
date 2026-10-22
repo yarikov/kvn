@@ -235,6 +235,10 @@ fn is_safe_slug_char(c: char) -> bool {
 }
 
 impl Settings {
+    pub fn follows_omarchy_theme(&self) -> bool {
+        self.theme == OMARCHY_THEME_SENTINEL
+    }
+
     pub fn with_global_routing(&self) -> Self {
         let mut settings = self.clone();
         settings.geo_routing.set_mode(RoutingMode::Global);
@@ -255,9 +259,7 @@ impl Settings {
                 .map(|message| ConfigDiagnostic::new("/tun_interface", message)),
         );
 
-        if self.theme != OMARCHY_THEME_SENTINEL
-            && !BUNDLED_THEME_NAMES.contains(&self.theme.as_str())
-        {
+        if !self.follows_omarchy_theme() && !BUNDLED_THEME_NAMES.contains(&self.theme.as_str()) {
             diagnostics.push(ConfigDiagnostic::new(
                 "/theme",
                 format!(
