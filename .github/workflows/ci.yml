@@ -53,6 +53,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-insta
+      - uses: ./.github/actions/sing-box
       - run: cargo test --locked
       # Re-runs the suite against the warm target dir purely to catch .snap
       # files no test references any more. `cargo insta test` forwards
@@ -70,9 +71,10 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
+      - uses: ./.github/actions/sing-box
       # cargo-llvm-cov's --fail-under-* flags do not actually enforce the
       # threshold in 0.8.x, so parse the TOTAL line ourselves and gate on it.
-      - name: Enforce ≥85% region and line coverage
+      - name: Enforce ≥90% region and line coverage
         run: |
           set -euo pipefail
           cargo llvm-cov --locked --summary-only | tee /tmp/cov.out
@@ -81,8 +83,8 @@ jobs:
           lines=$(echo "$total" | awk '{print $10}' | tr -d '%')
           echo "region coverage: ${regions}%, line coverage: ${lines}%"
           awk -v r="$regions" -v l="$lines" 'BEGIN {
-            if (r + 0 < 85 || l + 0 < 85) {
-              printf "FAIL: regions=%s%%, lines=%s%% — minimum is 85%%\n", r, l
+            if (r + 0 < 90 || l + 0 < 90) {
+              printf "FAIL: regions=%s%%, lines=%s%% — minimum is 90%%\n", r, l
               exit 1
             }
             printf "PASS: regions=%s%%, lines=%s%%\n", r, l

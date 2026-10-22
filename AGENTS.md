@@ -24,7 +24,7 @@ INSTA_UPDATE=always cargo test # run tests and auto-accept snapshot changes
 cargo insta test --check --unreferenced=reject  # what CI checks: snapshots match, none orphaned
 cargo fmt                      # format (required before committing)
 cargo clippy --all-targets --all-features -- -D warnings  # lint; CI fails on any warning
-cargo llvm-cov --summary-only  # coverage report; both region & line totals must stay ≥ 85 % (CI gate)
+cargo llvm-cov --summary-only  # coverage report; both region & line totals must stay ≥ 90 % (CI gate)
 cargo deny check all           # dependency licenses, advisories, bans, sources (CI gate, deny.toml)
 ```
 
@@ -235,8 +235,8 @@ Rules of thumb:
 
 ### Coverage Policy
 
-- **Minimum total coverage is 85 %** on both regions and lines. CI enforces this in the `coverage` job — see `.github/workflows/ci.yml`.
-- Any change that lowers total region or line coverage below 85 % must add tests in the same PR to bring it back up. A code change that drops coverage is not "done."
+- **Minimum total coverage is 90 %** on both regions and lines. CI enforces this in the `coverage` job — see `.github/workflows/ci.yml`.
+- Any change that lowers total region or line coverage below 90 % must add tests in the same PR to bring it back up. A code change that drops coverage is not "done."
 - Check locally before pushing:
 
   ```bash
@@ -246,7 +246,7 @@ Rules of thumb:
   cargo llvm-cov --summary-only
   ```
 
-  The `TOTAL` line shows region / function / line coverage. Both region and line numbers must be ≥ 85 % for CI to pass.
+  The `TOTAL` line shows region / function / line coverage. Both region and line numbers must be ≥ 90 % for CI to pass.
 - The CI gate parses the `TOTAL` line directly because `cargo-llvm-cov --fail-under-*` flags are silently no-op in the 0.8.x series.
 - 0 %-coverage I/O wrappers (`daemon.rs` and its `daemon/` submodules, `tui_client.rs` and its `tui_client/handler/` submodules, `main.rs`, `services/killswitch.rs`, `services/suspend.rs`, `tui_client/clipboard.rs`, `tui_client/theme_watch.rs` watcher thread, `singbox/clash_api.rs`, `systemd.rs`, install_* in `cli.rs`) are accepted as-is — they wrap subprocesses, DBus, Unix sockets, HTTP, and filesystem watchers, which need integration harnesses out of scope for unit tests. **Do not rewrite them just to add fake-based tests.** Cover new logic with pure-function tests instead.
 
@@ -352,7 +352,7 @@ Any added, removed, or changed CLI command, option, or output updates
 
 1. Are you preserving atomic file writes for any new config files?
 2. Are you using `anyhow::Result`, and `tracing` instead of `println!` / `eprintln!` outside CLI output?
-3. Are tests added for new public functions, and does `cargo llvm-cov --summary-only` still report **≥ 85 %** region and line coverage?
+3. Are tests added for new public functions, and does `cargo llvm-cov --summary-only` still report **≥ 90 %** region and line coverage?
 4. Are you respecting the Arch-only constraint (no support for other distros or BSDs added silently)?
 5. Does the sing-box config generation remain valid for sing-box 1.14+?
 6. Have you run `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, and (after a dependency change) `cargo deny check all`, and fixed what they report?

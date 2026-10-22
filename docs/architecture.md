@@ -368,5 +368,5 @@ check the model and the returned effects. Rendering is tested only with insta
 snapshots. Configuration and protocol logic have unit tests; IPC, subscription
 and geo downloads also use local socket and HTTP fixtures. Runtime
 wrappers around processes, D-Bus and desktop services are kept thin and do not
-require unit-test coverage. CI requires at least 85 % line and region coverage
+require unit-test coverage. CI requires at least 90 % line and region coverage
 overall. See [CONTRIBUTING.md](../CONTRIBUTING.md) for the commands.
