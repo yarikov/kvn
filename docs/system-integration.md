@@ -25,8 +25,11 @@ not enable the daemon service automatically. An ALPM hook restores these
 capabilities whenever pacman installs or upgrades `/usr/bin/sing-box`; manually
 replaced binaries are not covered. That hook runs only at the end of the pacman
 transaction, so a connection started while the transaction is still upgrading
-the sing-box binary kvn launches (`SING_BOX_PATH`, or the first `sing-box` on
-`PATH`) waits for it to finish (at most five minutes) before launching it. Enable the daemon as your regular user:
+sing-box fails with `operation not permitted`; connect again once the upgrade
+finishes. kvn does not retry by itself, so a reconnect after resume or the
+auto-connect at startup that falls into that window stays disconnected, and
+with the kill switch on the computer stays offline, until you connect again.
+Enable the daemon as your regular user:
 
 ```bash
 systemctl --user enable --now kvn-tui.service

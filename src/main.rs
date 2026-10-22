@@ -17,7 +17,6 @@ mod ipc;
 mod net;
 mod omarchy;
 mod onboarding;
-mod pacman;
 mod paths;
 mod redaction;
 mod runtime_lock;
