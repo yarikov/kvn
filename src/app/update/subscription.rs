@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey};
+use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey, UpdateTrigger};
 use crate::config::profile::{Profile, SubscriptionAutoUpdate};
 use chrono::Local;
 use std::collections::{HashMap, HashSet};
@@ -23,8 +23,7 @@ fn handle_subscription_result_at(
     result: Result<Vec<Profile>, crate::app::msg::IpcError>,
     now: chrono::DateTime<Local>,
 ) -> Vec<Effect> {
-    let automatic = model.automatic_subscription_updates.remove(&id);
-    model.subscription_updates.remove(&id);
+    let automatic = model.subscription_updates.remove(&id) == Some(UpdateTrigger::Automatic);
     let Some(sub_idx) = model.config.subscriptions.iter().position(|s| s.id == id) else {
         return vec![Effect::AppendAppLog {
             level: "INFO".into(),
@@ -424,7 +423,9 @@ mod tests {
     fn subscription_fetched_after_its_subscription_was_deleted_is_dropped() {
         let mut model = model_with_profiles(vec![]);
         let deleted_id = Uuid::new_v4();
-        model.subscription_updates.insert(deleted_id);
+        model
+            .subscription_updates
+            .insert(deleted_id, UpdateTrigger::Manual);
         let fetched = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
 
         let effects = handle_subscription_result(&mut model, deleted_id, Ok(vec![fetched]));
@@ -480,7 +481,9 @@ mod tests {
             send_hwid: false,
             hwid: None,
         });
-        model.automatic_subscription_updates.insert(sub_id);
+        model
+            .subscription_updates
+            .insert(sub_id, UpdateTrigger::Automatic);
 
         let failed_at = Local::now();
         let effects = handle_subscription_result_at(
@@ -620,7 +623,9 @@ mod tests {
             hwid: None,
         });
         model.config.subscriptions[0].record_fetch_failure(Local::now());
-        model.automatic_subscription_updates.insert(sub_id);
+        model
+            .subscription_updates
+            .insert(sub_id, UpdateTrigger::Automatic);
 
         let new_profiles = vec![Profile::new_vless(
             "New".to_string(),

@@ -1,5 +1,5 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model, Overlay, StatusKey};
+use crate::app::model::{AppStatus, ConnectionState, Model, Overlay, StatusKey, UpdateTrigger};
 use crate::config::profile::{GeoRegion, SubscriptionAutoUpdate};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -188,7 +188,7 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
             .iter()
             .any(|p| p.subscription_id == Some(id))
         {
-            if model.subscription_updates.contains(&id) {
+            if model.subscription_updates.contains_key(&id) {
                 return subscription_already_updating(model, id, &name);
             }
             if !download_allowed(model) {
@@ -196,7 +196,7 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
                 push_download_blocked(&mut result, model, DownloadKind::Subscription(id));
                 return result;
             }
-            model.subscription_updates.insert(id);
+            model.subscription_updates.insert(id, UpdateTrigger::Manual);
             let mut result = vec![Effect::SaveConfig, Effect::UpdateSubscription { id }];
             push_status(
                 &mut result,
@@ -226,14 +226,14 @@ fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
     {
         let id = sub.id;
         let name = sub.name.clone();
-        if model.subscription_updates.contains(&id) {
+        if model.subscription_updates.contains_key(&id) {
             return subscription_already_updating(model, id, &name);
         }
         if !download_allowed(model) {
             push_download_blocked(&mut effects, model, DownloadKind::Subscription(id));
             return effects;
         }
-        model.subscription_updates.insert(id);
+        model.subscription_updates.insert(id, UpdateTrigger::Manual);
         let mut result = vec![Effect::SaveConfig, Effect::UpdateSubscription { id }];
         push_status(
             &mut result,
@@ -487,7 +487,10 @@ mod tests {
         });
         model.selected = 0;
         let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Enter));
-        assert!(model.subscription_updates.contains(&sub_id));
+        assert_eq!(
+            model.subscription_updates.get(&sub_id),
+            Some(&UpdateTrigger::Manual)
+        );
         assert!(effects.contains(&Effect::UpdateSubscription { id: sub_id }));
         assert!(effects.contains(&Effect::SaveConfig));
     }
@@ -507,7 +510,9 @@ mod tests {
             send_hwid: false,
             hwid: None,
         });
-        model.subscription_updates.insert(sub_id);
+        model
+            .subscription_updates
+            .insert(sub_id, UpdateTrigger::Manual);
         model.selected = 0;
 
         let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Enter));
@@ -728,7 +733,10 @@ mod tests {
 
         let effects = handle_sources(&mut model, key('u'));
 
-        assert!(model.subscription_updates.contains(&sub_id));
+        assert_eq!(
+            model.subscription_updates.get(&sub_id),
+            Some(&UpdateTrigger::Manual)
+        );
         assert_eq!(
             effects,
             vec![
@@ -754,7 +762,9 @@ mod tests {
             send_hwid: false,
             hwid: None,
         });
-        model.subscription_updates.insert(sub_id);
+        model
+            .subscription_updates
+            .insert(sub_id, UpdateTrigger::Manual);
         model.selected = 0;
 
         let effects = handle_sources(&mut model, key('u'));
