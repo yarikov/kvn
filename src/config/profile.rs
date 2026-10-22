@@ -34,7 +34,7 @@ pub use routing::{
     GeoRegion, GeoRouting, RoutedService, RoutingFallback, RoutingMode, ServiceRoute,
 };
 pub use schedule::{
-    GeoAutoUpdate, SubscriptionAutoUpdate, next_update_window_date, retry_delay_minutes,
+    GeoAutoUpdate, RetryState, SubscriptionAutoUpdate, next_update_window_date, update_window_open,
 };
 pub use schema::{CURRENT_SCHEMA_VERSION, Config};
 pub use settings::{
@@ -49,7 +49,6 @@ pub use share_link::{
 };
 pub use subscription::Subscription;
 #[cfg(test)]
-pub use subscription::SubscriptionRetryState;
 #[cfg(test)]
 pub use tls::WebSocketEarlyData;
 pub use tls::{

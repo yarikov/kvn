@@ -9,7 +9,7 @@ use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 use crate::app::msg::{GeoSchedule, ServiceSchedule};
-use crate::config::profile::{GeoRegion, RoutedService};
+use crate::config::profile::{GeoRegion, RetryState, RoutedService};
 
 const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 const GEO_BATCH_TIMEOUT: Duration = Duration::from_mins(3);
@@ -139,9 +139,9 @@ struct GeoMetadata {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     checked_at: HashMap<GeoRegion, DateTime<Local>>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    region_retry_states: HashMap<GeoRegion, GeoRetryState>,
+    region_retry_states: HashMap<GeoRegion, RetryState>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    service_retry_states: HashMap<RoutedService, GeoRetryState>,
+    service_retry_states: HashMap<RoutedService, RetryState>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     service_checked_at: HashMap<RoutedService, DateTime<Local>>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -167,26 +167,6 @@ fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
-fn next_retry_state(previous: Option<&GeoRetryState>, now: DateTime<Local>) -> GeoRetryState {
-    let failures = previous
-        .filter(|state| state.attempt_date == Some(now.date_naive()))
-        .map_or(1, |state| state.consecutive_failures.saturating_add(1));
-    let delay = crate::config::profile::retry_delay_minutes(failures, now);
-    GeoRetryState {
-        consecutive_failures: failures,
-        retry_at: now + chrono::Duration::minutes(delay),
-        attempt_date: Some(now.date_naive()),
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GeoRetryState {
-    pub consecutive_failures: u32,
-    pub retry_at: DateTime<Local>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attempt_date: Option<NaiveDate>,
-}
-
 #[derive(Debug, Default, Deserialize)]
 struct GeoMetadataRaw {
     #[serde(default)]
@@ -196,9 +176,9 @@ struct GeoMetadataRaw {
     #[serde(default)]
     checked_at: HashMap<GeoRegion, DateTime<Local>>,
     #[serde(default, alias = "retry_states")]
-    region_retry_states: HashMap<GeoRegion, GeoRetryState>,
+    region_retry_states: HashMap<GeoRegion, RetryState>,
     #[serde(default)]
-    service_retry_states: HashMap<RoutedService, GeoRetryState>,
+    service_retry_states: HashMap<RoutedService, RetryState>,
     #[serde(default)]
     service_checked_at: HashMap<RoutedService, DateTime<Local>>,
     #[serde(default)]
@@ -395,7 +375,7 @@ impl GeoManager {
         self.load_metadata().ok()?.checked_at.get(&region).copied()
     }
 
-    pub fn retry_state(&self, region: GeoRegion) -> Option<GeoRetryState> {
+    pub fn retry_state(&self, region: GeoRegion) -> Option<RetryState> {
         self.load_metadata()
             .ok()?
             .region_retry_states
@@ -411,7 +391,7 @@ impl GeoManager {
         &self,
         region: GeoRegion,
         schedule_epoch: u64,
-    ) -> Result<Option<GeoRetryState>> {
+    ) -> Result<Option<RetryState>> {
         self.record_update_failure_at(region, Local::now(), schedule_epoch)
     }
 
@@ -420,10 +400,10 @@ impl GeoManager {
         region: GeoRegion,
         now: DateTime<Local>,
         schedule_epoch: u64,
-    ) -> Result<Option<GeoRetryState>> {
+    ) -> Result<Option<RetryState>> {
         let mut recorded = None;
         self.update_schedule(schedule_epoch, |meta| {
-            let state = next_retry_state(meta.region_retry_states.get(&region), now);
+            let state = RetryState::after_failure(meta.region_retry_states.get(&region), now);
             meta.region_retry_states.insert(region, state);
             recorded = Some(state);
             true
@@ -435,7 +415,7 @@ impl GeoManager {
         self.update_metadata(|meta| meta.region_retry_states.remove(&region).is_some())
     }
 
-    pub fn service_retry_states(&self) -> HashMap<RoutedService, GeoRetryState> {
+    pub fn service_retry_states(&self) -> HashMap<RoutedService, RetryState> {
         self.load_metadata()
             .map(|meta| meta.service_retry_states)
             .unwrap_or_default()
@@ -465,11 +445,11 @@ impl GeoManager {
         &self,
         service: RoutedService,
         schedule_epoch: u64,
-    ) -> Result<Option<GeoRetryState>> {
+    ) -> Result<Option<RetryState>> {
         let now = Local::now();
         let mut recorded = None;
         self.update_schedule(schedule_epoch, |meta| {
-            let state = next_retry_state(meta.service_retry_states.get(&service), now);
+            let state = RetryState::after_failure(meta.service_retry_states.get(&service), now);
             meta.service_retry_states.insert(service, state);
             recorded = Some(state);
             true

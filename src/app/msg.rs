@@ -139,16 +139,17 @@ pub type ServiceCheckTimes = std::collections::HashMap<RoutedService, DateTime<L
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GeoSchedule {
     pub epoch: u64,
-    pub retry_state: Option<crate::geo::GeoRetryState>,
+    pub retry_state: Option<crate::config::profile::RetryState>,
     pub next_update: Option<chrono::NaiveDate>,
-    pub service_retry_states: std::collections::HashMap<RoutedService, crate::geo::GeoRetryState>,
+    pub service_retry_states:
+        std::collections::HashMap<RoutedService, crate::config::profile::RetryState>,
     pub service_next_updates: std::collections::HashMap<RoutedService, chrono::NaiveDate>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServiceSchedule {
     pub epoch: u64,
-    pub retry_states: std::collections::HashMap<RoutedService, crate::geo::GeoRetryState>,
+    pub retry_states: std::collections::HashMap<RoutedService, crate::config::profile::RetryState>,
     pub next_updates: std::collections::HashMap<RoutedService, chrono::NaiveDate>,
 }
 

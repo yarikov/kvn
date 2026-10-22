@@ -429,7 +429,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.geo_schedule_epoch = 2;
         let checked_at = Local::now();
-        let stale_retry = crate::geo::GeoRetryState {
+        let stale_retry = crate::config::profile::RetryState {
             consecutive_failures: 1,
             retry_at: checked_at,
             attempt_date: None,

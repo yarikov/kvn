@@ -537,7 +537,7 @@ mod tests {
         );
         assert_eq!(
             model.config.subscriptions[0].retry_state,
-            Some(crate::config::profile::SubscriptionRetryState {
+            Some(crate::config::profile::RetryState {
                 consecutive_failures: 1,
                 retry_at: failed_at + chrono::Duration::minutes(1),
                 attempt_date: Some(failed_at.date_naive()),
@@ -909,7 +909,7 @@ mod tests {
         let now = Local::now();
         let id = Uuid::new_v4();
         let mut model = model_with_profiles(vec![]);
-        let retry = crate::config::profile::SubscriptionRetryState {
+        let retry = crate::config::profile::RetryState {
             consecutive_failures: 2,
             retry_at: now + chrono::Duration::minutes(5),
             attempt_date: Some(now.date_naive()),
@@ -921,7 +921,7 @@ mod tests {
             auto_update: SubscriptionAutoUpdate::Every3d,
             last_updated: None,
             next_auto_update: Some(now.date_naive()),
-            retry_state: Some(retry.clone()),
+            retry_state: Some(retry),
             send_hwid: false,
             hwid: None,
         });
