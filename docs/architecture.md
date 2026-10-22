@@ -20,29 +20,30 @@ runs `sing-box` as a child process and shows its state in a terminal UI.
 
 ## Processes
 
-```text
- ┌──────────────┐ ┌──────────────────────┐ ┌──────────────────────────┐
- │ kvn (TUI)    │ │ kvn (CLI)            │ │ Omarchy plugin (omakvn)  │
- └──────┬───────┘ └──────────┬───────────┘ └────────────┬─────────────┘
-        │   NDJSON over $XDG_RUNTIME_DIR/kvn-tui.sock   │
-        └────────────────────┼──────────────────────────┘
-                             ▼
-              ┌───────────────────────────────┐
-              │ kvn --daemon                  │   systemd user unit
-              │ (kvn-tui.service)             │   kvn-tui.service
-              │ canonical Model, config, geo, │
-              │ suspend, logs                 │
-              └───────┬───────────────┬───────┘
-     spawn / kill,    │               │  sudo killswitch-helper.sh
-     Clash API        │               │  enable / disable
-     (loopback)       ▼               ▼
- ┌────────────────────────────┐ ┌────────────────────────────────┐
- │ sing-box run               │ │ kill switch: nftables table    │
- │ TUN, protocols, DNS,       │ │ kvn-tui-killswitch.service     │
- │ routing                    │ │ (systemd system unit)          │
- │ cap_net_admin,cap_net_raw  │ │ drops egress outside the       │
- │ marks packets 0x29a ───────┼─┼▶ tunnel, passes 0x29a          │
- └────────────────────────────┘ └────────────────────────────────┘
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    TUI["kvn (TUI)"]
+    CLI["kvn (CLI)"]
+    Plugin["Omarchy plugin (omakvn)"]
+    Daemon["kvn --daemon<br>kvn-tui.service (systemd user unit)"]
+    SingBox["sing-box run<br>TUN, protocols, DNS, routing<br>cap_net_admin,cap_net_raw<br>marks its packets 0x29a"]
+    Helper["killswitch-helper.sh<br>runs as root through sudo"]
+    Unit["kvn-tui-killswitch.service (systemd system unit)"]
+    Table["nftables table inet kvn_tui_killswitch<br>drops egress outside the tunnel<br>passes packets marked 0x29a"]
+
+    Socket(["$XDG_RUNTIME_DIR/kvn-tui.sock"])
+
+    TUI & CLI & Plugin -- NDJSON --> Socket --> Daemon
+    Daemon -- "spawn / stop<br>Clash API (loopback)" --> SingBox
+    Daemon -- "enable / disable" --> Helper
+    Helper -- "systemctl enable / disable" --> Unit
+    Unit -- "nft -f / delete table" --> Table
+    SingBox -- "marked packets" --> Table
 ```
 
 **The daemon** (`kvn --daemon`, started by the `kvn-tui.service` user unit, or
@@ -246,10 +247,16 @@ hours when connecting. The TUI
 reads the two files itself: on its own 250 ms tick, its `LogTailer` reads the
 new lines and shows them in the log pane.
 
-```text
-sing-box ──writes──▶ sing-box.log ─┐
-daemon ────writes──▶ app log ──────┼──▶ TUI LogTailer ──▶ log pane
-daemon ── trims both files ────────┘
+```mermaid
+flowchart LR
+    subgraph Logs["log files"]
+        SingBoxLog["sing-box.log"]
+        AppLog["app log"]
+    end
+    SingBox["sing-box"] -- writes --> SingBoxLog
+    Daemon["daemon"] -- writes --> AppLog
+    Daemon -. trims .-> Logs
+    Logs --> Tailer["TUI LogTailer"] --> Pane["log pane"]
 ```
 
 ## TUI client
