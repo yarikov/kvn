@@ -20,3 +20,8 @@ pacman writes the new sing-box binary (a spawn while it is still open for writin
 
 - **`Effect::SaveConfig`** — a change the user asked for. A failed write restores the config, support prompt and tour progress from before the update, preserves the edited version under `recovery/`, and drops every effect except `BroadcastState` and `AppendAppLog`: the change did not happen.
 - **`Effect::PersistConfirmedState`** — a record of something the system already did (`KillSwitchApplied`, `Connected`). A failed write keeps the model and every other effect, such as `WriteState`, and only reports the error: the model must describe the firewall and the tunnel as they are. The config the write was based on is kept in `Model::unsaved_state_merge_base` and used as the merge base of every later save, so the unsaved state reads as the model's own change and wins over the older value on disk. A successful write or a reload from disk clears it.
+
+## Connect Attempts and the Latency Probe
+
+- After every `update`, the run loop copies `Model::connect_attempt_id` into the process slot before any effect runs. `queue_connect` advances the ID one tick before `Effect::Connect`, so publishing it at once keeps a worker of the previous attempt from installing its process during those 250 ms.
+- sing-box acknowledges a SOCKS5 `CONNECT` before the outbound connection is open, so the CONNECT round trip is about 0 ms. `profile_test` measures from the start of the HTTP request (or of the TLS handshake for HTTPS) to the first response byte through the tunnel.
