@@ -381,9 +381,7 @@ pub struct Model {
     pub routing_fallback: Option<crate::config::profile::RoutingFallback>,
     pub region_download_deferred: bool,
     pub logs: VecDeque<String>,
-    pub log_scroll: usize,
     pub geo_updating: bool,
-    pub subscription_fetching: bool,
     pub subscription_updates: HashSet<Uuid>,
     pub automatic_subscription_updates: HashSet<Uuid>,
     pub needs_redraw: bool,
@@ -422,7 +420,6 @@ impl Model {
         if self.logs.len() > MAX_LOG_LINES {
             self.logs.pop_front();
         }
-        self.log_scroll = self.logs.len().saturating_sub(1);
     }
 
     pub fn status_text(&self) -> &str {
@@ -612,9 +609,7 @@ impl Model {
             routing_fallback: None,
             region_download_deferred: false,
             logs: VecDeque::new(),
-            log_scroll: 0,
             geo_updating: false,
-            subscription_fetching: false,
             subscription_updates: HashSet::new(),
             automatic_subscription_updates: HashSet::new(),
             needs_redraw: false,
@@ -732,9 +727,7 @@ impl Model {
             routing_fallback: None,
             region_download_deferred: false,
             logs: VecDeque::new(),
-            log_scroll: 0,
             geo_updating: false,
-            subscription_fetching: false,
             subscription_updates: HashSet::new(),
             automatic_subscription_updates: HashSet::new(),
             needs_redraw: false,
@@ -1002,9 +995,7 @@ impl Model {
             routing_fallback: None,
             region_download_deferred: false,
             logs: VecDeque::new(),
-            log_scroll: 0,
             geo_updating: false,
-            subscription_fetching: false,
             subscription_updates: HashSet::new(),
             automatic_subscription_updates: HashSet::new(),
             needs_redraw: false,
@@ -1394,7 +1385,7 @@ mod tests {
     }
 
     #[test]
-    fn push_log_truncates_and_updates_scroll() {
+    fn push_log_truncates() {
         let mut model = Model::test_new(Config::default());
         for i in 0..1005 {
             model.push_log(format!("line {}", i));
@@ -1402,7 +1393,6 @@ mod tests {
         assert_eq!(model.logs.len(), 1000);
         assert_eq!(model.logs[0], "line 5");
         assert_eq!(model.logs[999], "line 1004");
-        assert_eq!(model.log_scroll, 999);
     }
 
     #[test]

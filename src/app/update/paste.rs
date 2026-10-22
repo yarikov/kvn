@@ -108,7 +108,6 @@ fn add_and_fetch_subscription(model: &mut Model, url: &str) -> Vec<Effect> {
         push_download_blocked(&mut effects, model, DownloadKind::Subscription(id));
         return effects;
     }
-    model.subscription_fetching = true;
     model.subscription_updates.insert(id);
     effects.push(Effect::UpdateSubscription { id });
     push_status(
@@ -192,7 +191,6 @@ mod tests {
             model.selected_row(),
             Some(crate::app::model::SourceRow::SubscriptionHeader(0))
         ));
-        assert!(model.subscription_fetching);
         assert!(
             model
                 .subscription_updates
@@ -228,7 +226,6 @@ mod tests {
         let effects = handle_clipboard_text(&mut model, "http://example.com/secret-token");
 
         assert_eq!(model.config.subscriptions.len(), 1);
-        assert!(model.subscription_fetching);
         assert!(effects.contains(&Effect::SaveConfig));
         assert!(effects.iter().any(|effect| matches!(
             effect,
@@ -244,7 +241,7 @@ mod tests {
         let effects = handle_clipboard_text(&mut model, "http://example.com/secret-token");
 
         assert!(model.config.subscriptions.is_empty());
-        assert!(!model.subscription_fetching);
+        assert!(model.subscription_updates.is_empty());
         assert_eq!(
             effects,
             vec![app_log_error(
@@ -312,7 +309,6 @@ mod tests {
         let effects = handle_clipboard_text(&mut model, "https://example.com/sub");
 
         assert_eq!(model.config.subscriptions.len(), 1);
-        assert!(!model.subscription_fetching);
         assert!(model.subscription_updates.is_empty());
         assert!(effects.contains(&Effect::SaveConfig));
         assert!(

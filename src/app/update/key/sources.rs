@@ -196,7 +196,6 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
                 push_download_blocked(&mut result, model, DownloadKind::Subscription(id));
                 return result;
             }
-            model.subscription_fetching = true;
             model.subscription_updates.insert(id);
             let mut result = vec![Effect::SaveConfig, Effect::UpdateSubscription { id }];
             push_status(
@@ -234,7 +233,6 @@ fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
             push_download_blocked(&mut effects, model, DownloadKind::Subscription(id));
             return effects;
         }
-        model.subscription_fetching = true;
         model.subscription_updates.insert(id);
         let mut result = vec![Effect::SaveConfig, Effect::UpdateSubscription { id }];
         push_status(
@@ -489,7 +487,7 @@ mod tests {
         });
         model.selected = 0;
         let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Enter));
-        assert!(model.subscription_fetching);
+        assert!(model.subscription_updates.contains(&sub_id));
         assert!(effects.contains(&Effect::UpdateSubscription { id: sub_id }));
         assert!(effects.contains(&Effect::SaveConfig));
     }
@@ -730,7 +728,6 @@ mod tests {
 
         let effects = handle_sources(&mut model, key('u'));
 
-        assert!(model.subscription_fetching);
         assert!(model.subscription_updates.contains(&sub_id));
         assert_eq!(
             effects,
@@ -1080,7 +1077,7 @@ mod tests {
         let effects = handle_sources(&mut model, key('u'));
 
         assert!(!model.geo_updating);
-        assert!(!model.subscription_fetching);
+        assert!(model.subscription_updates.is_empty());
         assert!(!effects.iter().any(|effect| matches!(
             effect,
             Effect::DownloadGeo | Effect::UpdateSubscription { .. }
