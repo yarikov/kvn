@@ -12,9 +12,10 @@ mod support;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-use crate::app::model::{Model, Overlay};
+use crate::app::model::{Model, Overlay, SettingsMenuEntry};
 use crate::ui::icons::icons;
 
+pub(super) const SETTINGS_HEADING: &str = "Settings";
 pub(super) const APPLY_ACTION: &str = "apply";
 pub(super) const CONFIRM_ACTION: &str = "confirm";
 pub(super) const BACK_ACTION: &str = "⌫ back";
@@ -32,6 +33,10 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         Overlay::Onboarding(step) => onboarding::draw(frame, model, step, area),
         Overlay::None => {}
     }
+}
+
+pub(super) fn settings_heading(entry: SettingsMenuEntry) -> String {
+    format!("{SETTINGS_HEADING} › {}", entry.label())
 }
 
 pub(super) fn overlay_footer(

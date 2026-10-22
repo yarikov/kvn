@@ -1,5 +1,7 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, Model, Overlay, SettingsMenuPage, StatusKey};
+use crate::app::model::{
+    AppStatus, Model, Overlay, SettingsMenuEntry, SettingsMenuPage, StatusKey,
+};
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::update::connection::reconnect_with_new_settings;
@@ -60,6 +62,7 @@ pub(in crate::app::update) fn handle_dns_settings(model: &mut Model, key: KeyEve
         KeyCode::Backspace => {
             model.dns_preset_draft = None;
             model.dns_fakeip_draft = None;
+            model.settings_menu_selected = SettingsMenuEntry::Dns.index();
             model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         }
         _ => {}

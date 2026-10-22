@@ -4,7 +4,7 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use crate::app::model::Model;
+use crate::app::model::{Model, SettingsMenuEntry};
 use crate::config::profile::IconSet;
 use crate::ui::icons::icons;
 use crate::ui::layout::text::visual_width;
@@ -14,7 +14,7 @@ use super::popup::{
 };
 use super::routing::geo_region_label;
 use super::settings_row::{settings_full_width_line, settings_value_layout, settings_value_line};
-use super::{APPLY_ACTION, overlay_footer};
+use super::{APPLY_ACTION, SETTINGS_HEADING, overlay_footer, settings_heading};
 
 pub(super) fn draw(
     frame: &mut Frame,
@@ -23,31 +23,24 @@ pub(super) fn draw(
     area: Rect,
 ) {
     use crate::app::model::SettingsMenuPage;
-    let heading = match page {
-        SettingsMenuPage::Root => "Settings",
-        SettingsMenuPage::Routing => "Settings › Routing",
-        SettingsMenuPage::Connection => "Settings › Connection",
-        SettingsMenuPage::Interface => "Settings › Interface",
-    };
+    let heading = page
+        .entry()
+        .map_or_else(|| SETTINGS_HEADING.to_string(), settings_heading);
     let footer = overlay_footer(
         model,
         (page != SettingsMenuPage::Root).then_some(APPLY_ACTION),
         true,
         page != SettingsMenuPage::Root,
     );
-    let frame_widths = [visual_width(heading), visual_width(&footer)];
+    let frame_widths = [visual_width(&heading), visual_width(&footer)];
     let mut lines: Vec<Line> = vec![
         Line::from(Span::styled(heading, model.theme.accent())).centered(),
         Line::from(""),
     ];
     let popup_width = match page {
         SettingsMenuPage::Root => {
-            let entries = [
-                ("c", "Connection"),
-                ("d", "DNS"),
-                ("i", "Interface"),
-                ("r", "Routing"),
-            ];
+            let entries =
+                SettingsMenuEntry::ALL.map(|entry| (entry.key().to_string(), entry.label()));
             let entry_width = entries
                 .iter()
                 .map(|(key, action)| visual_width(&format!("{key}  {action}")))

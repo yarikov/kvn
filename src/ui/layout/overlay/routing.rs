@@ -1,11 +1,11 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-use crate::app::model::Model;
+use crate::app::model::{Model, SettingsMenuEntry};
 use crate::onboarding::OnboardingStep;
 
 use super::popup::draw_selection_modal;
-use super::{APPLY_ACTION, overlay_footer};
+use super::{APPLY_ACTION, overlay_footer, settings_heading};
 
 pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
     let modes = model.config.settings.geo_routing.available_modes();
@@ -22,7 +22,7 @@ pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
         frame,
         &model.theme,
         area,
-        "Settings › Routing › Mode",
+        &format!("{} › Mode", settings_heading(SettingsMenuEntry::Routing)),
         &labels,
         model.routing_selected,
         model.overlay_scroll,
@@ -48,7 +48,7 @@ pub(super) fn draw_region(frame: &mut Frame, model: &Model, area: Rect) {
         frame,
         &model.theme,
         area,
-        "Settings › Routing › Region",
+        &format!("{} › Region", settings_heading(SettingsMenuEntry::Routing)),
         &labels,
         model.geo_region_selected,
         model.overlay_scroll,

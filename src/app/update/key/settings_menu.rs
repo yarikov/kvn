@@ -1,6 +1,6 @@
 use crate::app::effect::Effect;
 use crate::app::model::{
-    AppStatus, Model, Overlay, RoutingSettingsItem, SettingsMenuPage, StatusKey,
+    AppStatus, Model, Overlay, RoutingSettingsItem, SettingsMenuEntry, SettingsMenuPage, StatusKey,
 };
 use crate::config::profile::GeoRegion;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -13,14 +13,14 @@ pub(in crate::app::update) fn handle_settings_menu(
     page: SettingsMenuPage,
     key: KeyEvent,
 ) -> Vec<Effect> {
-    let len = match page {
-        SettingsMenuPage::Root => 4,
-        SettingsMenuPage::Routing => {
-            RoutingSettingsItem::available(model.shown_routing_settings().region).len()
-        }
-        SettingsMenuPage::Connection => 2,
-        SettingsMenuPage::Interface => 2,
-    };
+    let len = model.settings_menu_len(page);
+    if page == SettingsMenuPage::Root
+        && let KeyCode::Char(key) = key.code
+        && let Some(entry) = SettingsMenuEntry::from_key(key)
+    {
+        open_settings_entry(model, entry);
+        return vec![];
+    }
     match (page, key.code) {
         (_, KeyCode::Char('j') | KeyCode::Down) => {
             crate::ui::nav::select_next(&mut model.settings_menu_selected, len);
@@ -31,28 +31,11 @@ pub(in crate::app::update) fn handle_settings_menu(
         (_, KeyCode::Char('G')) => {
             crate::ui::nav::select_last(&mut model.settings_menu_selected, len);
         }
-        (SettingsMenuPage::Root, KeyCode::Char('r')) => {
-            model.settings_menu_selected = 3;
-            open_routing_settings(model);
+        (SettingsMenuPage::Root, KeyCode::Enter) => {
+            if let Some(&entry) = SettingsMenuEntry::ALL.get(model.settings_menu_selected) {
+                open_settings_entry(model, entry);
+            }
         }
-        (SettingsMenuPage::Root, KeyCode::Char('d')) => {
-            model.settings_menu_selected = 1;
-            open_dns_settings(model);
-        }
-        (SettingsMenuPage::Root, KeyCode::Char('c')) => {
-            model.settings_menu_selected = 0;
-            open_connection_settings(model);
-        }
-        (SettingsMenuPage::Root, KeyCode::Char('i')) => {
-            open_interface_settings(model);
-        }
-        (SettingsMenuPage::Root, KeyCode::Enter) => match model.settings_menu_selected {
-            0 => open_connection_settings(model),
-            1 => open_dns_settings(model),
-            2 => open_interface_settings(model),
-            3 => open_routing_settings(model),
-            _ => {}
-        },
         (SettingsMenuPage::Routing, KeyCode::Char('l') | KeyCode::Right) => {
             cycle_routing_draft(model, true);
         }
@@ -98,11 +81,7 @@ pub(in crate::app::update) fn handle_settings_menu(
             SettingsMenuPage::Routing | SettingsMenuPage::Connection | SettingsMenuPage::Interface,
             KeyCode::Backspace,
         ) => {
-            model.settings_menu_selected = match page {
-                SettingsMenuPage::Interface => 2,
-                SettingsMenuPage::Routing => 3,
-                _ => 0,
-            };
+            model.settings_menu_selected = page.entry().map_or(0, SettingsMenuEntry::index);
             clear_settings_drafts(model);
             model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         }
@@ -126,6 +105,15 @@ fn theme_slugs() -> Vec<String> {
             .map(str::to_string),
     );
     out
+}
+
+fn open_settings_entry(model: &mut Model, entry: SettingsMenuEntry) {
+    match entry {
+        SettingsMenuEntry::Connection => open_connection_settings(model),
+        SettingsMenuEntry::Dns => open_dns_settings(model),
+        SettingsMenuEntry::Interface => open_interface_settings(model),
+        SettingsMenuEntry::Routing => open_routing_settings(model),
+    }
 }
 
 fn open_routing_settings(model: &mut Model) {
