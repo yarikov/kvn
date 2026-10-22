@@ -41,7 +41,12 @@ pub(in crate::app::update) fn handle_ipc_command(
             support::resolve_prompt(model, resolution)
         }
         IpcCommand::DismissSupportPrompt => support::dismiss_prompt(model),
-        IpcCommand::Key { code, char, ctrl } => match rebuild_key_event(&code, char, ctrl) {
+        IpcCommand::Key {
+            code,
+            char,
+            ctrl,
+            alt,
+        } => match rebuild_key_event(&code, char, ctrl, alt) {
             Some(key) => handle_key(model, key),
             None => vec![],
         },
@@ -160,6 +165,7 @@ fn rebuild_key_event(
     code: &str,
     ch: Option<char>,
     ctrl: bool,
+    alt: bool,
 ) -> Option<crossterm::event::KeyEvent> {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let key_code = match code {
@@ -178,6 +184,9 @@ fn rebuild_key_event(
     let mut modifiers = KeyModifiers::empty();
     if ctrl {
         modifiers |= KeyModifiers::CONTROL;
+    }
+    if alt {
+        modifiers |= KeyModifiers::ALT;
     }
     Some(KeyEvent::new(key_code, modifiers))
 }
@@ -522,6 +531,7 @@ mod tests {
                 code: "Char".into(),
                 char: Some('j'),
                 ctrl: false,
+                alt: false,
             },
         );
         assert_eq!(effects, vec![Effect::BroadcastState]);
@@ -532,15 +542,15 @@ mod tests {
     fn rebuild_key_event_handles_tab_and_backtab() {
         use crossterm::event::{KeyCode, KeyModifiers};
 
-        let tab = rebuild_key_event("Tab", None, false).unwrap();
+        let tab = rebuild_key_event("Tab", None, false, false).unwrap();
         assert_eq!(tab.code, KeyCode::Tab);
         assert_eq!(tab.modifiers, KeyModifiers::empty());
 
-        let backtab = rebuild_key_event("BackTab", None, false).unwrap();
+        let backtab = rebuild_key_event("BackTab", None, false, false).unwrap();
         assert_eq!(backtab.code, KeyCode::BackTab);
         assert_eq!(backtab.modifiers, KeyModifiers::empty());
 
-        let backspace = rebuild_key_event("Backspace", None, false).unwrap();
+        let backspace = rebuild_key_event("Backspace", None, false, false).unwrap();
         assert_eq!(backspace.code, KeyCode::Backspace);
         assert_eq!(backspace.modifiers, KeyModifiers::empty());
     }
@@ -551,44 +561,47 @@ mod tests {
     fn rebuild_key_event_named_codes() {
         use crossterm::event::{KeyCode, KeyModifiers};
         assert_eq!(
-            rebuild_key_event("Enter", None, false).unwrap().code,
+            rebuild_key_event("Enter", None, false, false).unwrap().code,
             KeyCode::Enter
         );
         assert_eq!(
-            rebuild_key_event("Esc", None, false).unwrap().code,
+            rebuild_key_event("Esc", None, false, false).unwrap().code,
             KeyCode::Esc
         );
         assert_eq!(
-            rebuild_key_event("Up", None, false).unwrap().code,
+            rebuild_key_event("Up", None, false, false).unwrap().code,
             KeyCode::Up
         );
         assert_eq!(
-            rebuild_key_event("Down", None, false).unwrap().code,
+            rebuild_key_event("Down", None, false, false).unwrap().code,
             KeyCode::Down
         );
         assert_eq!(
-            rebuild_key_event("Left", None, false).unwrap().code,
+            rebuild_key_event("Left", None, false, false).unwrap().code,
             KeyCode::Left
         );
         assert_eq!(
-            rebuild_key_event("Right", None, false).unwrap().code,
+            rebuild_key_event("Right", None, false, false).unwrap().code,
             KeyCode::Right
         );
-        let ctrl_c = rebuild_key_event("Char", Some('c'), true).unwrap();
+        let ctrl_c = rebuild_key_event("Char", Some('c'), true, false).unwrap();
         assert_eq!(ctrl_c.code, KeyCode::Char('c'));
         assert_eq!(ctrl_c.modifiers, KeyModifiers::CONTROL);
+        let alt_j = rebuild_key_event("Char", Some('j'), false, true).unwrap();
+        assert_eq!(alt_j.code, KeyCode::Char('j'));
+        assert_eq!(alt_j.modifiers, KeyModifiers::ALT);
     }
 
     #[test]
     fn rebuild_key_event_char_without_value_uses_space() {
-        let event = rebuild_key_event("Char", None, false).unwrap();
+        let event = rebuild_key_event("Char", None, false, false).unwrap();
         assert_eq!(event.code, crossterm::event::KeyCode::Char(' '));
     }
 
     #[test]
     fn rebuild_key_event_unknown_code_returns_none() {
-        assert!(rebuild_key_event("F1", None, false).is_none());
-        assert!(rebuild_key_event("", None, false).is_none());
+        assert!(rebuild_key_event("F1", None, false, false).is_none());
+        assert!(rebuild_key_event("", None, false, false).is_none());
     }
 
     // ---- handle_ipc_command gaps ----
@@ -653,6 +666,7 @@ mod tests {
                 code: "F1".into(),
                 char: None,
                 ctrl: false,
+                alt: false,
             },
         );
         assert_eq!(effects, vec![Effect::BroadcastState]);

@@ -240,6 +240,8 @@ detected problems.
 | `y` | Yank selected profile or subscription |
 | `p` / `Ctrl+V` | Paste profile or subscription from clipboard |
 | `d` | Delete selected profile or subscription |
+| `Alt+j` / `Alt+↓` | Move selected profile or subscription down |
+| `Alt+k` / `Alt+↑` | Move selected profile or subscription up |
 | `u` / `U` | Update selected subscription / geo |
 | `i` / `I` | Cycle subscription / geo auto-update |
 | `t` / `T` | Test selected / all profiles |

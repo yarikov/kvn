@@ -364,7 +364,13 @@ impl<'a> ClientLoop<'a> {
             other => (format!("{:?}", other), None),
         };
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        self.client.send(&IpcCommand::Key { code, char, ctrl })
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        self.client.send(&IpcCommand::Key {
+            code,
+            char,
+            ctrl,
+            alt,
+        })
     }
 }
 

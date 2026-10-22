@@ -53,6 +53,7 @@ fn handle_subscription_result_at(
     let mut effects = match result {
         Ok(mut profiles) => {
             let reused_ids = reuse_previous_ids(&previous_profiles, &mut profiles);
+            let fetched = keep_previous_order(&previous_profiles, profiles, reused_ids);
             if managed {
                 if let Some(sub) = model.config.subscriptions.iter_mut().find(|s| s.id == id) {
                     sub.last_updated = Some(now);
@@ -69,7 +70,7 @@ fn handle_subscription_result_at(
                     .retain(|p| p.subscription_id != Some(id));
             }
             let mut imported = 0;
-            for (mut profile, reused_id) in profiles.into_iter().zip(reused_ids) {
+            for (mut profile, reused_id) in fetched {
                 let key = profile.dedup_key();
                 if reused_id {
                     // Same server was in this subscription before — reuse its UUID so
@@ -92,8 +93,11 @@ fn handle_subscription_result_at(
                         profile.id = existing.id;
                         if managed {
                             profile.subscription_id = Some(id);
+                            model.config.profiles.remove(idx);
+                            model.add_profile(profile);
+                        } else {
+                            model.config.profiles[idx] = profile;
                         }
-                        model.config.profiles[idx] = profile;
                         imported += 1;
                     }
                     // Profiles belonging to other subscriptions are skipped.
@@ -212,6 +216,26 @@ fn handle_subscription_result_at(
     }
 
     effects
+}
+
+fn keep_previous_order(
+    previous: &[Profile],
+    profiles: Vec<Profile>,
+    reused_ids: Vec<bool>,
+) -> Vec<(Profile, bool)> {
+    let previous_positions: HashMap<Uuid, usize> = previous
+        .iter()
+        .enumerate()
+        .map(|(position, profile)| (profile.id, position))
+        .collect();
+    let mut fetched: Vec<(Profile, bool)> = profiles.into_iter().zip(reused_ids).collect();
+    fetched.sort_by_key(|(profile, _)| {
+        previous_positions
+            .get(&profile.id)
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+    fetched
 }
 
 fn reuse_previous_ids(previous: &[Profile], fetched: &mut [Profile]) -> Vec<bool> {
@@ -563,6 +587,70 @@ mod tests {
 
         assert!(effects.contains(&Effect::BroadcastState));
         assert!(matches!(model.status, Some(AppStatus::Error(_))));
+    }
+
+    fn server(name: &str, host: &str) -> Profile {
+        Profile::new_vless(name.to_string(), host.to_string(), 443, "u".to_string())
+    }
+
+    fn model_with_subscribed_servers(
+        standalone: Vec<Profile>,
+        servers: &[(&str, &str)],
+    ) -> (Model, Uuid) {
+        let sub = subscription_with_hwid(false, None);
+        let sub_id = sub.id;
+        let mut model = model_with_profiles(standalone);
+        model
+            .config
+            .profiles
+            .extend(servers.iter().map(|(name, host)| {
+                let mut profile = server(name, host);
+                profile.subscription_id = Some(sub_id);
+                profile
+            }));
+        model.config.subscriptions.push(sub);
+        (model, sub_id)
+    }
+
+    fn profile_names(model: &Model) -> Vec<&str> {
+        model
+            .config
+            .profiles
+            .iter()
+            .map(|profile| profile.name.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn subscription_update_keeps_the_previous_order_and_appends_new_servers() {
+        let (mut model, sub_id) =
+            model_with_subscribed_servers(vec![], &[("Second", "2.2.2.2"), ("First", "1.1.1.1")]);
+
+        let fetched = vec![
+            server("New", "3.3.3.3"),
+            server("First", "1.1.1.1"),
+            server("Second", "2.2.2.2"),
+        ];
+        handle_subscription_result(&mut model, sub_id, Ok(fetched));
+
+        assert_eq!(profile_names(&model), ["Second", "First", "New"]);
+    }
+
+    #[test]
+    fn subscription_update_appends_an_adopted_standalone_profile() {
+        let (mut model, sub_id) = model_with_subscribed_servers(
+            vec![server("Standalone", "3.3.3.3")],
+            &[("First", "1.1.1.1"), ("Second", "2.2.2.2")],
+        );
+
+        let fetched = vec![
+            server("Adopted", "3.3.3.3"),
+            server("First", "1.1.1.1"),
+            server("Second", "2.2.2.2"),
+        ];
+        handle_subscription_result(&mut model, sub_id, Ok(fetched));
+
+        assert_eq!(profile_names(&model), ["First", "Second", "Adopted"]);
     }
 
     #[test]

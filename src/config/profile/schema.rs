@@ -1,7 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::subscription::validate_hwid;
 use super::{
@@ -69,14 +70,36 @@ impl Config {
         config
     }
 
-    /// Canonicalize user-provided values that tolerate surrounding whitespace.
-    /// Returns whether any value changed.
     pub(crate) fn normalize(&mut self) -> bool {
+        let tun_interface_trimmed = self.trim_tun_interface();
+        let profiles_sorted = self.sort_profiles_by_source();
+        tun_interface_trimmed || profiles_sorted
+    }
+
+    fn trim_tun_interface(&mut self) -> bool {
         let tun_interface = self.settings.tun_interface.trim();
         if tun_interface == self.settings.tun_interface {
             return false;
         }
         self.settings.tun_interface = tun_interface.to_string();
+        true
+    }
+
+    fn sort_profiles_by_source(&mut self) -> bool {
+        let subscription_ranks: HashMap<Uuid, usize> = self
+            .subscriptions
+            .iter()
+            .enumerate()
+            .map(|(position, subscription)| (subscription.id, position + 1))
+            .collect();
+        let source_rank = |profile: &Profile| match profile.subscription_id {
+            None => 0,
+            Some(id) => subscription_ranks.get(&id).copied().unwrap_or(usize::MAX),
+        };
+        if self.profiles.is_sorted_by_key(source_rank) {
+            return false;
+        }
+        self.profiles.sort_by_key(source_rank);
         true
     }
 
@@ -183,6 +206,34 @@ mod tests {
     use crate::config::profile::*;
     use crate::test_helpers::subscription_with_hwid;
     use uuid::Uuid;
+
+    #[test]
+    fn normalize_orders_profiles_standalone_then_by_subscription() {
+        let first = subscription_with_hwid(false, None);
+        let second = subscription_with_hwid(false, None);
+        let profile = |name: &str, subscription_id: Option<Uuid>| {
+            let mut profile = Profile::new_vless(name.into(), "h".into(), 1, "u".into());
+            profile.subscription_id = subscription_id;
+            profile
+        };
+        let mut config = Config {
+            profiles: vec![
+                profile("Orphan", Some(Uuid::new_v4())),
+                profile("Q1", Some(second.id)),
+                profile("P1", Some(first.id)),
+                profile("A", None),
+                profile("P2", Some(first.id)),
+                profile("B", None),
+            ],
+            subscriptions: vec![first, second],
+            ..Config::default()
+        };
+
+        assert!(config.normalize());
+        let names: Vec<&str> = config.profiles.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["A", "B", "P1", "P2", "Q1", "Orphan"]);
+        assert!(!config.normalize());
+    }
 
     #[test]
     fn defaulted_icons_follow_the_desktop() {

@@ -213,6 +213,8 @@ pub enum IpcCommand {
         code: String,
         char: Option<char>,
         ctrl: bool,
+        #[serde(default)]
+        alt: bool,
     },
     SelectSource {
         index: usize,
@@ -349,6 +351,7 @@ mod tests {
                 code: "Char".into(),
                 char: Some('a'),
                 ctrl: false,
+                alt: false,
             },
             IpcCommand::SelectSource { index: 1 },
             IpcCommand::MoveSourceSelection { delta: -3 },

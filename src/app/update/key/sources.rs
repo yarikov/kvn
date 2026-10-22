@@ -1,10 +1,11 @@
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model, Overlay, StatusKey};
 use crate::config::profile::{GeoRegion, SubscriptionAutoUpdate};
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::update::connection::queue_connect;
 use crate::app::update::key::confirm_disable::{toggle_auto_connect, toggle_kill_switch};
+use crate::app::update::key::reorder::{Direction, move_selected_source};
 use crate::app::update::status::{
     DownloadKind, download_allowed, push_download_blocked, push_status,
 };
@@ -13,6 +14,12 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
     let mut effects = Vec::new();
     match key.code {
         // Navigation
+        KeyCode::Char('j') | KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT) => {
+            return move_selected_source(model, Direction::Down);
+        }
+        KeyCode::Char('k') | KeyCode::Up if key.modifiers.contains(KeyModifiers::ALT) => {
+            return move_selected_source(model, Direction::Up);
+        }
         KeyCode::Char('j') | KeyCode::Down => model.select_next(),
         KeyCode::Char('k') | KeyCode::Up => model.select_prev(),
         KeyCode::Char('G') => model.select_last(),
@@ -353,7 +360,27 @@ mod tests {
     use crate::config::profile::{GeoAutoUpdate, Profile, RoutedService, Subscription};
     use crate::test_helpers::*;
     use chrono::Local;
+    use crossterm::event::KeyModifiers;
     use uuid::Uuid;
+
+    #[test]
+    fn alt_navigation_keys_move_the_selected_source() {
+        for (down, up) in [
+            (KeyCode::Char('j'), KeyCode::Char('k')),
+            (KeyCode::Down, KeyCode::Up),
+        ] {
+            let mut model = model_with_profiles(vec![
+                Profile::new_vless("A".into(), "a".into(), 1, "u".into()),
+                Profile::new_vless("B".into(), "b".into(), 2, "v".into()),
+            ]);
+
+            let moved_down = handle_sources(&mut model, KeyEvent::new(down, KeyModifiers::ALT));
+            let moved_up = handle_sources(&mut model, KeyEvent::new(up, KeyModifiers::ALT));
+
+            assert_eq!(moved_down, vec![Effect::SaveConfig]);
+            assert_eq!(moved_up, vec![Effect::SaveConfig]);
+        }
+    }
 
     #[test]
     fn normal_mode_navigates() {

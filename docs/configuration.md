@@ -119,6 +119,15 @@ they store, and `i` changes the schedule at any time. The legacy values
 `every_1h` and `every_12h` behave as `every_1d`, and the schema migration
 rewrites them.
 
+kvn keeps the `profiles` array in the order the Profiles list shows it:
+standalone profiles first, then the profiles of each subscription in the order
+of the `subscriptions` array. A file in another order is rewritten in that
+order when kvn loads or saves it, so the Omarchy bar widget, which lists
+`profiles` as stored, shows the same order. `Alt+j` / `Alt+k` (or `Alt+↓` /
+`Alt+↑`) move the selected profile within its group, or the selected
+subscription among subscriptions. An update keeps the order of the servers a
+subscription already had and adds new servers at its end.
+
 Every subscription request carries `User-Agent: kvn-tui/<version>`. With
 `send_hwid: true` it also carries `X-Hwid` (the subscription's `hwid`, or
 `settings.hwid`), `X-Device-Os: Linux`, `X-Ver-Os` (the kernel version),

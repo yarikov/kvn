@@ -49,6 +49,8 @@ const SOURCES: &[(&str, &str)] = &[
     ("y", "Yank profile or subscription"),
     ("p", "Paste profile or subscription"),
     ("d", "Delete profile or subscription"),
+    ("Alt+j/↓", "Move profile or subscription down"),
+    ("Alt+k/↑", "Move profile or subscription up"),
     ("u/U", "Update subscription / geo"),
     ("i/I", "Cycle subscription / geo auto-update"),
     ("t/T", "Test selected / all profiles"),

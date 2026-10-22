@@ -158,6 +158,7 @@ pub(super) fn commit_config_change(
         },
     )?;
     merged.settings.kill_switch = edited.settings.kill_switch;
+    merged.normalize();
     crate::config::save_config_at_revision(&path, &merged, expected.as_deref())?;
     Ok(merged)
 }
@@ -527,6 +528,36 @@ mod tests {
                 .unwrap(),
             merged
         );
+    }
+
+    #[test]
+    fn config_commit_hands_back_profiles_in_source_order() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let base = Config::default();
+        crate::config::save_config(&base).unwrap();
+        let subscription = crate::test_helpers::subscription_with_hwid(false, None);
+        let profile = |name: &str| {
+            crate::config::profile::Profile::new_vless(
+                name.into(),
+                "h".into(),
+                1,
+                uuid::Uuid::new_v4().to_string(),
+            )
+        };
+        let mut owned = profile("Owned");
+        owned.subscription_id = Some(subscription.id);
+        let standalone = profile("Standalone");
+        let mut edited = base.clone();
+        edited.subscriptions.push(subscription);
+        edited.profiles = vec![owned, standalone];
+        let model = crate::app::model::Model::test_new(edited.clone());
+
+        let merged = commit_config_change(&model, &base, &edited).unwrap();
+
+        let names: Vec<&str> = merged.profiles.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Standalone", "Owned"]);
     }
 
     fn update_with_unwritable_config(model: &mut Model, msg: Msg) -> Vec<Effect> {
