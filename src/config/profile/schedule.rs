@@ -121,8 +121,12 @@ const MAX_CONSECUTIVE_FAILURES: u32 = 5;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RetryState {
+    /// Failed attempts in a row on `attempt_date`; retries stop after five.
     pub consecutive_failures: u32,
+    /// Earliest time of the next automatic retry.
     pub retry_at: DateTime<Local>,
+    /// Local date of the failures counted; a failure on a later date starts
+    /// the count again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempt_date: Option<NaiveDate>,
 }

@@ -49,7 +49,6 @@ pub use share_link::{
 };
 pub use subscription::Subscription;
 #[cfg(test)]
-#[cfg(test)]
 pub use tls::WebSocketEarlyData;
 pub use tls::{
     EchSettings, Flow, RealitySettings, Security, TlsCommon, TransportConfig, TransportType,
