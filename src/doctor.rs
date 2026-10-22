@@ -477,6 +477,8 @@ fn polkit_status_for(group: Option<crate::services::killswitch::IntegrationGroup
             return PolkitStatus::PkcheckUnavailable;
         };
 
+        // NOTE: pkcheck exits 2 when authorization would need an authentication
+        // dialog; doctor never passes --allow-user-interaction, so that is a denial.
         match output.status.code() {
             Some(0) => {}
             Some(1 | 2) => return PolkitStatus::Denied { action },
@@ -651,6 +653,9 @@ fn polkit_process_identity() -> Option<String> {
     Some(format!("{pid},{start_time},{uid}"))
 }
 
+// NOTE: field 2 of /proc/<pid>/stat is the command name in parentheses and may
+// itself contain spaces and `)`, so fields are counted after the last `) `;
+// starttime is field 22.
 fn proc_start_time(stat: &str) -> Option<&str> {
     stat.rsplit_once(") ")?.1.split_whitespace().nth(19)
 }
