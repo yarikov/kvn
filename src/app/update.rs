@@ -110,7 +110,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             sampled_at_ms,
         ),
         Msg::ThemeChanged(theme) => {
-            if model.config.settings.theme != "omarchy" {
+            if !model.config.settings.follows_omarchy_theme() {
                 return vec![];
             }
             model.theme = theme;
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn theme_changed_msg_applies_in_omarchy_mode() {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.theme = "omarchy".into();
+        model.config.settings.theme = crate::config::profile::OMARCHY_THEME_SENTINEL.into();
         let new_theme = crate::ui::styles::Theme::resolve("nord");
         let _ = update(&mut model, Msg::ThemeChanged(new_theme));
         assert_eq!(model.theme, new_theme);

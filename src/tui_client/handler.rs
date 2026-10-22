@@ -22,9 +22,7 @@ use crate::services::LogTailer;
 use crate::ui::layout::{LogNavigation, LogSelection};
 use crate::ui::styles::Theme;
 
-use super::{
-    TuiExit, apply_snapshot, apply_terminal_colors, input, snapshot_is_compatible, theme_watch,
-};
+use super::{TuiExit, apply_snapshot, apply_terminal_colors, input, snapshot_is_compatible};
 use key::GoFirstSequence;
 use pointer::{ClickTracker, PointerShape, update_pointer_shape};
 use toast::{ToastKey, ToastState};
@@ -131,9 +129,7 @@ impl<'a> ClientLoop<'a> {
             Msg::DaemonDisconnected => self.reconnect()?,
             Msg::Tick => self.tick()?,
             Msg::Resize => self.resize()?,
-            Msg::ThemeChanged(theme)
-                if self.model.config.settings.theme == theme_watch::OMARCHY_SENTINEL =>
-            {
+            Msg::ThemeChanged(theme) if self.model.config.settings.follows_omarchy_theme() => {
                 self.change_theme(theme)
             }
             _ => Flow::Continue,

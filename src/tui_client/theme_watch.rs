@@ -6,16 +6,15 @@ use std::time::Duration;
 use notify::{RecursiveMode, Watcher};
 
 use crate::app::msg::Msg;
+use crate::config::profile::OMARCHY_THEME_SENTINEL;
 use crate::omarchy::{detect_omarchy_theme, omarchy_current_dir, theme_colors_path};
 use crate::ui::palette::Palette;
 use crate::ui::styles::Theme;
 
-pub const OMARCHY_SENTINEL: &str = "omarchy";
-
 pub const DEFAULT_THEME: &str = "tokyo-night";
 
 pub fn resolve_active(settings_theme: &str) -> Theme {
-    if settings_theme == OMARCHY_SENTINEL {
+    if settings_theme == OMARCHY_THEME_SENTINEL {
         load_current_theme().unwrap_or_else(|| {
             detect_omarchy_theme()
                 .as_deref()
@@ -104,7 +103,7 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", config.path()) };
         unsafe { std::env::set_var("XDG_STATE_HOME", state.path()) };
-        let theme = resolve_active(OMARCHY_SENTINEL);
+        let theme = resolve_active(OMARCHY_THEME_SENTINEL);
         assert_eq!(
             theme.accent().fg,
             Some(ratatui::style::Color::Rgb(0x7a, 0xa2, 0xf7))
@@ -124,7 +123,7 @@ mod tests {
         std::fs::write(current.join("theme.name"), "custom-theme\n").unwrap();
         let raw = include_str!("../../themes/nord.toml").replace("#81a1c1", "#010203");
         std::fs::write(current.join("theme").join("colors.toml"), raw).unwrap();
-        let theme = resolve_active(OMARCHY_SENTINEL);
+        let theme = resolve_active(OMARCHY_THEME_SENTINEL);
         assert_eq!(theme.accent().fg, Some(ratatui::style::Color::Rgb(1, 2, 3)));
     }
 
@@ -142,7 +141,7 @@ mod tests {
         std::fs::write(current.join("theme").join("colors.toml"), raw).unwrap();
 
         assert_eq!(
-            resolve_active(OMARCHY_SENTINEL).accent().fg,
+            resolve_active(OMARCHY_THEME_SENTINEL).accent().fg,
             Some(ratatui::style::Color::Rgb(0x11, 0x22, 0x33))
         );
         assert_eq!(
@@ -164,7 +163,7 @@ mod tests {
         std::fs::write(current.join("theme").join("colors.toml"), "invalid").unwrap();
 
         assert_eq!(
-            resolve_active(OMARCHY_SENTINEL).accent().fg,
+            resolve_active(OMARCHY_THEME_SENTINEL).accent().fg,
             Some(ratatui::style::Color::Rgb(0x81, 0xa1, 0xc1))
         );
     }
@@ -183,14 +182,14 @@ mod tests {
         let original = include_str!("../../themes/nord.toml").replace("#81a1c1", "#112233");
         std::fs::write(&colors_path, original).unwrap();
         assert_eq!(
-            resolve_active(OMARCHY_SENTINEL).accent().fg,
+            resolve_active(OMARCHY_THEME_SENTINEL).accent().fg,
             Some(ratatui::style::Color::Rgb(0x11, 0x22, 0x33))
         );
 
         let changed = include_str!("../../themes/nord.toml").replace("#81a1c1", "#445566");
         std::fs::write(colors_path, changed).unwrap();
         assert_eq!(
-            resolve_active(OMARCHY_SENTINEL).accent().fg,
+            resolve_active(OMARCHY_THEME_SENTINEL).accent().fg,
             Some(ratatui::style::Color::Rgb(0x44, 0x55, 0x66))
         );
     }
@@ -207,7 +206,7 @@ mod tests {
         std::fs::write(current.join("theme.name"), "custom-theme\n").unwrap();
 
         assert_eq!(
-            resolve_active(OMARCHY_SENTINEL).accent().fg,
+            resolve_active(OMARCHY_THEME_SENTINEL).accent().fg,
             Some(ratatui::style::Color::Rgb(0x7a, 0xa2, 0xf7))
         );
     }
