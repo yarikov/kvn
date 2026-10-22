@@ -187,9 +187,6 @@ impl<'a> ClientLoop<'a> {
             }
         }
         scroll::send_next(self)?;
-        if self.model.restart_required {
-            self.model.overlay = Overlay::RestartRequired;
-        }
         self.focus_sources_when_logs_hidden()?;
         if self.model.overlay != Overlay::None {
             self.clear_log_selection();
@@ -333,13 +330,7 @@ impl<'a> ClientLoop<'a> {
         {
             return Ok(());
         }
-        if self.model.restart_required {
-            self.pane_focus = MainPaneFocus::Sources;
-            self.pending_focus = None;
-            Ok(())
-        } else {
-            self.focus_pane(MainPaneFocus::Sources)
-        }
+        self.focus_pane(MainPaneFocus::Sources)
     }
 
     fn clear_log_selection(&mut self) {
@@ -392,6 +383,5 @@ fn reattach(tx: Sender<Msg>) -> Result<Reattached> {
     }
     let snapshot = serde_json::from_value(value)?;
     client.spawn_reader(tx)?;
-    client.send(&IpcCommand::AttachSession)?;
     Ok(Reattached::Attached(client, Box::new(snapshot)))
 }

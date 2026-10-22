@@ -2,9 +2,8 @@
 //!
 //! Kept as a neutral top-level module so the daemon-side config loader (which
 //! sets the first-launch default theme), the TUI-side theme watcher (which
-//! follows Omarchy's active theme at runtime), `doctor` and the migration
-//! resource gate can share it without `config` having to depend on
-//! `tui_client`.
+//! follows Omarchy's active theme at runtime) and `doctor` can share it
+//! without `config` having to depend on `tui_client`.
 
 use std::io;
 use std::path::PathBuf;

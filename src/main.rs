@@ -14,7 +14,6 @@ mod geo;
 mod http;
 mod integration_files;
 mod ipc;
-mod migrations;
 mod net;
 mod omarchy;
 mod onboarding;
@@ -49,13 +48,9 @@ fn main() -> Result<()> {
     }
 
     if cli.daemon {
-        if migrations::block_daemon_if_pending()? {
-            return Ok(());
-        }
         initialize_logging()?;
         daemon::start()?;
     } else {
-        migrations::run_pending_interactive()?;
         initialize_logging()?;
         if !ipc::is_daemon_running() {
             start_daemon()?;

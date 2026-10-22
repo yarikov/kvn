@@ -140,11 +140,8 @@ pub fn run() -> Result<()> {
     spawn_ticker(tx.clone());
     theme_watch::spawn_theme_watcher(tx.clone());
     client.spawn_reader(tx.clone())?;
-    client.send(&IpcCommand::AttachSession)?;
-    if !initial_snapshot.restart_required {
-        client.send(&IpcCommand::CheckOnboarding)?;
-        client.send(&IpcCommand::CheckSupportPrompt)?;
-    }
+    client.send(&IpcCommand::CheckOnboarding)?;
+    client.send(&IpcCommand::CheckSupportPrompt)?;
 
     let mut log_tailer = LogTailer::new(vec![
         (crate::paths::app_log_path(), "[app]"),
@@ -175,10 +172,6 @@ pub fn run() -> Result<()> {
     drop(terminal_session);
     match outcome {
         TuiExit::Normal => Ok(()),
-        TuiExit::RestartDaemon => {
-            crate::systemd::restart_daemon_unit();
-            Ok(())
-        }
         TuiExit::Relaunch(executable) => relaunch(&executable),
     }
 }
@@ -197,7 +190,6 @@ fn relaunch(executable: &std::path::Path) -> Result<()> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TuiExit {
     Normal,
-    RestartDaemon,
     Relaunch(std::path::PathBuf),
 }
 
@@ -348,7 +340,6 @@ fn run_loop(
 }
 
 fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
-    model.restart_required = snapshot.restart_required;
     model.connection = snapshot.connection;
     model.status =
         crate::app::model::AppStatus::from_snapshot(snapshot.status, snapshot.status_is_error);
@@ -441,8 +432,6 @@ mod tests {
             let snapshot = crate::daemon::build_snapshot(
                 daemon_model,
                 crate::app::msg::LogSessionOffsets::default(),
-                1,
-                None,
                 None,
             );
             apply_snapshot(client_model, snapshot);
@@ -498,8 +487,6 @@ mod tests {
         let snapshot = crate::daemon::build_snapshot(
             &daemon_model,
             crate::app::msg::LogSessionOffsets::default(),
-            1,
-            None,
             None,
         );
         apply_snapshot(&mut client_model, snapshot);

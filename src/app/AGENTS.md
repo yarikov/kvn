@@ -53,11 +53,10 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   `onboarding::load_for_daemon` records it complete and persists that, so nobody
   who already uses kvn sees the tour.
 - **Card keys**: `Enter` performs the step and moves on; there is no skip, no way
-  back and no early exit, so every step is taken exactly once. The card is modal
-  like `Overlay::RestartRequired` — `q`/`Esc` and every other key fall through to
-  a no-op. The two protection cards additionally answer their own toggle,
-  `Shift+A` on `AutoConnect` and `Shift+K` on `KillSwitch`, which is what their
-  copy tells the user to press. They call `set_auto_connect` / `set_kill_switch`
+  back and no early exit, so every step is taken exactly once. The card is modal:
+  `q`/`Esc` and every other key fall through to a no-op. The two protection
+  cards additionally answer their own toggle, `Shift+A` on `AutoConnect` and
+  `Shift+K` on `KillSwitch`, which is what their copy tells the user to press. They call `set_auto_connect` / `set_kill_switch`
   rather than the main screen's `toggle_*` helpers: `toggle_*` opens
   `Overlay::ConfirmDisable` when turning a protection off, which would replace
   the card and then close to `Overlay::None`, stranding the tour. A card about

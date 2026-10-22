@@ -6,11 +6,17 @@ Upgrade `kvn` through your usual package manager:
 yay -Syu
 ```
 
-Pending migrations run on the next `kvn` launch, or explicitly with
-`kvn migrate`.
+A running daemon keeps the previous version until it restarts. Opening `kvn`
+restarts it and reconnects the current profile; without the TUI, restart it
+yourself:
 
-Use `kvn migrate --pending` to check pending migrations and `kvn doctor` if an
-upgrade needs attention.
+```bash
+systemctl --user restart kvn-tui.service
+```
+
+Until then, `kvn connect`, `kvn toggle` and the other one-shot commands refuse
+to talk to the outdated daemon. Run `kvn doctor` if an upgrade needs
+attention.
 
 ## v0.35.0
 

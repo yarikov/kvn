@@ -4,7 +4,6 @@ mod dns;
 pub(super) mod help;
 mod onboarding;
 pub(super) mod popup;
-mod restart_required;
 mod routing;
 mod settings_menu;
 mod settings_row;
@@ -31,7 +30,6 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         Overlay::DnsSettings => dns::draw(frame, model, area),
         Overlay::Support => support::draw(frame, model, area),
         Overlay::Onboarding(step) => onboarding::draw(frame, model, step, area),
-        Overlay::RestartRequired => restart_required::draw(frame, model, area),
         Overlay::None => {}
     }
 }
@@ -93,10 +91,6 @@ mod tests {
             ("dns-settings", |model: &mut Model| {
                 model.overlay = Overlay::DnsSettings;
                 model.dns_selected = 1;
-            }),
-            ("restart-required", |model: &mut Model| {
-                model.overlay = Overlay::RestartRequired;
-                model.restart_required = true;
             }),
             ("onboarding", |model: &mut Model| {
                 model.overlay = Overlay::Onboarding(crate::onboarding::OnboardingStep::AutoConnect);

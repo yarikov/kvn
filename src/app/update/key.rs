@@ -28,9 +28,6 @@ use settings_menu::handle_settings_menu;
 use sources::handle_sources;
 
 pub(in crate::app::update) fn handle_key(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
-    if model.overlay == Overlay::RestartRequired {
-        return vec![];
-    }
     if key.code == KeyCode::Char('?') && !matches!(model.overlay, Overlay::Help(_)) {
         open_help(model);
         return vec![];
@@ -56,7 +53,6 @@ pub(in crate::app::update) fn handle_key(model: &mut Model, key: KeyEvent) -> Ve
         // Navigation and activation are client-local because the selected
         // action may need to launch a browser in that client's GUI session.
         Overlay::Support => vec![],
-        Overlay::RestartRequired => vec![],
     }
 }
 
@@ -86,7 +82,6 @@ fn open_help(model: &mut Model) {
         Overlay::DnsSettings => HelpContext::DnsSettings,
         Overlay::Support => HelpContext::Support,
         Overlay::Onboarding(step) => HelpContext::Onboarding(step),
-        Overlay::RestartRequired => return,
         Overlay::Help(_) => return,
     };
     model.overlay = Overlay::Help(HelpState {
@@ -117,32 +112,6 @@ fn handle_help(model: &mut Model, mut state: HelpState, key: KeyEvent) -> Vec<Ef
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn the_restart_notice_cannot_be_dismissed_by_a_key() {
-        use crate::test_helpers::model_with_profiles;
-
-        let mut model = model_with_profiles(vec![]);
-        model.restart_required = true;
-        model.overlay = Overlay::RestartRequired;
-
-        for code in [
-            KeyCode::Char('q'),
-            KeyCode::Esc,
-            KeyCode::Enter,
-            KeyCode::Char('?'),
-            KeyCode::Char(' '),
-            KeyCode::Char('j'),
-        ] {
-            let effects = handle_key(&mut model, KeyEvent::from(code));
-            assert!(effects.is_empty(), "{code:?} produced effects");
-            assert_eq!(
-                model.overlay,
-                Overlay::RestartRequired,
-                "{code:?} closed it"
-            );
-        }
-    }
-
     use super::*;
     use crate::app::model::ConnectionState;
     use crate::config::profile::Profile;

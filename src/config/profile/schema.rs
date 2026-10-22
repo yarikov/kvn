@@ -16,7 +16,7 @@ pub const CURRENT_SCHEMA_VERSION: u32 = 7;
 
 fn default_schema_version() -> u32 {
     // Files written before the version was introduced are treated as v0 by
-    // the explicit package migration path.
+    // the schema migration path.
     0
 }
 
@@ -28,8 +28,8 @@ pub struct Config {
     #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
     pub json_schema: Option<String>,
     /// Schema version of the persisted file. See [`CURRENT_SCHEMA_VERSION`].
-    /// Absent in pre-versioned files; defaults to 0 for the explicit package
-    /// migration path.
+    /// Absent in pre-versioned files; defaults to 0 for the schema migration
+    /// path.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     #[serde(default)]

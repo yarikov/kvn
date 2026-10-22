@@ -11,9 +11,6 @@ use super::wheel::WheelDirection;
 use super::{ClientLoop, Flow};
 
 pub(super) fn handle(state: &mut ClientLoop, mouse: MouseEvent) -> Result<Flow> {
-    if state.model.overlay == Overlay::RestartRequired {
-        return Ok(Flow::Continue);
-    }
     state.mouse_position = Some((mouse.column, mouse.row));
     let hit = state.refresh_pointer_shape()?;
     if let Some(focus) = hover_focus(

@@ -53,9 +53,8 @@ the canonical application state, `profiles.json`, the sing-box process, geo rule
 and resume handling, and it turns the kill switch on and off. It runs headless, so the VPN does not
 depend on a terminal being open.
 
-At startup the daemon refuses to run while a package migration is pending. It
-then takes `$XDG_RUNTIME_DIR/kvn/daemon.lock` for its whole lifetime, before it
-touches the socket, `state.json` or a sing-box left by a crashed daemon. A
+At startup the daemon takes `$XDG_RUNTIME_DIR/kvn/daemon.lock` for its whole
+lifetime, before it touches the socket, `state.json` or a sing-box left by a crashed daemon. A
 second daemon waits up to 3 seconds for the previous one to exit and otherwise
 quits without changing anything. The daemon then reconciles settings with the system: `settings.kill_switch` follows
 whether the kill-switch unit is actually active, and auto-connect is turned off
@@ -74,7 +73,7 @@ directly:
 Some CLI commands also work without a daemon and then act on their own.
 `kvn enable`/`disable --killswitch` call the kill-switch helper directly when
 the daemon is unreachable, and `kvn disable --support-prompt` writes
-`support-prompt.json` itself. `kvn config`, `kvn migrate`, `setup` and `clean`
+`support-prompt.json` itself. `kvn config`, `setup` and `clean`
 work on files and system integration directly; see the
 [CLI reference](cli.md).
 
@@ -114,7 +113,7 @@ shown) are listed in [AGENTS.md](../AGENTS.md#side-effect-free-boundaries).
 After each `update`, the main loop handles the effects in this order:
 
 1. **`SaveConfig` first.** If the list contains it, the loop saves the new
-   config before any other effect runs (`persist_config_unless_frozen`,
+   config before any other effect runs (`commit_config_change`,
    revision-checked as described in
    [Configuration and state](#configuration-and-state)). On success the saved
    config replaces the model's and `SaveConfig` is dropped from the list. On
@@ -191,13 +190,6 @@ Clients talk to the daemon in newline-delimited JSON over
 
 - **Attach**: asks for the current `StateSnapshot`. The CLI does this too,
   for example in `kvn status`.
-- **AttachSession**: a TUI sends it right after `Attach` to register as an
-  open window. The daemon counts these connections in `tui_sessions` and
-  decrements the counter when the connection closes, so a crashed TUI is not
-  counted either. `kvn migrate` reads the counter: with an open TUI it
-  shows a restart prompt in that window, otherwise it restarts the unit
-  itself.
-  A client that only sends `Attach` does not count as an open TUI.
 - **Detach**: sent by a TUI when it exits with `q`.
 - **Key**: the TUI forwards key presses. The daemon interprets them with the
   same `update` code the TUI would, so behavior does not depend on the client.
@@ -209,13 +201,13 @@ Clients talk to the daemon in newline-delimited JSON over
 - **StateSnapshot**: after every state change the daemon pushes a full
   snapshot, including the complete config, to every attached client. There are
   no diffs to get out of sync. A client that cannot take a snapshot within
-  200 ms, for example a TUI process stopped with `SIGSTOP`, is disconnected
-  and no longer counts as an open window. `onboarding_complete` tells clients
+  200 ms, for example a TUI process stopped with `SIGSTOP`, is disconnected.
+  `onboarding_complete` tells clients
   without a keyboard model whether the first-run tour is finished: the Omarchy
   plugin sends no commands until it is.
 - **Reattaching**: a TUI that loses its connection, because the daemon was
-  restarted (`systemctl --user restart kvn-tui.service`, `kvn migrate`) or
-  disconnected it, reattaches on its own and shows the current state. When the
+  restarted (`systemctl --user restart kvn-tui.service`) or disconnected it,
+  reattaches on its own and shows the current state. When the
   new daemon is a different version, for example after a package update, the
   TUI restarts itself from the daemon's executable in the same terminal, so the
   two match and the daemon and the VPN are left alone. When the daemon is gone
@@ -225,10 +217,6 @@ Clients talk to the daemon in newline-delimited JSON over
   connection commands (`connect`, `disconnect`, `reconnect`, `toggle`) and
   `disable --support-prompt` carry a request id. Only the matching reply
   carries their result or error.
-- **Restart required**: after package migrations finish while a TUI is
-  attached, the daemon enters a frozen state until it is restarted. It ignores
-  every command except `Quit` and `ClearErrorStatus`, answers connection
-  requests with an error, and pauses scheduled downloads.
 
 Every snapshot carries the daemon's version and `IPC_VERSION`. When a package
 upgrade leaves an older daemon running, the TUI sends it `Quit`, waits up to
@@ -311,9 +299,6 @@ are described in the [configuration guide](configuration.md).
   the XDG directories. New files use the `kvn` namespace, while existing ones
   keep `kvn-tui` for compatibility. The full list is in the
   [configuration guide](configuration.md).
-- **Package migrations** (`kvn migrate`) run root-owned scripts shipped with
-  the package for changes that schema migrations cannot express, back up
-  `profiles.json` first and record what has run.
 
 ## Privileges
 
@@ -350,7 +335,6 @@ is listed in [System integration](system-integration.md).
 | `src/services/` | Log tailer, `state.json`, suspend watcher, kill switch |
 | `src/onboarding.rs` | First-run tour |
 | `src/doctor.rs`, `src/integration_files.rs` | Diagnostics and the embedded polkit and kill-switch files |
-| `src/migrations.rs`, `contrib/migrations/` | Package migrations |
 | `src/paths.rs`, `src/atomic_write.rs` | XDG paths and atomic writes |
 | `contrib/` | systemd units, polkit rule, nftables ruleset, setup and clean scripts |
 | `themes/`, `build.rs` | Bundled palettes, compiled into the binary at build time |

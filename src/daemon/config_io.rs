@@ -95,7 +95,7 @@ fn persist_confirmed_state(model: &mut Model, before: Config, effects: &mut Vec<
 
 fn commit_model_config(model: &mut Model, before: &Config) -> anyhow::Result<()> {
     let base = model.unsaved_state_merge_base.as_ref().unwrap_or(before);
-    let config = persist_config_unless_frozen(model, base, &model.config)?;
+    let config = commit_config_change(model, base, &model.config)?;
     model.replace_config_preserving_selection(config);
     model.unsaved_state_merge_base = None;
     Ok(())
@@ -112,26 +112,11 @@ fn ensure_broadcast(effects: &mut Vec<Effect>) {
     }
 }
 
-fn persist_config_unless_frozen(
-    model: &Model,
-    base: &Config,
-    edited: &Config,
-) -> anyhow::Result<Config> {
-    if model.restart_required {
-        return Ok(edited.clone());
-    }
-    commit_config_change(model, base, edited)
-}
-
 pub(super) fn commit_config_change(
     model: &Model,
     base: &Config,
     edited: &Config,
 ) -> anyhow::Result<Config> {
-    anyhow::ensure!(
-        !model.restart_required,
-        "configuration is frozen until the kvn daemon is restarted"
-    );
     anyhow::ensure!(
         !model.config_persistence_blocked,
         "persisted config previously failed to load"
