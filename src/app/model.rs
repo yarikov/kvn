@@ -40,6 +40,58 @@ pub enum SettingsMenuPage {
     Interface,
 }
 
+impl SettingsMenuPage {
+    pub fn entry(self) -> Option<SettingsMenuEntry> {
+        match self {
+            Self::Root => None,
+            Self::Routing => Some(SettingsMenuEntry::Routing),
+            Self::Connection => Some(SettingsMenuEntry::Connection),
+            Self::Interface => Some(SettingsMenuEntry::Interface),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsMenuEntry {
+    Connection,
+    Dns,
+    Interface,
+    Routing,
+}
+
+impl SettingsMenuEntry {
+    pub const ALL: [Self; 4] = [Self::Connection, Self::Dns, Self::Interface, Self::Routing];
+
+    pub fn key(self) -> char {
+        match self {
+            Self::Connection => 'c',
+            Self::Dns => 'd',
+            Self::Interface => 'i',
+            Self::Routing => 'r',
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Connection => "Connection",
+            Self::Dns => "DNS",
+            Self::Interface => "Interface",
+            Self::Routing => "Routing",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|entry| *entry == self)
+            .expect("every entry is listed in ALL")
+    }
+
+    pub fn from_key(key: char) -> Option<Self> {
+        Self::ALL.into_iter().find(|entry| entry.key() == key)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutingSettings {
     pub region: GeoRegion,
@@ -782,6 +834,16 @@ impl Model {
             kill_switch: self
                 .kill_switch_pending
                 .unwrap_or(self.config.settings.kill_switch),
+        }
+    }
+
+    pub fn settings_menu_len(&self, page: SettingsMenuPage) -> usize {
+        match page {
+            SettingsMenuPage::Root => SettingsMenuEntry::ALL.len(),
+            SettingsMenuPage::Routing => {
+                RoutingSettingsItem::available(self.shown_routing_settings().region).len()
+            }
+            SettingsMenuPage::Connection | SettingsMenuPage::Interface => 2,
         }
     }
 

@@ -1,12 +1,12 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-use crate::app::model::Model;
+use crate::app::model::{Model, SettingsMenuEntry};
 use crate::ui::layout::text::{fit_to_visual_width, visual_width};
 
 use super::popup::draw_selection_modal;
 use super::settings_row::{settings_value_layout, settings_value_text};
-use super::{APPLY_ACTION, overlay_footer};
+use super::{APPLY_ACTION, overlay_footer, settings_heading};
 
 fn preset_label(name: &str) -> &str {
     use crate::config::profile::DnsPreset;
@@ -57,7 +57,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         frame,
         &model.theme,
         area,
-        "Settings › DNS",
+        &settings_heading(SettingsMenuEntry::Dns),
         &label_refs,
         model.dns_selected,
         model.overlay_scroll,

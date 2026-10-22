@@ -1,4 +1,4 @@
-use crate::app::model::{Model, Overlay, RoutingSettingsItem, SettingsMenuPage, SourceRow};
+use crate::app::model::{Model, Overlay, SourceRow};
 use crate::config::profile::GeoRegion;
 
 pub(crate) fn context(overlay: Overlay) -> Overlay {
@@ -50,14 +50,7 @@ pub(crate) fn list(model: &Model) -> Option<(Vec<Option<usize>>, usize)> {
         Overlay::GeoRegions => (GeoRegion::ALL.len(), model.geo_region_selected),
         Overlay::DnsSettings => (3, model.dns_selected),
         Overlay::SettingsMenu(page) => {
-            let len = match page {
-                SettingsMenuPage::Root => 4,
-                SettingsMenuPage::Routing => {
-                    RoutingSettingsItem::available(model.shown_routing_settings().region).len()
-                }
-                _ => 2,
-            };
-            (len, model.settings_menu_selected)
+            (model.settings_menu_len(page), model.settings_menu_selected)
         }
         Overlay::Support => (3, model.support_selected),
         _ => return None,
@@ -81,7 +74,7 @@ pub(crate) fn select(model: &mut Model, selected: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::model::{HelpState, RoutingSettingsDraft};
+    use crate::app::model::{HelpState, RoutingSettingsDraft, SettingsMenuPage};
 
     #[test]
     fn each_selectable_context_updates_its_own_selection() {
