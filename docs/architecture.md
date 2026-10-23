@@ -103,7 +103,7 @@ All business logic follows The Elm Architecture (TEA), in `src/app/`:
 | `Model` | `app/model.rs` | All application state as plain data |
 | `Msg` | `app/msg.rs` | Every event: IPC commands, ticks, process exits, download results, resume |
 | `update` | `app/update.rs` + `app/update/` | `update(model, msg) -> Vec<Effect>`: changes the model, performs no I/O |
-| `Effect` | `app/effect.rs` | A description of a side effect: `Connect`, `SaveConfig`, `DownloadGeo`, `BroadcastState`, … |
+| `Effect` | `app/effect.rs` | A description of a side effect: `Connect`, `SaveConfig`, `DownloadRuleSets`, `BroadcastState`, … |
 
 `update` never reads files, opens sockets, starts threads or runs processes.
 It returns `Effect` values, and the daemon's main loop executes them. The few deliberate exceptions (small,

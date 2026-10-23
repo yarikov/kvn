@@ -316,7 +316,6 @@ mod tests {
             443,
             "u1".to_string(),
         )]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.logs.push_back("log line 1".to_string());
         model.logs.push_back("log line 2".to_string());
         model.connection = ConnectionState::Connected;

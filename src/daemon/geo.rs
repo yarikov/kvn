@@ -2,81 +2,69 @@ use std::sync::mpsc::Sender;
 use std::thread;
 
 use crate::app::model::{AppStatus, Model, StatusKey};
-use crate::app::msg::{GeoResult, Msg};
-use crate::config::profile::{GeoAutoUpdate, GeoRegion};
-use crate::geo::RegionUpdate;
+use crate::app::msg::Msg;
+use crate::config::profile::GeoAutoUpdate;
+use crate::geo::{RuleSet, RuleSetOutcome, RuleSetReport, ScheduleWrite};
 
-pub(super) fn download(tx: &Sender<Msg>, model: &mut Model) {
-    model.geo_updating = true;
+pub(super) fn download_rule_sets(
+    tx: &Sender<Msg>,
+    model: &Model,
+    rule_sets: Vec<&'static RuleSet>,
+    only_missing: bool,
+    record_schedule: bool,
+) {
     let tx = tx.clone();
-    let region = current_region(model);
-    let automatic = model.geo_automatic_update;
-    let interval_days = interval_days(model);
-    let schedule_epoch = model.geo_schedule_epoch;
+    let epoch = model.geo_schedule_epoch;
+    let schedule = record_schedule.then(|| ScheduleWrite {
+        interval_days: interval_days(model),
+        epoch,
+    });
     thread::spawn(move || {
-        let gm = match crate::geo::GeoManager::new() {
-            Ok(gm) => gm,
-            Err(e) => {
-                let _ = tx.send(Msg::GeoUpdated {
-                    result: GeoResult::Error {
-                        message: e.to_string(),
-                        schedule: None,
-                    },
-                    region_ready: false,
-                });
-                return;
-            }
-        };
-        let regional = gm.update_if_needed(region);
-        let result = finalize_geo_result(
-            &gm,
-            region,
-            regional,
-            ScheduleWrite {
-                retry_enabled: automatic,
-                interval_days,
-                epoch: schedule_epoch,
+        let msg = match crate::geo::GeoManager::new() {
+            Ok(gm) => Msg::RuleSetsUpdated {
+                reports: gm.update_rule_sets(&rule_sets, only_missing, schedule),
+                states: gm.states(&rule_sets),
+                epoch,
             },
-        );
-        let _ = tx.send(Msg::GeoUpdated {
-            result,
-            region_ready: gm.has_databases(region),
-        });
+            Err(e) => Msg::RuleSetsUpdated {
+                reports: rule_sets
+                    .iter()
+                    .map(|rule_set| RuleSetReport {
+                        key: rule_set.key(),
+                        tag: rule_set.tag.to_string(),
+                        outcome: RuleSetOutcome::Failed(format!("{e:#}")),
+                    })
+                    .collect(),
+                states: Default::default(),
+                epoch,
+            },
+        };
+        let _ = tx.send(msg);
     });
 }
 
-pub(super) fn refresh_last_updated(tx: &Sender<Msg>, model: &Model) {
+pub(super) fn refresh_rule_set_states(tx: &Sender<Msg>, model: &Model) {
     let tx = tx.clone();
-    let region = current_region(model);
-    let schedule_epoch = model.geo_schedule_epoch;
+    let selectable = crate::route_plan::selectable_rule_sets(&model.config.settings);
+    let epoch = model.geo_schedule_epoch;
     thread::spawn(move || {
-        let manager = crate::geo::GeoManager::new().ok();
-        let _ = tx.send(Msg::GeoMetadataRefreshed {
-            last_updated: manager.as_ref().and_then(|g| g.last_updated(region)),
-            last_checked_at: manager.as_ref().and_then(|g| g.last_checked_at(region)),
-            schedule: manager.map(|g| g.schedule(region, schedule_epoch)),
-        });
+        let states = crate::geo::GeoManager::new()
+            .map(|g| g.states(&selectable))
+            .unwrap_or_default();
+        let _ = tx.send(Msg::RuleSetStatesRefreshed { states, epoch });
     });
-}
-
-pub(super) fn clear_retry_state(region: GeoRegion) {
-    if let Ok(manager) = crate::geo::GeoManager::new()
-        && let Err(e) = manager.clear_retry_state(region)
-    {
-        tracing::warn!("Failed to clear geo retry state: {e}");
-    }
 }
 
 pub(super) fn reset_update_schedules(model: &mut Model) {
     let Ok(manager) = crate::geo::GeoManager::new() else {
         return;
     };
-    let region = current_region(model);
+    let selectable = crate::route_plan::selectable_rule_sets(&model.config.settings);
     let enabled = model.config.settings.geo_routing.auto_update != GeoAutoUpdate::Off;
-    match manager.reset_update_schedules(region, enabled) {
+    match manager.reset_update_schedules(&selectable, enabled) {
         Ok(schedule_epoch) => {
             model.geo_schedule_epoch = schedule_epoch;
-            model.apply_geo_schedule(manager.schedule(region, schedule_epoch));
+            model.apply_rule_set_states(manager.states(&selectable), schedule_epoch);
         }
         Err(error) => {
             let message = format!("Rule-set update schedule reset failed: {error:#}");
@@ -84,60 +72,6 @@ pub(super) fn reset_update_schedules(model: &mut Model) {
             crate::services::log_tailer::append_app_log("ERROR", &message);
         }
     }
-}
-
-pub(super) fn download_if_missing(tx: &Sender<Msg>, model: &mut Model) {
-    model.geo_updating = true;
-    let tx = tx.clone();
-    let region = current_region(model);
-    let retry_enabled = model.config.settings.geo_routing.auto_update != GeoAutoUpdate::Off;
-    let interval_days = interval_days(model);
-    let schedule_epoch = model.geo_schedule_epoch;
-    thread::spawn(move || {
-        let (result, region_ready) = match crate::geo::GeoManager::new() {
-            Ok(gm) => {
-                let result = if gm.has_databases(region) {
-                    let _ = gm.clear_retry_state(region);
-                    GeoResult::UpToDate {
-                        checked_at: gm.last_checked_at(region),
-                        schedule: Some(gm.schedule(region, schedule_epoch)),
-                    }
-                } else {
-                    finalize_geo_result(
-                        &gm,
-                        region,
-                        gm.update_if_needed(region),
-                        ScheduleWrite {
-                            retry_enabled,
-                            interval_days,
-                            epoch: schedule_epoch,
-                        },
-                    )
-                };
-                (result, gm.has_databases(region))
-            }
-            Err(e) => (
-                GeoResult::Error {
-                    message: e.to_string(),
-                    schedule: None,
-                },
-                false,
-            ),
-        };
-        let _ = tx.send(Msg::GeoUpdated {
-            result,
-            region_ready,
-        });
-    });
-}
-
-fn current_region(model: &Model) -> GeoRegion {
-    model
-        .config
-        .settings
-        .geo_routing
-        .current_region
-        .unwrap_or(GeoRegion::Global)
 }
 
 fn interval_days(model: &Model) -> i64 {
@@ -150,104 +84,38 @@ fn interval_days(model: &Model) -> i64 {
         / 1_440) as i64
 }
 
-struct ScheduleWrite {
-    retry_enabled: bool,
-    interval_days: i64,
-    epoch: u64,
-}
-
-fn finalize_geo_result(
-    manager: &crate::geo::GeoManager,
-    region: GeoRegion,
-    regional: anyhow::Result<RegionUpdate>,
-    write: ScheduleWrite,
-) -> GeoResult {
-    if write.retry_enabled {
-        if regional.is_err() {
-            let _ = manager.record_update_failure(region, write.epoch);
-        } else if let Err(e) =
-            manager.record_region_schedule_success(region, write.interval_days, write.epoch)
-        {
-            tracing::warn!("Failed to schedule geo update: {e}");
-        }
-    }
-    let schedule = Some(manager.schedule(region, write.epoch));
-
-    match regional {
-        Ok(RegionUpdate::Updated { parts, checked_at }) => GeoResult::Updated {
-            parts,
-            checked_at,
-            schedule,
-        },
-        Ok(RegionUpdate::UpToDate { checked_at }) => GeoResult::UpToDate {
-            checked_at,
-            schedule,
-        },
-        Err(e) => GeoResult::Error {
-            message: e.to_string(),
-            schedule,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{ScheduleWrite, finalize_geo_result};
-    use crate::app::msg::GeoResult;
-    use crate::config::profile::{GeoAutoUpdate, GeoRegion};
-
-    fn automatic_schedule(epoch: u64) -> ScheduleWrite {
-        ScheduleWrite {
-            retry_enabled: true,
-            interval_days: 1,
-            epoch,
-        }
-    }
-
-    #[test]
-    fn geo_batch_started_before_a_reset_reports_the_reset_schedule() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        let manager = crate::geo::GeoManager::new().unwrap();
-        let stale = manager.schedule_epoch();
-        manager.reset_update_schedules(GeoRegion::Ru, true).unwrap();
-        let reset_next = manager.region_next_update(GeoRegion::Ru);
-
-        let result = finalize_geo_result(
-            &manager,
-            GeoRegion::Ru,
-            Err(anyhow::anyhow!("regional unavailable")),
-            automatic_schedule(stale),
-        );
-
-        let GeoResult::Error {
-            schedule: Some(schedule),
-            ..
-        } = result
-        else {
-            panic!("expected an error result");
-        };
-        assert!(schedule.retry_state.is_none());
-        assert_eq!(schedule.next_update, reset_next);
-        assert!(manager.retry_state(GeoRegion::Ru).is_none());
-    }
+    use crate::config::profile::{GeoAutoUpdate, GeoRegion, RetryState};
 
     #[test]
     fn schedule_reset_clears_the_model_retry_state() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        let manager = crate::geo::GeoManager::new().unwrap();
         let mut model = crate::test_helpers::model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Off;
-        let epoch = manager.schedule_epoch();
-        model.geo_retry_state = manager.record_update_failure(GeoRegion::Ru, epoch).unwrap();
+        for rule_set in crate::route_plan::selectable_rule_sets(&model.config.settings) {
+            model
+                .rule_set_states
+                .entry(rule_set.key())
+                .or_default()
+                .retry = Some(RetryState {
+                consecutive_failures: 2,
+                retry_at: chrono::Local::now(),
+                attempt_date: None,
+            });
+        }
 
         super::reset_update_schedules(&mut model);
 
-        assert!(model.geo_retry_state.is_none());
+        assert!(
+            model
+                .rule_set_states
+                .values()
+                .all(|state| state.retry.is_none())
+        );
     }
 
     #[test]
@@ -291,29 +159,5 @@ mod tests {
             model.status_text()
         );
         assert!(model.status_is_error());
-    }
-
-    #[test]
-    fn geo_batch_schedules_a_retry_when_the_region_fails() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        let manager = crate::geo::GeoManager::new().unwrap();
-
-        let result = finalize_geo_result(
-            &manager,
-            GeoRegion::Ru,
-            Err(anyhow::anyhow!("regional unavailable")),
-            automatic_schedule(0),
-        );
-
-        let GeoResult::Error {
-            schedule: Some(schedule),
-            ..
-        } = result
-        else {
-            panic!("expected an error result");
-        };
-        assert_eq!(schedule.retry_state.unwrap().consecutive_failures, 1);
     }
 }

@@ -392,9 +392,9 @@ mod tests {
                 region: GeoRegion::Ru,
             },
         );
-        assert!(!model.geo_updating);
-        assert!(!effects.contains(&Effect::DownloadGeoIfMissing));
-        assert!(!effects.contains(&Effect::RefreshGeoLastUpdated));
+        assert!(!model.geo_updating());
+        assert!(!downloads_rule_sets(&effects));
+        assert!(!effects.contains(&Effect::RefreshRuleSetStates));
         assert!(effects.contains(&Effect::SaveConfig));
     }
 

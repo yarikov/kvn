@@ -283,6 +283,23 @@ mod tests {
     }
 
     #[test]
+    fn retry_state_backs_off_then_waits_for_the_next_update_window() {
+        use chrono::TimeZone;
+
+        let now = Local.with_ymd_and_hms(2026, 8, 22, 12, 0, 0).unwrap();
+        let mut state = None;
+        for (failures, delay) in [(1, 1), (2, 5), (3, 15), (4, 60)] {
+            let next = RetryState::after_failure(state.as_ref(), now);
+            assert_eq!(next.consecutive_failures, failures);
+            assert_eq!(next.retry_at, now + chrono::Duration::minutes(delay));
+            state = Some(next);
+        }
+        let fifth = RetryState::after_failure(state.as_ref(), now);
+        assert_eq!(fifth.consecutive_failures, 5);
+        assert!(fifth.retry_at.date_naive() > now.date_naive());
+    }
+
+    #[test]
     fn geo_auto_update_cycles_intervals_and_labels() {
         let schedules = [
             (GeoAutoUpdate::Off, 0, "off"),

@@ -77,7 +77,6 @@ mod tests {
     #[test]
     fn draw_dns_settings_overlay_snapshot() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::DnsSettings;
         model.dns_selected = 1;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
@@ -86,7 +85,6 @@ mod tests {
     #[test]
     fn draw_dns_settings_overlay_custom_preset_snapshot() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model
             .config
             .settings
@@ -108,7 +106,6 @@ mod tests {
     #[test]
     fn draw_dns_settings_overlay_fakeip_on_snapshot() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.config.settings.dns.fakeip_enabled = true;
         model.dns_preset_draft = Some("system_local".to_string());
         model.overlay = Overlay::DnsSettings;

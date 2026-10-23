@@ -191,10 +191,10 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
-                Effect::RefreshGeoLastUpdated,
+                Effect::RefreshRuleSetStates,
                 app_log_info("Geo region selected: cn"),
                 app_log_info("Checking geo databases…"),
-                Effect::DownloadGeoIfMissing,
+                download_missing_rule_sets_of(GeoRegion::Cn),
             ]
         );
     }
@@ -256,7 +256,7 @@ mod tests {
             effects,
             vec![
                 Effect::SaveConfig,
-                Effect::RefreshGeoLastUpdated,
+                Effect::RefreshRuleSetStates,
                 app_log_info("Geo region selected: global"),
                 app_log_info("Routing mode changed: Global")
             ]
@@ -284,7 +284,7 @@ mod tests {
             model.config.settings.geo_routing.mode(),
             RoutingMode::Global
         );
-        assert!(effects.contains(&Effect::DownloadGeoIfMissing));
+        assert!(downloads_rule_sets(&effects));
 
         model.overlay = Overlay::GeoRegions;
         model.geo_region_selected = 0;
@@ -337,7 +337,7 @@ mod tests {
             model.config.settings.geo_routing.current_region,
             Some(GeoRegion::Cn)
         );
-        assert!(!effects.contains(&Effect::RefreshGeoLastUpdated));
+        assert!(!effects.contains(&Effect::RefreshRuleSetStates));
     }
 
     #[test]
@@ -352,7 +352,7 @@ mod tests {
             model.config.settings.geo_routing.current_region,
             Some(GeoRegion::Global)
         );
-        assert!(!effects.contains(&Effect::DownloadGeoIfMissing));
+        assert!(!downloads_rule_sets(&effects));
         assert!(!model.status_text().contains("Checking geo databases"));
     }
 

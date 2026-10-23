@@ -111,7 +111,6 @@ mod tests {
     #[test]
     fn draw_routing_mode_overlay_snapshot() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model
             .config
             .settings
@@ -146,7 +145,6 @@ mod tests {
     #[test]
     fn draw_geo_region_overlay_snapshot() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::GeoRegions;
         model.geo_region_selected = 1;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
@@ -167,7 +165,6 @@ mod tests {
     #[test]
     fn draw_routing_mode_overlay_global_snapshot() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model
             .config
             .settings

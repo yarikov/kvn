@@ -1,105 +1,103 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey};
-use crate::app::msg::GeoResult;
-use crate::config::profile::RoutingFallback;
+use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey, UpdateTrigger};
+use crate::config::profile::{GeoAutoUpdate, RoutingFallback};
+use crate::geo::{RuleSet, RuleSetOutcome, RuleSetReport, RuleSetStates};
+use crate::route_plan::required_rule_sets;
 
 use crate::app::update::connection::queue_connect;
 use crate::app::update::status::{DownloadKind, append_download_hint, push_status};
 
-pub(in crate::app::update) fn handle_geo_result(
+pub(in crate::app::update) fn start_rule_set_download(
     model: &mut Model,
-    result: GeoResult,
-    region_ready: bool,
+    rule_sets: Vec<&'static RuleSet>,
+    trigger: UpdateTrigger,
+    only_missing: bool,
+) -> Option<Effect> {
+    let rule_sets: Vec<&'static RuleSet> = rule_sets
+        .into_iter()
+        .filter(|rule_set| !model.rule_set_updates.contains_key(&rule_set.key()))
+        .collect();
+    if rule_sets.is_empty() {
+        return None;
+    }
+    for rule_set in &rule_sets {
+        model.rule_set_updates.insert(rule_set.key(), trigger);
+    }
+    let auto_update_on = model.config.settings.geo_routing.auto_update != GeoAutoUpdate::Off;
+    Some(Effect::DownloadRuleSets {
+        rule_sets,
+        only_missing,
+        record_schedule: trigger == UpdateTrigger::Automatic || (only_missing && auto_update_on),
+    })
+}
+
+pub(in crate::app::update) fn handle_rule_sets_updated(
+    model: &mut Model,
+    reports: Vec<RuleSetReport>,
+    states: RuleSetStates,
+    epoch: u64,
 ) -> Vec<Effect> {
-    let failure = match &result {
-        GeoResult::Error { message, .. } => Some(message.clone()),
-        _ => None,
+    for report in &reports {
+        model.rule_set_updates.remove(&report.key);
+    }
+    model.apply_rule_set_states(states, epoch);
+    let updated: Vec<&RuleSetReport> = reports
+        .iter()
+        .filter(|report| report.outcome == RuleSetOutcome::Updated)
+        .collect();
+    let failures: Vec<String> = reports.iter().filter_map(failure_text).collect();
+
+    let mut effects = Vec::new();
+    for report in &updated {
+        let text = format!("Updated: {}", report.tag);
+        effects.push(Effect::AppendAppLog {
+            level: "INFO".to_string(),
+            message: text.clone(),
+        });
+        model.logs.push_back(text);
+    }
+    let status = if !failures.is_empty() {
+        AppStatus::Error(format!("Geo update failed: {}", failures.join("; ")))
+    } else if !updated.is_empty() {
+        AppStatus::Info("Geo databases updated".into())
+    } else {
+        AppStatus::Info("Geo databases up to date".into())
     };
-    model.geo_updating = false;
-    model.geo_automatic_update = false;
-    let mut effects = match result {
-        GeoResult::Updated {
-            parts,
-            checked_at,
-            schedule,
-        } => {
-            if let Some(schedule) = schedule {
-                model.apply_geo_schedule(schedule);
-            }
-            model.geo_last_updated = Some(checked_at.format("%d %b %H:%M").to_string());
-            model.geo_last_checked_at = Some(checked_at);
-            let mut log_effects = Vec::new();
-            for part in &parts {
-                let text = format!("Updated: {}", part);
-                log_effects.push(Effect::AppendAppLog {
-                    level: "INFO".to_string(),
-                    message: text.clone(),
-                });
-                model.logs.push_back(text);
-            }
-            push_status(
-                &mut log_effects,
-                model,
-                StatusKey::Geo,
-                AppStatus::Info("Geo databases updated".into()),
-            );
-            if model.connection == ConnectionState::Connected
-                && let Some(active_id) = model.active_profile_id
-                && queue_connect(model, active_id)
-            {
-                model
-                    .logs
-                    .push_back("Reconnecting to apply new geo databases".into());
-            }
-            log_effects
+    push_status(&mut effects, model, StatusKey::Geo, status);
+    if !failures.is_empty() {
+        append_download_hint(&mut effects, model, DownloadKind::Geo);
+    }
+
+    if model.connection == ConnectionState::Connected {
+        match model.routing_fallback {
+            Some(fallback) => effects.extend(leave_routing_fallback(model, fallback, &reports)),
+            None => reconnect_for_updated_rule_sets(model, &updated),
         }
-        GeoResult::UpToDate {
-            checked_at,
-            schedule,
-        } => {
-            if let Some(schedule) = schedule {
-                model.apply_geo_schedule(schedule);
-            }
-            model.geo_last_checked_at = checked_at;
-            if let Some(checked_at) = checked_at {
-                model.geo_last_updated = Some(checked_at.format("%d %b %H:%M").to_string());
-            }
-            let mut effects = Vec::new();
-            push_status(
-                &mut effects,
-                model,
-                StatusKey::Geo,
-                AppStatus::Info("Geo databases up to date".into()),
-            );
-            effects
-        }
-        GeoResult::Error { message, schedule } => {
-            if let Some(schedule) = schedule {
-                model.apply_geo_schedule(schedule);
-            }
-            let mut effects = Vec::new();
-            push_status(
-                &mut effects,
-                model,
-                StatusKey::Geo,
-                crate::app::model::AppStatus::Error(format!("Geo update failed: {message}")),
-            );
-            append_download_hint(&mut effects, model, DownloadKind::Geo);
-            effects
-        }
-    };
-    if let Some(fallback) = model.routing_fallback
-        && model.connection == ConnectionState::Connected
-    {
-        effects.extend(leave_routing_fallback(
-            model,
-            fallback,
-            region_ready,
-            failure,
-        ));
     }
     effects.push(Effect::BroadcastState);
     effects
+}
+
+fn failure_text(report: &RuleSetReport) -> Option<String> {
+    match &report.outcome {
+        RuleSetOutcome::Failed(message) => Some(format!("{}: {message}", report.tag)),
+        _ => None,
+    }
+}
+
+fn reconnect_for_updated_rule_sets(model: &mut Model, updated: &[&RuleSetReport]) {
+    let required = required_rule_sets(&model.config.settings);
+    let routed_update = updated
+        .iter()
+        .any(|report| required.iter().any(|rule_set| rule_set.key() == report.key));
+    if routed_update
+        && let Some(active_id) = model.active_profile_id
+        && queue_connect(model, active_id)
+    {
+        model
+            .logs
+            .push_back("Reconnecting to apply new geo databases".into());
+    }
 }
 
 pub(in crate::app::update) fn fetch_region_rule_sets(
@@ -118,167 +116,239 @@ pub(in crate::app::update) fn fetch_region_rule_sets(
         StatusKey::Geo,
         AppStatus::Info(format!("{mode} rule-sets are missing — {consequence}")),
     );
-    if model.geo_updating {
-        model.region_download_deferred = true;
-    } else {
-        effects.extend(start_region_rule_sets_download(model));
-    }
+    let required = required_rule_sets(&model.config.settings);
+    effects.extend(start_rule_set_download(
+        model,
+        required,
+        UpdateTrigger::Manual,
+        true,
+    ));
     effects
 }
 
 fn leave_routing_fallback(
     model: &mut Model,
     fallback: RoutingFallback,
-    region_ready: bool,
-    failure: Option<String>,
+    reports: &[RuleSetReport],
 ) -> Vec<Effect> {
-    if region_ready {
+    let required = required_rule_sets(&model.config.settings);
+    if required
+        .iter()
+        .any(|rule_set| model.rule_set_updates.contains_key(&rule_set.key()))
+    {
+        return Vec::new();
+    }
+    let missing: Vec<&'static RuleSet> = required
+        .into_iter()
+        .filter(|rule_set| {
+            !model
+                .rule_set_states
+                .get(&rule_set.key())
+                .is_some_and(|state| state.present)
+        })
+        .collect();
+    if missing.is_empty() {
         if let Some(active_id) = model.active_profile_id {
             queue_connect(model, active_id);
         }
         return Vec::new();
     }
-    if let Some(effects) = start_deferred_region_download(model) {
-        return effects;
+    let failures: Vec<String> = reports
+        .iter()
+        .filter(|report| missing.iter().any(|rule_set| rule_set.key() == report.key))
+        .filter_map(failure_text)
+        .collect();
+    if failures.is_empty() {
+        return Vec::new();
     }
-    match failure {
-        None => Vec::new(),
-        Some(message) => {
-            let mut effects = Vec::new();
-            let mode = model.config.settings.geo_routing.mode();
-            let consequence = match fallback {
-                RoutingFallback::Global => "running in Global",
-                RoutingFallback::Direct => "nothing uses the VPN",
-            };
-            push_status(
-                &mut effects,
-                model,
-                StatusKey::Geo,
-                AppStatus::Error(format!("{mode} unavailable — {consequence}: {message}")),
-            );
-            effects
-        }
-    }
-}
-
-fn start_deferred_region_download(model: &mut Model) -> Option<Vec<Effect>> {
-    let deferred = std::mem::take(&mut model.region_download_deferred);
-    (deferred && model.routing_fallback.is_some() && model.connection == ConnectionState::Connected)
-        .then(|| start_region_rule_sets_download(model))
-}
-
-fn start_region_rule_sets_download(model: &mut Model) -> Vec<Effect> {
-    model.geo_updating = true;
-    model.geo_last_attempt_at = Some(chrono::Local::now());
-    vec![Effect::DownloadGeoIfMissing]
+    let mut effects = Vec::new();
+    let mode = model.config.settings.geo_routing.mode();
+    let consequence = match fallback {
+        RoutingFallback::Global => "running in Global",
+        RoutingFallback::Direct => "nothing uses the VPN",
+    };
+    push_status(
+        &mut effects,
+        model,
+        StatusKey::Geo,
+        AppStatus::Error(format!(
+            "{mode} unavailable — {consequence}: {}",
+            failures.join("; ")
+        )),
+    );
+    effects
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::msg::{GeoSchedule, Msg};
+    use crate::app::msg::Msg;
     use crate::app::update::update;
-    use crate::config::profile::RetryState;
-    use crate::config::profile::{GeoRegion, Profile, RoutingMode};
+    use crate::config::profile::{GeoRegion, Profile, RetryState, RoutingMode};
+    use crate::geo::RuleSetState;
     use crate::test_helpers::*;
     use chrono::Local;
 
-    fn stale_retry_state() -> RetryState {
+    fn ru_rule_sets() -> Vec<&'static RuleSet> {
+        crate::geo::region_rule_sets(GeoRegion::Ru).to_vec()
+    }
+
+    fn report(rule_set: &RuleSet, outcome: RuleSetOutcome) -> RuleSetReport {
+        RuleSetReport {
+            key: rule_set.key(),
+            tag: rule_set.tag.to_string(),
+            outcome,
+        }
+    }
+
+    fn present(rule_sets: &[&RuleSet], present: bool) -> RuleSetStates {
+        rule_sets
+            .iter()
+            .map(|rule_set| {
+                let state = RuleSetState {
+                    present,
+                    checked_at: present.then(Local::now),
+                    ..RuleSetState::default()
+                };
+                (rule_set.key(), state)
+            })
+            .collect()
+    }
+
+    fn rule_sets_updated(reports: Vec<RuleSetReport>, states: RuleSetStates) -> Msg {
+        Msg::RuleSetsUpdated {
+            reports,
+            states,
+            epoch: 0,
+        }
+    }
+
+    fn retry_state(consecutive_failures: u32) -> RetryState {
         RetryState {
-            consecutive_failures: 3,
+            consecutive_failures,
             retry_at: Local::now(),
             attempt_date: None,
         }
     }
 
+    fn connected(mode: RoutingMode) -> Model {
+        let a = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        let b = Profile::new_vless("B".into(), "2.2.2.2".into(), 443, "u2".into());
+        let active_id = a.id;
+        let mut model = model_with_profiles(vec![a, b]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode(mode);
+        model.connection = ConnectionState::Connected;
+        model.active_profile_id = Some(active_id);
+        model
+    }
+
     #[test]
-    fn geo_result_from_before_a_schedule_reset_keeps_the_reset_schedule() {
+    fn states_from_before_a_schedule_reset_keep_the_reset_schedule() {
         let mut model = model_with_profiles(vec![]);
         model.geo_schedule_epoch = 2;
+        let geoip = ru_rule_sets()[1];
         let reset_next = Some(Local::now().date_naive());
-        model.geo_next_update = reset_next;
+        model.rule_set_states.insert(
+            geoip.key(),
+            RuleSetState {
+                next_update: reset_next,
+                ..RuleSetState::default()
+            },
+        );
         let checked_at = Local::now();
+        let stale = RuleSetState {
+            present: true,
+            checked_at: Some(checked_at),
+            retry: Some(retry_state(3)),
+            next_update: None,
+        };
+
+        let geosite = ru_rule_sets()[0];
 
         update(
             &mut model,
-            Msg::GeoUpdated {
-                result: GeoResult::UpToDate {
-                    checked_at: Some(checked_at),
-                    schedule: Some(GeoSchedule {
-                        epoch: 1,
-                        retry_state: Some(stale_retry_state()),
-                        ..Default::default()
-                    }),
-                },
-                region_ready: false,
+            Msg::RuleSetsUpdated {
+                reports: vec![report(geoip, RuleSetOutcome::UpToDate)],
+                states: RuleSetStates::from([(geoip.key(), stale.clone()), (geosite.key(), stale)]),
+                epoch: 1,
             },
         );
 
-        assert_eq!(model.geo_next_update, reset_next);
-        assert!(model.geo_retry_state.is_none());
-        assert_eq!(model.geo_last_checked_at, Some(checked_at));
+        let state = &model.rule_set_states[&geoip.key()];
+        assert_eq!(state.next_update, reset_next);
+        assert!(state.retry.is_none());
+        assert_eq!(state.checked_at, Some(checked_at));
+        let unknown_before = &model.rule_set_states[&geosite.key()];
+        assert!(unknown_before.retry.is_none());
+        assert_eq!(unknown_before.checked_at, Some(checked_at));
     }
 
     #[test]
-    fn geo_result_of_the_current_schedule_updates_the_schedule() {
+    fn states_of_the_current_schedule_update_the_schedule() {
         let mut model = model_with_profiles(vec![]);
         model.geo_schedule_epoch = 2;
-        let retry_state = stale_retry_state();
+        let geoip = ru_rule_sets()[1];
+        let failed = RuleSetState {
+            retry: Some(retry_state(1)),
+            ..RuleSetState::default()
+        };
 
         update(
             &mut model,
-            Msg::GeoUpdated {
-                result: GeoResult::Error {
-                    message: "unavailable".into(),
-                    schedule: Some(GeoSchedule {
-                        epoch: 2,
-                        retry_state: Some(retry_state),
-                        ..Default::default()
-                    }),
-                },
-                region_ready: false,
+            Msg::RuleSetsUpdated {
+                reports: vec![report(geoip, RuleSetOutcome::Failed("down".into()))],
+                states: RuleSetStates::from([(geoip.key(), failed.clone())]),
+                epoch: 2,
             },
         );
 
-        assert_eq!(model.geo_retry_state, Some(retry_state));
+        assert_eq!(model.rule_set_states[&geoip.key()], failed);
     }
 
     #[test]
-    fn geo_last_updated_message_updates_model() {
+    fn refreshed_states_reach_the_model() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = None;
+        let states = present(&ru_rule_sets(), true);
+
         let effects = update(
             &mut model,
-            Msg::GeoMetadataRefreshed {
-                last_updated: Some("2026-06-15 08:00".to_string()),
-                last_checked_at: None,
-                schedule: None,
+            Msg::RuleSetStatesRefreshed {
+                states: states.clone(),
+                epoch: 0,
             },
         );
-        assert_eq!(model.geo_last_updated, Some("2026-06-15 08:00".to_string()));
+
+        assert_eq!(model.rule_set_states, states);
         assert_eq!(effects, vec![Effect::BroadcastState]);
     }
 
     #[test]
-    fn geo_result_updated_broadcasts_state() {
+    fn an_update_logs_each_updated_rule_set_and_ends_its_download() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_updating = true;
+        let [geosite, geoip] = ru_rule_sets()[..] else {
+            unreachable!()
+        };
+        model
+            .rule_set_updates
+            .insert(geoip.key(), UpdateTrigger::Manual);
+
         let effects = update(
             &mut model,
-            Msg::GeoUpdated {
-                result: GeoResult::Updated {
-                    parts: vec!["geoip".into()],
-                    checked_at: Local::now(),
-                    schedule: None,
-                },
-                region_ready: false,
-            },
+            rule_sets_updated(
+                vec![
+                    report(geosite, RuleSetOutcome::UpToDate),
+                    report(geoip, RuleSetOutcome::Updated),
+                ],
+                RuleSetStates::new(),
+            ),
         );
-        assert!(!model.geo_updating);
+
+        assert!(!model.geo_updating());
         assert_eq!(
             effects,
             vec![
-                app_log_info("Updated: geoip"),
+                app_log_info("Updated: geoip-ru"),
                 app_log_info("Geo databases updated"),
                 Effect::BroadcastState
             ]
@@ -286,45 +356,15 @@ mod tests {
     }
 
     #[test]
-    fn geo_update_queues_active_profile_not_cursor() {
-        let a = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
-        let b = Profile::new_vless("B".into(), "2.2.2.2".into(), 443, "u2".into());
-        let active_id = a.id;
-        let mut model = model_with_profiles(vec![a, b]);
-        model.connection = ConnectionState::Connected;
-        model.active_profile_id = Some(active_id);
-        model.select_next();
-
-        update(
-            &mut model,
-            Msg::GeoUpdated {
-                result: GeoResult::Updated {
-                    parts: vec!["geoip".into()],
-                    checked_at: Local::now(),
-                    schedule: None,
-                },
-                region_ready: false,
-            },
-        );
-
-        assert_eq!(model.connecting_profile_id, Some(active_id));
-    }
-
-    #[test]
-    fn geo_result_up_to_date_broadcasts_state() {
+    fn an_up_to_date_check_broadcasts_state() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_updating = true;
         let effects = update(
             &mut model,
-            Msg::GeoUpdated {
-                result: GeoResult::UpToDate {
-                    checked_at: Some(Local::now()),
-                    schedule: None,
-                },
-                region_ready: false,
-            },
+            rule_sets_updated(
+                vec![report(ru_rule_sets()[0], RuleSetOutcome::UpToDate)],
+                RuleSetStates::new(),
+            ),
         );
-        assert!(!model.geo_updating);
         assert_eq!(
             effects,
             vec![
@@ -334,7 +374,176 @@ mod tests {
         );
     }
 
-    fn connected_in_fallback(geo_updating: bool) -> (Model, Vec<Effect>) {
+    #[test]
+    fn a_failed_update_reports_each_rule_set_and_the_download_hint() {
+        let mut model = model_with_profiles(vec![]);
+        let geoip = ru_rule_sets()[1];
+        model
+            .rule_set_updates
+            .insert(geoip.key(), UpdateTrigger::Automatic);
+
+        let effects = update(
+            &mut model,
+            rule_sets_updated(
+                vec![report(geoip, RuleSetOutcome::Failed("net fail".into()))],
+                RuleSetStates::new(),
+            ),
+        );
+
+        assert!(!model.geo_updating());
+        assert_eq!(
+            effects,
+            vec![
+                app_log_error("Geo update failed: geoip-ru: net fail"),
+                Effect::AppendAppLog {
+                    level: "WARN".into(),
+                    message:
+                        "VPN is disconnected. Try connecting to VPN and retrying the geo download."
+                            .into(),
+                },
+                Effect::BroadcastState,
+            ]
+        );
+    }
+
+    #[test]
+    fn an_update_of_a_routed_rule_set_reconnects_the_active_profile_not_the_cursor() {
+        let mut model = connected(RoutingMode::Bypass(GeoRegion::Ru));
+        let active_id = model.active_profile_id;
+        model.select_next();
+
+        update(
+            &mut model,
+            rule_sets_updated(
+                vec![report(ru_rule_sets()[1], RuleSetOutcome::Updated)],
+                RuleSetStates::new(),
+            ),
+        );
+
+        assert_eq!(model.connecting_profile_id, active_id);
+    }
+
+    #[test]
+    fn an_update_of_a_rule_set_the_mode_does_not_route_keeps_the_connection() {
+        let mut model = connected(RoutingMode::Global);
+
+        update(
+            &mut model,
+            rule_sets_updated(
+                vec![report(ru_rule_sets()[1], RuleSetOutcome::Updated)],
+                RuleSetStates::new(),
+            ),
+        );
+
+        assert_eq!(model.connection, ConnectionState::Connected);
+    }
+
+    #[test]
+    fn a_download_skips_rule_sets_that_are_already_downloading() {
+        let mut model = model_with_profiles(vec![]);
+        let [geosite, geoip] = ru_rule_sets()[..] else {
+            unreachable!()
+        };
+        model
+            .rule_set_updates
+            .insert(geoip.key(), UpdateTrigger::Automatic);
+
+        let effect = start_rule_set_download(
+            &mut model,
+            vec![geosite, geoip],
+            UpdateTrigger::Manual,
+            false,
+        );
+
+        assert_eq!(
+            effect,
+            Some(Effect::DownloadRuleSets {
+                rule_sets: vec![geosite],
+                only_missing: false,
+                record_schedule: false,
+            })
+        );
+        assert_eq!(
+            model.rule_set_updates[&geoip.key()],
+            UpdateTrigger::Automatic
+        );
+        assert_eq!(
+            model.rule_set_updates[&geosite.key()],
+            UpdateTrigger::Manual
+        );
+        assert_eq!(
+            start_rule_set_download(
+                &mut model,
+                vec![geosite, geoip],
+                UpdateTrigger::Manual,
+                false
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_region_change_during_a_scheduled_download_keeps_the_download_in_flight() {
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        let ru = ru_rule_sets();
+        for rule_set in &ru {
+            model
+                .rule_set_updates
+                .insert(rule_set.key(), UpdateTrigger::Automatic);
+        }
+
+        let effects = crate::app::update::routing::commit_geo_region(&mut model, GeoRegion::Cn);
+        let cn = crate::geo::region_rule_sets(GeoRegion::Cn).to_vec();
+        assert!(effects.contains(&Effect::DownloadRuleSets {
+            rule_sets: cn.clone(),
+            only_missing: true,
+            record_schedule: false,
+        }));
+
+        update(
+            &mut model,
+            rule_sets_updated(
+                ru.iter()
+                    .map(|rule_set| report(rule_set, RuleSetOutcome::UpToDate))
+                    .collect(),
+                present(&ru, true),
+            ),
+        );
+
+        assert!(model.geo_updating());
+        assert!(
+            cn.iter()
+                .all(|rule_set| model.rule_set_updates.contains_key(&rule_set.key()))
+        );
+    }
+
+    #[test]
+    fn a_late_result_for_the_previous_region_leaves_the_current_one_alone() {
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Cn);
+        let cn = crate::geo::region_rule_sets(GeoRegion::Cn).to_vec();
+        let cn_states = present(&cn, false);
+        model.rule_set_states = cn_states.clone();
+        let checked_before = model.selectable_rule_sets_checked_at();
+
+        update(
+            &mut model,
+            rule_sets_updated(
+                vec![report(ru_rule_sets()[1], RuleSetOutcome::Updated)],
+                present(&ru_rule_sets()[1..], true),
+            ),
+        );
+
+        assert!(
+            cn.iter().all(
+                |rule_set| model.rule_set_states[&rule_set.key()] == cn_states[&rule_set.key()]
+            )
+        );
+        assert_eq!(model.selectable_rule_sets_checked_at(), checked_before);
+    }
+
+    fn connected_in_fallback(downloading: bool) -> (Model, Vec<Effect>) {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
@@ -345,7 +554,13 @@ mod tests {
             .geo_routing
             .set_mode(RoutingMode::Bypass(GeoRegion::Ru));
         model.connection = ConnectionState::ConnectPending;
-        model.geo_updating = geo_updating;
+        if downloading {
+            for rule_set in ru_rule_sets() {
+                model
+                    .rule_set_updates
+                    .insert(rule_set.key(), UpdateTrigger::Automatic);
+            }
+        }
         let effects = update(
             &mut model,
             Msg::Connected {
@@ -358,22 +573,26 @@ mod tests {
         (model, effects)
     }
 
-    fn geo_error() -> Msg {
-        Msg::GeoUpdated {
-            result: GeoResult::Error {
-                message: "net fail".into(),
-                schedule: None,
-            },
-            region_ready: false,
-        }
+    fn region_failed() -> Msg {
+        rule_sets_updated(
+            ru_rule_sets()
+                .iter()
+                .map(|rule_set| report(rule_set, RuleSetOutcome::Failed("net fail".into())))
+                .collect(),
+            present(&ru_rule_sets(), false),
+        )
     }
 
     #[test]
-    fn fallback_connection_downloads_region_rule_sets_through_the_tunnel() {
+    fn fallback_connection_downloads_its_missing_rule_sets_through_the_tunnel() {
         let (model, effects) = connected_in_fallback(false);
         assert_eq!(model.routing_fallback, Some(RoutingFallback::Global));
-        assert!(model.geo_updating);
-        assert!(effects.contains(&Effect::DownloadGeoIfMissing));
+        assert!(effects.contains(&Effect::DownloadRuleSets {
+            rule_sets: ru_rule_sets(),
+            only_missing: true,
+            record_schedule: false,
+        }));
+        assert!(model.geo_updating());
         assert_eq!(
             model.status_text(),
             "Bypass RU rule-sets are missing — running in Global while they download through the VPN"
@@ -406,93 +625,61 @@ mod tests {
             "Only RU rule-sets are missing — nothing uses the VPN until they download"
         );
 
-        update(&mut model, geo_error());
+        update(&mut model, region_failed());
         assert_eq!(
             model.status_text(),
-            "Only RU unavailable — nothing uses the VPN: net fail"
+            "Only RU unavailable — nothing uses the VPN: geosite-category-ru: net fail; geoip-ru: net fail"
         );
     }
 
     #[test]
-    fn fallback_connection_retries_a_running_download_once_it_fails() {
+    fn fallback_connection_waits_for_a_download_of_its_rule_sets_already_running() {
         let (mut model, effects) = connected_in_fallback(true);
-        assert!(!effects.contains(&Effect::DownloadGeoIfMissing));
+        assert!(
+            !effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::DownloadRuleSets { .. }))
+        );
 
-        let effects = update(&mut model, geo_error());
-        assert!(effects.contains(&Effect::DownloadGeoIfMissing));
-        assert!(model.geo_updating);
+        let effects = update(&mut model, region_failed());
 
-        let effects = update(&mut model, geo_error());
-        assert!(!effects.contains(&Effect::DownloadGeoIfMissing));
+        assert!(
+            !effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::DownloadRuleSets { .. }))
+        );
         assert_eq!(model.connection, ConnectionState::Connected);
-        assert_eq!(
-            model.status_text(),
-            "Bypass RU unavailable — running in Global: net fail"
+        assert!(
+            model
+                .status_text()
+                .starts_with("Bypass RU unavailable — running in Global: ")
         );
     }
 
     #[test]
-    fn fallback_connection_reconnects_once_region_rule_sets_are_present() {
+    fn fallback_connection_reconnects_once_every_rule_set_is_present() {
         let (mut model, _) = connected_in_fallback(false);
-        update(&mut model, geo_up_to_date(true));
+        let [geosite, geoip] = ru_rule_sets()[..] else {
+            unreachable!()
+        };
+
+        update(
+            &mut model,
+            rule_sets_updated(
+                vec![report(geosite, RuleSetOutcome::Updated)],
+                present(&[geosite], true),
+            ),
+        );
+        assert_eq!(model.connection, ConnectionState::Connected);
+
+        update(
+            &mut model,
+            rule_sets_updated(
+                vec![report(geoip, RuleSetOutcome::Updated)],
+                present(&[geoip], true),
+            ),
+        );
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, model.active_profile_id);
-    }
-
-    #[test]
-    fn fallback_connection_stays_in_global_while_region_rule_sets_are_absent() {
-        let (mut model, _) = connected_in_fallback(false);
-        let effects = update(&mut model, geo_up_to_date(false));
-        assert_eq!(model.connection, ConnectionState::Connected);
-        assert!(!effects.contains(&Effect::DownloadGeoIfMissing));
-    }
-
-    fn geo_up_to_date(region_ready: bool) -> Msg {
-        Msg::GeoUpdated {
-            result: GeoResult::UpToDate {
-                checked_at: Some(Local::now()),
-                schedule: None,
-            },
-            region_ready,
-        }
-    }
-
-    #[test]
-    fn geo_result_error_broadcasts_state() {
-        let mut model = model_with_profiles(vec![]);
-        model.geo_updating = true;
-        let retry_state = crate::config::profile::RetryState {
-            consecutive_failures: 1,
-            retry_at: Local::now() + chrono::Duration::minutes(1),
-            attempt_date: None,
-        };
-        let effects = update(
-            &mut model,
-            Msg::GeoUpdated {
-                result: GeoResult::Error {
-                    message: "net fail".into(),
-                    schedule: Some(GeoSchedule {
-                        retry_state: Some(retry_state),
-                        ..Default::default()
-                    }),
-                },
-                region_ready: false,
-            },
-        );
-        assert!(!model.geo_updating);
-        assert_eq!(model.geo_retry_state, Some(retry_state));
-        assert_eq!(
-            effects,
-            vec![
-                app_log_error("Geo update failed: net fail"),
-                Effect::AppendAppLog {
-                    level: "WARN".into(),
-                    message:
-                        "VPN is disconnected. Try connecting to VPN and retrying the geo download."
-                            .into(),
-                },
-                Effect::BroadcastState,
-            ]
-        );
     }
 }

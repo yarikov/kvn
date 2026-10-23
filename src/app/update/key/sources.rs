@@ -1,6 +1,6 @@
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model, Overlay, StatusKey, UpdateTrigger};
-use crate::config::profile::{GeoRegion, SubscriptionAutoUpdate};
+use crate::config::profile::SubscriptionAutoUpdate;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::update::connection::queue_connect;
@@ -45,10 +45,6 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
             let schedule = model.config.settings.geo_routing.auto_update.next();
             model.config.settings.geo_routing.auto_update = schedule;
             let mut effects = vec![Effect::SaveConfig, Effect::ResetGeoUpdateSchedules];
-            if let Some(region) = model.config.settings.geo_routing.current_region {
-                model.geo_retry_state = None;
-                effects.push(Effect::ClearGeoRetryState { region });
-            }
             push_status(
                 &mut effects,
                 model,
@@ -267,34 +263,37 @@ fn subscription_already_updating(model: &mut Model, id: uuid::Uuid, name: &str) 
 
 fn update_geo(model: &mut Model) -> Vec<Effect> {
     let mut effects = Vec::new();
-    if !model.geo_updating {
-        if model.config.settings.geo_routing.current_region == Some(GeoRegion::Global) {
-            push_status(
-                &mut effects,
-                model,
-                StatusKey::Geo,
-                crate::app::model::AppStatus::Info(
-                    "The Global region has no rule-sets to update".to_string(),
-                ),
-            );
-            return effects;
-        }
-        if !download_allowed(model) {
-            push_download_blocked(&mut effects, model, DownloadKind::Geo);
-            return effects;
-        }
-        model.geo_updating = true;
-        model.geo_automatic_update = false;
-        model.geo_last_attempt_at = Some(chrono::Local::now());
+    let selectable = crate::route_plan::selectable_rule_sets(&model.config.settings);
+    if selectable.is_empty() {
         push_status(
             &mut effects,
             model,
             StatusKey::Geo,
-            crate::app::model::AppStatus::Info("Checking for geo updates…".to_string()),
+            crate::app::model::AppStatus::Info(
+                "The Global region has no rule-sets to update".to_string(),
+            ),
         );
-        effects.push(Effect::DownloadGeo);
         return effects;
     }
+    if !download_allowed(model) {
+        push_download_blocked(&mut effects, model, DownloadKind::Geo);
+        return effects;
+    }
+    let Some(download) = crate::app::update::geo::start_rule_set_download(
+        model,
+        selectable,
+        UpdateTrigger::Manual,
+        false,
+    ) else {
+        return effects;
+    };
+    push_status(
+        &mut effects,
+        model,
+        StatusKey::Geo,
+        crate::app::model::AppStatus::Info("Checking for geo updates…".to_string()),
+    );
+    effects.push(download);
     effects
 }
 
@@ -334,7 +333,7 @@ mod tests {
     use crate::app::update::key::ipc::handle_ipc_command;
     use crate::app::update::tick::handle_tick;
     use crate::app::update::update;
-    use crate::config::profile::{GeoAutoUpdate, Profile, Subscription};
+    use crate::config::profile::{GeoAutoUpdate, GeoRegion, Profile, Subscription};
     use crate::test_helpers::*;
     use chrono::Local;
     use crossterm::event::KeyModifiers;
@@ -529,8 +528,8 @@ mod tests {
             .set_region(GeoRegion::Global);
 
         let effects = handle_sources(&mut model, key('U'));
-        assert!(!model.geo_updating);
-        assert!(!effects.contains(&Effect::DownloadGeo));
+        assert!(!model.geo_updating());
+        assert!(!downloads_rule_sets(&effects));
         assert!(model.status_text().contains("no rule-sets to update"));
     }
 
@@ -910,7 +909,7 @@ mod tests {
         let mut direct = model_with_profiles(vec![]);
         direct.config.settings.geo_routing.set_region(GeoRegion::Ru);
         let effects = update(&mut direct, Msg::Key(key('U')));
-        assert!(effects.contains(&Effect::DownloadGeo));
+        assert!(downloads_rule_sets(&effects));
 
         let mut blocked = model_with_profiles(vec![]);
         blocked
@@ -920,8 +919,8 @@ mod tests {
             .set_region(GeoRegion::Ru);
         blocked.config.settings.kill_switch = true;
         let effects = update(&mut blocked, Msg::Key(key('U')));
-        assert!(!effects.contains(&Effect::DownloadGeo));
-        assert!(!blocked.geo_updating);
+        assert!(!downloads_rule_sets(&effects));
+        assert!(!blocked.geo_updating());
         assert!(effects.iter().any(|effect| matches!(
             effect,
             Effect::AppendAppLog { message, .. }
@@ -930,7 +929,7 @@ mod tests {
 
         blocked.connection = ConnectionState::Connected;
         let effects = update(&mut blocked, Msg::Key(key('U')));
-        assert!(effects.contains(&Effect::DownloadGeo));
+        assert!(downloads_rule_sets(&effects));
     }
 
     #[test]
@@ -1047,11 +1046,11 @@ mod tests {
 
         let effects = handle_sources(&mut model, key('u'));
 
-        assert!(!model.geo_updating);
+        assert!(!model.geo_updating());
         assert!(model.subscription_updates.is_empty());
         assert!(!effects.iter().any(|effect| matches!(
             effect,
-            Effect::DownloadGeo | Effect::UpdateSubscription { .. }
+            Effect::DownloadRuleSets { .. } | Effect::UpdateSubscription { .. }
         )));
         assert!(model.status_text().contains("press U for geo"));
     }
@@ -1063,8 +1062,8 @@ mod tests {
         model.main_pane_focus = crate::app::model::MainPaneFocus::Logs;
 
         let effects = handle_key(&mut model, key('U'));
-        assert!(model.geo_updating);
-        assert!(effects.contains(&Effect::DownloadGeo));
+        assert!(model.geo_updating());
+        assert!(downloads_rule_sets(&effects));
     }
 
     #[test]

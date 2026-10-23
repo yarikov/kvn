@@ -81,6 +81,18 @@ pub fn required_rule_sets(settings: &Settings) -> Vec<&'static RuleSet> {
     RoutePlan::for_settings(settings).rule_sets().collect()
 }
 
+pub fn selectable_rule_sets(settings: &Settings) -> Vec<&'static RuleSet> {
+    let mut selectable: Vec<&'static RuleSet> = Vec::new();
+    for mode in settings.geo_routing.available_modes() {
+        for rule_set in RoutePlan::for_mode(mode).rule_sets() {
+            if !selectable.contains(&rule_set) {
+                selectable.push(rule_set);
+            }
+        }
+    }
+    selectable
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +164,19 @@ mod tests {
             .map(|rule_set| rule_set.tag)
             .collect();
         assert_eq!(tags, ["geosite-category-ir", "geoip-ir"]);
+    }
+
+    #[test]
+    fn selectable_rule_sets_are_those_of_every_mode_of_the_region_once() {
+        let mut settings = Settings::default();
+        assert!(selectable_rule_sets(&settings).is_empty());
+
+        settings.geo_routing.set_region(GeoRegion::Ru);
+        assert_eq!(settings.geo_routing.mode(), RoutingMode::Global);
+        let tags: Vec<&str> = selectable_rule_sets(&settings)
+            .iter()
+            .map(|rule_set| rule_set.tag)
+            .collect();
+        assert_eq!(tags, ["geosite-category-ru", "geoip-ru"]);
     }
 }

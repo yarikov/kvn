@@ -299,7 +299,6 @@ mod tests {
             443,
             "u1".to_string(),
         )]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[0].id);
         model.traffic = crate::app::model::TrafficStats {
@@ -511,7 +510,6 @@ mod tests {
             443,
             "u1".to_string(),
         )]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[0].id);
         model.logs.push_back("normal info line".to_string());

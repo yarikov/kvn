@@ -109,7 +109,6 @@ mod tests {
                 443,
                 "u1".to_string(),
             )]);
-            model.geo_last_updated = Some("2026-05-31 13:41".to_string());
             setup(&mut model);
             insta::with_settings!({snapshot_suffix => label}, {
                 insta::assert_snapshot!(snapshot_terminal(

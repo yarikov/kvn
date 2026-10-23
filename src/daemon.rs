@@ -158,7 +158,7 @@ fn run_loop(
                 effect,
                 Effect::Connect { .. }
                     | Effect::Disconnect
-                    | Effect::DownloadGeo
+                    | Effect::DownloadRuleSets { .. }
                     | Effect::ResetGeoUpdateSchedules
                     | Effect::WriteState
                     | Effect::SaveConfig
@@ -307,10 +307,10 @@ pub(crate) fn build_snapshot(
         auto_connect_pending: model.auto_connect_pending,
         kill_switch_pending: model.kill_switch_pending,
         interface_settings_draft: model.interface_settings_draft,
-        geo_updating: model.geo_updating,
+        geo_updating: model.geo_updating(),
         routing_fallback: model.routing_fallback,
-        geo_last_updated: model.geo_last_updated.clone(),
-        geo_last_checked_at: model.geo_last_checked_at,
+        rule_set_updates: model.rule_set_updates.clone(),
+        rule_set_states: model.rule_set_states.clone(),
         overlay: model.overlay,
         main_pane_focus: model.main_pane_focus,
         profiles: model.config.profiles.clone(),

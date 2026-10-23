@@ -41,7 +41,6 @@ mod tests {
             443,
             "u1".to_string(),
         )]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.config.settings.auto_connect = true;
         model.overlay = Overlay::ConfirmDisable(DisableTarget::AutoConnect);
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
@@ -55,7 +54,6 @@ mod tests {
             443,
             "u1".to_string(),
         )]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.config.settings.kill_switch = true;
         model.overlay = Overlay::ConfirmDisable(DisableTarget::KillSwitch);
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));

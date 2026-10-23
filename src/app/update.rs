@@ -17,7 +17,7 @@ use connection::{
     handle_auto_connect_polkit_checked, handle_kill_switch_applied, on_connect_failed,
     on_connect_retrying, on_connected, on_singbox_exited, on_system_resumed,
 };
-use geo::handle_geo_result;
+use geo::handle_rule_sets_updated;
 use key::handle_key;
 use key::ipc::handle_ipc_command;
 use subscription::handle_subscription_result;
@@ -30,21 +30,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     match msg {
         Msg::Key(key) => handle_key(model, key),
         Msg::Tick => handle_tick(model),
-        Msg::GeoUpdated {
-            result,
-            region_ready,
-        } => handle_geo_result(model, result, region_ready),
-        Msg::GeoMetadataRefreshed {
-            last_updated,
-            last_checked_at,
-            schedule,
-        } => {
-            model.geo_last_updated = last_updated;
-            model.geo_last_checked_at = last_checked_at;
-            model.geo_last_attempt_at = None;
-            if let Some(schedule) = schedule {
-                model.apply_geo_schedule(schedule);
-            }
+        Msg::RuleSetsUpdated {
+            reports,
+            states,
+            epoch,
+        } => handle_rule_sets_updated(model, reports, states, epoch),
+        Msg::RuleSetStatesRefreshed { states, epoch } => {
+            model.apply_rule_set_states(states, epoch);
             vec![Effect::BroadcastState]
         }
         Msg::SystemResumed => on_system_resumed(model),

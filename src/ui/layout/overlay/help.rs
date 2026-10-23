@@ -164,7 +164,6 @@ mod tests {
     #[test]
     fn draw_help_overlay_snapshot() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::Help(crate::app::model::HelpState::default());
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
@@ -172,7 +171,6 @@ mod tests {
     #[test]
     fn draw_help_overlay_at_minimum_terminal_size_snapshot() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::Help(crate::app::model::HelpState::default());
         insta::assert_snapshot!(snapshot_terminal(
             &model,

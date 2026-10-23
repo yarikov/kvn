@@ -120,7 +120,7 @@ pub struct ConnectionSettings {
     pub kill_switch: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UpdateTrigger {
     Manual,
     Automatic,
@@ -378,19 +378,14 @@ pub struct Model {
     pub dns_preset_draft: Option<String>,
     pub dns_fakeip_draft: Option<bool>,
     pub routing_fallback: Option<crate::config::profile::RoutingFallback>,
-    pub region_download_deferred: bool,
     pub logs: VecDeque<String>,
-    pub geo_updating: bool,
+    pub rule_set_updates: HashMap<String, UpdateTrigger>,
+    pub rule_set_states: crate::geo::RuleSetStates,
+    pub rule_set_automatic_attempts: HashMap<String, DateTime<Local>>,
     pub subscription_updates: HashMap<Uuid, UpdateTrigger>,
     pub needs_redraw: bool,
     pub should_quit: bool,
-    pub geo_last_updated: Option<String>,
-    pub geo_last_checked_at: Option<DateTime<Local>>,
-    pub geo_last_attempt_at: Option<DateTime<Local>>,
-    pub geo_retry_state: Option<crate::config::profile::RetryState>,
-    pub geo_next_update: Option<chrono::NaiveDate>,
     pub geo_schedule_epoch: u64,
-    pub geo_automatic_update: bool,
     pub traffic: TrafficStats,
     pub last_traffic_sample_at_ms: u64,
     pub traffic_request_id: u64,
@@ -403,6 +398,22 @@ pub struct Model {
     pub profile_latencies: HashMap<Uuid, Option<u64>>,
     pub testing_profiles: HashSet<Uuid>,
     pub pending_tests: VecDeque<Uuid>,
+}
+
+fn load_rule_set_states(
+    settings: &crate::config::profile::Settings,
+) -> (u64, crate::geo::RuleSetStates) {
+    let Ok(manager) = crate::geo::GeoManager::new() else {
+        return (0, crate::geo::RuleSetStates::new());
+    };
+    let selectable = crate::route_plan::selectable_rule_sets(settings);
+    let epoch = manager.schedule_epoch();
+    let _ = manager.ensure_update_schedules(
+        &selectable,
+        settings.geo_routing.auto_update != crate::config::profile::GeoAutoUpdate::Off,
+        epoch,
+    );
+    (epoch, manager.states(&selectable))
 }
 
 fn show_omarchy_card() -> bool {
@@ -442,12 +453,42 @@ impl Model {
         self.status = Some(status);
     }
 
-    pub fn apply_geo_schedule(&mut self, schedule: crate::app::msg::GeoSchedule) {
-        if schedule.epoch != self.geo_schedule_epoch {
-            return;
+    pub fn geo_updating(&self) -> bool {
+        !self.rule_set_updates.is_empty()
+    }
+
+    pub fn selectable_rule_sets_checked_at(&self) -> Option<DateTime<Local>> {
+        crate::route_plan::selectable_rule_sets(&self.config.settings)
+            .iter()
+            .map(|rule_set| {
+                self.rule_set_states
+                    .get(&rule_set.key())
+                    .and_then(|state| state.checked_at)
+            })
+            .collect::<Option<Vec<_>>>()?
+            .into_iter()
+            .min()
+    }
+
+    pub fn mark_selectable_rule_sets_checked(&mut self, checked_at: DateTime<Local>) {
+        for rule_set in crate::route_plan::selectable_rule_sets(&self.config.settings) {
+            self.rule_set_states
+                .entry(rule_set.key())
+                .or_default()
+                .checked_at = Some(checked_at);
         }
-        self.geo_retry_state = schedule.retry_state;
-        self.geo_next_update = schedule.next_update;
+    }
+
+    pub fn apply_rule_set_states(&mut self, states: crate::geo::RuleSetStates, epoch: u64) {
+        let current_schedule = epoch == self.geo_schedule_epoch;
+        for (key, mut state) in states {
+            if !current_schedule {
+                let known = self.rule_set_states.get(&key);
+                state.retry = known.and_then(|known| known.retry);
+                state.next_update = known.and_then(|known| known.next_update);
+            }
+            self.rule_set_states.insert(key, state);
+        }
     }
 
     pub fn clear_error_status(&mut self, status_revision: u64) -> bool {
@@ -522,25 +563,7 @@ impl Model {
             .then_some(config.settings.last_connected_profile)
             .flatten();
 
-        let region = config
-            .settings
-            .geo_routing
-            .current_region
-            .unwrap_or(GeoRegion::Global);
-        let geo_manager = crate::geo::GeoManager::new().ok();
-        let geo_schedule_epoch = geo_manager.as_ref().map_or(0, |g| g.schedule_epoch());
-        if let Some(manager) = &geo_manager {
-            let _ = manager.ensure_update_schedule(
-                region,
-                config.settings.geo_routing.auto_update
-                    != crate::config::profile::GeoAutoUpdate::Off,
-                geo_schedule_epoch,
-            );
-        }
-        let geo_last_updated = geo_manager.as_ref().and_then(|g| g.last_updated(region));
-        let geo_last_checked_at = geo_manager.as_ref().and_then(|g| g.last_checked_at(region));
-        let geo_retry_state = geo_manager.as_ref().and_then(|g| g.retry_state(region));
-        let geo_next_update = geo_manager.and_then(|g| g.region_next_update(region));
+        let (geo_schedule_epoch, rule_set_states) = load_rule_set_states(&config.settings);
 
         let mut model = Self {
             overlay: Overlay::None,
@@ -576,19 +599,14 @@ impl Model {
             dns_preset_draft: None,
             dns_fakeip_draft: None,
             routing_fallback: None,
-            region_download_deferred: false,
             logs: VecDeque::new(),
-            geo_updating: false,
+            rule_set_updates: HashMap::new(),
             subscription_updates: HashMap::new(),
             needs_redraw: false,
             should_quit: false,
-            geo_last_updated,
-            geo_last_checked_at,
-            geo_last_attempt_at: None,
-            geo_retry_state,
-            geo_next_update,
+            rule_set_states,
+            rule_set_automatic_attempts: HashMap::new(),
             geo_schedule_epoch,
-            geo_automatic_update: false,
             traffic: TrafficStats::default(),
             last_traffic_sample_at_ms: 0,
             traffic_request_id: 0,
@@ -617,25 +635,7 @@ impl Model {
 
     pub fn from_config(config: Config) -> Self {
         let selected = 0;
-        let region = config
-            .settings
-            .geo_routing
-            .current_region
-            .unwrap_or(GeoRegion::Global);
-        let geo_manager = crate::geo::GeoManager::new().ok();
-        let geo_schedule_epoch = geo_manager.as_ref().map_or(0, |g| g.schedule_epoch());
-        if let Some(manager) = &geo_manager {
-            let _ = manager.ensure_update_schedule(
-                region,
-                config.settings.geo_routing.auto_update
-                    != crate::config::profile::GeoAutoUpdate::Off,
-                geo_schedule_epoch,
-            );
-        }
-        let geo_last_updated = geo_manager.as_ref().and_then(|g| g.last_updated(region));
-        let geo_last_checked_at = geo_manager.as_ref().and_then(|g| g.last_checked_at(region));
-        let geo_retry_state = geo_manager.as_ref().and_then(|g| g.retry_state(region));
-        let geo_next_update = geo_manager.and_then(|g| g.region_next_update(region));
+        let (geo_schedule_epoch, rule_set_states) = load_rule_set_states(&config.settings);
 
         Self {
             overlay: Overlay::None,
@@ -674,19 +674,14 @@ impl Model {
             dns_preset_draft: None,
             dns_fakeip_draft: None,
             routing_fallback: None,
-            region_download_deferred: false,
             logs: VecDeque::new(),
-            geo_updating: false,
+            rule_set_updates: HashMap::new(),
             subscription_updates: HashMap::new(),
             needs_redraw: false,
             should_quit: false,
-            geo_last_updated,
-            geo_last_checked_at,
-            geo_last_attempt_at: None,
-            geo_retry_state,
-            geo_next_update,
+            rule_set_states,
+            rule_set_automatic_attempts: HashMap::new(),
             geo_schedule_epoch,
-            geo_automatic_update: false,
             traffic: TrafficStats::default(),
             last_traffic_sample_at_ms: 0,
             traffic_request_id: 0,
@@ -928,19 +923,14 @@ impl Model {
             dns_preset_draft: None,
             dns_fakeip_draft: None,
             routing_fallback: None,
-            region_download_deferred: false,
             logs: VecDeque::new(),
-            geo_updating: false,
+            rule_set_updates: HashMap::new(),
             subscription_updates: HashMap::new(),
             needs_redraw: false,
             should_quit: false,
-            geo_last_updated: None,
-            geo_last_checked_at: None,
-            geo_last_attempt_at: None,
-            geo_retry_state: None,
-            geo_next_update: None,
+            rule_set_states: HashMap::new(),
+            rule_set_automatic_attempts: HashMap::new(),
             geo_schedule_epoch: 0,
-            geo_automatic_update: false,
             traffic: TrafficStats::default(),
             last_traffic_sample_at_ms: 0,
             traffic_request_id: 0,

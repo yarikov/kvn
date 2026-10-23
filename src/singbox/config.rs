@@ -42,12 +42,7 @@ impl GeoAvailability {
     pub fn all() -> Self {
         let rule_sets = crate::geo::RULE_SETS
             .iter()
-            .map(|rule_set| {
-                (
-                    rule_set.tag,
-                    PathBuf::from("/geo").join(rule_set.filename()),
-                )
-            })
+            .map(|rule_set| (rule_set.tag, PathBuf::from("/geo").join(rule_set.key())))
             .collect();
         Self { rule_sets }
     }
