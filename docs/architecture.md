@@ -333,6 +333,7 @@ is listed in [System integration](system-integration.md).
 | `src/ui/` | ratatui layout, widgets, overlays, palettes, icons |
 | `src/config.rs`, `src/config/` | `profiles.json` I/O, profile and settings types, share links, schema, merge, subscriptions |
 | `src/singbox/` | Config generation, process runner, Clash API client |
+| `src/route_plan.rs` | What each routing mode routes and the rule-sets it needs |
 | `src/geo.rs` | Rule-set catalog, region rule-sets, downloads and cache |
 | `src/services/` | Log tailer, `state.json`, suspend watcher, kill switch |
 | `src/onboarding.rs` | First-run tour |
