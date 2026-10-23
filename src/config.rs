@@ -6,6 +6,7 @@ pub(crate) mod json_pointer;
 pub(crate) mod merge;
 pub mod profile;
 pub(crate) mod recovery;
+pub mod routing;
 pub mod subscription;
 
 use profile::Config;
@@ -166,6 +167,14 @@ fn ensure_hwid(config: &mut Config, path: &Path) -> Result<()> {
 
     tracing::info!("Generated installation HWID");
     save_config_at(path, config).context("Failed to persist generated HWID")
+}
+
+pub fn load_routing(
+    legacy_service_routes: Option<&serde_json::Value>,
+    create_missing: bool,
+) -> Result<routing::RoutingConfig> {
+    let path = crate::paths::routing_path().context("Failed to determine routing config path")?;
+    routing::load_routing_at(&path, legacy_service_routes, create_missing)
 }
 
 #[cfg(test)]

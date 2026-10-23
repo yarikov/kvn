@@ -351,6 +351,7 @@ fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
     model.config.profiles = snapshot.profiles;
     model.config.subscriptions = snapshot.subscriptions;
     model.config.settings = snapshot.settings;
+    model.routing = snapshot.routing;
     model.traffic = snapshot.traffic;
     model.profile_latencies = snapshot
         .profile_latencies

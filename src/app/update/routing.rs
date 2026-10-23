@@ -201,8 +201,10 @@ pub(in crate::app::update) fn commit_geo_region(
     effects
 }
 
-fn download_missing_selectable_rule_sets(model: &mut Model) -> Option<Effect> {
-    let selectable = crate::route_plan::selectable_rule_sets(&model.config.settings);
+pub(in crate::app::update) fn download_missing_selectable_rule_sets(
+    model: &mut Model,
+) -> Option<Effect> {
+    let selectable = model.selectable_rule_sets();
     crate::app::update::geo::start_rule_set_download(
         model,
         selectable,

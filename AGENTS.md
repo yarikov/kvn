@@ -68,10 +68,10 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `ui` | `src/ui.rs`, `src/ui/layout.rs`, `src/ui/widgets.rs`, `src/ui/styles.rs`, `src/ui/palette.rs`, `src/ui/icons.rs`, `src/ui/nav.rs`, `src/ui/help.rs` | ratatui rendering (used by TUI client only), layout splits, widget definitions, palette-driven `Theme`, Nerd Font / Unicode icon sets selected by `settings.icons`, navigation helpers, and the Help overlay's rows per `HelpContext` |
 | `ui::layout` submodules | `src/ui/layout.rs` + `src/ui/layout/` | Layout facade and one submodule per pane or overlay; see [`src/ui/AGENTS.md`](src/ui/AGENTS.md) § Module Layout |
 | `palette` | `src/ui/palette.rs`, `themes/*.toml`, `build.rs` | 22 vendored Omarchy palettes; `build.rs` compiles `themes/*.toml` into a `BUNDLED` static at compile time (no runtime TOML parsing) |
-| `config` | `src/config.rs`, `src/config/profile.rs`, `src/config/subscription.rs`, `src/config/json_pointer.rs`, `src/config/merge.rs` + `src/config/merge/resolution.rs`, `src/config/recovery.rs` | JSON config I/O, profile and subscription struct definitions, subscription fetcher; `merge` is the UUID-aware three-way merge and `merge::resolution` builds the `YOUR EDIT` / `CURRENT` conflict document; `recovery` preserves and rotates copies in `recovery/` (three per kind); `json_pointer::JsonIndex` indexes every RFC 6901 pointer of a JSON text in one pass and answers its line (exact, or the nearest present ancestor) |
+| `config` | `src/config.rs`, `src/config/profile.rs`, `src/config/routing.rs`, `src/config/subscription.rs`, `src/config/json_pointer.rs`, `src/config/merge.rs` + `src/config/merge/resolution.rs`, `src/config/recovery.rs` | JSON config I/O, profile and subscription struct definitions, subscription fetcher; `routing` is `~/.config/kvn-tui/routing.json` (`RoutingConfig`: the declared rule-sets, created with the defaults, checked on load); `merge` is the UUID-aware three-way merge and `merge::resolution` builds the `YOUR EDIT` / `CURRENT` conflict document; `recovery` preserves and rotates copies in `recovery/` (three per kind); `json_pointer::JsonIndex` indexes every RFC 6901 pointer of a JSON text in one pass and answers its line (exact, or the nearest present ancestor) |
 | `config::profile` submodules | `src/config/profile/{diagnostic,json_schema,protocol,protocol_options,protocol_config,tls,entry,schedule,subscription,routing,settings,schema,migrate,dns}.rs`, `src/config/profile/share_link{.rs,/parse.rs,/encode.rs,/finalmask.rs}` | One persisted type per submodule, behind a `pub use` facade; see [`src/config/AGENTS.md`](src/config/AGENTS.md) § Module Layout |
 | `singbox` | `src/singbox.rs`, `src/singbox/config.rs`, `src/singbox/outbound.rs`, `src/singbox/runner.rs`, `src/singbox/clash_api.rs`, `src/singbox/process_handle.rs` | Process lifecycle: allocate a free Clash API port, write temp config, run `sing-box check`, spawn `sing-box run`, retry a lost port race, stop on disconnect (SIGTERM, then SIGKILL after `STOP_GRACE_PERIOD`); Clash API client for live traffic stats; `Child` wrapper carrying the process's Clash API port |
-| `geo` | `src/geo.rs` | The `RuleSet` catalog (tag, geoip/geosite kind, URL) and the rule-sets of each region; downloads and caches them for sing-box routing |
+| `geo` | `src/geo.rs` | The `RuleSet` entity (tag, geoip/geosite kind, URL), the default catalog `routing.json` starts from, and the tags of each region's rule-sets; downloads and caches them for sing-box routing, with the source URL of each file in `metadata.json` |
 | `route_plan` | `src/route_plan.rs` | Pure translation of the routing mode into a `RoutePlan` (ordered rule-set → outbound entries, private-network rule, `final`, fallback) and the list of rule-sets the current settings need |
 | `paths` | `src/paths.rs` | Every file path kvn uses: config (`~/.config/kvn-tui/`), state (`$XDG_STATE_HOME/kvn/`) and both runtime namespaces (`$XDG_RUNTIME_DIR/kvn-tui/`, `$XDG_RUNTIME_DIR/kvn/`) |
 | `atomic_write` | `src/atomic_write.rs` | Atomic file write helper (write `.tmp` + fsync + rename + parent-dir fsync) |
@@ -322,7 +322,9 @@ If you need to add a new side effect from `update`, add a new `Effect` variant, 
 
 The existing `kvn-tui` paths below are retained for compatibility. Use `kvn`
 instead of `kvn-tui` in the path of every new file or directory; do not add new
-filesystem resources under the legacy `kvn-tui` namespace.
+filesystem resources under the legacy `kvn-tui` namespace. The one exception is
+`routing.json`, which sits next to `profiles.json` and moves with the config
+directory.
 
 Keep documentation synchronized with code changes. When a filesystem path,
 persistent file, runtime file, command, configuration field, or user-visible
@@ -333,6 +335,7 @@ Any added, removed, or changed CLI command, option, or output updates
 | Resource | Path |
 |----------|------|
 | Profiles & settings | `~/.config/kvn-tui/profiles.json` |
+| Rule-sets (legacy namespace by exception, moves with the config directory) | `~/.config/kvn-tui/routing.json` |
 | Geo rule-sets | `~/.config/kvn-tui/geo/` |
 | sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |
 | App log | `~/.config/kvn-tui/logs/app.log` |

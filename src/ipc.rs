@@ -416,6 +416,7 @@ mod tests {
             profiles: vec![],
             subscriptions: vec![],
             settings: Settings::default(),
+            routing: Default::default(),
             traffic: TrafficStats::default(),
             log_session_offsets: None,
             profile_latencies: Default::default(),

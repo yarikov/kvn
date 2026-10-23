@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
@@ -26,92 +27,91 @@ fn rule_set_usable(path: &Path) -> bool {
         && is_rule_set(&header)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RuleSetKind {
-    Geoip,
-    Geosite,
-}
+pub(crate) use crate::config::routing::RuleSetKind;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RuleSet {
-    pub(crate) tag: &'static str,
+    pub(crate) tag: Cow<'static, str>,
     pub(crate) kind: RuleSetKind,
-    pub(crate) url: &'static str,
+    pub(crate) url: Cow<'static, str>,
 }
 
 impl RuleSet {
+    pub(crate) const fn builtin(tag: &'static str, kind: RuleSetKind, url: &'static str) -> Self {
+        Self {
+            tag: Cow::Borrowed(tag),
+            kind,
+            url: Cow::Borrowed(url),
+        }
+    }
+
     pub(crate) fn key(&self) -> String {
-        format!("{}.srs", self.tag)
+        rule_set_key(&self.tag)
     }
 }
 
-const GEOIP_RU: RuleSet = RuleSet {
-    tag: "geoip-ru",
-    kind: RuleSetKind::Geoip,
-    url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
-};
+fn rule_set_key(tag: &str) -> String {
+    format!("{tag}.srs")
+}
 
-const GEOSITE_CATEGORY_RU: RuleSet = RuleSet {
-    tag: "geosite-category-ru",
-    kind: RuleSetKind::Geosite,
-    url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs",
-};
+const GEOIP_RU: RuleSet = RuleSet::builtin(
+    "geoip-ru",
+    RuleSetKind::Geoip,
+    "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
+);
 
-const GEOIP_CN: RuleSet = RuleSet {
-    tag: "geoip-cn",
-    kind: RuleSetKind::Geoip,
-    url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
-};
+const GEOSITE_CATEGORY_RU: RuleSet = RuleSet::builtin(
+    "geosite-category-ru",
+    RuleSetKind::Geosite,
+    "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs",
+);
 
-const GEOSITE_CN: RuleSet = RuleSet {
-    tag: "geosite-cn",
-    kind: RuleSetKind::Geosite,
-    url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
-};
+const GEOIP_CN: RuleSet = RuleSet::builtin(
+    "geoip-cn",
+    RuleSetKind::Geoip,
+    "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+);
 
-const GEOIP_IR: RuleSet = RuleSet {
-    tag: "geoip-ir",
-    kind: RuleSetKind::Geoip,
-    url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ir.srs",
-};
+const GEOSITE_CN: RuleSet = RuleSet::builtin(
+    "geosite-cn",
+    RuleSetKind::Geosite,
+    "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+);
 
-const GEOSITE_CATEGORY_IR: RuleSet = RuleSet {
-    tag: "geosite-category-ir",
-    kind: RuleSetKind::Geosite,
-    url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ir.srs",
-};
+const GEOIP_IR: RuleSet = RuleSet::builtin(
+    "geoip-ir",
+    RuleSetKind::Geoip,
+    "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ir.srs",
+);
 
-pub(crate) const RULE_SETS: &[&RuleSet] = &[
-    &GEOIP_RU,
-    &GEOSITE_CATEGORY_RU,
-    &GEOIP_CN,
-    &GEOSITE_CN,
-    &GEOIP_IR,
-    &GEOSITE_CATEGORY_IR,
+const GEOSITE_CATEGORY_IR: RuleSet = RuleSet::builtin(
+    "geosite-category-ir",
+    RuleSetKind::Geosite,
+    "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ir.srs",
+);
+
+pub(crate) const RULE_SETS: &[RuleSet] = &[
+    GEOIP_RU,
+    GEOSITE_CATEGORY_RU,
+    GEOIP_CN,
+    GEOSITE_CN,
+    GEOIP_IR,
+    GEOSITE_CATEGORY_IR,
 ];
 
-pub(crate) fn region_rule_sets(region: GeoRegion) -> &'static [&'static RuleSet] {
+pub(crate) fn region_rule_set_tags(region: GeoRegion) -> &'static [&'static str] {
     match region {
         GeoRegion::Global => &[],
-        GeoRegion::Ru => &[&GEOSITE_CATEGORY_RU, &GEOIP_RU],
-        GeoRegion::Cn => &[&GEOSITE_CN, &GEOIP_CN],
-        GeoRegion::Ir => &[&GEOSITE_CATEGORY_IR, &GEOIP_IR],
+        GeoRegion::Ru => &["geosite-category-ru", "geoip-ru"],
+        GeoRegion::Cn => &["geosite-cn", "geoip-cn"],
+        GeoRegion::Ir => &["geosite-category-ir", "geoip-ir"],
     }
-}
-
-pub(crate) fn rule_set(tag: &str) -> Option<&'static RuleSet> {
-    RULE_SETS
-        .iter()
-        .copied()
-        .find(|rule_set| rule_set.tag == tag)
-}
-
-pub(crate) fn is_ip_rule_set_tag(tag: &str) -> bool {
-    rule_set(tag).is_some_and(|rule_set| rule_set.kind == RuleSetKind::Geoip)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct RuleSetRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     etag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -128,6 +128,33 @@ struct GeoMetadata {
     schedule_epoch: u64,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     rule_sets: HashMap<String, RuleSetRecord>,
+}
+
+impl RuleSetRecord {
+    fn describes(&self, rule_set: &RuleSet) -> bool {
+        self.url.as_deref().is_none_or(|url| url == rule_set.url)
+    }
+}
+
+impl GeoMetadata {
+    fn record(&self, rule_set: &RuleSet) -> RuleSetRecord {
+        self.rule_sets
+            .get(&rule_set.key())
+            .filter(|record| record.describes(rule_set))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn describes(&self, rule_set: &RuleSet) -> bool {
+        self.rule_sets
+            .get(&rule_set.key())
+            .is_none_or(|record| record.describes(rule_set))
+    }
+
+    fn source_record_mut(&mut self, rule_set: &RuleSet) -> Option<&mut RuleSetRecord> {
+        let record = self.rule_sets.entry(rule_set.key()).or_default();
+        record.describes(rule_set).then_some(record)
+    }
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -181,8 +208,8 @@ impl From<GeoMetadataRaw> for GeoMetadata {
             rule_sets.entry(file).or_default().etag.get_or_insert(etag);
         }
         for region in GeoRegion::ALL {
-            for rule_set in region_rule_sets(region) {
-                let record = rule_sets.entry(rule_set.key()).or_default();
+            for tag in region_rule_set_tags(region) {
+                let record = rule_sets.entry(rule_set_key(tag)).or_default();
                 if record.checked_at.is_none() {
                     record.checked_at = raw.checked_at.get(&region).copied();
                 }
@@ -275,55 +302,57 @@ impl GeoManager {
         self.geo_dir.join(rule_set.key())
     }
 
-    pub(crate) fn has_rule_set(&self, rule_set: &RuleSet) -> bool {
-        rule_set_usable(&self.rule_set_path(rule_set))
+    fn has_current_rule_set(&self, meta: &GeoMetadata, rule_set: &RuleSet) -> bool {
+        meta.describes(rule_set) && rule_set_usable(&self.rule_set_path(rule_set))
     }
 
     pub fn schedule_epoch(&self) -> u64 {
         self.load_metadata().unwrap_or_default().schedule_epoch
     }
 
-    pub fn states(&self, rule_sets: &[&RuleSet]) -> RuleSetStates {
+    pub fn states(&self, rule_sets: &[RuleSet]) -> RuleSetStates {
         let meta = self.load_metadata().unwrap_or_default();
         rule_sets
             .iter()
             .map(|rule_set| {
-                let key = rule_set.key();
-                let record = meta.rule_sets.get(&key).cloned().unwrap_or_default();
+                let record = meta.record(rule_set);
                 let state = RuleSetState {
-                    present: self.has_rule_set(rule_set),
+                    present: self.has_current_rule_set(&meta, rule_set),
                     checked_at: record.checked_at,
                     retry: record.retry,
                     next_update: record.next_update,
                 };
-                (key, state)
+                (rule_set.key(), state)
             })
             .collect()
     }
 
     pub fn update_rule_sets(
         &self,
-        rule_sets: &[&RuleSet],
+        rule_sets: &[RuleSet],
         only_missing: bool,
         schedule: Option<ScheduleWrite>,
     ) -> Vec<RuleSetReport> {
-        let saved = self.load_metadata().unwrap_or_default().rule_sets;
+        let saved = self.load_metadata().unwrap_or_default();
         rule_sets
             .iter()
             .map(|rule_set| {
                 let key = rule_set.key();
-                let already_present = only_missing && self.has_rule_set(rule_set);
+                if let Err(e) = self.adopt_source(rule_set) {
+                    tracing::warn!("Failed to record the source of {}: {e:#}", rule_set.tag);
+                }
+                let already_present = only_missing && self.has_current_rule_set(&saved, rule_set);
                 let (outcome, etag) = if already_present {
                     (RuleSetOutcome::UpToDate, None)
                 } else {
-                    let saved_etag = saved.get(&key).and_then(|record| record.etag.as_deref());
-                    self.refresh_rule_set(rule_set, saved_etag)
+                    let saved_etag = saved.record(rule_set).etag;
+                    self.refresh_rule_set(&saved, rule_set, saved_etag.as_deref())
                 };
                 let checked = (!already_present && !matches!(outcome, RuleSetOutcome::Failed(_)))
                     .then(Local::now);
                 let failed = matches!(outcome, RuleSetOutcome::Failed(_));
                 if let Err(e) = self.record_outcome(
-                    &key,
+                    rule_set,
                     RecordedOutcome {
                         etag,
                         checked,
@@ -345,12 +374,13 @@ impl GeoManager {
 
     fn refresh_rule_set(
         &self,
+        saved: &GeoMetadata,
         rule_set: &RuleSet,
         saved_etag: Option<&str>,
     ) -> (RuleSetOutcome, Option<String>) {
-        match self.rule_set_needs_download(rule_set, saved_etag) {
+        match self.rule_set_needs_download(saved, rule_set, saved_etag) {
             Ok(false) => (RuleSetOutcome::UpToDate, None),
-            Ok(true) => match self.download_file(rule_set.url, &self.rule_set_path(rule_set)) {
+            Ok(true) => match self.download_file(&rule_set.url, &self.rule_set_path(rule_set)) {
                 Ok(etag) => (RuleSetOutcome::Updated, etag),
                 Err(e) => (
                     RuleSetOutcome::Failed(format!(
@@ -364,9 +394,28 @@ impl GeoManager {
         }
     }
 
+    fn adopt_source(&self, rule_set: &RuleSet) -> Result<()> {
+        self.update_metadata(|meta| {
+            let record = meta.rule_sets.entry(rule_set.key()).or_default();
+            if record.url.as_deref() == Some(&*rule_set.url) {
+                return false;
+            }
+            if !record.describes(rule_set) {
+                *record = RuleSetRecord::default();
+                if let Err(e) = fs::remove_file(self.rule_set_path(rule_set))
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::warn!("Failed to remove the stale {}: {e:#}", rule_set.key());
+                }
+            }
+            record.url = Some(rule_set.url.to_string());
+            true
+        })
+    }
+
     fn record_outcome(
         &self,
-        key: &str,
+        rule_set: &RuleSet,
         outcome: RecordedOutcome,
         schedule: Option<ScheduleWrite>,
     ) -> Result<()> {
@@ -376,7 +425,9 @@ impl GeoManager {
             if outcome.etag.is_none() && outcome.checked.is_none() && schedule.is_none() {
                 return false;
             }
-            let record = meta.rule_sets.entry(key.to_string()).or_default();
+            let Some(record) = meta.source_record_mut(rule_set) else {
+                return false;
+            };
             if let Some(etag) = outcome.etag {
                 record.etag = Some(etag);
             }
@@ -398,16 +449,17 @@ impl GeoManager {
         })
     }
 
-    pub fn reset_update_schedules(&self, rule_sets: &[&RuleSet], enabled: bool) -> Result<u64> {
+    pub fn reset_update_schedules(&self, rule_sets: &[RuleSet], enabled: bool) -> Result<u64> {
         let next = crate::config::profile::next_update_window_date(Local::now());
         let mut schedule_epoch = 0;
         self.update_metadata(|meta| {
             meta.schedule_epoch = meta.schedule_epoch.wrapping_add(1);
             schedule_epoch = meta.schedule_epoch;
             for rule_set in rule_sets {
-                let record = meta.rule_sets.entry(rule_set.key()).or_default();
-                record.retry = None;
-                record.next_update = enabled.then_some(next);
+                if let Some(record) = meta.source_record_mut(rule_set) {
+                    record.retry = None;
+                    record.next_update = enabled.then_some(next);
+                }
             }
             true
         })?;
@@ -416,7 +468,7 @@ impl GeoManager {
 
     pub fn ensure_update_schedules(
         &self,
-        rule_sets: &[&RuleSet],
+        rule_sets: &[RuleSet],
         enabled: bool,
         schedule_epoch: u64,
     ) -> Result<()> {
@@ -427,8 +479,9 @@ impl GeoManager {
         self.update_schedule(schedule_epoch, |meta| {
             let mut changed = false;
             for rule_set in rule_sets {
-                let record = meta.rule_sets.entry(rule_set.key()).or_default();
-                if record.next_update.is_none() {
+                if let Some(record) = meta.source_record_mut(rule_set)
+                    && record.next_update.is_none()
+                {
                     record.next_update = Some(next);
                     changed = true;
                 }
@@ -473,13 +526,14 @@ impl GeoManager {
 
     fn rule_set_needs_download(
         &self,
+        saved: &GeoMetadata,
         rule_set: &RuleSet,
         saved_etag: Option<&str>,
     ) -> Result<bool> {
-        if !self.has_rule_set(rule_set) {
+        if !self.has_current_rule_set(saved, rule_set) {
             return Ok(true);
         }
-        self.check_single(rule_set.url, saved_etag)
+        self.check_single(&rule_set.url, saved_etag)
     }
 
     fn check_single(&self, url: &str, saved_etag: Option<&str>) -> Result<bool> {
@@ -574,11 +628,12 @@ mod tests {
 
     #[test]
     fn each_rule_region_uses_one_geosite_and_one_geoip_rule_set() {
-        assert!(region_rule_sets(GeoRegion::Global).is_empty());
+        assert!(region_rule_set_tags(GeoRegion::Global).is_empty());
+        let routing = crate::config::routing::RoutingConfig::default();
         for region in RULE_REGIONS {
-            let kinds: Vec<RuleSetKind> = region_rule_sets(region)
+            let kinds: Vec<RuleSetKind> = region_rule_set_tags(region)
                 .iter()
-                .map(|rule_set| rule_set.kind)
+                .map(|tag| routing.rule_set(tag).unwrap().kind)
                 .collect();
             assert_eq!(
                 kinds,
@@ -593,17 +648,6 @@ mod tests {
         for entry in RULE_SETS {
             assert!(entry.url.starts_with("https://"), "{}", entry.url);
             assert!(entry.url.ends_with(&entry.key()), "{}", entry.url);
-            assert_eq!(rule_set(entry.tag), Some(*entry));
-        }
-    }
-
-    #[test]
-    fn ip_rule_set_tags_are_the_geoip_rule_sets() {
-        for tag in ["geoip-ru", "geoip-cn", "geoip-ir"] {
-            assert!(is_ip_rule_set_tag(tag), "{tag}");
-        }
-        for tag in ["geosite-category-ru", "geosite-cn", "geoip-unknown"] {
-            assert!(!is_ip_rule_set_tag(tag), "{tag}");
         }
     }
 
@@ -672,15 +716,15 @@ mod tests {
         format!("http://{addr}")
     }
 
-    fn stub_rule_set(tag: &'static str, kind: RuleSetKind, url: String) -> &'static RuleSet {
-        Box::leak(Box::new(RuleSet {
-            tag,
+    fn stub_rule_set(tag: &'static str, kind: RuleSetKind, url: String) -> RuleSet {
+        RuleSet {
+            tag: Cow::Borrowed(tag),
             kind,
-            url: Box::leak(url.into_boxed_str()),
-        }))
+            url: Cow::Owned(url),
+        }
     }
 
-    fn stub_rule_sets(base: &str) -> Vec<&'static RuleSet> {
+    fn stub_rule_sets(base: &str) -> Vec<RuleSet> {
         vec![
             stub_rule_set("geoip-stub", RuleSetKind::Geoip, format!("{base}/geoip")),
             stub_rule_set(
@@ -691,7 +735,7 @@ mod tests {
         ]
     }
 
-    fn unreachable_rule_set(tag: &'static str) -> &'static RuleSet {
+    fn unreachable_rule_set(tag: &'static str) -> RuleSet {
         stub_rule_set(
             tag,
             RuleSetKind::Geoip,
@@ -704,7 +748,9 @@ mod tests {
     }
 
     fn state(gm: &GeoManager, rule_set: &RuleSet) -> RuleSetState {
-        gm.states(&[rule_set]).remove(&rule_set.key()).unwrap()
+        gm.states(std::slice::from_ref(rule_set))
+            .remove(&rule_set.key())
+            .unwrap()
     }
 
     fn record(gm: &GeoManager, rule_set: &RuleSet) -> RuleSetRecord {
@@ -713,6 +759,13 @@ mod tests {
             .rule_sets
             .remove(&rule_set.key())
             .unwrap_or_default()
+    }
+
+    fn sourced(rule_set: &RuleSet) -> RuleSetRecord {
+        RuleSetRecord {
+            url: Some(rule_set.url.to_string()),
+            ..RuleSetRecord::default()
+        }
     }
 
     fn schedule(epoch: u64) -> Option<ScheduleWrite> {
@@ -742,10 +795,10 @@ mod tests {
         };
         assert!(message.contains("geosite-stub.srs"), "{message}");
         assert_eq!(reports[1].tag, "geosite-stub");
-        assert!(gm.has_rule_set(rule_sets[0]));
-        assert!(!gm.has_rule_set(rule_sets[1]));
-        assert_eq!(record(&gm, rule_sets[0]).etag.as_deref(), Some("etag-ok"));
-        assert_eq!(record(&gm, rule_sets[1]), RuleSetRecord::default());
+        assert!(state(&gm, &rule_sets[0]).present);
+        assert!(!state(&gm, &rule_sets[1]).present);
+        assert_eq!(record(&gm, &rule_sets[0]).etag.as_deref(), Some("etag-ok"));
+        assert_eq!(record(&gm, &rule_sets[1]), sourced(&rule_sets[1]));
     }
 
     #[test]
@@ -762,7 +815,7 @@ mod tests {
             [&RuleSetOutcome::Updated, &RuleSetOutcome::Updated]
         );
         assert_eq!(
-            fs::read(gm.rule_set_path(rule_sets[0])).unwrap(),
+            fs::read(gm.rule_set_path(&rule_sets[0])).unwrap(),
             b"SRS\x01DATA"
         );
 
@@ -771,7 +824,7 @@ mod tests {
             outcomes(&second),
             [&RuleSetOutcome::UpToDate, &RuleSetOutcome::UpToDate]
         );
-        assert!(state(&gm, rule_sets[1]).checked_at.is_some());
+        assert!(state(&gm, &rule_sets[1]).checked_at.is_some());
     }
 
     #[test]
@@ -786,16 +839,16 @@ mod tests {
             RuleSetKind::Geosite,
             format!("{base}/geosite"),
         );
-        fs::write(gm.rule_set_path(dead), b"SRS\x01OLD").unwrap();
+        fs::write(gm.rule_set_path(&dead), b"SRS\x01OLD").unwrap();
 
-        let reports = gm.update_rule_sets(&[dead, sibling], false, None);
+        let reports = gm.update_rule_sets(&[dead.clone(), sibling.clone()], false, None);
 
         let RuleSetOutcome::Failed(message) = &reports[0].outcome else {
             panic!("{:?}", reports[0]);
         };
         assert!(message.contains("HEAD request failed"), "{message}");
         assert_eq!(reports[1].outcome, RuleSetOutcome::Updated);
-        assert_eq!(record(&gm, sibling).etag.as_deref(), Some("e1"));
+        assert_eq!(record(&gm, &sibling).etag.as_deref(), Some("e1"));
     }
 
     #[test]
@@ -870,7 +923,7 @@ mod tests {
             )
         });
         let rule_sets = stub_rule_sets(&base);
-        let geoip = gm.rule_set_path(rule_sets[0]);
+        let geoip = gm.rule_set_path(&rule_sets[0]);
         fs::write(&geoip, crate::test_helpers::RULE_SET_BYTES).unwrap();
 
         let reports = gm.update_rule_sets(&rule_sets[..1], false, None);
@@ -883,7 +936,7 @@ mod tests {
             fs::read(&geoip).unwrap(),
             crate::test_helpers::RULE_SET_BYTES
         );
-        assert!(gm.load_metadata().unwrap().rule_sets.is_empty());
+        assert_eq!(record(&gm, &rule_sets[0]), sourced(&rule_sets[0]));
     }
 
     #[test]
@@ -899,22 +952,23 @@ mod tests {
             format!("{base}/geosite"),
         );
         fs::write(
-            gm.rule_set_path(present),
+            gm.rule_set_path(&present),
             crate::test_helpers::RULE_SET_BYTES,
         )
         .unwrap();
         let epoch = gm.schedule_epoch();
 
-        let reports = gm.update_rule_sets(&[present, missing], true, schedule(epoch));
+        let reports =
+            gm.update_rule_sets(&[present.clone(), missing.clone()], true, schedule(epoch));
 
         assert_eq!(
             outcomes(&reports),
             [&RuleSetOutcome::UpToDate, &RuleSetOutcome::Updated]
         );
-        let present_state = state(&gm, present);
+        let present_state = state(&gm, &present);
         assert!(present_state.checked_at.is_none());
         assert!(present_state.next_update.is_none());
-        let missing_state = state(&gm, missing);
+        let missing_state = state(&gm, &missing);
         assert!(missing_state.present);
         assert!(missing_state.checked_at.is_some());
         assert_eq!(
@@ -929,12 +983,12 @@ mod tests {
         let first = unreachable_rule_set("geoip-first");
         let second = unreachable_rule_set("geoip-second");
 
-        gm.update_rule_sets(&[first, second], false, schedule(0));
-        gm.update_rule_sets(&[first], false, schedule(0));
+        gm.update_rule_sets(&[first.clone(), second.clone()], false, schedule(0));
+        gm.update_rule_sets(std::slice::from_ref(&first), false, schedule(0));
 
-        assert_eq!(state(&gm, first).retry.unwrap().consecutive_failures, 2);
-        assert_eq!(state(&gm, second).retry.unwrap().consecutive_failures, 1);
-        assert!(state(&gm, first).checked_at.is_none());
+        assert_eq!(state(&gm, &first).retry.unwrap().consecutive_failures, 2);
+        assert_eq!(state(&gm, &second).retry.unwrap().consecutive_failures, 1);
+        assert!(state(&gm, &first).checked_at.is_none());
     }
 
     #[test]
@@ -942,9 +996,9 @@ mod tests {
         let (_guard, _dir, gm) = temp_manager();
         let dead = unreachable_rule_set("geoip-dead");
 
-        gm.update_rule_sets(&[dead], false, None);
+        gm.update_rule_sets(std::slice::from_ref(&dead), false, None);
 
-        assert_eq!(record(&gm, dead), RuleSetRecord::default());
+        assert_eq!(record(&gm, &dead), sourced(&dead));
     }
 
     #[test]
@@ -952,34 +1006,38 @@ mod tests {
         let (_guard, _dir, gm) = temp_manager();
         let dead = unreachable_rule_set("geoip-dead");
         let stale = gm.schedule_epoch();
-        let current = gm.reset_update_schedules(&[dead], true).unwrap();
-        let reset_next = state(&gm, dead).next_update;
+        let current = gm
+            .reset_update_schedules(std::slice::from_ref(&dead), true)
+            .unwrap();
+        let reset_next = state(&gm, &dead).next_update;
         assert!(reset_next.is_some());
 
-        gm.update_rule_sets(&[dead], false, schedule(stale));
-        assert!(state(&gm, dead).retry.is_none());
-        assert_eq!(state(&gm, dead).next_update, reset_next);
+        gm.update_rule_sets(std::slice::from_ref(&dead), false, schedule(stale));
+        assert!(state(&gm, &dead).retry.is_none());
+        assert_eq!(state(&gm, &dead).next_update, reset_next);
 
-        gm.update_rule_sets(&[dead], false, schedule(current));
-        assert!(state(&gm, dead).retry.is_some());
+        gm.update_rule_sets(std::slice::from_ref(&dead), false, schedule(current));
+        assert!(state(&gm, &dead).retry.is_some());
     }
 
     #[test]
     fn schedule_reset_clears_retries_and_follows_the_update_setting() {
         let (_guard, _dir, gm) = temp_manager();
         let dead = unreachable_rule_set("geoip-dead");
-        gm.update_rule_sets(&[dead], false, schedule(0));
+        gm.update_rule_sets(std::slice::from_ref(&dead), false, schedule(0));
 
-        gm.reset_update_schedules(&[dead], true).unwrap();
-        let reset = state(&gm, dead);
+        gm.reset_update_schedules(std::slice::from_ref(&dead), true)
+            .unwrap();
+        let reset = state(&gm, &dead);
         assert!(reset.retry.is_none());
         assert_eq!(
             reset.next_update,
             Some(crate::config::profile::next_update_window_date(Local::now()))
         );
 
-        gm.reset_update_schedules(&[dead], false).unwrap();
-        assert!(state(&gm, dead).next_update.is_none());
+        gm.reset_update_schedules(std::slice::from_ref(&dead), false)
+            .unwrap();
+        assert!(state(&gm, &dead).next_update.is_none());
     }
 
     #[test]
@@ -988,7 +1046,9 @@ mod tests {
         let seeded = unreachable_rule_set("geoip-seeded");
         let fresh = unreachable_rule_set("geoip-fresh");
         let stale = gm.schedule_epoch();
-        let current = gm.reset_update_schedules(&[seeded], false).unwrap();
+        let current = gm
+            .reset_update_schedules(std::slice::from_ref(&seeded), false)
+            .unwrap();
         gm.update_metadata(|meta| {
             meta.rule_sets.entry(seeded.key()).or_default().next_update =
                 NaiveDate::from_ymd_opt(2030, 1, 1);
@@ -996,30 +1056,147 @@ mod tests {
         })
         .unwrap();
 
-        gm.ensure_update_schedules(&[seeded, fresh], true, stale)
+        gm.ensure_update_schedules(&[seeded.clone(), fresh.clone()], true, stale)
             .unwrap();
-        assert!(state(&gm, fresh).next_update.is_none());
+        assert!(state(&gm, &fresh).next_update.is_none());
 
-        gm.ensure_update_schedules(&[seeded, fresh], true, current)
+        gm.ensure_update_schedules(&[seeded.clone(), fresh.clone()], true, current)
             .unwrap();
         assert_eq!(
-            state(&gm, seeded).next_update,
+            state(&gm, &seeded).next_update,
             NaiveDate::from_ymd_opt(2030, 1, 1)
         );
-        assert!(state(&gm, fresh).next_update.is_some());
+        assert!(state(&gm, &fresh).next_update.is_some());
+    }
+
+    #[test]
+    fn a_changed_url_turns_the_file_and_its_record_stale() {
+        let (_guard, _dir, gm) = temp_manager();
+        let old = stub_rule_set(
+            "geoip-moved",
+            RuleSetKind::Geoip,
+            "https://old.example/geoip.srs".to_string(),
+        );
+        let moved = unreachable_rule_set("geoip-moved");
+        fs::write(gm.rule_set_path(&old), crate::test_helpers::RULE_SET_BYTES).unwrap();
+        gm.update_metadata(|meta| {
+            let record = meta.rule_sets.entry(old.key()).or_default();
+            record.url = Some(old.url.to_string());
+            record.etag = Some("old".into());
+            record.checked_at = Some(Local::now());
+            true
+        })
+        .unwrap();
+        assert!(state(&gm, &old).present);
+
+        assert_eq!(state(&gm, &moved), RuleSetState::default());
+        assert!(!state(&gm, &moved).present);
+
+        gm.update_rule_sets(std::slice::from_ref(&moved), true, None);
+
+        assert!(!gm.rule_set_path(&moved).exists());
+        assert_eq!(record(&gm, &moved), sourced(&moved));
+    }
+
+    #[test]
+    fn a_changed_url_downloads_even_when_only_missing_files_are_wanted() {
+        let (_guard, _dir, gm) = temp_manager();
+        let base = spawn_stub_http(1, |_, _| {
+            (200, Some("new".to_string()), b"SRS\x01NEW".to_vec())
+        });
+        let moved = stub_rule_set("geoip-moved", RuleSetKind::Geoip, format!("{base}/geoip"));
+        fs::write(
+            gm.rule_set_path(&moved),
+            crate::test_helpers::RULE_SET_BYTES,
+        )
+        .unwrap();
+        gm.update_metadata(|meta| {
+            meta.rule_sets.entry(moved.key()).or_default().url =
+                Some("https://old.example/geoip.srs".into());
+            true
+        })
+        .unwrap();
+
+        let reports = gm.update_rule_sets(std::slice::from_ref(&moved), true, None);
+
+        assert_eq!(outcomes(&reports), [&RuleSetOutcome::Updated]);
+        assert_eq!(fs::read(gm.rule_set_path(&moved)).unwrap(), b"SRS\x01NEW");
+        assert_eq!(record(&gm, &moved).url.as_deref(), Some(&*moved.url));
+        assert_eq!(record(&gm, &moved).etag.as_deref(), Some("new"));
+        assert!(state(&gm, &moved).present);
+    }
+
+    #[test]
+    fn a_record_without_a_url_belongs_to_the_current_source() {
+        let (_guard, _dir, gm) = temp_manager();
+        let current = unreachable_rule_set("geoip-current");
+        let checked_at = Local::now();
+        fs::write(
+            gm.rule_set_path(&current),
+            crate::test_helpers::RULE_SET_BYTES,
+        )
+        .unwrap();
+        gm.update_metadata(|meta| {
+            meta.rule_sets.entry(current.key()).or_default().checked_at = Some(checked_at);
+            true
+        })
+        .unwrap();
+
+        let shown = state(&gm, &current);
+        assert!(shown.present);
+        assert_eq!(shown.checked_at, Some(checked_at));
+
+        gm.ensure_update_schedules(std::slice::from_ref(&current), true, gm.schedule_epoch())
+            .unwrap();
+        assert!(state(&gm, &current).next_update.is_some());
+        assert!(gm.rule_set_path(&current).exists());
+    }
+
+    #[test]
+    fn schedule_writes_leave_a_file_of_another_source_alone() {
+        let (_guard, _dir, gm) = temp_manager();
+        let mirrored = stub_rule_set(
+            "geoip-mirrored",
+            RuleSetKind::Geoip,
+            "https://mirror.example/geoip.srs".to_string(),
+        );
+        let builtin = unreachable_rule_set("geoip-mirrored");
+        fs::write(
+            gm.rule_set_path(&mirrored),
+            crate::test_helpers::RULE_SET_BYTES,
+        )
+        .unwrap();
+        gm.update_metadata(|meta| {
+            meta.rule_sets.entry(mirrored.key()).or_default().url = Some(mirrored.url.to_string());
+            true
+        })
+        .unwrap();
+
+        let epoch = gm
+            .reset_update_schedules(std::slice::from_ref(&builtin), true)
+            .unwrap();
+        gm.ensure_update_schedules(std::slice::from_ref(&builtin), true, epoch)
+            .unwrap();
+
+        assert!(gm.rule_set_path(&mirrored).exists());
+        assert_eq!(record(&gm, &mirrored), sourced(&mirrored));
     }
 
     #[test]
     fn states_report_presence_only_for_a_file_with_the_rule_set_header() {
         let (_guard, _dir, gm) = temp_manager();
-        let [geosite, geoip] = region_rule_sets(GeoRegion::Ru) else {
-            unreachable!()
-        };
-        fs::write(gm.rule_set_path(geoip), crate::test_helpers::RULE_SET_BYTES).unwrap();
-        fs::write(gm.rule_set_path(geosite), b"SRS").unwrap();
+        let routing = crate::config::routing::RoutingConfig::default();
+        let geosite = routing.rule_set("geosite-category-ru").unwrap();
+        let geoip = routing.rule_set("geoip-ru").unwrap();
+        fs::write(
+            gm.rule_set_path(&geoip),
+            crate::test_helpers::RULE_SET_BYTES,
+        )
+        .unwrap();
+        fs::write(gm.rule_set_path(&geosite), b"SRS").unwrap();
 
-        assert!(state(&gm, geoip).present);
-        assert!(!state(&gm, geosite).present);
+        assert!(state(&gm, &geoip).present);
+        assert!(!state(&gm, &geosite).present);
     }
 
     #[test]
@@ -1032,6 +1209,7 @@ mod tests {
         meta.rule_sets.insert(
             "geoip-ru.srs".into(),
             RuleSetRecord {
+                url: Some("https://example.com/geoip-ru.srs".into()),
                 etag: Some("e".into()),
                 checked_at: Some(Local::now()),
                 retry: None,

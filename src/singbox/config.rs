@@ -1,6 +1,6 @@
 use anyhow::Context;
 use serde_json::{Map, Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
@@ -8,6 +8,7 @@ use crate::config::profile::{
     ActiveDns, DnsRule, DnsServer, FINALMASK_PARAM, FakeIpServer, NaiveConfig, Profile,
     ProtocolConfig, RoutingFallback, Settings, SocksConfig, SocksVersion, read_stream_finalmask,
 };
+use crate::config::routing::RoutingConfig;
 use crate::geo::{RuleSet, RuleSetKind};
 use crate::route_plan::{Outbound, RoutePlan};
 use crate::singbox::outbound::{
@@ -21,12 +22,12 @@ const DNS_STRATEGY: &str = "ipv4_only";
 
 #[derive(Debug, Clone, Default)]
 pub struct GeoAvailability {
-    pub rule_sets: HashMap<&'static str, PathBuf>,
+    pub rule_sets: HashMap<String, PathBuf>,
 }
 
 impl GeoAvailability {
     pub fn path(&self, rule_set: &RuleSet) -> Option<&PathBuf> {
-        self.rule_sets.get(rule_set.tag)
+        self.rule_sets.get(&*rule_set.tag)
     }
 
     pub fn lacks_rule_sets_of(&self, plan: &RoutePlan) -> bool {
@@ -42,7 +43,12 @@ impl GeoAvailability {
     pub fn all() -> Self {
         let rule_sets = crate::geo::RULE_SETS
             .iter()
-            .map(|rule_set| (rule_set.tag, PathBuf::from("/geo").join(rule_set.key())))
+            .map(|rule_set| {
+                (
+                    rule_set.tag.to_string(),
+                    PathBuf::from("/geo").join(rule_set.key()),
+                )
+            })
             .collect();
         Self { rule_sets }
     }
@@ -63,9 +69,15 @@ pub fn generate_test_config(profile: &Profile, socks_port: u16) -> anyhow::Resul
     }))
 }
 
+#[derive(Clone, Copy)]
+pub struct RoutingInput<'a> {
+    pub settings: &'a Settings,
+    pub routing: &'a RoutingConfig,
+}
+
 pub fn generate_config(
     profile: &Profile,
-    settings: &Settings,
+    input: RoutingInput,
     geo: &GeoAvailability,
     clash_api_port: u16,
     fallback: Option<RoutingFallback>,
@@ -73,32 +85,36 @@ pub fn generate_config(
     match fallback {
         Some(RoutingFallback::Global) => build_config(
             profile,
-            &settings.with_global_routing(),
+            RoutingInput {
+                settings: &input.settings.with_global_routing(),
+                ..input
+            },
             geo,
             clash_api_port,
         ),
-        Some(RoutingFallback::Direct) => build_config(profile, settings, geo, clash_api_port),
+        Some(RoutingFallback::Direct) => build_config(profile, input, geo, clash_api_port),
         None => {
-            let routing_mode = settings.geo_routing.mode();
-            if geo.lacks_rule_sets_of(&RoutePlan::for_mode(routing_mode)) {
+            let routing_mode = input.settings.geo_routing.mode();
+            if geo.lacks_rule_sets_of(&RoutePlan::for_mode(routing_mode, input.routing)) {
                 anyhow::bail!(
                     "{routing_mode} routing needs its region rule-sets, which are not downloaded"
                 );
             }
-            build_config(profile, settings, geo, clash_api_port)
+            build_config(profile, input, geo, clash_api_port)
         }
     }
 }
 
 fn build_config(
     profile: &Profile,
-    settings: &Settings,
+    input: RoutingInput,
     geo: &GeoAvailability,
     clash_api_port: u16,
 ) -> anyhow::Result<Value> {
+    let RoutingInput { settings, routing } = input;
     let mut proxy_outbounds = build_outbound(profile)?;
     proxy_outbounds.push(json!({ "type": "direct", "tag": "direct" }));
-    let plan = RoutePlan::for_settings(settings);
+    let plan = RoutePlan::for_settings(settings, routing);
     let active_dns = settings.dns.active().with_context(|| {
         format!(
             "dns.current_preset {:?} does not name a DNS preset",
@@ -118,15 +134,16 @@ fn build_config(
         }),
     };
     let (route, rule_sets) = build_route(&plan, resolvers, geo);
-    let available_rule_sets: HashSet<&str> = rule_sets
-        .iter()
-        .filter_map(|rule_set| rule_set["tag"].as_str())
+    let routed_rule_sets: RoutedRuleSets = plan
+        .rule_sets()
+        .filter(|rule_set| geo.path(rule_set).is_some())
+        .map(|rule_set| (&*rule_set.tag, rule_set.kind))
         .collect();
     let dns = build_dns(
         &upstreams,
         bootstrap,
-        &available_rule_sets,
-        &domain_rule_set_outbounds(&route),
+        &routed_rule_sets,
+        &domain_rule_set_outbounds(&route, &routed_rule_sets),
         &ech_dns_lookup_names(&proxy_outbounds),
     );
 
@@ -175,10 +192,12 @@ fn build_config(
     Ok(config)
 }
 
+type RoutedRuleSets<'a> = HashMap<&'a str, RuleSetKind>;
+
 fn build_dns(
     upstreams: &DnsUpstreams,
     bootstrap: BootstrapResolver,
-    available_rule_sets: &HashSet<&str>,
+    routed_rule_sets: &RoutedRuleSets,
     domain_routes: &[(&str, &str)],
     ech_lookup_names: &[String],
 ) -> Value {
@@ -195,7 +214,7 @@ fn build_dns(
         })
         .collect();
     servers.extend(active.fakeip.as_ref().map(fakeip_server_value));
-    let active_rules = active_dns_rules(active, available_rule_sets);
+    let active_rules = active_dns_rules(active, routed_rule_sets);
     let ech_rule = ech_lookup_rule(ech_lookup_names, &bootstrap.tag);
     let direct_destination_rules =
         direct_destination_rules(domain_routes, &active.final_server, &bootstrap);
@@ -204,11 +223,9 @@ fn build_dns(
     block.insert("servers".to_string(), Value::Array(servers));
 
     let mut rules: Vec<Value> = ech_rule.into_iter().collect();
-    rules.extend(
-        active_rules
-            .iter()
-            .flat_map(|(idx, rule)| dns_rule_values(*idx, rule, &active.final_server)),
-    );
+    rules.extend(active_rules.iter().flat_map(|(idx, rule)| {
+        dns_rule_values(*idx, rule, &active.final_server, routed_rule_sets)
+    }));
     rules.extend(fakeip_catch_all_rule(active, &active_rules));
     rules.extend(direct_destination_rules);
     if !rules.is_empty() {
@@ -241,13 +258,16 @@ fn ech_lookup_rule(names: &[String], bootstrap_tag: &str) -> Option<Value> {
     })
 }
 
-fn domain_rule_set_outbounds(route: &Value) -> Vec<(&str, &str)> {
+fn domain_rule_set_outbounds<'a>(
+    route: &'a Value,
+    routed_rule_sets: &RoutedRuleSets,
+) -> Vec<(&'a str, &'a str)> {
     route["rules"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|rule| Some((rule["rule_set"][0].as_str()?, rule["outbound"].as_str()?)))
-        .filter(|(tag, _)| !crate::geo::is_ip_rule_set_tag(tag))
+        .filter(|(tag, _)| routed_rule_sets.get(tag) == Some(&RuleSetKind::Geosite))
         .collect()
 }
 
@@ -278,7 +298,7 @@ fn direct_destination_rules(
 
 fn active_dns_rules<'a>(
     active: &'a ActiveDns,
-    available_rule_sets: &HashSet<&str>,
+    routed_rule_sets: &RoutedRuleSets,
 ) -> Vec<(usize, &'a DnsRule)> {
     active
         .rules
@@ -287,7 +307,7 @@ fn active_dns_rules<'a>(
         .filter(|(_, rule)| {
             rule.rule_set
                 .iter()
-                .all(|tag| available_rule_sets.contains(tag.as_str()))
+                .all(|tag| routed_rule_sets.contains_key(tag.as_str()))
         })
         .collect()
 }
@@ -413,9 +433,13 @@ pub fn ech_dns_warning(profile: &Profile, settings: &Settings) -> Option<String>
     })
 }
 
-pub fn dns_bypass_warning(profile: &Profile, settings: &Settings) -> Option<String> {
+pub fn dns_bypass_warning(
+    profile: &Profile,
+    settings: &Settings,
+    routing: &RoutingConfig,
+) -> Option<String> {
     let active = settings.dns.active()?;
-    let upstreams = DnsUpstreams::new(active, &RoutePlan::for_settings(settings), profile);
+    let upstreams = DnsUpstreams::new(active, &RoutePlan::for_settings(settings, routing), profile);
     let servers: Vec<String> = upstreams
         .udp_servers_kept_out_of_tunnel()
         .map(|server| format!("{:?} ({})", server.tag(), server.kind_label()))
@@ -525,11 +549,16 @@ fn server_with_port(
     Value::Object(obj)
 }
 
-fn dns_rule_values(idx: usize, rule: &DnsRule, pre_resolver: &str) -> Vec<Value> {
+fn dns_rule_values(
+    idx: usize,
+    rule: &DnsRule,
+    pre_resolver: &str,
+    routed_rule_sets: &RoutedRuleSets,
+) -> Vec<Value> {
     let (ip_rule_sets, domain_rule_sets): (Vec<&String>, Vec<&String>) = rule
         .rule_set
         .iter()
-        .partition(|tag| crate::geo::is_ip_rule_set_tag(tag));
+        .partition(|tag| routed_rule_sets.get(tag.as_str()) == Some(&RuleSetKind::Geoip));
     if ip_rule_sets.is_empty() {
         let condition = any_domain_condition(rule, &domain_rule_sets, &[]);
         return vec![with_server(
@@ -665,8 +694,8 @@ fn build_route(
 
     let mut planned = RuleSetRules::default();
     for entry in &plan.entries {
-        if let Some(path) = geo.path(entry.rule_set) {
-            planned.push(entry.rule_set, path, entry.outbound);
+        if let Some(path) = geo.path(&entry.rule_set) {
+            planned.push(&entry.rule_set, path, entry.outbound);
         }
     }
     let private_rule = plan.private_direct.then(|| {
@@ -869,7 +898,10 @@ mod tests {
         let settings = Settings::default();
         let config = generate_config(
             &profile,
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -890,7 +922,10 @@ mod tests {
         let settings = Settings::default();
         let config = generate_config(
             &profile,
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -906,7 +941,10 @@ mod tests {
         settings.logs.level = "debug".to_string();
         let config = generate_config(
             &profile,
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -922,7 +960,10 @@ mod tests {
         settings.logs.level = "verbose".to_string();
         let config = generate_config(
             &profile,
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -937,7 +978,10 @@ mod tests {
         let settings = Settings::default();
         let config = generate_config(
             &profile,
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -955,8 +999,17 @@ mod tests {
         let profile = test_profile();
         let settings = Settings::default();
         for port in [31234u16, 45678u16] {
-            let config =
-                generate_config(&profile, &settings, &GeoAvailability::all(), port, None).unwrap();
+            let config = generate_config(
+                &profile,
+                RoutingInput {
+                    settings: &settings,
+                    routing: &RoutingConfig::default(),
+                },
+                &GeoAvailability::all(),
+                port,
+                None,
+            )
+            .unwrap();
             assert_eq!(
                 config["experimental"]["clash_api"]["external_controller"],
                 format!("127.0.0.1:{port}")
@@ -970,7 +1023,10 @@ mod tests {
         let settings = Settings::default();
         let config = generate_config(
             &profile,
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -1917,7 +1973,10 @@ mod tests {
         let settings = Settings::default();
         let config = generate_config(
             &profile,
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -2013,11 +2072,18 @@ mod tests {
         }
     }
 
-    fn build(upstreams: &DnsUpstreams, available_rule_sets: &HashSet<&str>) -> Value {
+    fn routed(tags: &[&'static str]) -> RoutedRuleSets<'static> {
+        let routing = RoutingConfig::default();
+        tags.iter()
+            .map(|tag| (*tag, routing.rule_set(tag).unwrap().kind))
+            .collect()
+    }
+
+    fn build(upstreams: &DnsUpstreams, routed_tags: &[&'static str]) -> Value {
         build_dns(
             upstreams,
             upstreams.bootstrap(),
-            available_rule_sets,
+            &routed(routed_tags),
             &[],
             &[],
         )
@@ -2046,7 +2112,7 @@ mod tests {
     #[test]
     fn route_has_default_mark_for_killswitch() {
         let (route, _) = build_route(
-            &RoutePlan::for_mode(RoutingMode::Global),
+            &RoutePlan::for_mode(RoutingMode::Global, &RoutingConfig::default()),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2060,7 +2126,7 @@ mod tests {
     #[test]
     fn build_route_global_has_basic_rules() {
         let (route, rule_sets) = build_route(
-            &RoutePlan::for_mode(RoutingMode::Global),
+            &RoutePlan::for_mode(RoutingMode::Global, &RoutingConfig::default()),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2077,7 +2143,7 @@ mod tests {
     #[test]
     fn build_route_only_ru_has_private_rule_and_final_direct() {
         let (route, _rule_sets) = build_route(
-            &RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Ru)),
+            &RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Ru), &RoutingConfig::default()),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2089,7 +2155,10 @@ mod tests {
     #[test]
     fn build_route_bypass_cn_has_private_rule() {
         let (route, _rule_sets) = build_route(
-            &RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Cn)),
+            &RoutePlan::for_mode(
+                RoutingMode::Bypass(GeoRegion::Cn),
+                &RoutingConfig::default(),
+            ),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2101,7 +2170,7 @@ mod tests {
     #[test]
     fn build_route_only_cn_has_private_rule_and_final_direct() {
         let (route, _rule_sets) = build_route(
-            &RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Cn)),
+            &RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Cn), &RoutingConfig::default()),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2112,7 +2181,7 @@ mod tests {
 
     #[test]
     fn default_dns_block_matches_legacy_layout() {
-        let dns = build(&direct(default_active()), &HashSet::new());
+        let dns = build(&direct(default_active()), &[]);
         let servers = dns["servers"].as_array().unwrap();
         assert_eq!(servers.len(), 2);
         assert_eq!(servers[0]["tag"], "local");
@@ -2141,7 +2210,7 @@ mod tests {
             ],
             "google-dot",
         );
-        let block = build(&direct(dns), &HashSet::new());
+        let block = build(&direct(dns), &[]);
         let s = &block["servers"].as_array().unwrap()[1];
         assert_eq!(s["type"], "tls");
         assert_eq!(s["server"], "8.8.8.8");
@@ -2157,7 +2226,7 @@ mod tests {
             ..Default::default()
         };
         let dns = with_fakeip(active(vec![local()], "local"), vec![lan_rule]);
-        let block = build(&direct(dns), &HashSet::new());
+        let block = build(&direct(dns), &[]);
         assert!(block.get("fakeip").is_none());
         let fake_server = block["servers"]
             .as_array()
@@ -2190,7 +2259,7 @@ mod tests {
             ..Default::default()
         };
         let dns = with_fakeip(active(vec![local()], "local"), vec![user_rule]);
-        let block = build(&direct(dns), &HashSet::new());
+        let block = build(&direct(dns), &[]);
         let rules = block["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["domain_suffix"][0], "example.com");
@@ -2206,7 +2275,7 @@ mod tests {
         };
         let mut dns = with_fakeip(active(vec![local()], "local"), vec![user_rule]);
         dns.fakeip_catch_all = false;
-        let block = build(&direct(dns), &HashSet::new());
+        let block = build(&direct(dns), &[]);
         let servers = block["servers"].as_array().unwrap();
         assert!(servers.iter().any(|server| server["type"] == "fakeip"));
         let rules = block["rules"].as_array().unwrap();
@@ -2227,12 +2296,12 @@ mod tests {
         ];
         let upstreams = direct(dns);
 
-        let block = build(&upstreams, &HashSet::new());
+        let block = build(&upstreams, &[]);
         let rules = block["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["domain_suffix"][0], "lan");
 
-        let block = build(&upstreams, &HashSet::from(["geosite-category-ru"]));
+        let block = build(&upstreams, &["geosite-category-ru"]);
         assert_eq!(block["rules"].as_array().unwrap().len(), 2);
     }
 
@@ -2242,7 +2311,7 @@ mod tests {
             active(vec![local()], "local"),
             vec![rule_set_rule("geosite-category-ru", "fakeip")],
         );
-        let block = build(&direct(dns), &HashSet::new());
+        let block = build(&direct(dns), &[]);
         let rules = block["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["query_type"][0], "A");
@@ -2272,9 +2341,10 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let available = HashSet::from(["geoip-ru", "geoip-cn", "geosite-category-ru"]);
-
-        let block = build(&through_proxy(dns), &available);
+        let block = build(
+            &through_proxy(dns),
+            &["geoip-ru", "geoip-cn", "geosite-category-ru"],
+        );
 
         assert_eq!(
             block["rules"],
@@ -2343,7 +2413,7 @@ mod tests {
             active(vec![local(), doh("remote", "1.1.1.1")], "remote"),
             vec![rule_set_rule("geoip-ru", "local")],
         );
-        let block = build(&through_proxy(dns), &HashSet::from(["geoip-ru"]));
+        let block = build(&through_proxy(dns), &["geoip-ru"]);
         let rules = block["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 3);
         assert_eq!(
@@ -2360,7 +2430,7 @@ mod tests {
             server: "local".to_string(),
             ..Default::default()
         }];
-        let block = build(&direct(dns), &HashSet::new());
+        let block = build(&direct(dns), &[]);
         let rules = block["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["domain_suffix"][0], "example.com");
@@ -2406,7 +2476,7 @@ mod tests {
         let dns = active(vec![doh("remote", "1.1.1.1")], "remote");
         let upstreams = DnsUpstreams::new(
             dns,
-            &RoutePlan::for_mode(RoutingMode::Global),
+            &RoutePlan::for_mode(RoutingMode::Global, &RoutingConfig::default()),
             &http_profile(),
         );
         assert!(upstreams.is_tunnelled(&doh("remote", "1.1.1.1")));
@@ -2420,7 +2490,8 @@ mod tests {
         let preset =
             |server| custom_preset(vec![doh("remote", "1.1.1.1"), server], vec![], "remote");
         let public = settings_with_preset(preset(udp("plain", "8.8.8.8")));
-        let warning = dns_bypass_warning(&http_profile(), &public).unwrap();
+        let warning =
+            dns_bypass_warning(&http_profile(), &public, &RoutingConfig::default()).unwrap();
         assert!(warning.contains("\"plain\" (UDP)"), "{warning}");
         assert!(warning.contains("http"), "{warning}");
 
@@ -2435,7 +2506,10 @@ mod tests {
             (http_profile(), &only),
             (test_profile(), &public),
         ] {
-            assert_eq!(dns_bypass_warning(&profile, settings), None);
+            assert_eq!(
+                dns_bypass_warning(&profile, settings, &RoutingConfig::default()),
+                None
+            );
         }
     }
 
@@ -2504,7 +2578,7 @@ mod tests {
             build_dns(
                 &upstreams,
                 upstreams.bootstrap(),
-                &HashSet::from(["geoip-ru"]),
+                &routed(&["geoip-ru"]),
                 &[],
                 &["ech.example".to_string()],
             )["rules"][0]
@@ -2532,7 +2606,10 @@ mod tests {
         let profile = trojan_with_ech(Vec::new());
         let config = generate_config(
             &profile,
-            &Settings::default(),
+            RoutingInput {
+                settings: &Settings::default(),
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -2620,7 +2697,7 @@ mod tests {
         let block = build_dns(
             &upstreams,
             upstreams.bootstrap(),
-            &HashSet::new(),
+            &RoutedRuleSets::new(),
             &[("geosite-category-ru", "direct")],
             &[],
         );
@@ -2643,7 +2720,10 @@ mod tests {
             .insert(GeoRegion::Ru, RoutingMode::Bypass(GeoRegion::Ru));
         let config = generate_config(
             &test_profile(),
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -2665,7 +2745,7 @@ mod tests {
             ],
             "remote",
         );
-        let block = build(&through_proxy(dns), &HashSet::new());
+        let block = build(&through_proxy(dns), &[]);
         let servers = block["servers"].as_array().unwrap();
         let tags: Vec<&str> = servers.iter().map(|s| s["tag"].as_str().unwrap()).collect();
         assert_eq!(tags, ["local", "remote", "router", "bootstrap"]);
@@ -2685,7 +2765,7 @@ mod tests {
             ],
             "remote",
         );
-        let block = build(&direct(dns), &HashSet::new());
+        let block = build(&direct(dns), &[]);
         let servers = block["servers"].as_array().unwrap();
         assert_eq!(servers.len(), 3);
         assert_eq!(servers[1]["domain_resolver"], "local");
@@ -2732,7 +2812,10 @@ mod tests {
                 .insert(GeoRegion::Ru, mode);
             let config = generate_config(
                 &test_profile(),
-                &settings,
+                RoutingInput {
+                    settings: &settings,
+                    routing: &RoutingConfig::default(),
+                },
                 &GeoAvailability::all(),
                 TEST_CLASH_PORT,
                 None,
@@ -2750,7 +2833,10 @@ mod tests {
         settings.dns.fakeip_enabled = true;
         let config = generate_config(
             &test_profile(),
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -2769,7 +2855,10 @@ mod tests {
         let _state = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", state.path());
         let config = generate_config(
             &test_profile(),
-            &Settings::default(),
+            RoutingInput {
+                settings: &Settings::default(),
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -2791,7 +2880,10 @@ mod tests {
         let settings = Settings::default();
         let config = generate_config(
             &profile,
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -2813,7 +2905,10 @@ mod tests {
         ));
         let config = generate_config(
             &test_profile(),
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -2841,7 +2936,10 @@ mod tests {
             .insert(GeoRegion::Ru, RoutingMode::Only(GeoRegion::Ru));
         let config = generate_config(
             &test_profile(),
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
             None,
@@ -2859,7 +2957,10 @@ mod tests {
     #[test]
     fn build_route_bypass_ir_has_private_rule_and_final_proxy() {
         let (route, rule_sets) = build_route(
-            &RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Ir)),
+            &RoutePlan::for_mode(
+                RoutingMode::Bypass(GeoRegion::Ir),
+                &RoutingConfig::default(),
+            ),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2877,7 +2978,7 @@ mod tests {
     #[test]
     fn build_route_only_ir_has_private_rule_and_final_direct() {
         let (route, rule_sets) = build_route(
-            &RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Ir)),
+            &RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Ir), &RoutingConfig::default()),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2890,7 +2991,10 @@ mod tests {
     #[test]
     fn build_route_bypass_ru_has_private_rule_and_final_proxy() {
         let (route, rule_sets) = build_route(
-            &RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Ru)),
+            &RoutePlan::for_mode(
+                RoutingMode::Bypass(GeoRegion::Ru),
+                &RoutingConfig::default(),
+            ),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2909,7 +3013,10 @@ mod tests {
             settings.geo_routing.set_mode(mode);
             let error = generate_config(
                 &test_profile(),
-                &settings,
+                RoutingInput {
+                    settings: &settings,
+                    routing: &RoutingConfig::default(),
+                },
                 &GeoAvailability::default(),
                 TEST_CLASH_PORT,
                 None,
@@ -2926,24 +3033,38 @@ mod tests {
     fn a_regional_mode_without_its_files_falls_back_by_its_own_default() {
         let missing = GeoAvailability::default();
         assert_eq!(
-            missing.routing_fallback(&RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Cn))),
+            missing.routing_fallback(&RoutePlan::for_mode(
+                RoutingMode::Bypass(GeoRegion::Cn),
+                &RoutingConfig::default()
+            )),
             Some(RoutingFallback::Global)
         );
         assert_eq!(
-            missing.routing_fallback(&RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Ir))),
+            missing.routing_fallback(&RoutePlan::for_mode(
+                RoutingMode::Only(GeoRegion::Ir),
+                &RoutingConfig::default()
+            )),
             Some(RoutingFallback::Direct)
         );
         assert_eq!(
-            missing.routing_fallback(&RoutePlan::for_mode(RoutingMode::Global)),
+            missing.routing_fallback(&RoutePlan::for_mode(
+                RoutingMode::Global,
+                &RoutingConfig::default()
+            )),
             None
         );
         assert_eq!(
-            missing.routing_fallback(&RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Global))),
+            missing.routing_fallback(&RoutePlan::for_mode(
+                RoutingMode::Only(GeoRegion::Global),
+                &RoutingConfig::default()
+            )),
             None
         );
         assert_eq!(
-            GeoAvailability::all()
-                .routing_fallback(&RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Ir))),
+            GeoAvailability::all().routing_fallback(&RoutePlan::for_mode(
+                RoutingMode::Only(GeoRegion::Ir),
+                &RoutingConfig::default()
+            )),
             None
         );
     }
@@ -2967,7 +3088,10 @@ mod tests {
             settings.geo_routing.set_mode(mode);
             let config = generate_config(
                 &test_profile(),
-                &settings,
+                RoutingInput {
+                    settings: &settings,
+                    routing: &RoutingConfig::default(),
+                },
                 &GeoAvailability::default(),
                 TEST_CLASH_PORT,
                 Some(fallback),
@@ -2981,7 +3105,10 @@ mod tests {
     #[test]
     fn build_route_places_rule_sets_by_kind_after_sniff_and_resolve() {
         let (route, _) = build_route(
-            &RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Ru)),
+            &RoutePlan::for_mode(
+                RoutingMode::Bypass(GeoRegion::Ru),
+                &RoutingConfig::default(),
+            ),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -3055,7 +3182,7 @@ mod tests {
     }
 
     fn plain_rule(rule: &DnsRule) -> Value {
-        dns_rule_values(0, rule, "final").remove(0)
+        dns_rule_values(0, rule, "final", &RoutedRuleSets::new()).remove(0)
     }
 
     #[test]

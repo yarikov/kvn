@@ -91,7 +91,7 @@ fn tick_running_work(model: &mut Model) -> Vec<Effect> {
     effects
 }
 
-fn due_rule_sets(model: &Model, now: chrono::DateTime<Local>) -> Vec<&'static RuleSet> {
+fn due_rule_sets(model: &Model, now: chrono::DateTime<Local>) -> Vec<RuleSet> {
     if model.config.settings.kill_switch && model.connection != ConnectionState::Connected {
         return Vec::new();
     }
@@ -104,11 +104,11 @@ fn due_rule_sets(model: &Model, now: chrono::DateTime<Local>) -> Vec<&'static Ru
     if interval == 0 {
         return Vec::new();
     }
-    let idle: Vec<&'static RuleSet> =
-        crate::route_plan::selectable_rule_sets(&model.config.settings)
-            .into_iter()
-            .filter(|rule_set| !model.rule_set_updates.contains_key(&rule_set.key()))
-            .collect();
+    let idle: Vec<RuleSet> = model
+        .selectable_rule_sets()
+        .into_iter()
+        .filter(|rule_set| !model.rule_set_updates.contains_key(&rule_set.key()))
+        .collect();
     let any_due = idle.iter().any(|rule_set| {
         let key = rule_set.key();
         !attempted_recently(model, &key, now)
@@ -213,7 +213,7 @@ mod tests {
         let effects = handle_tick_at(&mut model, after_update_window());
 
         assert!(effects.contains(&Effect::DownloadRuleSets {
-            rule_sets: crate::geo::region_rule_sets(GeoRegion::Ru).to_vec(),
+            rule_sets: crate::test_helpers::region_rule_sets(GeoRegion::Ru),
             only_missing: false,
             record_schedule: true,
         }));
@@ -240,9 +240,10 @@ mod tests {
     fn one_due_rule_set_updates_the_whole_region_in_one_download() {
         let mut model = ru_auto_updated();
         let now = after_update_window();
-        let [_, geoip] = crate::geo::region_rule_sets(GeoRegion::Ru) else {
-            unreachable!()
-        };
+        let [_, geoip] = <[crate::geo::RuleSet; 2]>::try_from(
+            crate::test_helpers::region_rule_sets(GeoRegion::Ru),
+        )
+        .unwrap();
         model.mark_selectable_rule_sets_checked(now);
         assert!(!is_due(&model, now));
         model
@@ -253,7 +254,7 @@ mod tests {
 
         assert_eq!(
             due_rule_sets(&model, now),
-            crate::geo::region_rule_sets(GeoRegion::Ru)
+            crate::test_helpers::region_rule_sets(GeoRegion::Ru)
         );
     }
 
@@ -318,7 +319,7 @@ mod tests {
         assert!(!is_due(&model, now));
 
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        for rule_set in crate::geo::region_rule_sets(GeoRegion::Ru) {
+        for rule_set in crate::test_helpers::region_rule_sets(GeoRegion::Ru) {
             model
                 .rule_set_updates
                 .insert(rule_set.key(), UpdateTrigger::Manual);

@@ -311,7 +311,7 @@ it:
 4. Permanently deletes the user's kvn files:
 
    ```text
-   ~/.config/kvn-tui/          profiles, settings, geo rule-sets, logs, state, recovery copies
+   ~/.config/kvn-tui/          profiles, settings, rule-sets, logs, state, recovery copies
    ~/.local/state/kvn/         first-run tour, support prompt, sing-box cache
    /run/user/$UID/kvn-tui/     temporary sing-box and latency-test configurations
    /run/user/$UID/kvn/         daemon lock, state.json, editor JSON Schema

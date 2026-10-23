@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::config::load_config;
 use crate::config::profile::{Config, GeoRegion, Profile};
+use crate::config::routing::RoutingConfig;
 use crate::ui::styles::Theme;
 use chrono::{DateTime, Local};
 
@@ -353,6 +354,7 @@ pub struct Model {
     pub main_pane_focus: MainPaneFocus,
     pub connection: ConnectionState,
     pub config: Config,
+    pub routing: RoutingConfig,
     pub config_persistence_blocked: bool,
     pub unsaved_state_merge_base: Option<Config>,
     pub support_prompt: crate::support_prompt::SupportPromptState,
@@ -402,11 +404,12 @@ pub struct Model {
 
 fn load_rule_set_states(
     settings: &crate::config::profile::Settings,
+    routing: &RoutingConfig,
 ) -> (u64, crate::geo::RuleSetStates) {
     let Ok(manager) = crate::geo::GeoManager::new() else {
         return (0, crate::geo::RuleSetStates::new());
     };
-    let selectable = crate::route_plan::selectable_rule_sets(settings);
+    let selectable = crate::route_plan::selectable_rule_sets(settings, routing);
     let epoch = manager.schedule_epoch();
     let _ = manager.ensure_update_schedules(
         &selectable,
@@ -457,8 +460,16 @@ impl Model {
         !self.rule_set_updates.is_empty()
     }
 
+    pub fn required_rule_sets(&self) -> Vec<crate::geo::RuleSet> {
+        crate::route_plan::required_rule_sets(&self.config.settings, &self.routing)
+    }
+
+    pub fn selectable_rule_sets(&self) -> Vec<crate::geo::RuleSet> {
+        crate::route_plan::selectable_rule_sets(&self.config.settings, &self.routing)
+    }
+
     pub fn selectable_rule_sets_checked_at(&self) -> Option<DateTime<Local>> {
-        crate::route_plan::selectable_rule_sets(&self.config.settings)
+        self.selectable_rule_sets()
             .iter()
             .map(|rule_set| {
                 self.rule_set_states
@@ -471,7 +482,7 @@ impl Model {
     }
 
     pub fn mark_selectable_rule_sets_checked(&mut self, checked_at: DateTime<Local>) {
-        for rule_set in crate::route_plan::selectable_rule_sets(&self.config.settings) {
+        for rule_set in self.selectable_rule_sets() {
             self.rule_set_states
                 .entry(rule_set.key())
                 .or_default()
@@ -524,6 +535,21 @@ impl Model {
                 Config::default()
             }
         };
+        let routing = match crate::config::load_routing(
+            config.settings.geo_routing.legacy_service_routes.as_ref(),
+            !config_persistence_blocked,
+        ) {
+            Ok(routing) => routing,
+            Err(e) => {
+                let msg = format!("Routing configuration load failed; using defaults: {e:#}");
+                tracing::error!("{msg}");
+                startup_error = Some(match startup_error.take() {
+                    Some(previous) => format!("{previous}; {msg}"),
+                    None => msg,
+                });
+                RoutingConfig::default()
+            }
+        };
         let default_selected = 0;
 
         let stale_cleanup_failed = match crate::services::waybar::cleanup_stale_session() {
@@ -563,7 +589,8 @@ impl Model {
             .then_some(config.settings.last_connected_profile)
             .flatten();
 
-        let (geo_schedule_epoch, rule_set_states) = load_rule_set_states(&config.settings);
+        let (geo_schedule_epoch, rule_set_states) =
+            load_rule_set_states(&config.settings, &routing);
 
         let mut model = Self {
             overlay: Overlay::None,
@@ -574,6 +601,7 @@ impl Model {
             main_pane_focus: MainPaneFocus::Sources,
             connection,
             config,
+            routing,
             config_persistence_blocked,
             unsaved_state_merge_base: None,
             support_prompt,
@@ -635,7 +663,6 @@ impl Model {
 
     pub fn from_config(config: Config) -> Self {
         let selected = 0;
-        let (geo_schedule_epoch, rule_set_states) = load_rule_set_states(&config.settings);
 
         Self {
             overlay: Overlay::None,
@@ -646,6 +673,7 @@ impl Model {
             main_pane_focus: MainPaneFocus::Sources,
             connection: ConnectionState::Idle,
             config,
+            routing: RoutingConfig::default(),
             config_persistence_blocked: false,
             unsaved_state_merge_base: None,
             support_prompt: crate::support_prompt::SupportPromptState::default(),
@@ -679,9 +707,9 @@ impl Model {
             subscription_updates: HashMap::new(),
             needs_redraw: false,
             should_quit: false,
-            rule_set_states,
+            rule_set_states: crate::geo::RuleSetStates::new(),
             rule_set_automatic_attempts: HashMap::new(),
-            geo_schedule_epoch,
+            geo_schedule_epoch: 0,
             traffic: TrafficStats::default(),
             last_traffic_sample_at_ms: 0,
             traffic_request_id: 0,
@@ -898,6 +926,7 @@ impl Model {
             main_pane_focus: MainPaneFocus::Sources,
             connection: ConnectionState::Idle,
             config,
+            routing: RoutingConfig::default(),
             config_persistence_blocked: false,
             unsaved_state_merge_base: None,
             support_prompt: crate::support_prompt::SupportPromptState::default(),

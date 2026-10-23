@@ -295,10 +295,19 @@ pub(super) fn commit_edited(
 pub(super) fn reload(tx: &Sender<Msg>) {
     let tx = tx.clone();
     thread::spawn(move || {
-        let result = crate::config::load_config()
-            .and_then(|c| c.validate().map(|_| c))
-            .map_err(IpcError::from);
-        let _ = tx.send(Msg::ConfigReloaded(Box::new(result)));
+        let result = crate::config::load_config().and_then(|c| c.validate().map(|_| c));
+        let routing = crate::config::load_routing(
+            result
+                .as_ref()
+                .ok()
+                .and_then(|config| config.settings.geo_routing.legacy_service_routes.as_ref()),
+            result.is_ok(),
+        )
+        .map_err(IpcError::from);
+        let _ = tx.send(Msg::ConfigReloaded(Box::new(
+            result.map_err(IpcError::from),
+        )));
+        let _ = tx.send(Msg::RoutingReloaded(Box::new(routing)));
     });
 }
 

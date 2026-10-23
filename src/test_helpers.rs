@@ -254,9 +254,17 @@ pub fn downloads_rule_sets(effects: &[Effect]) -> bool {
         .any(|effect| matches!(effect, Effect::DownloadRuleSets { .. }))
 }
 
+pub fn region_rule_sets(region: crate::config::profile::GeoRegion) -> Vec<crate::geo::RuleSet> {
+    let routing = crate::config::routing::RoutingConfig::default();
+    crate::geo::region_rule_set_tags(region)
+        .iter()
+        .filter_map(|tag| routing.rule_set(tag))
+        .collect()
+}
+
 pub fn download_missing_rule_sets_of(region: crate::config::profile::GeoRegion) -> Effect {
     Effect::DownloadRuleSets {
-        rule_sets: crate::geo::region_rule_sets(region).to_vec(),
+        rule_sets: crate::test_helpers::region_rule_sets(region),
         only_missing: true,
         record_schedule: false,
     }
