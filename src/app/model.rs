@@ -522,7 +522,7 @@ impl Model {
     pub fn new() -> anyhow::Result<Self> {
         let mut startup_error: Option<String> = None;
         let mut config_persistence_blocked = false;
-        let config = match load_config() {
+        let mut config = match load_config() {
             Ok(cfg) => match cfg.validate() {
                 Ok(()) => cfg,
                 Err(e) => {
@@ -542,7 +542,8 @@ impl Model {
                 Config::default()
             }
         };
-        let routing = match crate::config::load_routing(
+        let mut routing_loaded = true;
+        let mut routing = match crate::config::load_routing(
             &config.settings.geo_routing,
             !config_persistence_blocked,
         ) {
@@ -554,9 +555,28 @@ impl Model {
                     Some(previous) => format!("{previous}; {msg}"),
                     None => msg,
                 });
+                routing_loaded = false;
                 RoutingConfig::default()
             }
         };
+        if routing_loaded && !config_persistence_blocked {
+            match crate::config::move_service_routes(&mut config, &mut routing) {
+                Ok(true) => {
+                    tracing::info!("Moved the Steam and Telegram overrides into routing.json rules")
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    let msg = format!(
+                        "Steam and Telegram overrides were not moved to routing.json: {e:#}"
+                    );
+                    tracing::error!("{msg}");
+                    startup_error = Some(match startup_error.take() {
+                        Some(previous) => format!("{previous}; {msg}"),
+                        None => msg,
+                    });
+                }
+            }
+        }
         let default_selected = 0;
 
         let stale_cleanup_failed = match crate::services::waybar::cleanup_stale_session() {

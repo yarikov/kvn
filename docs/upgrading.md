@@ -18,6 +18,19 @@ Until then, `kvn connect`, `kvn toggle` and the other one-shot commands refuse
 to talk to the outdated daemon. Run `kvn doctor` if an upgrade needs
 attention.
 
+## v0.36.0
+
+Rule-sets and routing modes move to a new file,
+`~/.config/kvn-tui/routing.json`, which kvn creates the first time it starts.
+See [Rule-sets and modes](configuration.md#rule-sets-and-modes).
+
+Steam and Telegram overrides become rules of every mode in that file, with the
+same route and the same rule-set sources, so the files already downloaded are
+kept and both services are routed as before. The `service_routes` setting
+leaves `profiles.json`; an older kvn started afterwards routes Steam and
+Telegram by the mode, like any other traffic. If `routing.json` cannot be read,
+kvn reports it and moves the overrides once the file is fixed.
+
 ## v0.35.0
 
 The AUR package is renamed from `kvn-tui-bin` to `kvn-bin`. `kvn-tui-bin` still
