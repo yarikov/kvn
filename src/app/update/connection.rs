@@ -27,17 +27,6 @@ pub(in crate::app::update) fn on_connected(
         crate::app::update::onboarding::Trigger::TunnelUp,
     );
     effects.push(Effect::WriteState);
-    if routing_fallback.is_none()
-        && !model
-            .config
-            .settings
-            .geo_routing
-            .enabled_services()
-            .is_empty()
-    {
-        model.geo_updating = true;
-        effects.push(Effect::DownloadServiceRuleSetsIfMissing);
-    }
     model.active_profile_id = Some(profile_id);
     let profile = model.config.profiles.iter().find(|p| p.id == profile_id);
     let profile_name = profile.map(|p| p.name.clone());
@@ -690,65 +679,6 @@ mod tests {
         let effects = update(&mut model, Msg::SystemResumed);
 
         assert!(effects.is_empty());
-    }
-
-    #[test]
-    fn connected_fetches_service_rule_sets_only_when_enabled() {
-        use crate::config::profile::{RoutedService, ServiceRoute};
-
-        let mut model = Model::test_new(crate::config::profile::Config::default());
-        model.connection = ConnectionState::ConnectPending;
-        let effects = update(
-            &mut model,
-            Msg::Connected {
-                pid: 1,
-                profile_id: uuid::Uuid::new_v4(),
-                attempt_id: 0,
-                routing_fallback: None,
-            },
-        );
-        assert!(
-            !effects.contains(&Effect::DownloadServiceRuleSetsIfMissing),
-            "all service routes are disabled by default — no fetch"
-        );
-
-        let mut model = Model::test_new(crate::config::profile::Config::default());
-        model
-            .config
-            .settings
-            .geo_routing
-            .service_routes
-            .insert(RoutedService::Telegram, ServiceRoute::Proxy);
-        model.connection = ConnectionState::ConnectPending;
-        let effects = update(
-            &mut model,
-            Msg::Connected {
-                pid: 1,
-                profile_id: uuid::Uuid::new_v4(),
-                attempt_id: 0,
-                routing_fallback: None,
-            },
-        );
-        assert!(effects.contains(&Effect::DownloadServiceRuleSetsIfMissing));
-
-        let mut model = Model::test_new(crate::config::profile::Config::default());
-        model
-            .config
-            .settings
-            .geo_routing
-            .service_routes
-            .insert(RoutedService::Steam, ServiceRoute::Disabled);
-        model.connection = ConnectionState::ConnectPending;
-        let effects = update(
-            &mut model,
-            Msg::Connected {
-                pid: 1,
-                profile_id: uuid::Uuid::new_v4(),
-                attempt_id: 0,
-                routing_fallback: None,
-            },
-        );
-        assert!(!effects.contains(&Effect::DownloadServiceRuleSetsIfMissing));
     }
 
     #[test]

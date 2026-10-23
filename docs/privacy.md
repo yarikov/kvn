@@ -63,13 +63,6 @@ where it goes, exactly as it would without a VPN. Bypass and Only exist for
 that purpose: Bypass keeps domestic sites fast and reachable, and Only reaches
 services that refuse foreign IP addresses while everything else stays direct.
 
-The Steam and Telegram rows of the same screen override the mode for those
-services. A service set to `direct` always skips the tunnel; one set to
-`proxy` always uses it. An override needs its own rule-set files, which kvn
-downloads through the tunnel. Until they are downloaded and kvn has
-reconnected, the service follows the routing mode. Turning an override on
-while connected does both automatically; files that were missing when a
-connection started apply only from the next connection.
 
 ## DNS
 
@@ -121,10 +114,6 @@ matched:
   direct copy of your main DNS server, as it is without fake-IP.
 - **A site sent directly because of its address** is looked up through the
   tunnel first.
-- **While a Steam or Telegram override is on**, kvn looks every other name up
-  through the tunnel before it checks the region's list, so region sites no
-  longer take the first path; the service's own names still do when it is set
-  to `direct`.
 
 Without fake-IP, programs get real addresses from kvn — through the tunnel in
 Global and Bypass, except for the sites sent directly because of their name —
@@ -167,7 +156,7 @@ not carrying your traffic: before the tunnel is up, after it drops, or when the
 daemon has stopped. Other programs then cannot reach the internet directly.
 
 It does not override the routing decisions above. Traffic that kvn itself sends
-directly — Bypass and Only destinations, `direct` service routes, the DNS
+directly — Bypass and Only destinations, the DNS
 traffic described above, and the connection to the VPN server — is marked by
 kvn and allowed through, because sending it directly is the purpose of those
 settings.
@@ -211,8 +200,8 @@ The tunnel carries IPv4 only. While kvn is connected:
   Global and Bypass modes a public DNS server is
   queried through the tunnel, so an IPv6 address works there if the VPN
   server itself has IPv6.
-- **Direct traffic is IPv4 too**: Bypass and Only destinations and `direct`
-  service routes cannot be reached over IPv6.
+- **Direct traffic is IPv4 too**: Bypass and Only destinations cannot be
+  reached over IPv6.
 
 kvn therefore answers IPv6 address lookups with no addresses, so programs do
 not try IPv6 addresses they cannot use.
@@ -225,7 +214,7 @@ Even in Global mode, your provider can see:
   flows;
 - the lookup of the VPN server's name and the connection to your main DNS
   server used for it, if the server is configured by name;
-- everything listed as direct for your routing mode and service routes.
+- everything listed as direct for your routing mode.
 
 The VPN server's operator sees the traffic that leaves the tunnel, as any VPN
 provider does.
@@ -237,11 +226,9 @@ tunnel (or directly, as your routing mode decides), and while disconnected
 they go directly. With the kill switch on, kvn makes them only while the tunnel
 is up.
 
-- **Rule-sets** for the selected region and for Steam and Telegram overrides
-  are downloaded from `raw.githubusercontent.com` (SagerNet and MetaCubeX
-  repositories), on first use and on the `geo_routing.auto_update` schedule.
-  The first download of a service's rule-sets waits for the tunnel; scheduled
-  refreshes run like the others.
+- **Rule-sets** for the selected region are downloaded from
+  `raw.githubusercontent.com` (SagerNet repositories), on first use and on the
+  `geo_routing.auto_update` schedule.
 - **Subscriptions** are fetched from their URL with
   `User-Agent: kvn-tui/<version>`. A subscription with `send_hwid` also sends
   an installation identifier, the kernel version, and the system locale; see

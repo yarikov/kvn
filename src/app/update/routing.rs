@@ -1,82 +1,11 @@
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model, RoutingSettings, StatusKey};
-use crate::app::msg::{ServiceCheckTimes, ServiceSchedule};
 use crate::config::profile::{GeoRegion, RoutingMode};
 
 use crate::app::update::connection::queue_connect;
 use crate::app::update::status::{
-    DownloadKind, append_download_hint, download_allowed, push_download_blocked, push_status,
+    DownloadKind, download_allowed, push_download_blocked, push_status,
 };
-
-pub(in crate::app::update) fn on_service_rule_sets_ready(
-    model: &mut Model,
-    checked_at: ServiceCheckTimes,
-    schedule: Option<ServiceSchedule>,
-    updated_parts: Vec<String>,
-    errors: Vec<String>,
-) -> Vec<Effect> {
-    model.geo_updating = model.pending_geo_reconnect;
-    model.service_checked_at = checked_at;
-    if let Some(schedule) = schedule {
-        model.apply_service_schedule(schedule);
-    }
-    let mut effects =
-        crate::app::update::geo::start_deferred_region_download(model).unwrap_or_default();
-    for part in updated_parts {
-        effects.push(Effect::AppendAppLog {
-            level: "INFO".to_string(),
-            message: format!("Updated: {part}"),
-        });
-    }
-    if !errors.is_empty() {
-        push_status(
-            &mut effects,
-            model,
-            StatusKey::Geo,
-            AppStatus::Error(format!(
-                "Service rule-set update failed: {}",
-                errors.join("; ")
-            )),
-        );
-        append_download_hint(&mut effects, model, DownloadKind::Geo);
-    }
-    if !model.pending_service_reconnect {
-        if !effects.is_empty() {
-            effects.push(Effect::BroadcastState);
-        }
-        return effects;
-    }
-    model.pending_service_reconnect = false;
-    if model.pending_geo_reconnect {
-        effects.push(Effect::BroadcastState);
-        return effects;
-    }
-    if model.connection != ConnectionState::Connected {
-        effects.push(Effect::BroadcastState);
-        return effects;
-    }
-    effects.push(Effect::BroadcastState);
-    let active = model
-        .active_profile_id
-        .and_then(|id| model.config.profiles.iter().find(|p| p.id == id).cloned());
-    if let Some(profile) = active {
-        queue_connect(model, profile.id);
-        push_status(
-            &mut effects,
-            model,
-            StatusKey::Routing,
-            AppStatus::Info("Service routing changed — reconnecting".into()),
-        );
-    } else {
-        push_status(
-            &mut effects,
-            model,
-            StatusKey::Routing,
-            AppStatus::Info("Service routing changed — applies after reconnect".into()),
-        );
-    }
-    effects
-}
 
 pub(in crate::app::update) fn commit_routing_mode(
     model: &mut Model,
@@ -143,11 +72,9 @@ pub(in crate::app::update) fn commit_routing_settings(
 
     let old_region = model.config.settings.geo_routing.current_region;
     let old_mode = model.config.settings.geo_routing.mode();
-    let old_routes = model.config.settings.geo_routing.service_routes.clone();
     let region_changed = old_region != Some(settings.region);
     let mode_changed = old_mode != settings.mode;
-    let service_routes_changed = old_routes != settings.service_routes;
-    if !region_changed && !mode_changed && !service_routes_changed {
+    if !region_changed && !mode_changed {
         return vec![];
     }
 
@@ -165,7 +92,6 @@ pub(in crate::app::update) fn commit_routing_settings(
         .geo_routing
         .set_region(settings.region);
     model.config.settings.geo_routing.set_mode(settings.mode);
-    model.config.settings.geo_routing.service_routes = settings.service_routes;
 
     let connection = model.connection;
     let mut effects = vec![Effect::SaveConfig, Effect::BroadcastState];
@@ -182,9 +108,6 @@ pub(in crate::app::update) fn commit_routing_settings(
             if download_allowed(model) {
                 model.geo_updating = true;
                 model.geo_last_attempt_at = Some(chrono::Local::now());
-                if connection == ConnectionState::Connected && service_routes_changed {
-                    model.pending_geo_reconnect = true;
-                }
                 effects.push(Effect::DownloadGeoIfMissing);
             } else {
                 push_download_blocked(&mut effects, model, DownloadKind::Geo);
@@ -192,38 +115,7 @@ pub(in crate::app::update) fn commit_routing_settings(
         }
     }
 
-    if service_routes_changed {
-        match connection {
-            ConnectionState::Connected => {
-                model.pending_service_reconnect = true;
-                effects.push(Effect::DownloadServiceRuleSetsIfMissing);
-            }
-            ConnectionState::Connecting | ConnectionState::ConnectPending => {
-                push_status(
-                    &mut effects,
-                    model,
-                    StatusKey::Routing,
-                    AppStatus::Info("Routing settings changed — applies after reconnect".into()),
-                );
-            }
-            _ if !model
-                .config
-                .settings
-                .geo_routing
-                .enabled_services()
-                .is_empty() =>
-            {
-                if download_allowed(model) {
-                    effects.push(Effect::DownloadServiceRuleSetsIfMissing);
-                } else {
-                    push_download_blocked(&mut effects, model, DownloadKind::Geo);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if connection == ConnectionState::Connected && !service_routes_changed {
+    if connection == ConnectionState::Connected {
         if let Some(active_id) = model.active_profile_id {
             queue_connect(model, active_id);
         }
@@ -309,212 +201,4 @@ pub(in crate::app::update) fn commit_geo_region(
         model.logs.push_back("Region changed — reconnecting".into());
     }
     effects
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::msg::{GeoResult, Msg};
-    use crate::app::update::tick::handle_tick;
-    use crate::app::update::update;
-    use crate::config::profile::{Profile, RoutedService};
-    use crate::test_helpers::*;
-    use chrono::Local;
-    use std::collections::HashMap;
-
-    #[test]
-    fn service_rule_sets_ready_reconnects_active_profile_not_cursor() {
-        let a = Profile::new_vless("A".into(), "e".into(), 1, "u".into());
-        let b = Profile::new_vless("B".into(), "e".into(), 2, "u".into());
-        let active_id = a.id;
-        let mut model = model_with_profiles(vec![a, b]);
-        model.connection = ConnectionState::Connected;
-        model.active_profile_id = Some(active_id);
-        model.pending_service_reconnect = true;
-        model.select_next();
-        update(
-            &mut model,
-            Msg::ServiceRuleSetsReady {
-                checked_at: Default::default(),
-                schedule: None,
-                updated_parts: Vec::new(),
-                errors: Vec::new(),
-            },
-        );
-        assert!(!model.pending_service_reconnect, "flag is consumed");
-        assert_eq!(model.connection, ConnectionState::Connecting);
-        assert_eq!(model.connecting_profile_id, Some(active_id));
-        let tick_effects = handle_tick(&mut model);
-        let connect_id = tick_effects.iter().find_map(|e| match e {
-            Effect::Connect { profile, .. } => Some(profile.id),
-            _ => None,
-        });
-        assert_eq!(
-            connect_id,
-            Some(active_id),
-            "must reconnect the active profile, not the cursor's"
-        );
-    }
-
-    #[test]
-    fn routing_reconnect_waits_for_geo_and_service_downloads_in_any_order() {
-        fn geo_ready() -> Msg {
-            Msg::GeoUpdated {
-                result: GeoResult::UpToDate {
-                    checked_at: Some(Local::now()),
-                    service_checked_at: Default::default(),
-                    schedule: None,
-                    warnings: Vec::new(),
-                },
-                region_ready: true,
-            }
-        }
-
-        fn services_ready() -> Msg {
-            Msg::ServiceRuleSetsReady {
-                checked_at: Default::default(),
-                schedule: None,
-                updated_parts: Vec::new(),
-                errors: Vec::new(),
-            }
-        }
-
-        for geo_first in [true, false] {
-            let profile = Profile::new_vless("A".into(), "e".into(), 1, "u".into());
-            let active_id = profile.id;
-            let mut model = model_with_profiles(vec![profile]);
-            model.connection = ConnectionState::Connected;
-            model.active_profile_id = Some(active_id);
-            let mut service_routes = std::collections::HashMap::new();
-            service_routes.insert(
-                RoutedService::Steam,
-                crate::config::profile::ServiceRoute::Proxy,
-            );
-            let effects = commit_routing_settings(
-                &mut model,
-                RoutingSettings {
-                    region: GeoRegion::Ru,
-                    mode: RoutingMode::Global,
-                    service_routes,
-                },
-            );
-
-            assert!(effects.contains(&Effect::DownloadGeoIfMissing));
-            assert!(effects.contains(&Effect::DownloadServiceRuleSetsIfMissing));
-            assert!(model.pending_geo_reconnect);
-            assert!(model.pending_service_reconnect);
-
-            if geo_first {
-                update(&mut model, geo_ready());
-                assert_eq!(model.connection, ConnectionState::Connected);
-                assert!(model.geo_updating);
-                update(&mut model, services_ready());
-            } else {
-                update(&mut model, services_ready());
-                assert_eq!(model.connection, ConnectionState::Connected);
-                assert!(model.geo_updating);
-                update(&mut model, geo_ready());
-            }
-
-            assert_eq!(model.connection, ConnectionState::Connecting);
-            assert_eq!(model.connecting_profile_id, Some(active_id));
-            assert!(!model.pending_geo_reconnect);
-            assert!(!model.pending_service_reconnect);
-            assert!(!model.geo_updating);
-        }
-    }
-
-    #[test]
-    fn service_rule_sets_from_before_a_schedule_reset_keep_the_reset_schedule() {
-        let mut model = model_with_profiles(vec![]);
-        model.geo_schedule_epoch = 2;
-        let checked_at = Local::now();
-        let stale_retry = crate::config::profile::RetryState {
-            consecutive_failures: 1,
-            retry_at: checked_at,
-            attempt_date: None,
-        };
-
-        update(
-            &mut model,
-            Msg::ServiceRuleSetsReady {
-                checked_at: HashMap::from([(RoutedService::Steam, checked_at)]),
-                schedule: Some(ServiceSchedule {
-                    epoch: 1,
-                    retry_states: HashMap::from([(RoutedService::Steam, stale_retry)]),
-                    next_updates: HashMap::from([(RoutedService::Steam, checked_at.date_naive())]),
-                }),
-                updated_parts: Vec::new(),
-                errors: Vec::new(),
-            },
-        );
-
-        assert!(model.service_retry_states.is_empty());
-        assert!(model.service_next_updates.is_empty());
-        assert_eq!(
-            model.service_checked_at.get(&RoutedService::Steam),
-            Some(&checked_at)
-        );
-    }
-
-    #[test]
-    fn service_rule_sets_ready_without_pending_commit_is_noop() {
-        let profile = Profile::new_vless("A".into(), "e".into(), 1, "u".into());
-        let mut model = model_with_profiles(vec![profile.clone()]);
-        model.connection = ConnectionState::Connected;
-        model.active_profile_id = Some(profile.id);
-        let effects = update(
-            &mut model,
-            Msg::ServiceRuleSetsReady {
-                checked_at: Default::default(),
-                schedule: None,
-                updated_parts: Vec::new(),
-                errors: Vec::new(),
-            },
-        );
-        assert!(effects.is_empty());
-        assert_eq!(model.connection, ConnectionState::Connected);
-    }
-
-    #[test]
-    fn service_rule_sets_ready_after_disconnect_clears_flag_without_connect() {
-        let profile = Profile::new_vless("A".into(), "e".into(), 1, "u".into());
-        let mut model = model_with_profiles(vec![profile.clone()]);
-        model.connection = ConnectionState::Idle;
-        model.active_profile_id = Some(profile.id);
-        model.pending_service_reconnect = true;
-        let effects = update(
-            &mut model,
-            Msg::ServiceRuleSetsReady {
-                checked_at: Default::default(),
-                schedule: None,
-                updated_parts: Vec::new(),
-                errors: Vec::new(),
-            },
-        );
-        assert!(!model.pending_service_reconnect);
-        assert!(!effects.iter().any(|e| matches!(e, Effect::Connect { .. })));
-        assert_eq!(model.connection, ConnectionState::Idle);
-    }
-
-    #[test]
-    fn service_rule_sets_ready_with_missing_active_profile_does_not_flip_state() {
-        let profile = Profile::new_vless("A".into(), "e".into(), 1, "u".into());
-        let mut model = model_with_profiles(vec![profile]);
-        model.connection = ConnectionState::Connected;
-        model.active_profile_id = Some(uuid::Uuid::new_v4());
-        model.pending_service_reconnect = true;
-        let effects = update(
-            &mut model,
-            Msg::ServiceRuleSetsReady {
-                checked_at: Default::default(),
-                schedule: None,
-                updated_parts: Vec::new(),
-                errors: Vec::new(),
-            },
-        );
-        assert!(!model.pending_service_reconnect);
-        assert!(!effects.iter().any(|e| matches!(e, Effect::Connect { .. })));
-        assert_eq!(model.connection, ConnectionState::Connected);
-    }
 }

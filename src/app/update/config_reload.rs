@@ -17,8 +17,6 @@ pub(crate) fn handle_config_reloaded(
             config.settings.kill_switch = old_settings.kill_switch;
             let runtime_settings_changed =
                 connection_settings_changed(&old_settings, &config.settings);
-            let service_routes_changed = old_settings.geo_routing.service_routes
-                != config.settings.geo_routing.service_routes;
             let active_profile_changed = model.active_profile_id.is_some_and(|id| {
                 profile_runtime_changed_for_id(&model.config.profiles, &config.profiles, id)
             });
@@ -54,10 +52,6 @@ pub(crate) fn handle_config_reloaded(
                     };
                 if runtime_changed {
                     match model.connection {
-                        ConnectionState::Connected if service_routes_changed => {
-                            model.pending_service_reconnect = true;
-                            effects.push(Effect::DownloadServiceRuleSetsIfMissing);
-                        }
                         ConnectionState::Connected | ConnectionState::ConnectPending => {
                             reconnect_with_new_settings(model);
                         }
@@ -77,17 +71,10 @@ pub(crate) fn handle_config_reloaded(
                     || runtime_settings_changed);
             let status = if kill_switch_ignored && reconnecting {
                 "Kill switch edit ignored (use K); configuration changed — reconnecting"
-            } else if kill_switch_ignored
-                && model.pending_service_reconnect
-                && service_routes_changed
-            {
-                "Kill switch edit ignored (use K); configuration changed — updating rule-sets"
             } else if kill_switch_ignored {
                 "Kill switch edit ignored — use K to change it"
             } else if reconnecting {
                 "Configuration changed — reconnecting"
-            } else if model.pending_service_reconnect && service_routes_changed {
-                "Configuration changed — updating rule-sets"
             } else {
                 "Configuration reloaded"
             };
@@ -135,7 +122,6 @@ fn connection_settings_changed(
     old.tun_interface != new.tun_interface
         || old.dns != new.dns
         || old.geo_routing.mode() != new.geo_routing.mode()
-        || old.geo_routing.service_routes != new.geo_routing.service_routes
         || old.logs.level != new.logs.level
 }
 
@@ -364,8 +350,6 @@ mod tests {
 
     #[test]
     fn connection_settings_comparison_covers_singbox_inputs() {
-        use crate::config::profile::{GeoRegion, RoutedService, ServiceRoute};
-
         let original = crate::config::profile::Settings::default();
         let mut changed = original.clone();
         changed.dns.fakeip_enabled = true;
@@ -380,13 +364,6 @@ mod tests {
         changed
             .geo_routing
             .set_mode(crate::config::profile::RoutingMode::Only(GeoRegion::Ru));
-        assert!(connection_settings_changed(&original, &changed));
-
-        let mut changed = original.clone();
-        changed
-            .geo_routing
-            .service_routes
-            .insert(RoutedService::Steam, ServiceRoute::Proxy);
         assert!(connection_settings_changed(&original, &changed));
     }
 
@@ -452,28 +429,5 @@ mod tests {
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connect_attempt_id, old_attempt + 1);
         assert_eq!(model.connecting_profile_id, Some(profile_id));
-    }
-
-    #[test]
-    fn config_reload_defers_service_route_reconnect_until_assets_ready() {
-        use crate::config::profile::{RoutedService, ServiceRoute};
-
-        let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
-        let profile_id = profile.id;
-        let mut model = model_with_profiles(vec![profile]);
-        model.connection = ConnectionState::Connected;
-        model.active_profile_id = Some(profile_id);
-        let mut config = model.config.clone();
-        config
-            .settings
-            .geo_routing
-            .service_routes
-            .insert(RoutedService::Steam, ServiceRoute::Proxy);
-
-        let effects = update(&mut model, Msg::ConfigReloaded(Box::new(Ok(config))));
-
-        assert_eq!(model.connection, ConnectionState::Connected);
-        assert!(model.pending_service_reconnect);
-        assert!(effects.contains(&Effect::DownloadServiceRuleSetsIfMissing));
     }
 }

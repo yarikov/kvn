@@ -142,8 +142,8 @@ sing-box's connection to the VPN server and its DNS queries are marked. The
 older kvn left behind.
 
 Marked traffic includes the sing-box `direct` outbound. This is required for
-Bypass/Only modes and means an explicit Direct service route can leave through
-the physical network while the kill switch is active.
+Bypass/Only modes and means their direct destinations leave through the
+physical network while the kill switch is active.
 
 Toggling the kill switch with `Shift+K` runs `systemctl enable --now` or
 `disable --now`; an enabled kill switch therefore loads again at boot.

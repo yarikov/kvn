@@ -6,9 +6,10 @@ use std::path::PathBuf;
 
 use crate::config::profile::{
     ActiveDns, DnsRule, DnsServer, FINALMASK_PARAM, FakeIpServer, GeoRegion, NaiveConfig, Profile,
-    ProtocolConfig, RoutedService, RoutingFallback, RoutingMode, ServiceRoute, Settings,
-    SocksConfig, SocksVersion, read_stream_finalmask,
+    ProtocolConfig, RoutingFallback, RoutingMode, Settings, SocksConfig, SocksVersion,
+    read_stream_finalmask,
 };
+use crate::geo::{RuleSet, RuleSetKind};
 use crate::singbox::outbound::{
     build_anytls_outbound, build_http_outbound, build_hysteria2_outbound, build_naive_outbound,
     build_shadowsocks_outbound, build_shadowtls_outbounds, build_socks_outbound,
@@ -20,20 +21,21 @@ const DNS_STRATEGY: &str = "ipv4_only";
 
 #[derive(Debug, Clone, Default)]
 pub struct GeoAvailability {
-    pub regions: HashMap<GeoRegion, (PathBuf, PathBuf)>,
-    pub services: HashMap<RoutedService, Vec<(&'static str, PathBuf)>>,
+    pub rule_sets: HashMap<&'static str, PathBuf>,
 }
 
 impl GeoAvailability {
-    pub fn get(&self, region: GeoRegion) -> Option<&(PathBuf, PathBuf)> {
-        self.regions.get(&region)
+    pub fn path(&self, rule_set: &RuleSet) -> Option<&PathBuf> {
+        self.rule_sets.get(rule_set.tag)
     }
 
     pub fn lacks_region_rule_sets(&self, routing_mode: &RoutingMode) -> bool {
         match routing_mode {
             RoutingMode::Global => false,
             RoutingMode::Bypass(region) | RoutingMode::Only(region) => {
-                crate::geo::region_assets(*region).is_some() && self.get(*region).is_none()
+                crate::geo::region_rule_sets(*region)
+                    .iter()
+                    .any(|rule_set| self.path(rule_set).is_none())
             }
         }
     }
@@ -45,30 +47,16 @@ impl GeoAvailability {
 
     #[cfg(test)]
     pub fn all() -> Self {
-        let mut regions = HashMap::new();
-        for region in GeoRegion::ALL {
-            if let Some(a) = crate::geo::region_assets(region) {
-                regions.insert(
-                    region,
-                    (
-                        PathBuf::from("/geo").join(a.geoip.filename),
-                        PathBuf::from("/geo").join(a.geosite.filename),
-                    ),
-                );
-            }
-        }
-        let mut services = HashMap::new();
-        for service in RoutedService::ALL {
-            services.insert(
-                service,
-                crate::geo::service_assets(service)
-                    .present()
-                    .into_iter()
-                    .map(|a| (a.tag(), PathBuf::from("/geo").join(a.filename)))
-                    .collect(),
-            );
-        }
-        Self { regions, services }
+        let rule_sets = crate::geo::RULE_SETS
+            .iter()
+            .map(|rule_set| {
+                (
+                    rule_set.tag,
+                    PathBuf::from("/geo").join(rule_set.filename()),
+                )
+            })
+            .collect();
+        Self { rule_sets }
     }
 }
 
@@ -141,12 +129,7 @@ fn build_config(
             "strategy": DNS_STRATEGY,
         }),
     };
-    let (route, rule_sets) = build_route(
-        &routing_mode,
-        resolvers,
-        geo,
-        &settings.geo_routing.service_routes,
-    );
+    let (route, rule_sets) = build_route(&routing_mode, resolvers, geo);
     let available_rule_sets: HashSet<&str> = rule_sets
         .iter()
         .filter_map(|rule_set| rule_set["tag"].as_str())
@@ -656,15 +639,14 @@ struct RuleSetRules {
 }
 
 impl RuleSetRules {
-    fn push(&mut self, tag: &str, path: &PathBuf, outbound: &str) {
-        let rule = json!({ "rule_set": [tag], "outbound": outbound });
-        if crate::geo::is_ip_rule_set_tag(tag) {
-            self.ip.push(rule);
-        } else {
-            self.domain.push(rule);
+    fn push(&mut self, rule_set: &RuleSet, path: &PathBuf, outbound: &str) {
+        let rule = json!({ "rule_set": [rule_set.tag], "outbound": outbound });
+        match rule_set.kind {
+            RuleSetKind::Geoip => self.ip.push(rule),
+            RuleSetKind::Geosite => self.domain.push(rule),
         }
         self.definitions.push(json!({
-            "tag": tag,
+            "tag": rule_set.tag,
             "type": "local",
             "format": "binary",
             "path": path,
@@ -676,7 +658,6 @@ fn build_route(
     routing_mode: &RoutingMode,
     resolvers: RouteResolvers,
     geo: &GeoAvailability,
-    service_routes: &HashMap<RoutedService, ServiceRoute>,
 ) -> (Value, Vec<Value>) {
     let mut rules = vec![
         json!({
@@ -694,21 +675,6 @@ fn build_route(
         }),
     ];
 
-    let mut services = RuleSetRules::default();
-    for service in RoutedService::ALL {
-        let outbound = match service_routes.get(&service).copied().unwrap_or_default() {
-            ServiceRoute::Disabled => continue,
-            ServiceRoute::Proxy => "proxy",
-            ServiceRoute::Direct => "direct",
-        };
-        let Some(entries) = geo.services.get(&service) else {
-            continue;
-        };
-        for (tag, path) in entries {
-            services.push(tag, path, outbound);
-        }
-    }
-
     let mut region = RuleSetRules::default();
     let mut region_private_rule = None;
     match routing_mode {
@@ -725,11 +691,10 @@ fn build_route(
                 "ip_is_private": true,
                 "outbound": "direct",
             }));
-            if let (Some(assets), Some((geoip_path, geosite_path))) =
-                (crate::geo::region_assets(*geo_region), geo.get(*geo_region))
-            {
-                region.push(assets.geosite.tag(), geosite_path, outbound);
-                region.push(assets.geoip.tag(), geoip_path, outbound);
+            for rule_set in crate::geo::region_rule_sets(*geo_region) {
+                if let Some(path) = geo.path(rule_set) {
+                    region.push(rule_set, path, outbound);
+                }
             }
         }
         RoutingMode::Bypass(_) | RoutingMode::Only(_) => {}
@@ -741,29 +706,23 @@ fn build_route(
     // over the fake-IP name in sing-box's domain matching, so `sniff` runs only
     // while the destination has no name; an SNI that differs from the queried
     // name (ECH, domain fronting) must not move a connection to another rule.
-    if !services.domain.is_empty() || !region.domain.is_empty() {
+    if !region.domain.is_empty() {
         rules.push(json!({
             "domain_regex": ["."],
             "invert": true,
             "action": "sniff",
         }));
     }
-    rules.append(&mut services.domain);
-    let mut resolve = (!services.ip.is_empty() || !region.ip.is_empty()).then(|| {
+    let resolve = (!region.ip.is_empty()).then(|| {
         let mut rule = resolvers.destination;
         rule["action"] = json!("resolve");
         rule
     });
-    if !services.ip.is_empty() {
-        rules.extend(resolve.take());
-    }
-    rules.append(&mut services.ip);
     rules.extend(region_private_rule);
     rules.append(&mut region.domain);
     rules.extend(resolve);
     rules.append(&mut region.ip);
-    let mut rule_sets = services.definitions;
-    rule_sets.append(&mut region.definitions);
+    let rule_sets = region.definitions;
 
     let route = json!({
         "default_domain_resolver": resolvers.default_domain,
@@ -2121,7 +2080,6 @@ mod tests {
             &RoutingMode::Global,
             default_resolver(),
             &GeoAvailability::all(),
-            &no_services(),
         );
         assert_eq!(
             route["default_mark"].as_u64(),
@@ -2136,7 +2094,6 @@ mod tests {
             &RoutingMode::Global,
             default_resolver(),
             &GeoAvailability::all(),
-            &no_services(),
         );
         assert!(rule_sets.is_empty());
         let rules = route["rules"].as_array().unwrap();
@@ -2154,7 +2111,6 @@ mod tests {
             &RoutingMode::Only(GeoRegion::Ru),
             default_resolver(),
             &GeoAvailability::all(),
-            &no_services(),
         );
         let rules = route["rules"].as_array().unwrap();
         assert!(rules.len() >= 4);
@@ -2167,7 +2123,6 @@ mod tests {
             &RoutingMode::Bypass(GeoRegion::Cn),
             default_resolver(),
             &GeoAvailability::all(),
-            &no_services(),
         );
         let rules = route["rules"].as_array().unwrap();
         assert!(rules.len() >= 4);
@@ -2180,7 +2135,6 @@ mod tests {
             &RoutingMode::Only(GeoRegion::Cn),
             default_resolver(),
             &GeoAvailability::all(),
-            &no_services(),
         );
         let rules = route["rules"].as_array().unwrap();
         assert!(rules.len() >= 4);
@@ -2337,7 +2291,7 @@ mod tests {
                 rule_set: vec![
                     "geosite-category-ru".into(),
                     "geoip-ru".into(),
-                    "geoip-telegram".into(),
+                    "geoip-cn".into(),
                 ],
                 server: "local".into(),
                 disable_cache: true,
@@ -2349,7 +2303,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let available = HashSet::from(["geoip-ru", "geoip-telegram", "geosite-category-ru"]);
+        let available = HashSet::from(["geoip-ru", "geoip-cn", "geosite-category-ru"]);
 
         let block = build(&through_proxy(dns), &available);
 
@@ -2391,7 +2345,7 @@ mod tests {
                 {
                     "match_response": "kvn-rule-1",
                     "response_rcode": "NOERROR",
-                    "rule_set": ["geoip-ru", "geoip-telegram"],
+                    "rule_set": ["geoip-ru", "geoip-cn"],
                     "action": "route",
                     "server": "local",
                     "disable_cache": true,
@@ -2660,14 +2614,14 @@ mod tests {
     fn direct_destination_rules_mirror_domain_routes_up_to_the_last_direct_one() {
         let bootstrap = through_proxy(active(vec![doh("remote", "1.1.1.1")], "remote")).bootstrap();
         let routes = [
-            ("geosite-telegram", "proxy"),
+            ("geosite-cn", "proxy"),
             ("geosite-category-ru", "direct"),
-            ("geosite-steam", "proxy"),
+            ("geosite-category-ir", "proxy"),
         ];
         assert_eq!(
             direct_destination_rules(&routes, "remote", &bootstrap),
             vec![
-                json!({ "rule_set": ["geosite-telegram"], "server": "remote" }),
+                json!({ "rule_set": ["geosite-cn"], "server": "remote" }),
                 json!({ "rule_set": ["geosite-category-ru"], "server": "bootstrap" }),
             ]
         );
@@ -2935,7 +2889,6 @@ mod tests {
             &RoutingMode::Bypass(GeoRegion::Ir),
             default_resolver(),
             &GeoAvailability::all(),
-            &no_services(),
         );
         let rules = route["rules"].as_array().unwrap();
         assert!(rules.len() >= 4);
@@ -2954,7 +2907,6 @@ mod tests {
             &RoutingMode::Only(GeoRegion::Ir),
             default_resolver(),
             &GeoAvailability::all(),
-            &no_services(),
         );
         let rules = route["rules"].as_array().unwrap();
         assert!(rules.len() >= 4);
@@ -2968,7 +2920,6 @@ mod tests {
             &RoutingMode::Bypass(GeoRegion::Ru),
             default_resolver(),
             &GeoAvailability::all(),
-            &no_services(),
         );
         assert_eq!(route["final"], "proxy");
         assert_eq!(rule_sets.len(), 2);
@@ -3050,200 +3001,25 @@ mod tests {
         }
     }
 
-    fn no_services() -> HashMap<RoutedService, ServiceRoute> {
-        HashMap::new()
-    }
-
-    fn routes(entries: &[(RoutedService, ServiceRoute)]) -> HashMap<RoutedService, ServiceRoute> {
-        entries.iter().copied().collect()
-    }
-
     #[test]
-    fn build_route_service_direct_adds_rule_and_rule_sets_in_global() {
-        let (route, rule_sets) = build_route(
-            &RoutingMode::Global,
-            default_resolver(),
-            &GeoAvailability::all(),
-            &routes(&[(RoutedService::Steam, ServiceRoute::Direct)]),
-        );
-        let rules = route["rules"].as_array().unwrap();
-        for tag in ["geosite-steam", "geoip-steam"] {
-            let steam_rule = rules
-                .iter()
-                .find(|r| r["rule_set"] == json!([tag]))
-                .expect("steam rule present");
-            assert_eq!(steam_rule["outbound"], "direct");
-        }
-        let tags: Vec<&str> = rule_sets.iter().filter_map(|r| r["tag"].as_str()).collect();
-        assert_eq!(tags, ["geosite-steam", "geoip-steam"]);
-        assert!(
-            rule_sets
-                .iter()
-                .all(|r| r["type"] == "local" && r["format"] == "binary")
-        );
-    }
-
-    #[test]
-    fn build_route_service_proxy_uses_proxy_outbound() {
-        let (route, rule_sets) = build_route(
-            &RoutingMode::Bypass(GeoRegion::Ru),
-            default_resolver(),
-            &GeoAvailability::all(),
-            &routes(&[(RoutedService::Telegram, ServiceRoute::Proxy)]),
-        );
-        let rules = route["rules"].as_array().unwrap();
-        for tag in ["geosite-telegram", "geoip-telegram"] {
-            let tg_rule = rules
-                .iter()
-                .find(|r| r["rule_set"] == json!([tag]))
-                .expect("telegram rule present");
-            assert_eq!(tg_rule["outbound"], "proxy");
-        }
-        assert_eq!(rule_sets.len(), 4);
-    }
-
-    #[test]
-    fn build_route_service_rules_precede_geo_rules_under_only() {
-        let (route, rule_sets) = build_route(
-            &RoutingMode::Only(GeoRegion::Ru),
-            default_resolver(),
-            &GeoAvailability::all(),
-            &routes(&[(RoutedService::Steam, ServiceRoute::Direct)]),
-        );
-        let rules = route["rules"].as_array().unwrap();
-        let steam_idx = rules
-            .iter()
-            .position(|r| r["rule_set"] == json!(["geoip-steam"]))
-            .unwrap();
-        let geo_idx = rules
-            .iter()
-            .position(|r| r["rule_set"] == json!(["geosite-category-ru"]))
-            .unwrap();
-        assert!(
-            steam_idx < geo_idx,
-            "service overrides must win over the regional rules"
-        );
-        assert_eq!(rule_sets.len(), 4);
-    }
-
-    #[test]
-    fn build_route_service_rules_follow_all_order() {
-        let (route, _) = build_route(
-            &RoutingMode::Global,
-            default_resolver(),
-            &GeoAvailability::all(),
-            &routes(&[
-                (RoutedService::Telegram, ServiceRoute::Direct),
-                (RoutedService::Steam, ServiceRoute::Direct),
-            ]),
-        );
-        let rules = route["rules"].as_array().unwrap();
-        let service_rules: Vec<&Value> = rules
-            .iter()
-            .filter(|r| r.get("rule_set").is_some())
-            .collect();
-        let tags: Vec<&Value> = service_rules.iter().map(|r| &r["rule_set"][0]).collect();
-        assert_eq!(
-            tags,
-            [
-                "geosite-steam",
-                "geosite-telegram",
-                "geoip-steam",
-                "geoip-telegram"
-            ]
-        );
-    }
-
-    #[test]
-    fn build_route_sniffs_before_domain_rules_and_resolves_before_ip_rules() {
+    fn build_route_places_rule_sets_by_kind_after_sniff_and_resolve() {
         let (route, _) = build_route(
             &RoutingMode::Bypass(GeoRegion::Ru),
             default_resolver(),
             &GeoAvailability::all(),
-            &routes(&[(RoutedService::Steam, ServiceRoute::Proxy)]),
         );
         let rules = route["rules"].as_array().unwrap();
         let position =
             |predicate: &dyn Fn(&Value) -> bool| rules.iter().position(predicate).unwrap();
         let sniff = position(&|r| r["action"] == "sniff");
         let resolve = position(&|r| r["action"] == "resolve");
-        let first_domain_rule = position(&|r| r["rule_set"] == json!(["geosite-steam"]));
-        let first_ip_rule = position(&|r| r["rule_set"] == json!(["geoip-steam"]));
-        assert!(sniff < first_domain_rule);
+        let geosite_rule = position(&|r| r["rule_set"] == json!(["geosite-category-ru"]));
+        let geoip_rule = position(&|r| r["rule_set"] == json!(["geoip-ru"]));
+        assert!(sniff < geosite_rule);
         assert_eq!(rules[sniff]["domain_regex"], json!(["."]));
         assert_eq!(rules[sniff]["invert"], true);
-        assert!(first_domain_rule < resolve && resolve < first_ip_rule);
+        assert!(geosite_rule < resolve && resolve < geoip_rule);
         assert_eq!(rules[resolve]["server"], "remote");
-    }
-
-    #[test]
-    fn build_route_disabled_services_emit_no_entries() {
-        let (route, rule_sets) = build_route(
-            &RoutingMode::Global,
-            default_resolver(),
-            &GeoAvailability::all(),
-            &routes(&[(RoutedService::Steam, ServiceRoute::Disabled)]),
-        );
-        assert!(rule_sets.is_empty());
-        assert!(
-            route["rules"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|r| r.get("rule_set").is_none())
-        );
-    }
-
-    #[test]
-    fn build_route_service_enabled_without_files_is_noop() {
-        let (_route, rule_sets) = build_route(
-            &RoutingMode::Global,
-            default_resolver(),
-            &GeoAvailability::default(),
-            &routes(&[(RoutedService::Steam, ServiceRoute::Direct)]),
-        );
-        assert!(rule_sets.is_empty());
-    }
-
-    #[test]
-    fn generated_config_includes_service_rule_sets_when_enabled() {
-        let profile = test_profile();
-        let mut settings = Settings::default();
-        settings
-            .geo_routing
-            .service_routes
-            .insert(RoutedService::Steam, ServiceRoute::Direct);
-        let config = generate_config(
-            &profile,
-            &settings,
-            &GeoAvailability::all(),
-            TEST_CLASH_PORT,
-            None,
-        )
-        .unwrap();
-        let tags: Vec<&str> = config["route"]["rule_set"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|r| r["tag"].as_str())
-            .collect();
-        assert!(tags.contains(&"geosite-steam"));
-        assert!(tags.contains(&"geoip-steam"));
-    }
-
-    #[test]
-    fn generated_config_omits_service_rule_sets_by_default() {
-        let profile = test_profile();
-        let settings = Settings::default();
-        let config = generate_config(
-            &profile,
-            &settings,
-            &GeoAvailability::all(),
-            TEST_CLASH_PORT,
-            None,
-        )
-        .unwrap();
-        assert!(config["route"].get("rule_set").is_none());
     }
 
     #[test]

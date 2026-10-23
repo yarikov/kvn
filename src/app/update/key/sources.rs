@@ -269,31 +269,14 @@ fn update_geo(model: &mut Model) -> Vec<Effect> {
     let mut effects = Vec::new();
     if !model.geo_updating {
         if model.config.settings.geo_routing.current_region == Some(GeoRegion::Global) {
-            let services = model.config.settings.geo_routing.enabled_services();
-            if services.is_empty() {
-                push_status(
-                    &mut effects,
-                    model,
-                    StatusKey::Geo,
-                    crate::app::model::AppStatus::Info(
-                        "No enabled service rule-sets to update".to_string(),
-                    ),
-                );
-                return effects;
-            }
-            if !download_allowed(model) {
-                push_download_blocked(&mut effects, model, DownloadKind::Geo);
-                return effects;
-            }
-            model.geo_updating = true;
-            model.geo_automatic_update = false;
             push_status(
                 &mut effects,
                 model,
                 StatusKey::Geo,
-                crate::app::model::AppStatus::Info("Checking service rule-sets…".to_string()),
+                crate::app::model::AppStatus::Info(
+                    "The Global region has no rule-sets to update".to_string(),
+                ),
             );
-            effects.push(Effect::RetryServiceRuleSets { services });
             return effects;
         }
         if !download_allowed(model) {
@@ -351,7 +334,7 @@ mod tests {
     use crate::app::update::key::ipc::handle_ipc_command;
     use crate::app::update::tick::handle_tick;
     use crate::app::update::update;
-    use crate::config::profile::{GeoAutoUpdate, Profile, RoutedService, Subscription};
+    use crate::config::profile::{GeoAutoUpdate, Profile, Subscription};
     use crate::test_helpers::*;
     use chrono::Local;
     use crossterm::event::KeyModifiers;
@@ -537,29 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn normal_mode_shift_u_in_global_updates_enabled_services() {
-        let mut model = model_with_profiles(vec![]);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(GeoRegion::Global);
-        model.config.settings.geo_routing.service_routes.insert(
-            RoutedService::Telegram,
-            crate::config::profile::ServiceRoute::Proxy,
-        );
-        model.connection = ConnectionState::Connected;
-
-        let effects = handle_sources(&mut model, key('U'));
-        assert!(model.geo_updating);
-        assert!(!effects.contains(&Effect::DownloadGeo));
-        assert!(effects.contains(&Effect::RetryServiceRuleSets {
-            services: vec![RoutedService::Telegram],
-        }));
-    }
-
-    #[test]
-    fn normal_mode_shift_u_in_global_without_services_is_noop() {
+    fn normal_mode_shift_u_in_global_is_noop() {
         let mut model = model_with_profiles(vec![]);
         model
             .config
@@ -570,7 +531,7 @@ mod tests {
         let effects = handle_sources(&mut model, key('U'));
         assert!(!model.geo_updating);
         assert!(!effects.contains(&Effect::DownloadGeo));
-        assert!(model.status_text().contains("No enabled service"));
+        assert!(model.status_text().contains("no rule-sets to update"));
     }
 
     #[test]

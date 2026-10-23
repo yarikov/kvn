@@ -232,23 +232,6 @@ fn cycle_routing_draft(model: &mut Model, forward: bool) {
             };
             model.routing_settings_draft.get_or_insert_default().mode = Some(modes[next]);
         }
-        Some(RoutingSettingsItem::Service(service)) => {
-            let current = shown
-                .service_routes
-                .get(&service)
-                .copied()
-                .unwrap_or_default();
-            let next = if forward {
-                current.next()
-            } else {
-                current.prev()
-            };
-            model
-                .routing_settings_draft
-                .get_or_insert_default()
-                .service_routes
-                .insert(service, next);
-        }
         None => {}
     }
 }
@@ -325,12 +308,12 @@ pub(in crate::app::update) fn open_dns_settings(model: &mut Model) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::model::{ConnectionSettingsDraft, ConnectionState};
+    use crate::app::model::ConnectionSettingsDraft;
     use crate::app::msg::Msg;
     use crate::app::update::key::handle_key;
     use crate::app::update::key::sources::handle_sources;
     use crate::app::update::update;
-    use crate::config::profile::{IconSet, Profile, RoutedService, RoutingMode, ServiceRoute};
+    use crate::config::profile::{IconSet, RoutingMode};
     use crate::test_helpers::*;
 
     #[test]
@@ -556,34 +539,6 @@ mod tests {
     }
 
     #[test]
-    fn settings_routing_service_change_defers_one_connected_reconnect() {
-        let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u".into());
-        let active_id = profile.id;
-        let mut model = model_with_profiles(vec![profile]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.connection = ConnectionState::Connected;
-        model.active_profile_id = Some(active_id);
-        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
-
-        handle_key(&mut model, key('r'));
-        handle_key(&mut model, key('j'));
-        handle_key(&mut model, key('j'));
-        handle_key(&mut model, key('l'));
-        let effects = handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
-
-        assert_eq!(model.connection, ConnectionState::Connected);
-        assert!(model.pending_service_reconnect);
-        assert!(effects.contains(&Effect::DownloadServiceRuleSetsIfMissing));
-        assert_eq!(
-            effects
-                .iter()
-                .filter(|effect| matches!(effect, Effect::SaveConfig))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
     fn connection_menu_does_not_replace_pending_kill_switch_target() {
         let mut model = model_with_profiles(vec![]);
         model.kill_switch_pending = Some(true);
@@ -687,19 +642,9 @@ mod tests {
 
         assert_eq!(model.shown_routing_settings().region, GeoRegion::Global);
         handle_key(&mut model, key('j'));
-        assert_eq!(model.settings_menu_selected, 1);
-        handle_key(&mut model, key('l'));
-        assert_eq!(
-            model
-                .shown_routing_settings()
-                .service_routes
-                .get(&RoutedService::Steam),
-            Some(&ServiceRoute::Proxy)
-        );
+        assert_eq!(model.settings_menu_selected, 0);
         handle_key(&mut model, key('G'));
-        assert_eq!(model.settings_menu_selected, 2);
-        handle_key(&mut model, key('j'));
-        assert_eq!(model.settings_menu_selected, 2);
+        assert_eq!(model.settings_menu_selected, 0);
     }
 
     #[test]
@@ -718,17 +663,17 @@ mod tests {
         let shown = model.shown_routing_settings();
         assert_eq!(shown.region, GeoRegion::Global);
         assert_eq!(shown.mode, RoutingMode::Global);
-        assert_eq!(RoutingSettingsItem::available(shown.region).len(), 3);
+        assert_eq!(RoutingSettingsItem::available(shown.region).len(), 1);
 
         handle_key(&mut model, key('l'));
         let shown = model.shown_routing_settings();
         assert_eq!(shown.region, GeoRegion::Ru);
         assert_eq!(shown.mode, RoutingMode::Bypass(GeoRegion::Ru));
-        assert_eq!(RoutingSettingsItem::available(shown.region).len(), 4);
+        assert_eq!(RoutingSettingsItem::available(shown.region).len(), 2);
     }
 
     #[test]
-    fn repeated_routing_enter_keeps_routes_merged_from_disk() {
+    fn repeated_routing_enter_keeps_the_mode_merged_from_disk() {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
@@ -741,18 +686,13 @@ mod tests {
         merged
             .settings
             .geo_routing
-            .service_routes
-            .insert(RoutedService::Steam, ServiceRoute::Proxy);
+            .set_mode(RoutingMode::Only(GeoRegion::Ru));
         model.replace_config_preserving_selection(merged);
 
         assert!(handle_key(&mut model, KeyEvent::from(KeyCode::Enter)).is_empty());
         assert_eq!(
-            model
-                .config
-                .settings
-                .geo_routing
-                .service_route(RoutedService::Steam),
-            ServiceRoute::Proxy
+            model.config.settings.geo_routing.mode(),
+            RoutingMode::Only(GeoRegion::Ru)
         );
     }
 
@@ -831,10 +771,6 @@ mod tests {
         handle_key(&mut routing, key('l'));
         handle_key(&mut routing, key('j'));
         handle_key(&mut routing, key('l'));
-        handle_key(&mut routing, key('j'));
-        handle_key(&mut routing, key('l'));
-        handle_key(&mut routing, key('j'));
-        handle_key(&mut routing, key('l'));
         let effects = handle_key(&mut routing, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
             routing.overlay,
@@ -847,22 +783,6 @@ mod tests {
         assert_eq!(
             routing.config.settings.geo_routing.mode(),
             crate::config::profile::RoutingMode::Bypass(GeoRegion::Ru)
-        );
-        assert_eq!(
-            routing
-                .config
-                .settings
-                .geo_routing
-                .service_route(RoutedService::Steam),
-            ServiceRoute::Proxy
-        );
-        assert_eq!(
-            routing
-                .config
-                .settings
-                .geo_routing
-                .service_route(RoutedService::Telegram),
-            ServiceRoute::Proxy
         );
         assert_eq!(
             effects

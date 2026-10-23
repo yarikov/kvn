@@ -20,7 +20,6 @@ use connection::{
 use geo::handle_geo_result;
 use key::handle_key;
 use key::ipc::handle_ipc_command;
-use routing::on_service_rule_sets_ready;
 use subscription::handle_subscription_result;
 use tick::handle_tick;
 use traffic::handle_traffic_stats_updated;
@@ -38,13 +37,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::GeoMetadataRefreshed {
             last_updated,
             last_checked_at,
-            service_checked_at,
             schedule,
         } => {
             model.geo_last_updated = last_updated;
             model.geo_last_checked_at = last_checked_at;
             model.geo_last_attempt_at = None;
-            model.service_checked_at = service_checked_at;
             if let Some(schedule) = schedule {
                 model.apply_geo_schedule(schedule);
             }
@@ -62,12 +59,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             effects.push(Effect::BroadcastState);
             effects
         }
-        Msg::ServiceRuleSetsReady {
-            checked_at,
-            schedule,
-            updated_parts,
-            errors,
-        } => on_service_rule_sets_ready(model, checked_at, schedule, updated_parts, errors),
         Msg::ConnectFailed { attempt_id, error } => on_connect_failed(model, attempt_id, error),
         Msg::ConnectRetrying {
             attempt_id,

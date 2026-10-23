@@ -27,12 +27,6 @@ pub(super) fn execute_daemon_effect(
         Effect::CheckIntegrationSetup => connection::check_integration_setup(tx),
         Effect::DownloadGeo => geo::download(tx, model),
         Effect::DownloadGeoIfMissing => geo::download_if_missing(tx, model),
-        Effect::DownloadServiceRuleSetsIfMissing => {
-            geo::download_service_rule_sets_if_missing(tx, model)
-        }
-        Effect::RetryServiceRuleSets { services } => {
-            geo::retry_service_rule_sets(tx, model, services)
-        }
         Effect::RefreshGeoLastUpdated => geo::refresh_last_updated(tx, model),
         Effect::ClearGeoRetryState { region } => geo::clear_retry_state(region),
         Effect::ResetGeoUpdateSchedules => geo::reset_update_schedules(model),

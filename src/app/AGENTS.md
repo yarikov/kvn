@@ -7,7 +7,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 - `GeoRegion::Ru` / `Cn` / `Ir` — download that country's geoip/geosite, enable `Global` / `Bypass(region)` / `Only(region)`.
 - `GeoRegion::Global` — skip geo downloads, only `Global` mode is available.
 - The first-run tour (see § First-Run Onboarding) owns the first region choice: its `Region` card hands off to the region picker, and the mode and region pickers open from nowhere else. Both end only by choosing — they ignore `q`/`Esc` and offer no close action. A region or mode set over IPC while a picker is open leaves it on screen with that value marked active, and `Enter` confirms or replaces it. A completed tour with no region stored opens the main screen and behaves as `Global`.
-- The region can be changed at runtime on Settings › Routing (`Space r`). When the region changes, the previous region's mode is saved into `geo_routing.selected_region_modes` and the new region's previously stored mode is restored (falling back to `Global`).
+- The region can be changed at runtime on Settings › Routing (`Space r`), whose Region and Mode edits are drafted in `Model::routing_settings_draft` and committed together on Enter. When the region changes, the previous region's mode is saved into `geo_routing.selected_region_modes` and the new region's previously stored mode is restored (falling back to `Global`).
 
 ## First-Run Onboarding
 

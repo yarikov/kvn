@@ -14,17 +14,17 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
 │                                       ┌───────────────────────────────┐                                       │
 │                                       │      Settings › Routing       │                                       │
 │                                       │                               │                                       │
-│                                       │   Region   ‹ 🌍  Global ›      │                                       │
-│                                       │                               │                                       │
-│                                       │           Services            │                                       │
-│                                       │   Steam    ‹ Disabled ›       │                                       │
-│                                       │   Telegram ‹ Disabled ›       │                                       │
+│                                       │    Region ‹ 🌍  Global ›       │                                       │
 │                                       │                               │                                       │
 │                                       │ 󰌑 apply · q/󱊷 close · ⌫ back  │                                       │
 │                                       └───────────────────────────────┘                                       │
+│                                                       ││                                                      │
+│                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

@@ -71,7 +71,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `config` | `src/config.rs`, `src/config/profile.rs`, `src/config/subscription.rs`, `src/config/json_pointer.rs`, `src/config/merge.rs` + `src/config/merge/resolution.rs`, `src/config/recovery.rs` | JSON config I/O, profile and subscription struct definitions, subscription fetcher; `merge` is the UUID-aware three-way merge and `merge::resolution` builds the `YOUR EDIT` / `CURRENT` conflict document; `recovery` preserves and rotates copies in `recovery/` (three per kind); `json_pointer::JsonIndex` indexes every RFC 6901 pointer of a JSON text in one pass and answers its line (exact, or the nearest present ancestor) |
 | `config::profile` submodules | `src/config/profile/{diagnostic,json_schema,protocol,protocol_options,protocol_config,tls,entry,schedule,subscription,routing,settings,schema,migrate,dns}.rs`, `src/config/profile/share_link{.rs,/parse.rs,/encode.rs,/finalmask.rs}` | One persisted type per submodule, behind a `pub use` facade; see [`src/config/AGENTS.md`](src/config/AGENTS.md) § Module Layout |
 | `singbox` | `src/singbox.rs`, `src/singbox/config.rs`, `src/singbox/outbound.rs`, `src/singbox/runner.rs`, `src/singbox/clash_api.rs`, `src/singbox/process_handle.rs` | Process lifecycle: allocate a free Clash API port, write temp config, run `sing-box check`, spawn `sing-box run`, retry a lost port race, stop on disconnect (SIGTERM, then SIGKILL after `STOP_GRACE_PERIOD`); Clash API client for live traffic stats; `Child` wrapper carrying the process's Clash API port |
-| `geo` | `src/geo.rs` | Download and cache geoip/geosite rule-sets for sing-box routing |
+| `geo` | `src/geo.rs` | The `RuleSet` catalog (tag, geoip/geosite kind, URL) and the rule-sets of each region; downloads and caches them for sing-box routing |
 | `paths` | `src/paths.rs` | Every file path kvn uses: config (`~/.config/kvn-tui/`), state (`$XDG_STATE_HOME/kvn/`) and both runtime namespaces (`$XDG_RUNTIME_DIR/kvn-tui/`, `$XDG_RUNTIME_DIR/kvn/`) |
 | `atomic_write` | `src/atomic_write.rs` | Atomic file write helper (write `.tmp` + fsync + rename + parent-dir fsync) |
 | `runtime_lock` | `src/runtime_lock.rs` | `flock`-based exclusive lock on a runtime file, optionally waiting for the holder to release it; backs the daemon's single-instance lock |
@@ -102,7 +102,7 @@ The Omarchy bar widget is not in this repository: it is the standalone [omakvn](
 | [`src/daemon/AGENTS.md`](src/daemon/AGENTS.md) | Effect execution: what each `daemon/` submodule owns |
 | [`src/tui_client/AGENTS.md`](src/tui_client/AGENTS.md) | The client loop, its handlers, and client-local keys |
 | [`src/config/AGENTS.md`](src/config/AGENTS.md) | `config::profile` submodules; share-link parsing, the DNS model and its generation, schema migrations, external editor sessions and JSON Schema |
-| [`src/singbox/AGENTS.md`](src/singbox/AGENTS.md) | sing-box config generation, the Clash API port, routing modes and service routing |
+| [`src/singbox/AGENTS.md`](src/singbox/AGENTS.md) | sing-box config generation, the Clash API port, routing modes and the rule-sets they route |
 | [`src/services/AGENTS.md`](src/services/AGENTS.md) | Kill switch, suspend/resume, `state.json` |
 | [`src/ui/AGENTS.md`](src/ui/AGENTS.md) | `ui::layout` submodules, rendering snapshots, palettes, theme resolution and setting, terminal colors |
 
@@ -272,7 +272,7 @@ Background work is executed in dedicated threads spawned by the **daemon** (`dae
 - **Suspend watcher** — `services/suspend.rs` runs a blocking zbus listener that sends `Msg::SystemResumed`; the daemon auto-reconnects on resume even when no TUI is attached.
 - **IPC server** — `ipc.rs` accepts Unix socket connections from clients, parses NDJSON commands, and forwards them into the daemon's mpsc channel as `Msg::IpcCommand`, or as `Msg::IpcRequest` when the command carries a request id for a correlated reply.
 - **Signal handler** — turns `SIGTERM` / `SIGINT` into `Quit`, so the daemon cleans up sing-box and the socket.
-- **Effects** — slow effects run on a short-lived thread that sends its result back through the daemon's channel: `Connect`, the geo effects (`DownloadGeo`, `DownloadGeoIfMissing`, `DownloadServiceRuleSetsIfMissing`, `RetryServiceRuleSets`, `RefreshGeoLastUpdated`), `UpdateSubscription`, `TestProfile`, `FetchTrafficStats`, `ApplyKillSwitch`, `CheckAutoConnectPolkit`, `CheckIntegrationSetup`, and `ReloadConfig`.
+- **Effects** — slow effects run on a short-lived thread that sends its result back through the daemon's channel: `Connect`, the geo effects (`DownloadGeo`, `DownloadGeoIfMissing`, `RefreshGeoLastUpdated`), `UpdateSubscription`, `TestProfile`, `FetchTrafficStats`, `ApplyKillSwitch`, `CheckAutoConnectPolkit`, `CheckIntegrationSetup`, and `ReloadConfig`.
 - **App log** — app status messages are appended to the app log with an `[app]` prefix (`Effect::AppendAppLog`), next to the sing-box log, so both are visible in the TUI log panel.
 - **State I/O** — `services/waybar.rs` writes `state.json` on connect/disconnect for waybar integration.
 

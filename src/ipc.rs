@@ -411,7 +411,6 @@ mod tests {
             routing_fallback: None,
             geo_last_updated: None,
             geo_last_checked_at: None,
-            service_checked_at: Default::default(),
             overlay: Overlay::None,
             main_pane_focus: Default::default(),
             profiles: vec![],

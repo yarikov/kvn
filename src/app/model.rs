@@ -4,7 +4,7 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use crate::config::load_config;
-use crate::config::profile::{Config, GeoRegion, Profile, RoutedService, ServiceRoute};
+use crate::config::profile::{Config, GeoRegion, Profile};
 use crate::ui::styles::Theme;
 use chrono::{DateTime, Local};
 
@@ -96,7 +96,6 @@ impl SettingsMenuEntry {
 pub struct RoutingSettings {
     pub region: GeoRegion,
     pub mode: crate::config::profile::RoutingMode,
-    pub service_routes: HashMap<RoutedService, ServiceRoute>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,8 +104,6 @@ pub struct RoutingSettingsDraft {
     pub region: Option<GeoRegion>,
     #[serde(default)]
     pub mode: Option<crate::config::profile::RoutingMode>,
-    #[serde(default)]
-    pub service_routes: HashMap<RoutedService, ServiceRoute>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,7 +144,6 @@ impl DnsSettingsItem {
 pub enum RoutingSettingsItem {
     Region,
     Mode,
-    Service(RoutedService),
 }
 
 impl RoutingSettingsItem {
@@ -156,7 +152,6 @@ impl RoutingSettingsItem {
         if region != GeoRegion::Global {
             items.push(Self::Mode);
         }
-        items.extend(RoutedService::ALL.map(Self::Service));
         items
     }
 }
@@ -382,8 +377,6 @@ pub struct Model {
     pub dns_selected: usize,
     pub dns_preset_draft: Option<String>,
     pub dns_fakeip_draft: Option<bool>,
-    pub pending_service_reconnect: bool,
-    pub pending_geo_reconnect: bool,
     pub routing_fallback: Option<crate::config::profile::RoutingFallback>,
     pub region_download_deferred: bool,
     pub logs: VecDeque<String>,
@@ -396,9 +389,6 @@ pub struct Model {
     pub geo_last_attempt_at: Option<DateTime<Local>>,
     pub geo_retry_state: Option<crate::config::profile::RetryState>,
     pub geo_next_update: Option<chrono::NaiveDate>,
-    pub service_retry_states: HashMap<RoutedService, crate::config::profile::RetryState>,
-    pub service_checked_at: HashMap<RoutedService, DateTime<Local>>,
-    pub service_next_updates: HashMap<RoutedService, chrono::NaiveDate>,
     pub geo_schedule_epoch: u64,
     pub geo_automatic_update: bool,
     pub traffic: TrafficStats,
@@ -458,16 +448,6 @@ impl Model {
         }
         self.geo_retry_state = schedule.retry_state;
         self.geo_next_update = schedule.next_update;
-        self.service_retry_states = schedule.service_retry_states;
-        self.service_next_updates = schedule.service_next_updates;
-    }
-
-    pub fn apply_service_schedule(&mut self, schedule: crate::app::msg::ServiceSchedule) {
-        if schedule.epoch != self.geo_schedule_epoch {
-            return;
-        }
-        self.service_retry_states = schedule.retry_states;
-        self.service_next_updates = schedule.next_updates;
     }
 
     pub fn clear_error_status(&mut self, status_revision: u64) -> bool {
@@ -550,9 +530,8 @@ impl Model {
         let geo_manager = crate::geo::GeoManager::new().ok();
         let geo_schedule_epoch = geo_manager.as_ref().map_or(0, |g| g.schedule_epoch());
         if let Some(manager) = &geo_manager {
-            let _ = manager.ensure_update_schedules(
+            let _ = manager.ensure_update_schedule(
                 region,
-                &config.settings.geo_routing.enabled_services(),
                 config.settings.geo_routing.auto_update
                     != crate::config::profile::GeoAutoUpdate::Off,
                 geo_schedule_epoch,
@@ -561,20 +540,7 @@ impl Model {
         let geo_last_updated = geo_manager.as_ref().and_then(|g| g.last_updated(region));
         let geo_last_checked_at = geo_manager.as_ref().and_then(|g| g.last_checked_at(region));
         let geo_retry_state = geo_manager.as_ref().and_then(|g| g.retry_state(region));
-        let geo_next_update = geo_manager
-            .as_ref()
-            .and_then(|g| g.region_next_update(region));
-        let service_retry_states = geo_manager
-            .as_ref()
-            .map(|g| g.service_retry_states())
-            .unwrap_or_default();
-        let service_checked_at = geo_manager
-            .as_ref()
-            .map(|g| g.service_checked_at())
-            .unwrap_or_default();
-        let service_next_updates = geo_manager
-            .map(|g| g.service_next_updates())
-            .unwrap_or_default();
+        let geo_next_update = geo_manager.and_then(|g| g.region_next_update(region));
 
         let mut model = Self {
             overlay: Overlay::None,
@@ -609,8 +575,6 @@ impl Model {
             dns_selected: 0,
             dns_preset_draft: None,
             dns_fakeip_draft: None,
-            pending_service_reconnect: false,
-            pending_geo_reconnect: false,
             routing_fallback: None,
             region_download_deferred: false,
             logs: VecDeque::new(),
@@ -623,9 +587,6 @@ impl Model {
             geo_last_attempt_at: None,
             geo_retry_state,
             geo_next_update,
-            service_retry_states,
-            service_checked_at,
-            service_next_updates,
             geo_schedule_epoch,
             geo_automatic_update: false,
             traffic: TrafficStats::default(),
@@ -664,9 +625,8 @@ impl Model {
         let geo_manager = crate::geo::GeoManager::new().ok();
         let geo_schedule_epoch = geo_manager.as_ref().map_or(0, |g| g.schedule_epoch());
         if let Some(manager) = &geo_manager {
-            let _ = manager.ensure_update_schedules(
+            let _ = manager.ensure_update_schedule(
                 region,
-                &config.settings.geo_routing.enabled_services(),
                 config.settings.geo_routing.auto_update
                     != crate::config::profile::GeoAutoUpdate::Off,
                 geo_schedule_epoch,
@@ -675,20 +635,7 @@ impl Model {
         let geo_last_updated = geo_manager.as_ref().and_then(|g| g.last_updated(region));
         let geo_last_checked_at = geo_manager.as_ref().and_then(|g| g.last_checked_at(region));
         let geo_retry_state = geo_manager.as_ref().and_then(|g| g.retry_state(region));
-        let geo_next_update = geo_manager
-            .as_ref()
-            .and_then(|g| g.region_next_update(region));
-        let service_retry_states = geo_manager
-            .as_ref()
-            .map(|g| g.service_retry_states())
-            .unwrap_or_default();
-        let service_checked_at = geo_manager
-            .as_ref()
-            .map(|g| g.service_checked_at())
-            .unwrap_or_default();
-        let service_next_updates = geo_manager
-            .map(|g| g.service_next_updates())
-            .unwrap_or_default();
+        let geo_next_update = geo_manager.and_then(|g| g.region_next_update(region));
 
         Self {
             overlay: Overlay::None,
@@ -726,8 +673,6 @@ impl Model {
             dns_selected: 0,
             dns_preset_draft: None,
             dns_fakeip_draft: None,
-            pending_service_reconnect: false,
-            pending_geo_reconnect: false,
             routing_fallback: None,
             region_download_deferred: false,
             logs: VecDeque::new(),
@@ -740,9 +685,6 @@ impl Model {
             geo_last_attempt_at: None,
             geo_retry_state,
             geo_next_update,
-            service_retry_states,
-            service_checked_at,
-            service_next_updates,
             geo_schedule_epoch,
             geo_automatic_update: false,
             traffic: TrafficStats::default(),
@@ -862,20 +804,12 @@ impl Model {
         let mut shown = RoutingSettings {
             region: geo_routing.current_region.unwrap_or(GeoRegion::Global),
             mode: geo_routing.mode(),
-            service_routes: geo_routing.service_routes.clone(),
         };
         let Some(draft) = &self.routing_settings_draft else {
             return shown;
         };
         shown.region = draft.region.unwrap_or(shown.region);
         shown.mode = draft.mode.unwrap_or(shown.mode);
-        for (service, route) in &draft.service_routes {
-            if *route == ServiceRoute::Disabled {
-                shown.service_routes.remove(service);
-            } else {
-                shown.service_routes.insert(*service, *route);
-            }
-        }
         shown
     }
 
@@ -993,8 +927,6 @@ impl Model {
             dns_selected: 0,
             dns_preset_draft: None,
             dns_fakeip_draft: None,
-            pending_service_reconnect: false,
-            pending_geo_reconnect: false,
             routing_fallback: None,
             region_download_deferred: false,
             logs: VecDeque::new(),
@@ -1007,9 +939,6 @@ impl Model {
             geo_last_attempt_at: None,
             geo_retry_state: None,
             geo_next_update: None,
-            service_retry_states: HashMap::new(),
-            service_checked_at: HashMap::new(),
-            service_next_updates: HashMap::new(),
             geo_schedule_epoch: 0,
             geo_automatic_update: false,
             traffic: TrafficStats::default(),

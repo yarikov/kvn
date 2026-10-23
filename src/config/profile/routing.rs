@@ -152,69 +152,6 @@ impl<'de> Deserialize<'de> for RoutingMode {
     }
 }
 
-/// Routing override for one well-known service, applied ahead of the
-/// regional geo rules so it wins in every routing mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ServiceRoute {
-    /// No override — the service follows the regional routing mode.
-    #[default]
-    Disabled,
-    /// Force the service through the VPN tunnel, even under `Bypass`.
-    Proxy,
-    /// Send the service out the `direct` outbound (real network location),
-    /// even under `Only`. Deliberately bypasses the tunnel — and the kill
-    /// switch, which allowlists the `direct` outbound's fwmark by design.
-    Direct,
-}
-
-impl ServiceRoute {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Disabled => "Disabled",
-            Self::Proxy => "Proxy",
-            Self::Direct => "Direct",
-        }
-    }
-
-    pub const fn next(self) -> Self {
-        match self {
-            Self::Disabled => Self::Proxy,
-            Self::Proxy => Self::Direct,
-            Self::Direct => Self::Disabled,
-        }
-    }
-
-    pub const fn prev(self) -> Self {
-        match self {
-            Self::Disabled => Self::Direct,
-            Self::Proxy => Self::Disabled,
-            Self::Direct => Self::Proxy,
-        }
-    }
-}
-
-/// Services with predefined rule-sets that can be routed individually (see
-/// [`ServiceRoute`]). Adding a service = a variant here, an `ALL` entry, and
-/// a descriptor arm in `geo::service_assets`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RoutedService {
-    Steam,
-    Telegram,
-}
-
-impl RoutedService {
-    pub const ALL: [Self; 2] = [Self::Steam, Self::Telegram];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Steam => "Steam",
-            Self::Telegram => "Telegram",
-        }
-    }
-}
-
 /// Geo-region and routing-mode preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub struct GeoRouting {
@@ -224,10 +161,15 @@ pub struct GeoRouting {
     pub selected_region_modes: HashMap<GeoRegion, RoutingMode>,
     #[serde(default)]
     pub auto_update: GeoAutoUpdate,
-    /// Per-service routing overrides. An absent entry means
-    /// [`ServiceRoute::Disabled`] — overrides are strictly opt-in.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub service_routes: HashMap<RoutedService, ServiceRoute>,
+    /// Steam and Telegram overrides written by v0.35 and earlier, kept
+    /// verbatim until they migrate to custom rule-sets and routing rules.
+    #[serde(
+        default,
+        rename = "service_routes",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(skip)]
+    pub(crate) legacy_service_routes: Option<serde_json::Value>,
 }
 
 impl GeoRouting {
@@ -246,20 +188,6 @@ impl GeoRouting {
         if let Some(region) = self.current_region {
             self.selected_region_modes.insert(region, mode);
         }
-    }
-
-    pub fn service_route(&self, service: RoutedService) -> ServiceRoute {
-        self.service_routes
-            .get(&service)
-            .copied()
-            .unwrap_or_default()
-    }
-
-    pub fn enabled_services(&self) -> Vec<RoutedService> {
-        RoutedService::ALL
-            .into_iter()
-            .filter(|s| self.service_route(*s) != ServiceRoute::Disabled)
-            .collect()
     }
 
     pub fn available_modes(&self) -> Vec<RoutingMode> {
@@ -402,89 +330,16 @@ mod tests {
     }
 
     #[test]
-    fn service_routes_default_to_disabled() {
-        let g = GeoRouting::default();
-        assert!(g.service_routes.is_empty());
-        for service in RoutedService::ALL {
-            assert_eq!(g.service_route(service), ServiceRoute::Disabled);
-        }
-        assert!(g.enabled_services().is_empty());
-    }
-
-    #[test]
-    fn service_routes_absent_in_json_deserialize_as_empty() {
-        let json = r#"{
-            "tun_interface": "kvn0",
-            "dns_strategy": "prefer_ipv4",
-            "geo_routing": {},
-            "auto_connect": false
-        }"#;
-        let s: Settings = serde_json::from_str(json).unwrap();
-        assert!(s.geo_routing.service_routes.is_empty());
-        assert!(
-            !serde_json::to_string(&s)
-                .unwrap()
-                .contains("service_routes")
-        );
-    }
-
-    #[test]
-    fn service_routes_round_trip_with_snake_case_keys() {
-        let mut s = Settings::default();
-        s.geo_routing
-            .service_routes
-            .insert(RoutedService::Steam, ServiceRoute::Direct);
-        s.geo_routing
-            .service_routes
-            .insert(RoutedService::Telegram, ServiceRoute::Proxy);
-        let json = serde_json::to_string(&s).unwrap();
-        assert!(json.contains("\"steam\":\"direct\""), "{json}");
-        assert!(json.contains("\"telegram\":\"proxy\""), "{json}");
-        let restored: Settings = serde_json::from_str(&json).unwrap();
+    fn service_routes_of_an_older_build_survive_a_save_unchanged() {
+        let service_routes = serde_json::json!({ "steam": "direct", "telegram": "proxy" });
+        let document = serde_json::json!({
+            "geo_routing": { "current_region": "ru", "service_routes": service_routes }
+        });
+        let settings: Settings = serde_json::from_value(document).unwrap();
+        assert_eq!(settings.geo_routing.current_region, Some(GeoRegion::Ru));
         assert_eq!(
-            restored.geo_routing.service_route(RoutedService::Steam),
-            ServiceRoute::Direct
+            serde_json::to_value(&settings).unwrap()["geo_routing"]["service_routes"],
+            service_routes
         );
-        assert_eq!(
-            restored.geo_routing.service_route(RoutedService::Telegram),
-            ServiceRoute::Proxy
-        );
-    }
-
-    #[test]
-    fn enabled_services_follow_all_order() {
-        let mut g = GeoRouting::default();
-        g.service_routes
-            .insert(RoutedService::Telegram, ServiceRoute::Proxy);
-        g.service_routes
-            .insert(RoutedService::Steam, ServiceRoute::Disabled);
-        assert_eq!(g.enabled_services(), vec![RoutedService::Telegram]);
-        g.service_routes
-            .insert(RoutedService::Steam, ServiceRoute::Direct);
-        assert_eq!(
-            g.enabled_services(),
-            vec![RoutedService::Steam, RoutedService::Telegram]
-        );
-    }
-
-    #[test]
-    fn service_route_cycle_covers_all_states() {
-        let mut r = ServiceRoute::Disabled;
-        let mut seen = Vec::new();
-        for _ in 0..3 {
-            r = r.next();
-            seen.push(r);
-        }
-        assert_eq!(
-            seen,
-            vec![
-                ServiceRoute::Proxy,
-                ServiceRoute::Direct,
-                ServiceRoute::Disabled
-            ]
-        );
-        for route in seen {
-            assert_eq!(route.next().prev(), route);
-        }
     }
 }
