@@ -12,7 +12,7 @@ pub(in crate::app::update) fn commit_routing_mode(
     mode: RoutingMode,
 ) -> Vec<Effect> {
     let region = model.config.settings.geo_routing.current_region;
-    if !RoutingMode::available(region).contains(&mode) {
+    if !model.routing.modes_of(region).contains(&mode) {
         let mut effects = vec![];
         push_status(
             &mut effects,
@@ -25,7 +25,7 @@ pub(in crate::app::update) fn commit_routing_mode(
         );
         return effects;
     }
-    let changed = model.config.settings.geo_routing.mode() != mode;
+    let changed = model.config.settings.geo_routing.mode(&model.routing) != mode;
     model.config.settings.geo_routing.set_mode(mode);
     let mut effects =
         super::onboarding::outcome(model, super::onboarding::Trigger::RoutingCommitted);
@@ -37,10 +37,11 @@ pub(in crate::app::update) fn commit_routing_mode(
     } else {
         false
     };
+    let name = model.routing.mode_name(mode);
     let status = if reconnecting {
-        format!("Routing mode changed: {mode} — reconnecting")
+        format!("Routing mode changed: {name} — reconnecting")
     } else {
-        format!("Routing mode changed: {mode}")
+        format!("Routing mode changed: {name}")
     };
     push_status(
         &mut effects,
@@ -55,7 +56,11 @@ pub(in crate::app::update) fn commit_routing_settings(
     model: &mut Model,
     settings: RoutingSettings,
 ) -> Vec<Effect> {
-    if !RoutingMode::available(Some(settings.region)).contains(&settings.mode) {
+    if !model
+        .routing
+        .modes_of(Some(settings.region))
+        .contains(&settings.mode)
+    {
         let mut effects = vec![];
         push_status(
             &mut effects,
@@ -71,7 +76,7 @@ pub(in crate::app::update) fn commit_routing_settings(
     }
 
     let old_region = model.config.settings.geo_routing.current_region;
-    let old_mode = model.config.settings.geo_routing.mode();
+    let old_mode = model.config.settings.geo_routing.mode(&model.routing);
     let region_changed = old_region != Some(settings.region);
     let mode_changed = old_mode != settings.mode;
     if !region_changed && !mode_changed {
@@ -84,7 +89,8 @@ pub(in crate::app::update) fn commit_routing_settings(
             .settings
             .geo_routing
             .selected_region_modes
-            .insert(region, old_mode);
+            .entry(region)
+            .or_insert(old_mode);
     }
     model
         .config
@@ -139,7 +145,7 @@ pub(in crate::app::update) fn commit_geo_region(
     region: GeoRegion,
 ) -> Vec<Effect> {
     let old_region = model.config.settings.geo_routing.current_region;
-    let old_mode = model.config.settings.geo_routing.mode();
+    let old_mode = model.config.settings.geo_routing.mode(&model.routing);
     let changed = old_region != Some(region);
     model.config.settings.geo_routing.set_region(region);
     let mut effects =
@@ -178,15 +184,19 @@ pub(in crate::app::update) fn commit_geo_region(
                 .settings
                 .geo_routing
                 .selected_region_modes
-                .insert(old_region, old_mode);
+                .entry(old_region)
+                .or_insert(old_mode);
         }
-        let new_mode = model.config.settings.geo_routing.mode();
+        let new_mode = model.config.settings.geo_routing.mode(&model.routing);
         if new_mode != old_mode {
             push_status(
                 &mut effects,
                 model,
                 StatusKey::Routing,
-                AppStatus::Info(format!("Routing mode changed: {new_mode}")),
+                AppStatus::Info(format!(
+                    "Routing mode changed: {}",
+                    model.routing.mode_name(new_mode)
+                )),
             );
         }
     }

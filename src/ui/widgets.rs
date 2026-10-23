@@ -204,14 +204,26 @@ impl<'a> Widget for StatusBar<'a> {
             right.push(("Auto".to_string(), self.model.theme.accent(), 0));
         }
         right.push((dns_label, self.model.theme.accent(), 1_u8));
-        let routing_mode = self.model.config.settings.geo_routing.mode();
+        let routing_mode = self
+            .model
+            .config
+            .settings
+            .geo_routing
+            .mode(&self.model.routing);
         right.push(match self.model.routing_fallback {
             Some(fallback) if routing_mode != RoutingMode::Global => (
-                format!("{routing_mode} → {fallback}"),
+                format!(
+                    "{} → {fallback}",
+                    self.model.routing.mode_name(routing_mode)
+                ),
                 self.model.theme.error(),
                 3,
             ),
-            _ => (routing_mode.to_string(), self.model.theme.accent(), 3),
+            _ => (
+                self.model.routing.mode_name(routing_mode),
+                self.model.theme.accent(),
+                3,
+            ),
         });
         if let Some((label, style)) = rule_set_badge(self.model, chrono::Local::now()) {
             right.push((label, style, 2));

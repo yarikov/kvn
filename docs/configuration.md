@@ -8,7 +8,7 @@
 
 This is the default location; `XDG_CONFIG_HOME` is respected when set.
 Rule-sets live in their own file, `~/.config/kvn-tui/routing.json` (see
-[Rule-sets](#rule-sets)).
+[Rule-sets and modes](#rule-sets-and-modes)).
 
 Press `e` in the TUI to edit a private copy with `$VISUAL` or `$EDITOR`.
 VS Code, VSCodium, Cursor, Zed and Sublime Text get `--wait` unless the
@@ -434,12 +434,12 @@ portal or error page is rejected and the previous file stays. A damaged
 rule-set file counts as missing and is downloaded again on the next update,
 even when the server reports it unchanged.
 
-### Rule-sets
+### Rule-sets and modes
 
-Every rule-set kvn downloads is declared in `~/.config/kvn-tui/routing.json`,
+Rule-sets and routing modes are declared in `~/.config/kvn-tui/routing.json`,
 next to — not inside — `profiles.json`. kvn creates the file the first time it
-starts with the rule-sets of every region; from then on the file is yours, so
-a mirror or another source for a region's rule-set is a change of its `url`:
+starts, with the rule-sets of every region and the Global mode plus the modes
+of the regions you have used; from then on the file is yours:
 
 ```json
 {
@@ -453,34 +453,63 @@ a mirror or another source for a region's rule-set is a change of its `url`:
       "kind": "geosite",
       "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs"
     }
-  }
+  },
+  "modes": [
+    { "id": "global", "name": "Global", "final": "proxy", "rules": [] },
+    {
+      "id": "bypass_ru",
+      "name": "Bypass RU",
+      "final": "proxy",
+      "private_direct": true,
+      "rules": [
+        { "rule_set": "geosite-category-ru", "route": "direct", "required": true },
+        { "rule_set": "geoip-ru", "route": "direct", "required": true }
+      ]
+    }
+  ]
 }
 ```
 
-- The key is the rule-set's tag: the name DNS rules use in `rule_set`, and the
-  name of the downloaded file, `<tag>.srs` in the geo directory. Tags use
-  lowercase letters, digits and inner hyphens.
+`rule_sets`:
+
+- The key is the rule-set's tag: the name rules and DNS rules use in
+  `rule_set`, and the name of the downloaded file, `<tag>.srs` in the geo
+  directory. Tags use lowercase letters, digits and inner hyphens.
 - `kind` is `geoip` for a list of IP networks or `geosite` for a list of
-  domains. kvn does not read the file to find out, so declare it correctly.
+  domains. kvn does not read the file to find out, so declare it correctly; the
+  built-in rule-sets keep their `kind`.
 - `url` is an `https://` address of a binary sing-box rule-set (`.srs`). Two
-  rule-sets cannot share one address.
-- The rule-sets of the region modes (`geosite-category-ru`, `geoip-ru`, and so
-  on) cannot be removed or change `kind`: Bypass and Only need them as they
-  are.
+  rule-sets cannot share one address. Changing it discards the downloaded file:
+  the next update downloads it from the new address.
 
-A rule-set you add is not downloaded and routes nothing yet; routing rules that
-use it come in a later release. If Steam or Telegram overrides were set in an
-earlier release, the new file also declares `geosite-steam` / `geoip-steam`
-and `geosite-telegram` / `geoip-telegram` from the same sources, so the files
-already downloaded for them are kept.
+`modes`:
 
-Changing a rule-set's `url` discards its downloaded file: the next update
-downloads it from the new address. Until then a region mode that needs it runs
-as Global (Bypass) or Direct (Only). kvn reads `routing.json` when the daemon
-starts and when the configuration is reloaded. A file that fails these checks
-is reported in the status line and left untouched: on a reload kvn keeps the
-rule-sets it already loaded, at startup it uses the built-in ones until the
-file is fixed.
+- `id` is what the settings select (`global`, `bypass_<region>`,
+  `only_<region>`); lowercase letters, digits and inner hyphens or
+  underscores. `name` is shown for the mode.
+- `final` is where traffic no rule matches goes: `proxy` (through the tunnel) or
+  `direct`. `private_direct` keeps private networks outside the tunnel.
+- `rules` send what a rule-set matches to `route` (`proxy` or `direct`); every
+  rule-set a mode uses is downloaded and kept up to date. A `required` rule-set
+  the mode cannot run without: while its file is missing, all traffic goes to
+  the mode's `final` outbound — Bypass runs as Global, Only as Direct — and kvn
+  reconnects once it is downloaded. A rule-set that is not required is simply
+  left out until its file is there.
+- The `global` mode is required, its `final` is `proxy` and none of its rules
+  is `required`: it is what the other modes fall back to. A mode missing from
+  the file cannot be selected; a selected mode that is gone runs as Global. The
+  Mode setting still offers Global, Bypass and Only of the current region, so a
+  region whose modes are not in the file offers only Global.
+
+If Steam or Telegram overrides were set in an earlier release, the new file
+also declares `geosite-steam` / `geoip-steam` and `geosite-telegram` /
+`geoip-telegram` from the same sources, so the files already downloaded for
+them are kept.
+
+kvn reads `routing.json` when the daemon starts and when the configuration is
+reloaded. A file that fails these checks is reported in the status line and
+left untouched: on a reload kvn keeps what it already loaded, at startup it
+uses the built-in rule-sets and modes until the file is fixed.
 
 ## Themes and logging
 

@@ -170,11 +170,11 @@ fn ensure_hwid(config: &mut Config, path: &Path) -> Result<()> {
 }
 
 pub fn load_routing(
-    legacy_service_routes: Option<&serde_json::Value>,
+    geo_routing: &profile::GeoRouting,
     create_missing: bool,
 ) -> Result<routing::RoutingConfig> {
     let path = crate::paths::routing_path().context("Failed to determine routing config path")?;
-    routing::load_routing_at(&path, legacy_service_routes, create_missing)
+    routing::load_routing_at(&path, geo_routing, create_missing)
 }
 
 #[cfg(test)]
