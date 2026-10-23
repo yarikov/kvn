@@ -25,10 +25,12 @@ pub(super) fn execute_daemon_effect(
         Effect::ApplyKillSwitch { enabled } => connection::apply_kill_switch(tx, enabled),
         Effect::CheckAutoConnectPolkit => connection::check_auto_connect_polkit(tx),
         Effect::CheckIntegrationSetup => connection::check_integration_setup(tx),
-        Effect::DownloadGeo => geo::download(tx, model),
-        Effect::DownloadGeoIfMissing => geo::download_if_missing(tx, model),
-        Effect::RefreshGeoLastUpdated => geo::refresh_last_updated(tx, model),
-        Effect::ClearGeoRetryState { region } => geo::clear_retry_state(region),
+        Effect::DownloadRuleSets {
+            rule_sets,
+            only_missing,
+            record_schedule,
+        } => geo::download_rule_sets(tx, model, rule_sets, only_missing, record_schedule),
+        Effect::RefreshRuleSetStates => geo::refresh_rule_set_states(tx, model),
         Effect::ResetGeoUpdateSchedules => geo::reset_update_schedules(model),
         Effect::SaveConfig | Effect::PersistConfirmedState => {
             config_io::report_uncommitted_save(model)

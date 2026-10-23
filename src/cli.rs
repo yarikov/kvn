@@ -1877,8 +1877,8 @@ esac
             interface_settings_draft: None,
             geo_updating: false,
             routing_fallback: None,
-            geo_last_updated: None,
-            geo_last_checked_at: None,
+            rule_set_updates: Default::default(),
+            rule_set_states: Default::default(),
             overlay: crate::app::model::Overlay::None,
             main_pane_focus: Default::default(),
             profiles: vec![

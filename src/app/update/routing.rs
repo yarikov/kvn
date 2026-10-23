@@ -103,12 +103,10 @@ pub(in crate::app::update) fn commit_routing_settings(
     );
 
     if region_changed {
-        effects.push(Effect::RefreshGeoLastUpdated);
+        effects.push(Effect::RefreshRuleSetStates);
         if settings.region != GeoRegion::Global {
             if download_allowed(model) {
-                model.geo_updating = true;
-                model.geo_last_attempt_at = Some(chrono::Local::now());
-                effects.push(Effect::DownloadGeoIfMissing);
+                effects.extend(download_missing_selectable_rule_sets(model));
             } else {
                 push_download_blocked(&mut effects, model, DownloadKind::Geo);
             }
@@ -148,7 +146,7 @@ pub(in crate::app::update) fn commit_geo_region(
         super::onboarding::outcome(model, super::onboarding::Trigger::RegionCommitted);
     effects.push(Effect::SaveConfig);
     if changed {
-        effects.push(Effect::RefreshGeoLastUpdated);
+        effects.push(Effect::RefreshRuleSetStates);
     }
     push_status(
         &mut effects,
@@ -159,15 +157,15 @@ pub(in crate::app::update) fn commit_geo_region(
 
     if changed && region != GeoRegion::Global {
         if download_allowed(model) {
-            model.geo_updating = true;
-            model.geo_last_attempt_at = Some(chrono::Local::now());
-            push_status(
-                &mut effects,
-                model,
-                StatusKey::Geo,
-                AppStatus::Info("Checking geo databases…".to_string()),
-            );
-            effects.push(Effect::DownloadGeoIfMissing);
+            if let Some(download) = download_missing_selectable_rule_sets(model) {
+                push_status(
+                    &mut effects,
+                    model,
+                    StatusKey::Geo,
+                    AppStatus::Info("Checking geo databases…".to_string()),
+                );
+                effects.push(download);
+            }
         } else {
             push_download_blocked(&mut effects, model, DownloadKind::Geo);
         }
@@ -201,4 +199,14 @@ pub(in crate::app::update) fn commit_geo_region(
         model.logs.push_back("Region changed — reconnecting".into());
     }
     effects
+}
+
+fn download_missing_selectable_rule_sets(model: &mut Model) -> Option<Effect> {
+    let selectable = crate::route_plan::selectable_rule_sets(&model.config.settings);
+    crate::app::update::geo::start_rule_set_download(
+        model,
+        selectable,
+        crate::app::model::UpdateTrigger::Manual,
+        true,
+    )
 }

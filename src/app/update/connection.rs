@@ -18,7 +18,6 @@ pub(in crate::app::update) fn on_connected(
     }
     model.singbox_pid = Some(pid);
     model.routing_fallback = routing_fallback;
-    model.region_download_deferred = false;
     model.connection = ConnectionState::Connected;
     model.connecting_profile_id = None;
     reset_traffic_state(model);
@@ -178,7 +177,6 @@ fn clear_connection(model: &mut Model) {
     model.singbox_pid = None;
     model.active_profile_id = None;
     model.routing_fallback = None;
-    model.region_download_deferred = false;
     reset_traffic_state(model);
 }
 

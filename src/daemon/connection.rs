@@ -222,7 +222,6 @@ pub(super) fn disconnect(model: &mut Model, shared: &DaemonShared) {
     model.connecting_profile_id = None;
     model.singbox_pid = None;
     model.routing_fallback = None;
-    model.region_download_deferred = false;
     model.traffic = TrafficStats::default();
     model.last_traffic_sample_at_ms = 0;
     model.traffic_request_id = 0;

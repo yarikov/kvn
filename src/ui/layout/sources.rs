@@ -300,7 +300,6 @@ mod tests {
             },
         ];
         let mut model = model_with_profiles(profiles);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.config.subscriptions.push(Subscription {
             id: sub_id,
             name: "Example".to_string(),
@@ -333,7 +332,6 @@ mod tests {
             ),
         ];
         let mut model = model_with_profiles(profiles);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.selected = 0;
         let output = snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS);
         assert!(
@@ -360,7 +358,6 @@ mod tests {
             ),
         ];
         let mut model = model_with_profiles(profiles);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.selected = 0;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
@@ -486,7 +483,6 @@ mod tests {
             ),
         ];
         let mut model = model_with_profiles(profiles);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.selected = 0;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
@@ -507,7 +503,6 @@ mod tests {
                 "u2".to_string(),
             ),
         ]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[1].id);
         model.selected = 1;
@@ -516,8 +511,7 @@ mod tests {
 
     #[test]
     fn draw_sources_empty_state_snapshot() {
-        let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
+        let model = model_with_profiles(vec![]);
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 
@@ -536,7 +530,6 @@ mod tests {
         );
         profile.subscription_id = Some(sub_id);
         let mut model = model_with_profiles(vec![profile]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         let last_updated = chrono::Local
             .with_ymd_and_hms(2026, 6, 14, 9, 30, 0)
             .unwrap();

@@ -248,6 +248,20 @@ pub fn after_update_window() -> DateTime<Local> {
         .unwrap()
 }
 
+pub fn downloads_rule_sets(effects: &[Effect]) -> bool {
+    effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::DownloadRuleSets { .. }))
+}
+
+pub fn download_missing_rule_sets_of(region: crate::config::profile::GeoRegion) -> Effect {
+    Effect::DownloadRuleSets {
+        rule_sets: crate::geo::region_rule_sets(region).to_vec(),
+        only_missing: true,
+        record_schedule: false,
+    }
+}
+
 pub fn app_log_info(message: &str) -> Effect {
     Effect::AppendAppLog {
         level: "INFO".to_string(),

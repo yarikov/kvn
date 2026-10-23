@@ -262,7 +262,7 @@ The application follows **The Elm Architecture (TEA)**:
 1. **Model** (`app/model.rs`) holds all application state as pure data. UI state is split into `Overlay` (popup/modal) and `ConnectionState` (idle/connecting/connected).
 2. **Messages** (`app/msg.rs`) represent every external event — keyboard input, timer ticks, log lines, geo updates, system resume.
 3. **Update** (`app/update.rs` and its `app/update/` submodules) is a pure function `update(model, msg) -> Vec<Effect>`: no I/O, no threads, no system calls. All business logic lives here; `update.rs` itself only dispatches each `Msg` to a submodule handler.
-4. **Effects** (`app/effect.rs`) are declarative descriptions of side effects (`Connect`, `DownloadGeo`, `SaveConfig`, `Quit`, etc.).
+4. **Effects** (`app/effect.rs`) are declarative descriptions of side effects (`Connect`, `DownloadRuleSets`, `SaveConfig`, `Quit`, etc.).
 5. **Daemon** (`daemon.rs` + `daemon/`) owns the canonical `Model` and executes every `Effect`; **TUI clients** (`tui_client.rs`) render a local copy and forward input. Both, and the IPC protocol between them, are described in § Daemon + TUI Client Architecture.
 
 This separation makes the update tree fully synchronous and trivial to unit-test.
@@ -273,7 +273,7 @@ Background work is executed in dedicated threads spawned by the **daemon** (`dae
 - **Suspend watcher** — `services/suspend.rs` runs a blocking zbus listener that sends `Msg::SystemResumed`; the daemon auto-reconnects on resume even when no TUI is attached.
 - **IPC server** — `ipc.rs` accepts Unix socket connections from clients, parses NDJSON commands, and forwards them into the daemon's mpsc channel as `Msg::IpcCommand`, or as `Msg::IpcRequest` when the command carries a request id for a correlated reply.
 - **Signal handler** — turns `SIGTERM` / `SIGINT` into `Quit`, so the daemon cleans up sing-box and the socket.
-- **Effects** — slow effects run on a short-lived thread that sends its result back through the daemon's channel: `Connect`, the geo effects (`DownloadGeo`, `DownloadGeoIfMissing`, `RefreshGeoLastUpdated`), `UpdateSubscription`, `TestProfile`, `FetchTrafficStats`, `ApplyKillSwitch`, `CheckAutoConnectPolkit`, `CheckIntegrationSetup`, and `ReloadConfig`.
+- **Effects** — slow effects run on a short-lived thread that sends its result back through the daemon's channel: `Connect`, the rule-set effects (`DownloadRuleSets`, `RefreshRuleSetStates`), `UpdateSubscription`, `TestProfile`, `FetchTrafficStats`, `ApplyKillSwitch`, `CheckAutoConnectPolkit`, `CheckIntegrationSetup`, and `ReloadConfig`.
 - **App log** — app status messages are appended to the app log with an `[app]` prefix (`Effect::AppendAppLog`), next to the sing-box log, so both are visible in the TUI log panel.
 - **State I/O** — `services/waybar.rs` writes `state.json` on connect/disconnect for waybar integration.
 
@@ -304,7 +304,7 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 The TEA update function (`app::update::update`) must remain free of I/O, threads, and system calls. Side effects are declared as `Effect` values and executed by the daemon runtime.
 
 Rules of thumb:
-- `app::update::update(model, msg) -> Vec<Effect>` must not call functions from `services`, `geo`, `paths`, `atomic_write`, `config::load_config`, `config::subscription`, `singbox::clash_api`, `singbox::runner`, `tui_client::clipboard`, `tui_client::editor`, or perform any file/network/process I/O.
+- `app::update::update(model, msg) -> Vec<Effect>` must not call functions from `services`, `geo::GeoManager`, `paths`, `atomic_write`, `config::load_config`, `config::subscription`, `singbox::clash_api`, `singbox::runner`, `tui_client::clipboard`, `tui_client::editor`, or perform any file/network/process I/O.
   - **Documented exceptions**: `theme_slugs()` (`update/key/settings_menu.rs`, used by the Interface page's Theme row) calls `omarchy::detect_omarchy_theme()`, which does a single small `fs::read_to_string` of the Omarchy state theme path to decide whether to show the Auto entry; `model::show_omarchy_card()` adds `omarchy::omakvn_plugin_installed()`, one more small read of the plugin manifest, while the model is constructed.
   - Cheap, deterministic, and scoped to a key press; promoted to "OK" because the alternative (caching in `Model`) costs more clarity than it saves.
   - The full `Theme` resolution stays out of `update`: the Interface page handler only mutates `theme_draft`/`settings.theme`, and the TUI client recomputes `model.theme` via `resolve_active` on snapshot apply.

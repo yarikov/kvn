@@ -1,10 +1,13 @@
 use crate::app::effect::Effect;
 use crate::app::model::{ConnectionState, Model, Overlay, UpdateTrigger};
-use crate::config::profile::{GeoRegion, update_window_open};
+use crate::config::profile::update_window_open;
+use crate::geo::{RuleSet, RuleSetState};
 use chrono::Local;
 use std::time::Instant;
 
 use crate::app::update::traffic::TRAFFIC_POLL_INTERVAL;
+
+const AUTOMATIC_ATTEMPT_SPACING: chrono::TimeDelta = chrono::TimeDelta::minutes(1);
 
 pub(in crate::app::update) fn handle_tick(model: &mut Model) -> Vec<Effect> {
     handle_tick_at(model, Local::now())
@@ -13,12 +16,18 @@ pub(in crate::app::update) fn handle_tick(model: &mut Model) -> Vec<Effect> {
 fn handle_tick_at(model: &mut Model, now: chrono::DateTime<Local>) -> Vec<Effect> {
     let mut effects = Vec::new();
 
-    if geo_update_due(model, now) {
-        model.geo_updating = true;
-        model.geo_automatic_update = true;
-        model.geo_last_attempt_at = Some(now);
-        effects.push(Effect::DownloadGeo);
+    let due = due_rule_sets(model, now);
+    for rule_set in &due {
+        model
+            .rule_set_automatic_attempts
+            .insert(rule_set.key(), now);
     }
+    effects.extend(crate::app::update::geo::start_rule_set_download(
+        model,
+        due,
+        UpdateTrigger::Automatic,
+        false,
+    ));
 
     effects.extend(check_due_subscriptions_at(model, now));
 
@@ -82,18 +91,9 @@ fn tick_running_work(model: &mut Model) -> Vec<Effect> {
     effects
 }
 
-fn geo_update_due(model: &Model, now: chrono::DateTime<Local>) -> bool {
-    if model.geo_updating {
-        return false;
-    }
+fn due_rule_sets(model: &Model, now: chrono::DateTime<Local>) -> Vec<&'static RuleSet> {
     if model.config.settings.kill_switch && model.connection != ConnectionState::Connected {
-        return false;
-    }
-    let Some(region) = model.config.settings.geo_routing.current_region else {
-        return false;
-    };
-    if region == GeoRegion::Global {
-        return false;
+        return Vec::new();
     }
     let interval = model
         .config
@@ -102,24 +102,40 @@ fn geo_update_due(model: &Model, now: chrono::DateTime<Local>) -> bool {
         .auto_update
         .interval_minutes();
     if interval == 0 {
-        return false;
+        return Vec::new();
     }
-    if let Some(retry) = model.geo_retry_state
+    let idle: Vec<&'static RuleSet> =
+        crate::route_plan::selectable_rule_sets(&model.config.settings)
+            .into_iter()
+            .filter(|rule_set| !model.rule_set_updates.contains_key(&rule_set.key()))
+            .collect();
+    let any_due = idle.iter().any(|rule_set| {
+        let key = rule_set.key();
+        !attempted_recently(model, &key, now)
+            && rule_set_due(model.rule_set_states.get(&key), interval, now)
+    });
+    if any_due { idle } else { Vec::new() }
+}
+
+fn attempted_recently(model: &Model, key: &str, now: chrono::DateTime<Local>) -> bool {
+    model
+        .rule_set_automatic_attempts
+        .get(key)
+        .is_some_and(|attempt| now.signed_duration_since(*attempt) < AUTOMATIC_ATTEMPT_SPACING)
+}
+
+fn rule_set_due(state: Option<&RuleSetState>, interval: u64, now: chrono::DateTime<Local>) -> bool {
+    let state = state.cloned().unwrap_or_default();
+    if let Some(retry) = state.retry
         && retry.governs(now)
     {
         return retry.retry_due(now);
     }
     update_window_open(now)
-        && model.geo_next_update.map_or_else(
+        && state.next_update.map_or_else(
             || {
-                let reference = match (model.geo_last_checked_at, model.geo_last_attempt_at) {
-                    (Some(checked), Some(attempt)) => Some(checked.max(attempt)),
-                    (Some(checked), None) => Some(checked),
-                    (None, Some(attempt)) => Some(attempt),
-                    (None, None) => None,
-                };
-                reference.is_none_or(|last| {
-                    now.signed_duration_since(last).num_minutes() >= interval as i64
+                state.checked_at.is_none_or(|checked| {
+                    now.signed_duration_since(checked).num_minutes() >= interval as i64
                 })
             },
             |date| now.date_naive() >= date,
@@ -172,84 +188,126 @@ mod tests {
     use crate::app::msg::Msg;
     use crate::app::update::key::sources::handle_sources;
     use crate::app::update::update;
-    use crate::config::profile::{GeoAutoUpdate, Profile, Subscription, SubscriptionAutoUpdate};
+    use crate::config::profile::{
+        GeoAutoUpdate, GeoRegion, Profile, Subscription, SubscriptionAutoUpdate,
+    };
     use crate::test_helpers::*;
     use crossterm::event::{KeyCode, KeyEvent};
     use uuid::Uuid;
 
-    #[test]
-    fn geo_auto_update_due_without_previous_check() {
+    fn ru_auto_updated() -> Model {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
+        model
+    }
+
+    fn is_due(model: &Model, now: chrono::DateTime<Local>) -> bool {
+        !due_rule_sets(model, now).is_empty()
+    }
+
+    #[test]
+    fn rule_set_auto_update_is_due_without_a_previous_check() {
+        let mut model = ru_auto_updated();
 
         let effects = handle_tick_at(&mut model, after_update_window());
 
-        assert!(effects.contains(&Effect::DownloadGeo));
-        assert!(model.geo_updating);
-        assert!(model.geo_last_attempt_at.is_some());
+        assert!(effects.contains(&Effect::DownloadRuleSets {
+            rule_sets: crate::geo::region_rule_sets(GeoRegion::Ru).to_vec(),
+            only_missing: false,
+            record_schedule: true,
+        }));
+        assert!(
+            model
+                .rule_set_updates
+                .values()
+                .all(|trigger| *trigger == UpdateTrigger::Automatic)
+        );
     }
 
     #[test]
-    fn geo_auto_update_respects_interval_and_retries_after_interval() {
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
+    fn rule_set_auto_update_respects_the_interval_since_the_last_check() {
+        let mut model = ru_auto_updated();
         let now = after_update_window();
-        model.geo_last_checked_at = Some(now - chrono::Duration::try_hours(23).unwrap());
-        assert!(!geo_update_due(&model, now));
+        model.mark_selectable_rule_sets_checked(now - chrono::Duration::try_hours(23).unwrap());
+        assert!(!is_due(&model, now));
 
-        model.geo_last_checked_at = Some(now - chrono::Duration::try_hours(25).unwrap());
-        assert!(geo_update_due(&model, now));
-
-        model.geo_last_attempt_at = Some(now - chrono::Duration::try_hours(1).unwrap());
-        assert!(!geo_update_due(&model, now));
-        model.geo_last_attempt_at = Some(now - chrono::Duration::try_hours(25).unwrap());
-        assert!(geo_update_due(&model, now));
+        model.mark_selectable_rule_sets_checked(now - chrono::Duration::try_hours(25).unwrap());
+        assert!(is_due(&model, now));
     }
 
     #[test]
-    fn geo_auto_update_honors_retry_deadline_before_normal_interval() {
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
+    fn one_due_rule_set_updates_the_whole_region_in_one_download() {
+        let mut model = ru_auto_updated();
         let now = after_update_window();
-        model.geo_last_checked_at = Some(now - chrono::Duration::days(2));
-        model.geo_retry_state = Some(crate::config::profile::RetryState {
-            consecutive_failures: 2,
-            retry_at: now + chrono::Duration::minutes(5),
-            attempt_date: None,
-        });
+        let [_, geoip] = crate::geo::region_rule_sets(GeoRegion::Ru) else {
+            unreachable!()
+        };
+        model.mark_selectable_rule_sets_checked(now);
+        assert!(!is_due(&model, now));
+        model
+            .rule_set_states
+            .get_mut(&geoip.key())
+            .unwrap()
+            .next_update = Some(now.date_naive());
 
-        assert!(!geo_update_due(&model, now));
-        assert!(!geo_update_due(&model, now + chrono::Duration::minutes(4)));
-        assert!(geo_update_due(&model, now + chrono::Duration::minutes(5)));
+        assert_eq!(
+            due_rule_sets(&model, now),
+            crate::geo::region_rule_sets(GeoRegion::Ru)
+        );
     }
 
     #[test]
-    fn geo_auto_update_waits_for_vpn_when_kill_switch_is_enabled() {
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
+    fn an_automatic_attempt_waits_a_minute_even_when_its_result_was_not_saved() {
+        let mut model = ru_auto_updated();
+        let now = after_update_window();
+        handle_tick_at(&mut model, now);
+        model.rule_set_updates.clear();
+
+        assert!(!is_due(&model, now + chrono::Duration::seconds(59)));
+        assert!(is_due(&model, now + chrono::Duration::minutes(1)));
+    }
+
+    #[test]
+    fn rule_set_auto_update_honors_a_retry_deadline_before_the_interval() {
+        let mut model = ru_auto_updated();
+        let now = after_update_window();
+        model.mark_selectable_rule_sets_checked(now - chrono::Duration::days(2));
+        for state in model.rule_set_states.values_mut() {
+            state.retry = Some(crate::config::profile::RetryState {
+                consecutive_failures: 2,
+                retry_at: now + chrono::Duration::minutes(5),
+                attempt_date: None,
+            });
+        }
+
+        assert!(!is_due(&model, now));
+        assert!(!is_due(&model, now + chrono::Duration::minutes(4)));
+        assert!(is_due(&model, now + chrono::Duration::minutes(5)));
+    }
+
+    #[test]
+    fn rule_set_auto_update_waits_for_vpn_when_kill_switch_is_enabled() {
+        let mut model = ru_auto_updated();
         model.config.settings.kill_switch = true;
         let now = after_update_window();
 
         model.connection = ConnectionState::Connecting;
-        assert!(!geo_update_due(&model, now));
+        assert!(!is_due(&model, now));
 
         model.connection = ConnectionState::ConnectPending;
-        assert!(!geo_update_due(&model, now));
+        assert!(!is_due(&model, now));
 
         model.connection = ConnectionState::Connected;
-        assert!(geo_update_due(&model, now));
+        assert!(is_due(&model, now));
     }
 
     #[test]
-    fn geo_auto_update_skips_off_global_and_in_flight() {
+    fn rule_set_auto_update_skips_off_global_and_rule_sets_in_flight() {
         let mut model = model_with_profiles(vec![]);
-        let now = Local::now();
+        let now = after_update_window();
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        assert!(!geo_update_due(&model, now));
+        assert!(!is_due(&model, now));
 
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
         model
@@ -257,11 +315,15 @@ mod tests {
             .settings
             .geo_routing
             .set_region(GeoRegion::Global);
-        assert!(!geo_update_due(&model, now));
+        assert!(!is_due(&model, now));
 
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.geo_updating = true;
-        assert!(!geo_update_due(&model, now));
+        for rule_set in crate::geo::region_rule_sets(GeoRegion::Ru) {
+            model
+                .rule_set_updates
+                .insert(rule_set.key(), UpdateTrigger::Manual);
+        }
+        assert!(!is_due(&model, now));
     }
 
     #[test]

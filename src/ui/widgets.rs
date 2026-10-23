@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Widget, Wrap};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::model::{AppStatus, ConnectionState, Model};
-use crate::config::profile::{GeoRegion, RoutingMode};
+use crate::config::profile::RoutingMode;
 
 const RULE_SET_STALE_GRACE_MINUTES: u64 = 60;
 
@@ -21,18 +21,19 @@ enum RuleSetFreshness {
 
 fn rule_set_freshness(model: &Model, now: chrono::DateTime<chrono::Local>) -> RuleSetFreshness {
     let routing = &model.config.settings.geo_routing;
-    let has_region_rule_sets = routing
-        .current_region
-        .is_some_and(|region| region != GeoRegion::Global);
+    let selectable = crate::route_plan::selectable_rule_sets(&model.config.settings);
 
-    if !has_region_rule_sets {
+    if selectable.is_empty() {
         return RuleSetFreshness::Disabled;
     }
-    if model.geo_updating {
+    if selectable
+        .iter()
+        .any(|rule_set| model.rule_set_updates.contains_key(&rule_set.key()))
+    {
         return RuleSetFreshness::Updating;
     }
 
-    let Some(last_checked_at) = model.geo_last_checked_at else {
+    let Some(last_checked_at) = model.selectable_rule_sets_checked_at() else {
         return RuleSetFreshness::Never;
     };
 
@@ -424,6 +425,14 @@ mod tests {
         );
     }
 
+    fn mark_ru_rule_sets_updating(model: &mut Model) {
+        for rule_set in crate::geo::region_rule_sets(GeoRegion::Ru) {
+            model
+                .rule_set_updates
+                .insert(rule_set.key(), crate::app::model::UpdateTrigger::Manual);
+        }
+    }
+
     #[test]
     fn rule_set_freshness_reports_updating_and_never() {
         let mut model = model_with_region_rule_sets();
@@ -432,7 +441,7 @@ mod tests {
             RuleSetFreshness::Never
         );
 
-        model.geo_updating = true;
+        mark_ru_rule_sets_updating(&mut model);
         assert_eq!(
             rule_set_freshness(&model, local_time(14, 12)),
             RuleSetFreshness::Updating
@@ -444,7 +453,7 @@ mod tests {
         let mut model = model_with_region_rule_sets();
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every3d;
         let checked_at = local_time(11, 12);
-        model.geo_last_checked_at = Some(checked_at);
+        model.mark_selectable_rule_sets_checked(checked_at);
 
         assert_eq!(
             rule_set_freshness(&model, checked_at + Duration::days(3)),
@@ -467,7 +476,7 @@ mod tests {
     fn rule_set_freshness_is_neutral_when_auto_update_is_off() {
         let mut model = model_with_region_rule_sets();
         let checked_at = local_time(1, 8);
-        model.geo_last_checked_at = Some(checked_at);
+        model.mark_selectable_rule_sets_checked(checked_at);
 
         assert_eq!(
             rule_set_freshness(&model, local_time(14, 12)),
@@ -479,25 +488,25 @@ mod tests {
     fn rule_set_badge_has_omarchy_icon_padding_and_state_style() {
         let mut model = model_with_region_rule_sets();
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
-        model.geo_last_checked_at = Some(local_time(14, 10));
+        model.mark_selectable_rule_sets_checked(local_time(14, 10));
 
         let (label, style) = rule_set_badge(&model, local_time(14, 12)).unwrap();
         assert_eq!(label, "  (1d) 14 Aug 10:20 ");
         assert_eq!(style, model.theme.ruleset_fresh_badge());
 
-        model.geo_updating = true;
+        mark_ru_rule_sets_updating(&mut model);
         let (label, style) = rule_set_badge(&model, local_time(14, 12)).unwrap();
         assert_eq!(label, "  (1d) updating… ");
         assert_eq!(style, model.theme.ruleset_updating_badge());
 
-        model.geo_updating = false;
-        model.geo_last_checked_at = None;
+        model.rule_set_updates.clear();
+        model.rule_set_states.clear();
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every3d;
         let (label, style) = rule_set_badge(&model, local_time(14, 12)).unwrap();
         assert_eq!(label, "  (3d) never ");
         assert_eq!(style, model.theme.ruleset_stale_badge());
 
-        model.geo_last_checked_at = Some(local_time(14, 10));
+        model.mark_selectable_rule_sets_checked(local_time(14, 10));
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Off;
         let (label, style) = rule_set_badge(&model, local_time(14, 12)).unwrap();
         assert_eq!(label, "  (off) 14 Aug 10:20 ");
@@ -520,7 +529,6 @@ mod tests {
         )]);
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[0].id);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
         StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         insta::assert_snapshot!(buffer_to_string(&buf));
@@ -557,7 +565,6 @@ mod tests {
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[0].id);
         model.config.settings.auto_connect = true;
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
         StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         insta::assert_snapshot!(buffer_to_string(&buf));
@@ -566,7 +573,7 @@ mod tests {
     #[test]
     fn status_bar_does_not_include_transient_geo_state() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_updating = true;
+        mark_ru_rule_sets_updating(&mut model);
         let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
         StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         assert!(!buffer_to_string(&buf).contains("Geo"));
@@ -574,8 +581,7 @@ mod tests {
 
     #[test]
     fn status_bar_does_not_include_geo_timestamp() {
-        let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
+        let model = model_with_profiles(vec![]);
         let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
         StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         let content: String = buf.content.iter().map(|c| c.symbol()).collect();
@@ -648,7 +654,6 @@ mod tests {
     #[test]
     fn status_bar_does_not_include_status_message() {
         let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.status = Some(crate::app::model::AppStatus::Error(
             "Connection failed: sing-box exited immediately (code: Some(1)). stderr: FATAL[0000] create service: parse outbound[0].server_settings.address: lookup example.com: no such host".to_string(),
         ));
@@ -668,7 +673,6 @@ mod tests {
             "u1".to_string(),
         )]);
         model.connection = ConnectionState::Connecting;
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         let mut buf = Buffer::empty(Rect::new(0, 0, APP_WINDOW_COLS, 1));
         StatusBar::new(&model).render(Rect::new(0, 0, APP_WINDOW_COLS, 1), &mut buf);
         insta::assert_snapshot!(buffer_to_string(&buf));
@@ -683,7 +687,6 @@ mod tests {
             "u1".to_string(),
         )]);
         model.connection = ConnectionState::ConnectPending;
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         insta::assert_snapshot!(status_bar_styles(&model));
     }
 
@@ -693,7 +696,7 @@ mod tests {
         model.config.settings.kill_switch = true;
         model.config.settings.auto_connect = true;
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.geo_last_checked_at = Some(chrono::Local::now());
+        model.mark_selectable_rule_sets_checked(chrono::Local::now());
         let area = Rect::new(0, 0, 18, 1);
         let mut buf = Buffer::empty(area);
         StatusBar::new(&model).render(area, &mut buf);
@@ -712,9 +715,12 @@ mod tests {
         model.config.settings.kill_switch = true;
         model.config.settings.auto_connect = true;
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.geo_last_checked_at = chrono::Local
-            .with_ymd_and_hms(2026, 5, 31, 13, 41, 0)
-            .single();
+        model.mark_selectable_rule_sets_checked(
+            chrono::Local
+                .with_ymd_and_hms(2026, 5, 31, 13, 41, 0)
+                .single()
+                .unwrap(),
+        );
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
         insta::assert_snapshot!(status_bar_styles(&model));
     }

@@ -43,7 +43,6 @@ mod tests {
             443,
             "u1".to_string(),
         )]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.overlay = Overlay::ConfirmDelete;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }

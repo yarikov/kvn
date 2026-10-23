@@ -417,7 +417,6 @@ mod tests {
 
     fn card(step: OnboardingStep) -> Model {
         let mut model = model_with_profiles(vec![]);
-        model.geo_last_updated = Some("2026-05-31 13:41".to_string());
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model.onboarding.state.step = step;
         model.onboarding.include_omarchy_card = true;

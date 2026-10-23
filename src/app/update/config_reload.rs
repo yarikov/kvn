@@ -60,10 +60,7 @@ pub(crate) fn handle_config_reloaded(
                 }
             }
             if region_changed {
-                model.geo_last_updated = None;
-                model.geo_last_checked_at = None;
-                model.geo_last_attempt_at = None;
-                effects.push(Effect::RefreshGeoLastUpdated);
+                effects.push(Effect::RefreshRuleSetStates);
             }
             let reconnecting = model.connection == ConnectionState::Connecting
                 && (active_profile_changed

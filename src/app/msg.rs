@@ -3,8 +3,8 @@ use crate::app::model::{
     TrafficStats,
 };
 use crate::config::profile::{GeoRegion, Profile, RoutingMode, Settings, Subscription};
+use crate::geo::{RuleSetReport, RuleSetStates};
 use crate::ui::styles::Theme;
-use chrono::{DateTime, Local};
 use crossterm::event::{KeyEvent, MouseEvent};
 use uuid::Uuid;
 
@@ -54,14 +54,14 @@ pub enum Msg {
     Paste(String),
     Tick,
     Resize,
-    GeoUpdated {
-        result: GeoResult,
-        region_ready: bool,
+    RuleSetsUpdated {
+        reports: Vec<RuleSetReport>,
+        states: RuleSetStates,
+        epoch: u64,
     },
-    GeoMetadataRefreshed {
-        last_updated: Option<String>,
-        last_checked_at: Option<chrono::DateTime<chrono::Local>>,
-        schedule: Option<GeoSchedule>,
+    RuleSetStatesRefreshed {
+        states: RuleSetStates,
+        epoch: u64,
     },
     SystemResumed,
     Connected {
@@ -122,30 +122,6 @@ pub enum Msg {
     TestResult {
         id: Uuid,
         latency_ms: Option<u64>,
-    },
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GeoSchedule {
-    pub epoch: u64,
-    pub retry_state: Option<crate::config::profile::RetryState>,
-    pub next_update: Option<chrono::NaiveDate>,
-}
-
-#[derive(Debug)]
-pub enum GeoResult {
-    Updated {
-        parts: Vec<String>,
-        checked_at: DateTime<Local>,
-        schedule: Option<GeoSchedule>,
-    },
-    UpToDate {
-        checked_at: Option<DateTime<Local>>,
-        schedule: Option<GeoSchedule>,
-    },
-    Error {
-        message: String,
-        schedule: Option<GeoSchedule>,
     },
 }
 
@@ -426,9 +402,10 @@ pub struct StateSnapshot {
     pub geo_updating: bool,
     #[serde(default)]
     pub routing_fallback: Option<crate::config::profile::RoutingFallback>,
-    pub geo_last_updated: Option<String>,
     #[serde(default)]
-    pub geo_last_checked_at: Option<DateTime<Local>>,
+    pub rule_set_updates: std::collections::HashMap<String, crate::app::model::UpdateTrigger>,
+    #[serde(default)]
+    pub rule_set_states: RuleSetStates,
     pub overlay: Overlay,
     #[serde(default)]
     pub main_pane_focus: MainPaneFocus,

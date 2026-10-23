@@ -11,12 +11,12 @@ pub enum Effect {
     },
     Disconnect,
     RevokeKillSwitchExceptions,
-    DownloadGeo,
-    DownloadGeoIfMissing,
-    RefreshGeoLastUpdated,
-    ClearGeoRetryState {
-        region: crate::config::profile::GeoRegion,
+    DownloadRuleSets {
+        rule_sets: Vec<&'static crate::geo::RuleSet>,
+        only_missing: bool,
+        record_schedule: bool,
     },
+    RefreshRuleSetStates,
     ResetGeoUpdateSchedules,
     WriteState,
     SaveConfig,

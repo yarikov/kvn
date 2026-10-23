@@ -221,7 +221,7 @@ fn build_docs_preview_state_at(
     model.selected = 2;
     model.main_pane_focus = crate::app::model::MainPaneFocus::Sources;
     model.status = Some(AppStatus::Info("Connected to 🇺🇸 United States".into()));
-    model.geo_last_checked_at = Some(
+    model.mark_selectable_rule_sets_checked(
         preview_now
             .with_hour(8)
             .and_then(|time| time.with_minute(0))
@@ -359,7 +359,7 @@ mod tests {
             Some("[app] 15:30:07 INFO Kill switch enabled")
         );
         assert_eq!(
-            state.model.geo_last_checked_at.unwrap(),
+            state.model.selectable_rule_sets_checked_at().unwrap(),
             chrono::Local
                 .with_ymd_and_hms(2026, 9, 8, 8, 0, 0)
                 .single()
