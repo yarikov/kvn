@@ -1879,7 +1879,6 @@ esac
             routing_fallback: None,
             geo_last_updated: None,
             geo_last_checked_at: None,
-            service_checked_at: Default::default(),
             overlay: crate::app::model::Overlay::None,
             main_pane_focus: Default::default(),
             profiles: vec![

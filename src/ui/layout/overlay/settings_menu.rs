@@ -71,16 +71,14 @@ pub(super) fn draw(
             popup_width
         }
         SettingsMenuPage::Routing => {
-            use crate::config::profile::{GeoRegion, RoutedService, ServiceRoute};
+            use crate::config::profile::GeoRegion;
 
             let geo_routing = &model.config.settings.geo_routing;
             let mode = geo_routing.mode();
-            let routes = &geo_routing.service_routes;
             let has_draft = model.routing_settings_draft.is_some();
             let crate::app::model::RoutingSettings {
                 region: shown_region,
                 mode: shown_mode,
-                service_routes: shown_routes,
             } = model.shown_routing_settings();
             let mut settings = vec![(
                 "Region",
@@ -94,20 +92,6 @@ pub(super) fn draw(
                     has_draft && mode != shown_mode,
                 ));
             }
-            let service_offset = if shown_region == GeoRegion::Global {
-                1
-            } else {
-                2
-            };
-            for service in RoutedService::ALL {
-                let saved = routes.get(&service).copied().unwrap_or_default();
-                let shown = shown_routes.get(&service).copied().unwrap_or_default();
-                settings.push((
-                    service.label(),
-                    shown.label().to_string(),
-                    has_draft && saved != shown,
-                ));
-            }
             let stable_value_width = GeoRegion::ALL
                 .iter()
                 .map(|region| visual_width(geo_region_label(*region)))
@@ -116,24 +100,10 @@ pub(super) fn draw(
                         .into_iter()
                         .map(|mode| visual_width(&mode.to_string()))
                 }))
-                .chain(
-                    [
-                        ServiceRoute::Disabled,
-                        ServiceRoute::Proxy,
-                        ServiceRoute::Direct,
-                    ]
-                    .map(|route| visual_width(route.label())),
-                )
                 .max()
                 .unwrap_or(0);
             let layout = settings_value_layout(&settings, stable_value_width, area, &frame_widths);
             for (index, (name, value, dirty)) in settings.into_iter().enumerate() {
-                if index == service_offset {
-                    lines.push(Line::from(""));
-                    lines.push(
-                        Line::from(Span::styled("Services", model.theme.accent())).centered(),
-                    );
-                }
                 lines.push(settings_value_line(
                     name,
                     &value,

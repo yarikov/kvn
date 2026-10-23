@@ -348,7 +348,6 @@ fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
     model.routing_fallback = snapshot.routing_fallback;
     model.geo_last_updated = snapshot.geo_last_updated;
     model.geo_last_checked_at = snapshot.geo_last_checked_at;
-    model.service_checked_at = snapshot.service_checked_at;
     model.overlay = snapshot.overlay;
     model.config.profiles = snapshot.profiles;
     model.config.subscriptions = snapshot.subscriptions;

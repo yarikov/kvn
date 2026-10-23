@@ -11,22 +11,18 @@ pub(in crate::app::update) fn handle_geo_result(
     result: GeoResult,
     region_ready: bool,
 ) -> Vec<Effect> {
-    let pending_geo_reconnect = std::mem::take(&mut model.pending_geo_reconnect);
     let failure = match &result {
         GeoResult::Error { message, .. } => Some(message.clone()),
         _ => None,
     };
-    model.geo_updating = pending_geo_reconnect && model.pending_service_reconnect;
+    model.geo_updating = false;
     model.geo_automatic_update = false;
     let mut effects = match result {
         GeoResult::Updated {
             parts,
             checked_at,
-            service_checked_at,
             schedule,
-            warnings,
         } => {
-            model.service_checked_at = service_checked_at;
             if let Some(schedule) = schedule {
                 model.apply_geo_schedule(schedule);
             }
@@ -41,26 +37,13 @@ pub(in crate::app::update) fn handle_geo_result(
                 });
                 model.logs.push_back(text);
             }
-            for warning in &warnings {
-                log_effects.push(Effect::AppendAppLog {
-                    level: "ERROR".to_string(),
-                    message: format!("Geo batch partial failure: {warning}"),
-                });
-            }
-            if !warnings.is_empty() {
-                append_download_hint(&mut log_effects, model, DownloadKind::Geo);
-            }
-            let status = if warnings.is_empty() {
-                AppStatus::Info("Geo databases updated".into())
-            } else {
-                AppStatus::Error(format!(
-                    "Geo update partially failed: {}",
-                    warnings.join("; ")
-                ))
-            };
-            push_status(&mut log_effects, model, StatusKey::Geo, status);
-            if !pending_geo_reconnect
-                && model.connection == ConnectionState::Connected
+            push_status(
+                &mut log_effects,
+                model,
+                StatusKey::Geo,
+                AppStatus::Info("Geo databases updated".into()),
+            );
+            if model.connection == ConnectionState::Connected
                 && let Some(active_id) = model.active_profile_id
                 && queue_connect(model, active_id)
             {
@@ -72,11 +55,8 @@ pub(in crate::app::update) fn handle_geo_result(
         }
         GeoResult::UpToDate {
             checked_at,
-            service_checked_at,
             schedule,
-            warnings,
         } => {
-            model.service_checked_at = service_checked_at;
             if let Some(schedule) = schedule {
                 model.apply_geo_schedule(schedule);
             }
@@ -85,32 +65,19 @@ pub(in crate::app::update) fn handle_geo_result(
                 model.geo_last_updated = Some(checked_at.format("%d %b %H:%M").to_string());
             }
             let mut effects = Vec::new();
-            let status = if warnings.is_empty() {
-                AppStatus::Info("Geo databases up to date".into())
-            } else {
-                AppStatus::Error(format!(
-                    "Service rule-set update failed: {}",
-                    warnings.join("; ")
-                ))
-            };
-            push_status(&mut effects, model, StatusKey::Geo, status);
-            if !warnings.is_empty() {
-                append_download_hint(&mut effects, model, DownloadKind::Geo);
-            }
+            push_status(
+                &mut effects,
+                model,
+                StatusKey::Geo,
+                AppStatus::Info("Geo databases up to date".into()),
+            );
             effects
         }
-        GeoResult::Error {
-            message,
-            service_checked_at,
-            schedule,
-            updated_parts,
-        } => {
-            model.service_checked_at = service_checked_at;
+        GeoResult::Error { message, schedule } => {
             if let Some(schedule) = schedule {
                 model.apply_geo_schedule(schedule);
             }
             let mut effects = Vec::new();
-            let has_updates = !updated_parts.is_empty();
             push_status(
                 &mut effects,
                 model,
@@ -118,29 +85,9 @@ pub(in crate::app::update) fn handle_geo_result(
                 crate::app::model::AppStatus::Error(format!("Geo update failed: {message}")),
             );
             append_download_hint(&mut effects, model, DownloadKind::Geo);
-            for part in updated_parts {
-                effects.push(Effect::AppendAppLog {
-                    level: "INFO".to_string(),
-                    message: format!("Updated: {part}"),
-                });
-            }
-            if !pending_geo_reconnect
-                && has_updates
-                && model.connection == ConnectionState::Connected
-                && let Some(active_id) = model.active_profile_id
-            {
-                queue_connect(model, active_id);
-            }
             effects
         }
     };
-    if pending_geo_reconnect
-        && !model.pending_service_reconnect
-        && model.connection == ConnectionState::Connected
-        && let Some(active_id) = model.active_profile_id
-    {
-        queue_connect(model, active_id);
-    }
     if let Some(fallback) = model.routing_fallback
         && model.connection == ConnectionState::Connected
     {
@@ -214,9 +161,7 @@ fn leave_routing_fallback(
     }
 }
 
-pub(in crate::app::update) fn start_deferred_region_download(
-    model: &mut Model,
-) -> Option<Vec<Effect>> {
+fn start_deferred_region_download(model: &mut Model) -> Option<Vec<Effect>> {
     let deferred = std::mem::take(&mut model.region_download_deferred);
     (deferred && model.routing_fallback.is_some() && model.connection == ConnectionState::Connected)
         .then(|| start_region_rule_sets_download(model))
@@ -234,10 +179,9 @@ mod tests {
     use crate::app::msg::{GeoSchedule, Msg};
     use crate::app::update::update;
     use crate::config::profile::RetryState;
-    use crate::config::profile::{GeoRegion, Profile, RoutedService, RoutingMode};
+    use crate::config::profile::{GeoRegion, Profile, RoutingMode};
     use crate::test_helpers::*;
     use chrono::Local;
-    use std::collections::HashMap;
 
     fn stale_retry_state() -> RetryState {
         RetryState {
@@ -260,17 +204,11 @@ mod tests {
             Msg::GeoUpdated {
                 result: GeoResult::UpToDate {
                     checked_at: Some(checked_at),
-                    service_checked_at: Default::default(),
                     schedule: Some(GeoSchedule {
                         epoch: 1,
                         retry_state: Some(stale_retry_state()),
-                        service_retry_states: HashMap::from([(
-                            RoutedService::Steam,
-                            stale_retry_state(),
-                        )]),
                         ..Default::default()
                     }),
-                    warnings: Vec::new(),
                 },
                 region_ready: false,
             },
@@ -278,7 +216,6 @@ mod tests {
 
         assert_eq!(model.geo_next_update, reset_next);
         assert!(model.geo_retry_state.is_none());
-        assert!(model.service_retry_states.is_empty());
         assert_eq!(model.geo_last_checked_at, Some(checked_at));
     }
 
@@ -293,13 +230,11 @@ mod tests {
             Msg::GeoUpdated {
                 result: GeoResult::Error {
                     message: "unavailable".into(),
-                    service_checked_at: Default::default(),
                     schedule: Some(GeoSchedule {
                         epoch: 2,
                         retry_state: Some(retry_state),
                         ..Default::default()
                     }),
-                    updated_parts: Vec::new(),
                 },
                 region_ready: false,
             },
@@ -317,7 +252,6 @@ mod tests {
             Msg::GeoMetadataRefreshed {
                 last_updated: Some("2026-06-15 08:00".to_string()),
                 last_checked_at: None,
-                service_checked_at: Default::default(),
                 schedule: None,
             },
         );
@@ -335,9 +269,7 @@ mod tests {
                 result: GeoResult::Updated {
                     parts: vec!["geoip".into()],
                     checked_at: Local::now(),
-                    service_checked_at: Default::default(),
                     schedule: None,
-                    warnings: Vec::new(),
                 },
                 region_ready: false,
             },
@@ -369,9 +301,7 @@ mod tests {
                 result: GeoResult::Updated {
                     parts: vec!["geoip".into()],
                     checked_at: Local::now(),
-                    service_checked_at: Default::default(),
                     schedule: None,
-                    warnings: Vec::new(),
                 },
                 region_ready: false,
             },
@@ -389,9 +319,7 @@ mod tests {
             Msg::GeoUpdated {
                 result: GeoResult::UpToDate {
                     checked_at: Some(Local::now()),
-                    service_checked_at: Default::default(),
                     schedule: None,
-                    warnings: Vec::new(),
                 },
                 region_ready: false,
             },
@@ -406,7 +334,7 @@ mod tests {
         );
     }
 
-    fn connected_in_fallback(geo_updating: bool, steam_routed: bool) -> (Model, Vec<Effect>) {
+    fn connected_in_fallback(geo_updating: bool) -> (Model, Vec<Effect>) {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
@@ -416,12 +344,6 @@ mod tests {
             .settings
             .geo_routing
             .set_mode(RoutingMode::Bypass(GeoRegion::Ru));
-        if steam_routed {
-            model.config.settings.geo_routing.service_routes.insert(
-                RoutedService::Steam,
-                crate::config::profile::ServiceRoute::Direct,
-            );
-        }
         model.connection = ConnectionState::ConnectPending;
         model.geo_updating = geo_updating;
         let effects = update(
@@ -440,9 +362,7 @@ mod tests {
         Msg::GeoUpdated {
             result: GeoResult::Error {
                 message: "net fail".into(),
-                service_checked_at: Default::default(),
                 schedule: None,
-                updated_parts: Vec::new(),
             },
             region_ready: false,
         }
@@ -450,7 +370,7 @@ mod tests {
 
     #[test]
     fn fallback_connection_downloads_region_rule_sets_through_the_tunnel() {
-        let (model, effects) = connected_in_fallback(false, false);
+        let (model, effects) = connected_in_fallback(false);
         assert_eq!(model.routing_fallback, Some(RoutingFallback::Global));
         assert!(model.geo_updating);
         assert!(effects.contains(&Effect::DownloadGeoIfMissing));
@@ -495,7 +415,7 @@ mod tests {
 
     #[test]
     fn fallback_connection_retries_a_running_download_once_it_fails() {
-        let (mut model, effects) = connected_in_fallback(true, false);
+        let (mut model, effects) = connected_in_fallback(true);
         assert!(!effects.contains(&Effect::DownloadGeoIfMissing));
 
         let effects = update(&mut model, geo_error());
@@ -513,7 +433,7 @@ mod tests {
 
     #[test]
     fn fallback_connection_reconnects_once_region_rule_sets_are_present() {
-        let (mut model, _) = connected_in_fallback(false, false);
+        let (mut model, _) = connected_in_fallback(false);
         update(&mut model, geo_up_to_date(true));
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, model.active_profile_id);
@@ -521,42 +441,17 @@ mod tests {
 
     #[test]
     fn fallback_connection_stays_in_global_while_region_rule_sets_are_absent() {
-        let (mut model, _) = connected_in_fallback(false, false);
+        let (mut model, _) = connected_in_fallback(false);
         let effects = update(&mut model, geo_up_to_date(false));
         assert_eq!(model.connection, ConnectionState::Connected);
         assert!(!effects.contains(&Effect::DownloadGeoIfMissing));
-    }
-
-    #[test]
-    fn fallback_connection_leaves_service_rule_sets_to_the_reconnect() {
-        let (_, effects) = connected_in_fallback(false, true);
-        assert!(!effects.contains(&Effect::DownloadServiceRuleSetsIfMissing));
-        assert!(effects.contains(&Effect::DownloadGeoIfMissing));
-    }
-
-    #[test]
-    fn fallback_connection_starts_its_deferred_download_after_service_rule_sets() {
-        let (mut model, _) = connected_in_fallback(true, false);
-        let effects = update(
-            &mut model,
-            Msg::ServiceRuleSetsReady {
-                checked_at: Default::default(),
-                schedule: None,
-                updated_parts: Vec::new(),
-                errors: Vec::new(),
-            },
-        );
-        assert!(effects.contains(&Effect::DownloadGeoIfMissing));
-        assert!(model.geo_updating);
     }
 
     fn geo_up_to_date(region_ready: bool) -> Msg {
         Msg::GeoUpdated {
             result: GeoResult::UpToDate {
                 checked_at: Some(Local::now()),
-                service_checked_at: Default::default(),
                 schedule: None,
-                warnings: Vec::new(),
             },
             region_ready,
         }
@@ -576,12 +471,10 @@ mod tests {
             Msg::GeoUpdated {
                 result: GeoResult::Error {
                     message: "net fail".into(),
-                    service_checked_at: Default::default(),
                     schedule: Some(GeoSchedule {
                         retry_state: Some(retry_state),
                         ..Default::default()
                     }),
-                    updated_parts: Vec::new(),
                 },
                 region_ready: false,
             },

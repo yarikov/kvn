@@ -159,7 +159,6 @@ fn run_loop(
                 Effect::Connect { .. }
                     | Effect::Disconnect
                     | Effect::DownloadGeo
-                    | Effect::RetryServiceRuleSets { .. }
                     | Effect::ResetGeoUpdateSchedules
                     | Effect::WriteState
                     | Effect::SaveConfig
@@ -312,7 +311,6 @@ pub(crate) fn build_snapshot(
         routing_fallback: model.routing_fallback,
         geo_last_updated: model.geo_last_updated.clone(),
         geo_last_checked_at: model.geo_last_checked_at,
-        service_checked_at: model.service_checked_at.clone(),
         overlay: model.overlay,
         main_pane_focus: model.main_pane_focus,
         profiles: model.config.profiles.clone(),

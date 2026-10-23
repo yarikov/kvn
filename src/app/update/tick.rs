@@ -1,10 +1,9 @@
 use crate::app::effect::Effect;
 use crate::app::model::{ConnectionState, Model, Overlay, UpdateTrigger};
-use crate::config::profile::{GeoRegion, RoutedService, update_window_open};
+use crate::config::profile::{GeoRegion, update_window_open};
 use chrono::Local;
 use std::time::Instant;
 
-use crate::app::update::status::download_allowed;
 use crate::app::update::traffic::TRAFFIC_POLL_INTERVAL;
 
 pub(in crate::app::update) fn handle_tick(model: &mut Model) -> Vec<Effect> {
@@ -19,22 +18,6 @@ fn handle_tick_at(model: &mut Model, now: chrono::DateTime<Local>) -> Vec<Effect
         model.geo_automatic_update = true;
         model.geo_last_attempt_at = Some(now);
         effects.push(Effect::DownloadGeo);
-    } else if !model.geo_updating && download_allowed(model) {
-        let due_services: Vec<_> = model
-            .config
-            .settings
-            .geo_routing
-            .enabled_services()
-            .into_iter()
-            .filter(|service| service_update_due(model, *service, now))
-            .collect();
-        if !due_services.is_empty() {
-            model.geo_updating = true;
-            model.geo_automatic_update = true;
-            effects.push(Effect::RetryServiceRuleSets {
-                services: due_services,
-            });
-        }
     }
 
     effects.extend(check_due_subscriptions_at(model, now));
@@ -97,39 +80,6 @@ fn tick_running_work(model: &mut Model) -> Vec<Effect> {
     }
 
     effects
-}
-
-fn service_update_due(model: &Model, service: RoutedService, now: chrono::DateTime<Local>) -> bool {
-    if let Some(state) = model.service_retry_states.get(&service)
-        && state.governs(now)
-    {
-        return state.retry_due(now);
-    }
-    model
-        .config
-        .settings
-        .geo_routing
-        .auto_update
-        .interval_minutes()
-        != 0
-        && update_window_open(now)
-        && model.service_next_updates.get(&service).map_or_else(
-            || {
-                model
-                    .service_checked_at
-                    .get(&service)
-                    .is_none_or(|checked| {
-                        now.signed_duration_since(*checked).num_minutes()
-                            >= model
-                                .config
-                                .settings
-                                .geo_routing
-                                .auto_update
-                                .interval_minutes() as i64
-                    })
-            },
-            |date| now.date_naive() >= *date,
-        )
 }
 
 fn geo_update_due(model: &Model, now: chrono::DateTime<Local>) -> bool {
@@ -274,81 +224,6 @@ mod tests {
         assert!(!geo_update_due(&model, now));
         assert!(!geo_update_due(&model, now + chrono::Duration::minutes(4)));
         assert!(geo_update_due(&model, now + chrono::Duration::minutes(5)));
-    }
-
-    #[test]
-    fn service_retry_is_independent_from_region_schedule() {
-        let mut model = model_with_profiles(vec![]);
-        model.connection = ConnectionState::Connected;
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Off;
-        model.config.settings.geo_routing.service_routes.insert(
-            crate::config::profile::RoutedService::Telegram,
-            crate::config::profile::ServiceRoute::Proxy,
-        );
-        model.service_retry_states.insert(
-            crate::config::profile::RoutedService::Telegram,
-            crate::config::profile::RetryState {
-                consecutive_failures: 2,
-                retry_at: Local::now() - chrono::Duration::seconds(1),
-                attempt_date: None,
-            },
-        );
-
-        let effects = handle_tick(&mut model);
-
-        assert!(effects.contains(&Effect::RetryServiceRuleSets {
-            services: vec![crate::config::profile::RoutedService::Telegram],
-        }));
-        assert!(!effects.contains(&Effect::DownloadGeo));
-    }
-
-    #[test]
-    fn global_auto_update_checks_enabled_services_only() {
-        let mut model = model_with_profiles(vec![]);
-        model.connection = ConnectionState::Connected;
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(GeoRegion::Global);
-        model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
-        model.config.settings.geo_routing.service_routes.insert(
-            RoutedService::Telegram,
-            crate::config::profile::ServiceRoute::Proxy,
-        );
-
-        let effects = handle_tick_at(&mut model, after_update_window());
-        assert!(!effects.contains(&Effect::DownloadGeo));
-        assert!(effects.contains(&Effect::RetryServiceRuleSets {
-            services: vec![RoutedService::Telegram],
-        }));
-    }
-
-    #[test]
-    fn global_auto_update_skips_fresh_service_check() {
-        let mut model = model_with_profiles(vec![]);
-        model.connection = ConnectionState::Connected;
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(GeoRegion::Global);
-        model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
-        model.config.settings.geo_routing.service_routes.insert(
-            RoutedService::Telegram,
-            crate::config::profile::ServiceRoute::Proxy,
-        );
-        model
-            .service_checked_at
-            .insert(RoutedService::Telegram, Local::now());
-
-        let effects = handle_tick(&mut model);
-        assert!(
-            !effects
-                .iter()
-                .any(|effect| matches!(effect, Effect::RetryServiceRuleSets { .. }))
-        );
     }
 
     #[test]
@@ -634,31 +509,5 @@ mod tests {
         assert_eq!(test_effects.len(), 4);
         assert_eq!(model.testing_profiles.len(), 4);
         assert_eq!(model.pending_tests.len(), 1, "one still waiting");
-    }
-
-    #[test]
-    fn automatic_service_update_can_run_directly_without_kill_switch() {
-        let mut model = model_with_profiles(vec![]);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(GeoRegion::Global);
-        model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
-        model.config.settings.geo_routing.service_routes.insert(
-            RoutedService::Steam,
-            crate::config::profile::ServiceRoute::Direct,
-        );
-        let now = after_update_window();
-        model
-            .service_next_updates
-            .insert(RoutedService::Steam, now.date_naive());
-
-        let effects = handle_tick_at(&mut model, now);
-        assert!(effects.iter().any(|effect| matches!(
-            effect,
-            Effect::RetryServiceRuleSets { services }
-                if services == &vec![RoutedService::Steam]
-        )));
     }
 }

@@ -146,8 +146,7 @@ Connecting to a profile, end to end:
    [Daemon threads](#daemon-threads)) and sends back `Msg::Connected`, or
    sends `Msg::ConnectFailed`.
 5. `update` records the result and returns more effects: save the last used
-   profile, write `state.json`, download missing service rule-sets through the
-   tunnel, broadcast the new state.
+   profile, write `state.json`, broadcast the new state.
 6. Every attached client receives a `StateSnapshot` and redraws.
 
 Because `update` is a pure function, every state transition can be tested by
@@ -281,7 +280,7 @@ Connecting (`src/singbox/`):
    retried with a new port, up to three times.
 
 The generated config carries the routing mode (Global, Bypass or Only for the
-selected country), per-service overrides, the DNS preset and the fwmark that
+selected country), the DNS preset and the fwmark that
 lets sing-box's own packets pass the kill switch. What goes through the tunnel
 in each mode is described in [What kvn protects](privacy.md). The settings
 are described in the [configuration guide](configuration.md).
@@ -334,7 +333,7 @@ is listed in [System integration](system-integration.md).
 | `src/ui/` | ratatui layout, widgets, overlays, palettes, icons |
 | `src/config.rs`, `src/config/` | `profiles.json` I/O, profile and settings types, share links, schema, merge, subscriptions |
 | `src/singbox/` | Config generation, process runner, Clash API client |
-| `src/geo.rs` | Geo and service rule-set downloads and cache |
+| `src/geo.rs` | Rule-set catalog, region rule-sets, downloads and cache |
 | `src/services/` | Log tailer, `state.json`, suspend watcher, kill switch |
 | `src/onboarding.rs` | First-run tour |
 | `src/doctor.rs`, `src/integration_files.rs` | Diagnostics and the embedded polkit and kill-switch files |

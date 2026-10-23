@@ -39,7 +39,7 @@ Keyboard-first TUI for managing VPN connections. It provides a fast, minimal int
 
 - **Vim-style navigation** — `j`/`k` to move, `gg`/`G` to jump, `?` for help
 - **Profiles & subscriptions** — manage profiles and keep subscriptions automatically up to date
-- **Geo & service routing** — choose country-based routing modes and ready-made overrides for selected services
+- **Geo routing** — choose country-based routing modes
 - **Kill switch** — block outbound traffic if the VPN connection drops
 - **DNS presets** — built-in Cloudflare and Quad9 DoH, Google DoT, and system resolver presets, custom presets with per-domain rules, and fake-IP
 - **Auto-connect & resume** — restore the last connection on startup and after system resume

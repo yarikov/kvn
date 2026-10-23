@@ -24,27 +24,15 @@ fn rule_set_freshness(model: &Model, now: chrono::DateTime<chrono::Local>) -> Ru
     let has_region_rule_sets = routing
         .current_region
         .is_some_and(|region| region != GeoRegion::Global);
-    let enabled_services = routing.enabled_services();
 
-    if !has_region_rule_sets && enabled_services.is_empty() {
+    if !has_region_rule_sets {
         return RuleSetFreshness::Disabled;
     }
     if model.geo_updating {
         return RuleSetFreshness::Updating;
     }
 
-    let region_checked_at = has_region_rule_sets
-        .then_some(model.geo_last_checked_at)
-        .flatten();
-    let latest = region_checked_at
-        .into_iter()
-        .chain(
-            enabled_services
-                .into_iter()
-                .filter_map(|service| model.service_checked_at.get(&service).copied()),
-        )
-        .max();
-    let Some(last_checked_at) = latest else {
+    let Some(last_checked_at) = model.geo_last_checked_at else {
         return RuleSetFreshness::Never;
     };
 
@@ -399,7 +387,7 @@ impl Widget for Toast<'_> {
 mod tests {
     use super::*;
     use crate::app::model::ConnectionState;
-    use crate::config::profile::{GeoAutoUpdate, GeoRegion, Profile, RoutedService, ServiceRoute};
+    use crate::config::profile::{GeoAutoUpdate, GeoRegion, Profile};
     use crate::test_helpers::{
         APP_WINDOW_COLS, buffer_to_string, buffer_to_styled_string, model_with_profiles,
     };
@@ -448,49 +436,6 @@ mod tests {
         assert_eq!(
             rule_set_freshness(&model, local_time(14, 12)),
             RuleSetFreshness::Updating
-        );
-    }
-
-    #[test]
-    fn rule_set_freshness_uses_latest_active_check() {
-        let mut model = model_with_region_rule_sets();
-        model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
-        model.geo_last_checked_at = Some(local_time(11, 12));
-        model
-            .config
-            .settings
-            .geo_routing
-            .service_routes
-            .insert(RoutedService::Telegram, ServiceRoute::Proxy);
-        let service_checked_at = local_time(14, 11);
-        model
-            .service_checked_at
-            .insert(RoutedService::Telegram, service_checked_at);
-
-        assert_eq!(
-            rule_set_freshness(&model, local_time(14, 12)),
-            RuleSetFreshness::Fresh(service_checked_at)
-        );
-    }
-
-    #[test]
-    fn rule_set_freshness_supports_service_sets_in_global_region() {
-        let mut model = model_with_profiles(vec![]);
-        model
-            .config
-            .settings
-            .geo_routing
-            .service_routes
-            .insert(RoutedService::Steam, ServiceRoute::Direct);
-        model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every7d;
-        let checked_at = local_time(14, 10);
-        model
-            .service_checked_at
-            .insert(RoutedService::Steam, checked_at);
-
-        assert_eq!(
-            rule_set_freshness(&model, local_time(14, 12)),
-            RuleSetFreshness::Fresh(checked_at)
         );
     }
 

@@ -101,18 +101,10 @@ fn collect_geo_availability() -> GeoAvailability {
     let Ok(gm) = crate::geo::GeoManager::new() else {
         return geo;
     };
-    for region in crate::config::profile::GeoRegion::ALL {
-        let Some((geoip, geosite)) = gm.local_paths(region) else {
-            continue;
-        };
-        if gm.has_databases(region) {
-            geo.regions.insert(region, (geoip, geosite));
-        }
-    }
-    for service in crate::config::profile::RoutedService::ALL {
-        if gm.has_service_databases(service) {
-            geo.services
-                .insert(service, gm.service_local_paths(service));
+    for rule_set in crate::geo::RULE_SETS {
+        if gm.has_rule_set(rule_set) {
+            geo.rule_sets
+                .insert(rule_set.tag, gm.rule_set_path(rule_set));
         }
     }
     geo
@@ -362,79 +354,33 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let geo = collect_geo_availability();
-        assert!(geo.regions.is_empty());
+        assert!(geo.rule_sets.is_empty());
     }
 
     #[test]
-    fn collect_geo_availability_populates_each_region_independently() {
-        use crate::config::profile::GeoRegion;
+    fn collect_geo_availability_lists_each_usable_rule_set_by_tag() {
+        use crate::config::profile::{GeoRegion, RoutingMode};
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = crate::geo::GeoManager::new().unwrap();
+        let [geosite, geoip] = crate::geo::region_rule_sets(GeoRegion::Ru) else {
+            unreachable!()
+        };
+        let bypass_ru = RoutingMode::Bypass(GeoRegion::Ru);
 
-        let mut written = Vec::new();
-        for region in [GeoRegion::Ru, GeoRegion::Cn, GeoRegion::Ir] {
-            let (geoip, geosite) = gm.local_paths(region).unwrap();
-            fs::write(&geoip, crate::test_helpers::RULE_SET_BYTES).unwrap();
-            fs::write(&geosite, crate::test_helpers::RULE_SET_BYTES).unwrap();
-            written.push(region);
-
-            let geo = collect_geo_availability();
-            for r in [GeoRegion::Ru, GeoRegion::Cn, GeoRegion::Ir] {
-                assert_eq!(
-                    geo.regions.contains_key(&r),
-                    written.contains(&r),
-                    "region {:?} after writing {:?}",
-                    r,
-                    written
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn collect_geo_availability_skips_region_when_only_one_file_present() {
-        use crate::config::profile::GeoRegion;
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        let gm = crate::geo::GeoManager::new().unwrap();
-        let (geoip_ru, _) = gm.local_paths(GeoRegion::Ru).unwrap();
-        fs::write(&geoip_ru, crate::test_helpers::RULE_SET_BYTES).unwrap();
+        fs::write(gm.rule_set_path(geoip), crate::test_helpers::RULE_SET_BYTES).unwrap();
         let geo = collect_geo_availability();
-        assert!(!geo.regions.contains_key(&GeoRegion::Ru));
-    }
+        assert_eq!(geo.path(geoip), Some(&gm.rule_set_path(geoip)));
+        assert_eq!(geo.path(geosite), None);
+        assert!(geo.lacks_region_rule_sets(&bypass_ru));
 
-    #[test]
-    fn collect_geo_availability_includes_service_when_all_files_present() {
-        use crate::config::profile::RoutedService;
-
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        let gm = crate::geo::GeoManager::new().unwrap();
-        let paths = gm.service_local_paths(RoutedService::Steam);
-
-        assert!(
-            !collect_geo_availability()
-                .services
-                .contains_key(&RoutedService::Steam)
-        );
-        fs::write(&paths[0].1, crate::test_helpers::RULE_SET_BYTES).unwrap();
-        assert!(
-            !collect_geo_availability()
-                .services
-                .contains_key(&RoutedService::Steam),
-            "geoip missing"
-        );
-        fs::write(&paths[1].1, crate::test_helpers::RULE_SET_BYTES).unwrap();
-        assert_eq!(
-            collect_geo_availability()
-                .services
-                .get(&RoutedService::Steam),
-            Some(&paths)
-        );
+        fs::write(
+            gm.rule_set_path(geosite),
+            crate::test_helpers::RULE_SET_BYTES,
+        )
+        .unwrap();
+        assert!(!collect_geo_availability().lacks_region_rule_sets(&bypass_ru));
     }
 
     fn sing_box_on_path() -> bool {

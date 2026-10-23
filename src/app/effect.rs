@@ -13,10 +13,6 @@ pub enum Effect {
     RevokeKillSwitchExceptions,
     DownloadGeo,
     DownloadGeoIfMissing,
-    DownloadServiceRuleSetsIfMissing,
-    RetryServiceRuleSets {
-        services: Vec<crate::config::profile::RoutedService>,
-    },
     RefreshGeoLastUpdated,
     ClearGeoRetryState {
         region: crate::config::profile::GeoRegion,

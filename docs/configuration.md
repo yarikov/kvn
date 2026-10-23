@@ -172,7 +172,7 @@ otherwise the notice is skipped and logged. kvn recognises:
 |-------|---------|-------------|
 | `tun_interface` | `kvn0` | Name of the sing-box TUN interface; must start with `kvn` |
 | `dns` | Cloudflare DoH | DNS presets, the active preset, and fake-IP state |
-| `geo_routing` | no region; `auto_update` every 7 days on a new installation, `off` when the field or section is absent (`I` changes it at any time) | Country modes, rule-set updates, and service overrides |
+| `geo_routing` | no region; `auto_update` every 7 days on a new installation, `off` when the field or section is absent (`I` changes it at any time) | Country modes and rule-set updates |
 | `auto_connect` | `false` | Connect to `last_connected_profile` at startup |
 | `kill_switch` | `false` | Persisted kill-switch state |
 | `last_connected_profile` | `null` | Last connected profile; maintained by the application |
@@ -335,10 +335,9 @@ IP rule-set applies to every query type.
 `domain_regex` uses Go RE2 syntax and is checked by sing-box when connecting.
 
 A `rule_set` entry names one of the rule-sets kvn downloads, such as
-`geosite-category-ru` or `geoip-ru` for a region, or `geosite-telegram` for a
-service route. A rule is skipped while any of its rule-sets is not in use,
-because the routing mode does not use that region, the service route is
-disabled, or the file has not been downloaded yet.
+`geosite-category-ru` or `geoip-ru` for a region. A rule is skipped while any
+of its rule-sets is not in use, because the routing mode does not use that
+region or the file has not been downloaded yet.
 
 A rule with an IP rule-set (`geoip-*`) works in two steps, for `A` and
 `AAAA` queries only. kvn first asks the preset's `final_server`; only when
@@ -396,7 +395,7 @@ is not in use. For Russia with Yandex DNS:
 The regional service sees the names of the region's sites you visit, together
 with the VPN server's address in Bypass and your own in Only.
 
-## Geo and service routing
+## Geo routing
 
 Open **Settings › Routing** (`Space r`) and set **Region** to `ru`, `cn`,
 `ir`, or `global`, then pick the **Mode**. Country regions offer Global,
@@ -415,11 +414,7 @@ The following snippet belongs inside `settings`:
     "selected_region_modes": {
       "ru": "bypass_ru"
     },
-    "auto_update": "every_1d",
-    "service_routes": {
-      "steam": "direct",
-      "telegram": "proxy"
-    }
+    "auto_update": "every_1d"
   }
 }
 ```
@@ -429,18 +424,8 @@ Routing modes are serialized as `global`, `bypass_<region>`, or
 `every_7d`. The legacy value `every_12h` behaves as `every_1d`, and the schema
 migration rewrites it.
 
-The Steam and Telegram rows of Settings › Routing set the predefined service
-overrides. `proxy` always uses the
-tunnel; `direct` sends matching traffic through the real network, including
-past the kill switch. An absent service entry, or `"disabled"`, follows the
-country routing mode.
-
-Service rule-sets are fetched through the active tunnel. Missing files do not
-block a connection: the override remains inactive until the files are
-downloaded and the connection is restarted. Turning an override on in
-Settings › Routing while connected downloads its files and reconnects
-automatically. Files that were missing when a connection started are
-downloaded once it is up, but take effect only on the next connection.
+Each country region uses two rule-sets: a `geosite-*` list of domains and a
+`geoip-*` list of IP networks.
 
 A downloaded file is kept only when it is a sing-box rule-set: a captive
 portal or error page is rejected and the previous file stays. A damaged
@@ -498,7 +483,7 @@ cannot read it.
 | Resource | Location |
 |----------|----------|
 | Profiles and settings | `~/.config/kvn-tui/profiles.json` |
-| Geo and service rule-sets | `~/.config/kvn-tui/geo/` |
+| Geo rule-sets | `~/.config/kvn-tui/geo/` |
 | Application log | `~/.config/kvn-tui/logs/app.log` |
 | sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |
 | Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved) |

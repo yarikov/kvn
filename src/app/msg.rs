@@ -2,9 +2,7 @@ use crate::app::model::{
     ConnectionSettingsDraft, ConnectionState, MainPaneFocus, Overlay, RoutingSettingsDraft,
     TrafficStats,
 };
-use crate::config::profile::{
-    GeoRegion, Profile, RoutedService, RoutingMode, Settings, Subscription,
-};
+use crate::config::profile::{GeoRegion, Profile, RoutingMode, Settings, Subscription};
 use crate::ui::styles::Theme;
 use chrono::{DateTime, Local};
 use crossterm::event::{KeyEvent, MouseEvent};
@@ -63,7 +61,6 @@ pub enum Msg {
     GeoMetadataRefreshed {
         last_updated: Option<String>,
         last_checked_at: Option<chrono::DateTime<chrono::Local>>,
-        service_checked_at: ServiceCheckTimes,
         schedule: Option<GeoSchedule>,
     },
     SystemResumed,
@@ -86,12 +83,6 @@ pub enum Msg {
         attempt_id: u64,
         code: Option<i32>,
         signal: Option<i32>,
-    },
-    ServiceRuleSetsReady {
-        checked_at: ServiceCheckTimes,
-        schedule: Option<ServiceSchedule>,
-        updated_parts: Vec<String>,
-        errors: Vec<String>,
     },
     SubscriptionFetched {
         id: Uuid,
@@ -134,23 +125,11 @@ pub enum Msg {
     },
 }
 
-pub type ServiceCheckTimes = std::collections::HashMap<RoutedService, DateTime<Local>>;
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GeoSchedule {
     pub epoch: u64,
     pub retry_state: Option<crate::config::profile::RetryState>,
     pub next_update: Option<chrono::NaiveDate>,
-    pub service_retry_states:
-        std::collections::HashMap<RoutedService, crate::config::profile::RetryState>,
-    pub service_next_updates: std::collections::HashMap<RoutedService, chrono::NaiveDate>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ServiceSchedule {
-    pub epoch: u64,
-    pub retry_states: std::collections::HashMap<RoutedService, crate::config::profile::RetryState>,
-    pub next_updates: std::collections::HashMap<RoutedService, chrono::NaiveDate>,
 }
 
 #[derive(Debug)]
@@ -158,21 +137,15 @@ pub enum GeoResult {
     Updated {
         parts: Vec<String>,
         checked_at: DateTime<Local>,
-        service_checked_at: ServiceCheckTimes,
         schedule: Option<GeoSchedule>,
-        warnings: Vec<String>,
     },
     UpToDate {
         checked_at: Option<DateTime<Local>>,
-        service_checked_at: ServiceCheckTimes,
         schedule: Option<GeoSchedule>,
-        warnings: Vec<String>,
     },
     Error {
         message: String,
-        service_checked_at: ServiceCheckTimes,
         schedule: Option<GeoSchedule>,
-        updated_parts: Vec<String>,
     },
 }
 
@@ -456,8 +429,6 @@ pub struct StateSnapshot {
     pub geo_last_updated: Option<String>,
     #[serde(default)]
     pub geo_last_checked_at: Option<DateTime<Local>>,
-    #[serde(default)]
-    pub service_checked_at: std::collections::HashMap<RoutedService, DateTime<Local>>,
     pub overlay: Overlay,
     #[serde(default)]
     pub main_pane_focus: MainPaneFocus,

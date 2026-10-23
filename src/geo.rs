@@ -8,8 +8,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
-use crate::app::msg::{GeoSchedule, ServiceSchedule};
-use crate::config::profile::{GeoRegion, RetryState, RoutedService};
+use crate::app::msg::GeoSchedule;
+use crate::config::profile::{GeoRegion, RetryState};
 
 const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 const GEO_BATCH_TIMEOUT: Duration = Duration::from_mins(3);
@@ -27,107 +27,88 @@ fn rule_set_usable(path: &Path) -> bool {
         && is_rule_set(&header)
 }
 
-pub(crate) struct GeoAsset {
-    pub(crate) filename: &'static str,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuleSetKind {
+    Geoip,
+    Geosite,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct RuleSet {
+    pub(crate) tag: &'static str,
+    pub(crate) kind: RuleSetKind,
     pub(crate) url: &'static str,
 }
 
-impl GeoAsset {
-    pub(crate) fn tag(&self) -> &'static str {
-        self.filename.trim_end_matches(".srs")
+impl RuleSet {
+    pub(crate) fn filename(&self) -> String {
+        format!("{}.srs", self.tag)
     }
 }
 
-pub(crate) struct RegionAssets {
-    pub(crate) geoip: GeoAsset,
-    pub(crate) geosite: GeoAsset,
-}
+const GEOIP_RU: RuleSet = RuleSet {
+    tag: "geoip-ru",
+    kind: RuleSetKind::Geoip,
+    url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
+};
 
-pub(crate) fn region_assets(region: GeoRegion) -> Option<RegionAssets> {
+const GEOSITE_CATEGORY_RU: RuleSet = RuleSet {
+    tag: "geosite-category-ru",
+    kind: RuleSetKind::Geosite,
+    url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs",
+};
+
+const GEOIP_CN: RuleSet = RuleSet {
+    tag: "geoip-cn",
+    kind: RuleSetKind::Geoip,
+    url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+};
+
+const GEOSITE_CN: RuleSet = RuleSet {
+    tag: "geosite-cn",
+    kind: RuleSetKind::Geosite,
+    url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+};
+
+const GEOIP_IR: RuleSet = RuleSet {
+    tag: "geoip-ir",
+    kind: RuleSetKind::Geoip,
+    url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ir.srs",
+};
+
+const GEOSITE_CATEGORY_IR: RuleSet = RuleSet {
+    tag: "geosite-category-ir",
+    kind: RuleSetKind::Geosite,
+    url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ir.srs",
+};
+
+pub(crate) const RULE_SETS: &[&RuleSet] = &[
+    &GEOIP_RU,
+    &GEOSITE_CATEGORY_RU,
+    &GEOIP_CN,
+    &GEOSITE_CN,
+    &GEOIP_IR,
+    &GEOSITE_CATEGORY_IR,
+];
+
+pub(crate) fn region_rule_sets(region: GeoRegion) -> &'static [&'static RuleSet] {
     match region {
-        GeoRegion::Global => None,
-        GeoRegion::Ru => Some(RegionAssets {
-            geoip: GeoAsset {
-                filename: "geoip-ru.srs",
-                url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
-            },
-            geosite: GeoAsset {
-                filename: "geosite-category-ru.srs",
-                url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs",
-            },
-        }),
-        GeoRegion::Cn => Some(RegionAssets {
-            geoip: GeoAsset {
-                filename: "geoip-cn.srs",
-                url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
-            },
-            geosite: GeoAsset {
-                filename: "geosite-cn.srs",
-                url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
-            },
-        }),
-        GeoRegion::Ir => Some(RegionAssets {
-            geoip: GeoAsset {
-                filename: "geoip-ir.srs",
-                url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ir.srs",
-            },
-            geosite: GeoAsset {
-                filename: "geosite-category-ir.srs",
-                url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ir.srs",
-            },
-        }),
+        GeoRegion::Global => &[],
+        GeoRegion::Ru => &[&GEOSITE_CATEGORY_RU, &GEOIP_RU],
+        GeoRegion::Cn => &[&GEOSITE_CN, &GEOIP_CN],
+        GeoRegion::Ir => &[&GEOSITE_CATEGORY_IR, &GEOIP_IR],
     }
 }
 
-pub(crate) struct ServiceAssets {
-    pub(crate) geoip: Option<GeoAsset>,
-    pub(crate) geosite: Option<GeoAsset>,
-}
-
-impl ServiceAssets {
-    pub(crate) fn present(&self) -> Vec<&GeoAsset> {
-        [self.geosite.as_ref(), self.geoip.as_ref()]
-            .into_iter()
-            .flatten()
-            .collect()
-    }
-}
-
-pub(crate) fn service_assets(service: RoutedService) -> ServiceAssets {
-    match service {
-        RoutedService::Steam => ServiceAssets {
-            geoip: Some(GeoAsset {
-                filename: "geoip-steam.srs",
-                url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/asn/AS32590.srs",
-            }),
-            geosite: Some(GeoAsset {
-                filename: "geosite-steam.srs",
-                url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/steam.srs",
-            }),
-        },
-        RoutedService::Telegram => ServiceAssets {
-            geoip: Some(GeoAsset {
-                filename: "geoip-telegram.srs",
-                url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geoip/telegram.srs",
-            }),
-            geosite: Some(GeoAsset {
-                filename: "geosite-telegram.srs",
-                url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/telegram.srs",
-            }),
-        },
-    }
+pub(crate) fn rule_set(tag: &str) -> Option<&'static RuleSet> {
+    RULE_SETS
+        .iter()
+        .copied()
+        .find(|rule_set| rule_set.tag == tag)
 }
 
 pub(crate) fn is_ip_rule_set_tag(tag: &str) -> bool {
-    let region_tags = GeoRegion::ALL
-        .into_iter()
-        .filter_map(region_assets)
-        .map(|assets| assets.geoip.tag());
-    let service_tags = RoutedService::ALL
-        .into_iter()
-        .filter_map(|service| service_assets(service).geoip)
-        .map(|asset| asset.tag());
-    region_tags.chain(service_tags).any(|ip_tag| ip_tag == tag)
+    rule_set(tag).is_some_and(|rule_set| rule_set.kind == RuleSetKind::Geoip)
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -141,13 +122,7 @@ struct GeoMetadata {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     region_retry_states: HashMap<GeoRegion, RetryState>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    service_retry_states: HashMap<RoutedService, RetryState>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    service_checked_at: HashMap<RoutedService, DateTime<Local>>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     region_next_update: HashMap<GeoRegion, NaiveDate>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    service_next_update: HashMap<RoutedService, NaiveDate>,
     #[serde(default, skip_serializing_if = "is_zero")]
     schedule_epoch: u64,
 }
@@ -178,13 +153,7 @@ struct GeoMetadataRaw {
     #[serde(default, alias = "retry_states")]
     region_retry_states: HashMap<GeoRegion, RetryState>,
     #[serde(default)]
-    service_retry_states: HashMap<RoutedService, RetryState>,
-    #[serde(default)]
-    service_checked_at: HashMap<RoutedService, DateTime<Local>>,
-    #[serde(default)]
     region_next_update: HashMap<GeoRegion, NaiveDate>,
-    #[serde(default)]
-    service_next_update: HashMap<RoutedService, NaiveDate>,
     #[serde(default)]
     schedule_epoch: u64,
     #[serde(default)]
@@ -220,10 +189,7 @@ impl From<GeoMetadataRaw> for GeoMetadata {
             updated_at: raw.updated_at,
             checked_at: raw.checked_at,
             region_retry_states: raw.region_retry_states,
-            service_retry_states: raw.service_retry_states,
-            service_checked_at: raw.service_checked_at,
             region_next_update: raw.region_next_update,
-            service_next_update: raw.service_next_update,
             schedule_epoch: raw.schedule_epoch,
         }
     }
@@ -261,64 +227,29 @@ impl GeoManager {
         })
     }
 
-    pub fn local_paths(&self, region: GeoRegion) -> Option<(PathBuf, PathBuf)> {
-        region_assets(region).map(|a| {
-            (
-                self.geo_dir.join(a.geoip.filename),
-                self.geo_dir.join(a.geosite.filename),
-            )
-        })
+    pub(crate) fn rule_set_path(&self, rule_set: &RuleSet) -> PathBuf {
+        self.geo_dir.join(rule_set.filename())
+    }
+
+    pub(crate) fn has_rule_set(&self, rule_set: &RuleSet) -> bool {
+        rule_set_usable(&self.rule_set_path(rule_set))
     }
 
     pub fn has_databases(&self, region: GeoRegion) -> bool {
-        match region_assets(region) {
-            None => true,
-            Some(a) => {
-                rule_set_usable(&self.geo_dir.join(a.geoip.filename))
-                    && rule_set_usable(&self.geo_dir.join(a.geosite.filename))
-            }
-        }
-    }
-
-    pub(crate) fn service_local_paths(
-        &self,
-        service: RoutedService,
-    ) -> Vec<(&'static str, PathBuf)> {
-        service_assets(service)
-            .present()
-            .into_iter()
-            .map(|a| (a.tag(), self.geo_dir.join(a.filename)))
-            .collect()
-    }
-
-    pub fn has_service_databases(&self, service: RoutedService) -> bool {
-        self.service_local_paths(service)
+        region_rule_sets(region)
             .iter()
-            .all(|(_, path)| rule_set_usable(path))
+            .all(|rule_set| self.has_rule_set(rule_set))
     }
 
-    pub fn update_service_if_needed(&self, service: RoutedService) -> Result<bool> {
-        self.update_service_assets(service, &service_assets(service).present())
-    }
-
-    fn update_service_assets(&self, service: RoutedService, assets: &[&GeoAsset]) -> Result<bool> {
-        let updated = self.update_assets_if_needed(assets)?;
-        self.update_metadata(|meta| {
-            meta.service_checked_at.insert(service, Local::now());
-            true
-        })?;
-        Ok(updated)
-    }
-
-    fn update_assets_if_needed(&self, assets: &[&GeoAsset]) -> Result<bool> {
+    fn update_rule_sets_if_needed(&self, rule_sets: &[&RuleSet]) -> Result<bool> {
         let saved_etags = self.load_metadata().unwrap_or_default().etags;
         let mut downloaded_etags = Vec::new();
         let mut updated = false;
         let mut first_err: Option<anyhow::Error> = None;
-        for asset in assets {
-            let dest = self.geo_dir.join(asset.filename);
+        for rule_set in rule_sets {
+            let filename = rule_set.filename();
             let needed = match self
-                .asset_needs_download(asset, saved_etags.get(asset.filename).map(String::as_str))
+                .rule_set_needs_download(rule_set, saved_etags.get(&filename).map(String::as_str))
             {
                 Ok(n) => n,
                 Err(e) => {
@@ -331,17 +262,16 @@ impl GeoManager {
             if !needed {
                 continue;
             }
-            match self.download_file(asset.url, &dest) {
+            match self.download_file(rule_set.url, &self.rule_set_path(rule_set)) {
                 Ok(etag) => {
                     if let Some(e) = etag {
-                        downloaded_etags.push((asset.filename.to_string(), e));
+                        downloaded_etags.push((filename, e));
                     }
                     updated = true;
                 }
                 Err(e) => {
                     if first_err.is_none() {
-                        first_err =
-                            Some(e.context(format!("Failed to download {}", asset.filename)));
+                        first_err = Some(e.context(format!("Failed to download {filename}")));
                     }
                 }
             }
@@ -415,18 +345,6 @@ impl GeoManager {
         self.update_metadata(|meta| meta.region_retry_states.remove(&region).is_some())
     }
 
-    pub fn service_retry_states(&self) -> HashMap<RoutedService, RetryState> {
-        self.load_metadata()
-            .map(|meta| meta.service_retry_states)
-            .unwrap_or_default()
-    }
-
-    pub fn service_checked_at(&self) -> HashMap<RoutedService, DateTime<Local>> {
-        self.load_metadata()
-            .map(|meta| meta.service_checked_at)
-            .unwrap_or_default()
-    }
-
     pub fn region_next_update(&self, region: GeoRegion) -> Option<NaiveDate> {
         self.load_metadata()
             .ok()?
@@ -435,55 +353,17 @@ impl GeoManager {
             .copied()
     }
 
-    pub fn service_next_updates(&self) -> HashMap<RoutedService, NaiveDate> {
-        self.load_metadata()
-            .map(|meta| meta.service_next_update)
-            .unwrap_or_default()
-    }
-
-    pub fn record_service_failure(
-        &self,
-        service: RoutedService,
-        schedule_epoch: u64,
-    ) -> Result<Option<RetryState>> {
-        let now = Local::now();
-        let mut recorded = None;
-        self.update_schedule(schedule_epoch, |meta| {
-            let state = RetryState::after_failure(meta.service_retry_states.get(&service), now);
-            meta.service_retry_states.insert(service, state);
-            recorded = Some(state);
-            true
-        })?;
-        Ok(recorded)
-    }
-
-    pub fn reset_update_schedules(
-        &self,
-        region: GeoRegion,
-        services: &[RoutedService],
-        enabled: bool,
-    ) -> Result<u64> {
+    pub fn reset_update_schedules(&self, region: GeoRegion, enabled: bool) -> Result<u64> {
         let mut schedule_epoch = 0;
         self.update_metadata(|meta| {
             meta.schedule_epoch = meta.schedule_epoch.wrapping_add(1);
             schedule_epoch = meta.schedule_epoch;
             meta.region_retry_states.remove(&region);
-            for service in services {
-                meta.service_retry_states.remove(service);
-            }
-            if enabled {
+            if enabled && region != GeoRegion::Global {
                 let next = crate::config::profile::next_update_window_date(Local::now());
-                if region != GeoRegion::Global {
-                    meta.region_next_update.insert(region, next);
-                }
-                for service in services {
-                    meta.service_next_update.insert(*service, next);
-                }
+                meta.region_next_update.insert(region, next);
             } else {
                 meta.region_next_update.remove(&region);
-                for service in services {
-                    meta.service_next_update.remove(service);
-                }
             }
             true
         })?;
@@ -496,44 +376,25 @@ impl GeoManager {
             epoch,
             retry_state: meta.region_retry_states.get(&region).copied(),
             next_update: meta.region_next_update.get(&region).copied(),
-            service_retry_states: meta.service_retry_states,
-            service_next_updates: meta.service_next_update,
         }
     }
 
-    pub fn service_schedule(&self, epoch: u64) -> ServiceSchedule {
-        let meta = self.load_metadata().unwrap_or_default();
-        ServiceSchedule {
-            epoch,
-            retry_states: meta.service_retry_states,
-            next_updates: meta.service_next_update,
-        }
-    }
-
-    pub fn ensure_update_schedules(
+    pub fn ensure_update_schedule(
         &self,
         region: GeoRegion,
-        services: &[RoutedService],
         enabled: bool,
         schedule_epoch: u64,
     ) -> Result<()> {
-        if !enabled {
+        if !enabled || region == GeoRegion::Global {
             return Ok(());
         }
         let next = crate::config::profile::next_update_window_date(Local::now());
         self.update_schedule(schedule_epoch, |meta| {
-            let mut changed = false;
-            if region != GeoRegion::Global && !meta.region_next_update.contains_key(&region) {
-                meta.region_next_update.insert(region, next);
-                changed = true;
+            if meta.region_next_update.contains_key(&region) {
+                return false;
             }
-            for service in services {
-                if !meta.service_next_update.contains_key(service) {
-                    meta.service_next_update.insert(*service, next);
-                    changed = true;
-                }
-            }
-            changed
+            meta.region_next_update.insert(region, next);
+            true
         })?;
         Ok(())
     }
@@ -555,41 +416,25 @@ impl GeoManager {
         Ok(())
     }
 
-    pub fn record_service_schedule_success(
-        &self,
-        service: RoutedService,
-        interval_days: i64,
-        schedule_epoch: u64,
-    ) -> Result<()> {
-        self.update_schedule(schedule_epoch, |meta| {
-            meta.service_retry_states.remove(&service);
-            meta.service_next_update.insert(
-                service,
-                Local::now().date_naive() + chrono::Duration::days(interval_days),
-            );
-            true
-        })?;
-        Ok(())
-    }
-
-    fn check_update_available(&self, assets: &RegionAssets) -> Result<(bool, bool)> {
+    fn outdated_rule_sets(&self, rule_sets: &[&'static RuleSet]) -> Result<Vec<&'static RuleSet>> {
         let meta = self.load_metadata().unwrap_or_default();
-        let needs = |asset: &GeoAsset| -> Result<bool> {
-            self.asset_needs_download(asset, meta.etags.get(asset.filename).map(String::as_str))
-        };
-        Ok((needs(&assets.geoip)?, needs(&assets.geosite)?))
+        let mut outdated = Vec::new();
+        for rule_set in rule_sets {
+            let saved_etag = meta.etags.get(&rule_set.filename()).map(String::as_str);
+            if self.rule_set_needs_download(rule_set, saved_etag)? {
+                outdated.push(*rule_set);
+            }
+        }
+        Ok(outdated)
     }
 
     #[cfg(test)]
     pub fn download_databases(&self, region: GeoRegion) -> Result<bool> {
-        match region_assets(region) {
-            Some(assets) => self.download_region_assets(region, &assets),
-            None => Ok(false),
-        }
+        self.download_region_rule_sets(region, region_rule_sets(region))
     }
 
-    fn download_region_assets(&self, region: GeoRegion, assets: &RegionAssets) -> Result<bool> {
-        let updated = self.update_assets_if_needed(&[&assets.geoip, &assets.geosite])?;
+    fn download_region_rule_sets(&self, region: GeoRegion, rule_sets: &[&RuleSet]) -> Result<bool> {
+        let updated = self.update_rule_sets_if_needed(rule_sets)?;
         if updated {
             self.update_metadata(|meta| {
                 let now = Local::now();
@@ -602,20 +447,21 @@ impl GeoManager {
     }
 
     pub fn update_if_needed(&self, region: GeoRegion) -> Result<RegionUpdate> {
-        let Some(assets) = region_assets(region) else {
+        let rule_sets = region_rule_sets(region);
+        if rule_sets.is_empty() {
             return Ok(RegionUpdate::UpToDate { checked_at: None });
-        };
-        self.update_region_assets(region, &assets)
+        }
+        self.update_region_rule_sets(region, rule_sets)
     }
 
-    fn update_region_assets(
+    fn update_region_rule_sets(
         &self,
         region: GeoRegion,
-        assets: &RegionAssets,
+        rule_sets: &[&'static RuleSet],
     ) -> Result<RegionUpdate> {
-        let (geoip_need, geosite_need) = self.check_update_available(assets)?;
+        let outdated = self.outdated_rule_sets(rule_sets)?;
 
-        if !geoip_need && !geosite_need {
+        if outdated.is_empty() {
             let checked_at = Local::now();
             self.update_metadata(|meta| {
                 meta.checked_at.insert(region, checked_at);
@@ -626,17 +472,13 @@ impl GeoManager {
             });
         }
 
-        let updated = self.download_region_assets(region, assets)?;
+        let updated = self.download_region_rule_sets(region, rule_sets)?;
         if updated {
-            let mut parts = Vec::new();
-            if geoip_need {
-                parts.push(format!("geoip-{}", region.as_str()));
-            }
-            if geosite_need {
-                parts.push(format!("geosite-{}", region.as_str()));
-            }
             Ok(RegionUpdate::Updated {
-                parts,
+                parts: outdated
+                    .iter()
+                    .map(|rule_set| rule_set.tag.to_string())
+                    .collect(),
                 checked_at: self.last_checked_at(region).unwrap_or_else(Local::now),
             })
         } else {
@@ -680,11 +522,15 @@ impl GeoManager {
         Ok(())
     }
 
-    fn asset_needs_download(&self, asset: &GeoAsset, saved_etag: Option<&str>) -> Result<bool> {
-        if !rule_set_usable(&self.geo_dir.join(asset.filename)) {
+    fn rule_set_needs_download(
+        &self,
+        rule_set: &RuleSet,
+        saved_etag: Option<&str>,
+    ) -> Result<bool> {
+        if !self.has_rule_set(rule_set) {
             return Ok(true);
         }
-        self.check_single(asset.url, saved_etag)
+        self.check_single(rule_set.url, saved_etag)
     }
 
     fn check_single(&self, url: &str, saved_etag: Option<&str>) -> Result<bool> {
@@ -771,32 +617,19 @@ mod tests {
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = GeoManager::new().unwrap();
         let stale = gm.schedule_epoch();
-        let services = [RoutedService::Steam];
-        let current = gm
-            .reset_update_schedules(GeoRegion::Ru, &services, true)
-            .unwrap();
+        let current = gm.reset_update_schedules(GeoRegion::Ru, true).unwrap();
         let region_next = gm.region_next_update(GeoRegion::Ru);
-        let service_next = gm.service_next_updates();
 
         gm.record_region_schedule_success(GeoRegion::Ru, 7, stale)
-            .unwrap();
-        gm.record_service_schedule_success(RoutedService::Steam, 7, stale)
             .unwrap();
         assert_eq!(
             gm.record_update_failure(GeoRegion::Ru, stale).unwrap(),
             None
         );
-        assert_eq!(
-            gm.record_service_failure(RoutedService::Steam, stale)
-                .unwrap(),
-            None
-        );
 
         assert_ne!(stale, current);
         assert_eq!(gm.region_next_update(GeoRegion::Ru), region_next);
-        assert_eq!(gm.service_next_updates(), service_next);
         assert!(gm.retry_state(GeoRegion::Ru).is_none());
-        assert!(gm.service_retry_states().is_empty());
         assert!(
             gm.record_update_failure(GeoRegion::Ru, current)
                 .unwrap()
@@ -811,15 +644,12 @@ mod tests {
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = GeoManager::new().unwrap();
         let stale = gm.schedule_epoch();
-        let services = [RoutedService::Steam];
-        gm.reset_update_schedules(GeoRegion::Ru, &services, false)
-            .unwrap();
+        gm.reset_update_schedules(GeoRegion::Ru, false).unwrap();
 
-        gm.ensure_update_schedules(GeoRegion::Ru, &services, true, stale)
+        gm.ensure_update_schedule(GeoRegion::Ru, true, stale)
             .unwrap();
 
         assert!(gm.region_next_update(GeoRegion::Ru).is_none());
-        assert!(gm.service_next_updates().is_empty());
     }
 
     fn after_update_window() -> DateTime<Local> {
@@ -835,14 +665,27 @@ mod tests {
     const RULE_REGIONS: [GeoRegion; 3] = [GeoRegion::Ru, GeoRegion::Cn, GeoRegion::Ir];
 
     #[test]
-    fn region_assets_some_for_rule_regions_none_for_global() {
-        assert!(region_assets(GeoRegion::Global).is_none());
+    fn each_rule_region_uses_one_geosite_and_one_geoip_rule_set() {
+        assert!(region_rule_sets(GeoRegion::Global).is_empty());
         for region in RULE_REGIONS {
-            let a = region_assets(region).expect("rule region has assets");
-            assert!(a.geoip.filename.starts_with("geoip-"));
-            assert!(a.geosite.filename.starts_with("geosite-"));
-            assert!(a.geoip.url.contains(a.geoip.filename));
-            assert!(a.geosite.url.contains(a.geosite.filename));
+            let kinds: Vec<RuleSetKind> = region_rule_sets(region)
+                .iter()
+                .map(|rule_set| rule_set.kind)
+                .collect();
+            assert_eq!(
+                kinds,
+                [RuleSetKind::Geosite, RuleSetKind::Geoip],
+                "{region:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_rule_set_downloads_the_file_named_after_its_tag() {
+        for entry in RULE_SETS {
+            assert!(entry.url.starts_with("https://"), "{}", entry.url);
+            assert!(entry.url.ends_with(&entry.filename()), "{}", entry.url);
+            assert_eq!(rule_set(entry.tag), Some(*entry));
         }
     }
 
@@ -868,67 +711,13 @@ mod tests {
     }
 
     #[test]
-    fn geo_asset_tag_strips_srs_extension() {
-        let a = region_assets(GeoRegion::Ru).unwrap();
-        assert_eq!(a.geoip.tag(), "geoip-ru");
-        assert_eq!(a.geosite.tag(), "geosite-category-ru");
-    }
-
-    #[test]
-    fn ip_rule_set_tags_are_the_geoip_assets() {
-        for tag in [
-            "geoip-ru",
-            "geoip-cn",
-            "geoip-ir",
-            "geoip-steam",
-            "geoip-telegram",
-        ] {
+    fn ip_rule_set_tags_are_the_geoip_rule_sets() {
+        for tag in ["geoip-ru", "geoip-cn", "geoip-ir"] {
             assert!(is_ip_rule_set_tag(tag), "{tag}");
         }
-        for tag in ["geosite-category-ru", "geosite-steam", "geoip-unknown"] {
+        for tag in ["geosite-category-ru", "geosite-cn", "geoip-unknown"] {
             assert!(!is_ip_rule_set_tag(tag), "{tag}");
         }
-    }
-
-    #[test]
-    fn service_assets_tags_and_urls() {
-        let steam = service_assets(RoutedService::Steam);
-        let tags: Vec<&str> = steam.present().iter().map(|a| a.tag()).collect();
-        assert_eq!(tags, ["geosite-steam", "geoip-steam"]);
-        assert!(steam.geoip.as_ref().unwrap().url.ends_with("AS32590.srs"));
-
-        let telegram = service_assets(RoutedService::Telegram);
-        let tags: Vec<&str> = telegram.present().iter().map(|a| a.tag()).collect();
-        assert_eq!(tags, ["geosite-telegram", "geoip-telegram"]);
-
-        for service in RoutedService::ALL {
-            for asset in service_assets(service).present() {
-                assert!(asset.url.starts_with("https://"), "{}", asset.url);
-                assert!(asset.filename.ends_with(".srs"), "{}", asset.filename);
-            }
-        }
-    }
-
-    #[test]
-    fn service_local_paths_and_presence() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        let gm = GeoManager::new().unwrap();
-        let paths = gm.service_local_paths(RoutedService::Steam);
-        assert_eq!(paths.len(), 2);
-        assert_eq!(paths[0].0, "geosite-steam");
-        assert_eq!(paths[1].0, "geoip-steam");
-        assert!(paths.iter().all(|(_, p)| p.starts_with(&gm.geo_dir)));
-
-        assert!(!gm.has_service_databases(RoutedService::Steam));
-        fs::write(&paths[0].1, crate::test_helpers::RULE_SET_BYTES).unwrap();
-        assert!(
-            !gm.has_service_databases(RoutedService::Steam),
-            "only geosite present"
-        );
-        fs::write(&paths[1].1, crate::test_helpers::RULE_SET_BYTES).unwrap();
-        assert!(gm.has_service_databases(RoutedService::Steam));
     }
 
     fn spawn_stub_http(
@@ -978,17 +767,22 @@ mod tests {
         format!("http://{addr}")
     }
 
-    fn stub_assets(base: &str) -> Vec<GeoAsset> {
-        let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+    fn stub_rule_set(tag: &'static str, kind: RuleSetKind, url: String) -> &'static RuleSet {
+        Box::leak(Box::new(RuleSet {
+            tag,
+            kind,
+            url: Box::leak(url.into_boxed_str()),
+        }))
+    }
+
+    fn stub_rule_sets(base: &str) -> Vec<&'static RuleSet> {
         vec![
-            GeoAsset {
-                filename: "geoip-stub.srs",
-                url: leak(format!("{base}/geoip")),
-            },
-            GeoAsset {
-                filename: "geosite-stub.srs",
-                url: leak(format!("{base}/geosite")),
-            },
+            stub_rule_set("geoip-stub", RuleSetKind::Geoip, format!("{base}/geoip")),
+            stub_rule_set(
+                "geosite-stub",
+                RuleSetKind::Geosite,
+                format!("{base}/geosite"),
+            ),
         ]
     }
 
@@ -1005,10 +799,12 @@ mod tests {
                 (500, None, Vec::new())
             }
         });
-        let assets = stub_assets(&base);
+        let rule_sets = stub_rule_sets(&base);
 
-        let refs: Vec<&GeoAsset> = assets.iter().collect();
-        let err = gm.update_assets_if_needed(&refs).unwrap_err().to_string();
+        let err = gm
+            .update_rule_sets_if_needed(&rule_sets)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("geosite-stub.srs"), "{err}");
         assert!(gm.geo_dir.join("geoip-stub.srs").exists());
         assert!(!gm.geo_dir.join("geosite-stub.srs").exists());
@@ -1029,10 +825,9 @@ mod tests {
         let base = spawn_stub_http(8, |_, _| {
             (200, Some("same".to_string()), b"SRS\x01DATA".to_vec())
         });
-        let assets = stub_assets(&base);
+        let rule_sets = stub_rule_sets(&base);
 
-        let refs: Vec<&GeoAsset> = assets.iter().collect();
-        assert!(gm.update_assets_if_needed(&refs).unwrap());
+        assert!(gm.update_rule_sets_if_needed(&rule_sets).unwrap());
         assert_eq!(
             fs::read(gm.geo_dir.join("geoip-stub.srs")).unwrap(),
             b"SRS\x01DATA"
@@ -1041,7 +836,7 @@ mod tests {
             fs::read(gm.geo_dir.join("geosite-stub.srs")).unwrap(),
             b"SRS\x01DATA"
         );
-        assert!(!gm.update_assets_if_needed(&refs).unwrap());
+        assert!(!gm.update_rule_sets_if_needed(&rule_sets).unwrap());
     }
 
     fn assert_metadata_writable_during_requests(
@@ -1078,20 +873,9 @@ mod tests {
     }
 
     #[test]
-    fn service_refresh_does_not_hold_metadata_lock_during_requests() {
-        assert_metadata_writable_during_requests(|gm, base| {
-            let assets = stub_assets(base);
-            let refs: Vec<&GeoAsset> = assets.iter().collect();
-            gm.update_service_assets(RoutedService::Steam, &refs)
-        });
-    }
-
-    #[test]
     fn region_refresh_does_not_hold_metadata_lock_during_requests() {
         assert_metadata_writable_during_requests(|gm, base| {
-            let [geoip, geosite]: [GeoAsset; 2] = stub_assets(base).try_into().ok().unwrap();
-            let assets = RegionAssets { geoip, geosite };
-            gm.update_region_assets(GeoRegion::Ru, &assets)
+            gm.update_region_rule_sets(GeoRegion::Ru, &stub_rule_sets(base))
                 .map(|result| matches!(result, RegionUpdate::Updated { .. }))
         });
     }
@@ -1105,21 +889,24 @@ mod tests {
         let base = spawn_stub_http(2, |_, _| {
             (200, Some("e1".to_string()), b"SRS\x01NEW".to_vec())
         });
-        let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
-        let assets = [
-            GeoAsset {
-                filename: "geoip-stub.srs",
-                url: "http://127.0.0.1:1/dead",
-            },
-            GeoAsset {
-                filename: "geosite-stub.srs",
-                url: leak(format!("{base}/geosite")),
-            },
+        let rule_sets = [
+            stub_rule_set(
+                "geoip-stub",
+                RuleSetKind::Geoip,
+                "http://127.0.0.1:1/dead".to_string(),
+            ),
+            stub_rule_set(
+                "geosite-stub",
+                RuleSetKind::Geosite,
+                format!("{base}/geosite"),
+            ),
         ];
         fs::write(gm.geo_dir.join("geoip-stub.srs"), b"SRS\x01OLD").unwrap();
 
-        let refs: Vec<&GeoAsset> = assets.iter().collect();
-        let err = gm.update_assets_if_needed(&refs).unwrap_err().to_string();
+        let err = gm
+            .update_rule_sets_if_needed(&rule_sets)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("HEAD request failed"), "{err}");
         assert_eq!(
             fs::read(gm.geo_dir.join("geosite-stub.srs")).unwrap(),
@@ -1135,7 +922,7 @@ mod tests {
     const CAPTIVE_PORTAL_PAGE: &[u8] = b"<html>Sign in to the network</html>";
 
     fn with_corrupt_cache_and_unchanged_etags(
-        refresh: impl FnOnce(&GeoManager, &[GeoAsset]) -> Result<bool>,
+        refresh: impl FnOnce(&GeoManager, &[&'static RuleSet]) -> Result<bool>,
     ) {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -1144,45 +931,29 @@ mod tests {
         let base = spawn_stub_http(4, |_, _| {
             (200, Some("same".to_string()), b"SRS\x01NEW".to_vec())
         });
-        let assets = stub_assets(&base);
-        for asset in &assets {
-            fs::write(gm.geo_dir.join(asset.filename), CAPTIVE_PORTAL_PAGE).unwrap();
+        let rule_sets = stub_rule_sets(&base);
+        for rule_set in &rule_sets {
+            fs::write(gm.rule_set_path(rule_set), CAPTIVE_PORTAL_PAGE).unwrap();
         }
         gm.update_metadata(|meta| {
-            for asset in &assets {
-                meta.etags
-                    .insert(asset.filename.to_string(), "same".to_string());
+            for rule_set in &rule_sets {
+                meta.etags.insert(rule_set.filename(), "same".to_string());
             }
             true
         })
         .unwrap();
 
-        assert!(refresh(&gm, &assets).unwrap());
-        for asset in &assets {
-            assert_eq!(
-                fs::read(gm.geo_dir.join(asset.filename)).unwrap(),
-                b"SRS\x01NEW"
-            );
+        assert!(refresh(&gm, &rule_sets).unwrap());
+        for rule_set in &rule_sets {
+            assert_eq!(fs::read(gm.rule_set_path(rule_set)).unwrap(), b"SRS\x01NEW");
         }
     }
 
     #[test]
     fn region_refresh_replaces_a_corrupt_cache_despite_an_unchanged_etag() {
-        with_corrupt_cache_and_unchanged_etags(|gm, assets| {
-            let assets = RegionAssets {
-                geoip: GeoAsset { ..assets[0] },
-                geosite: GeoAsset { ..assets[1] },
-            };
-            gm.update_region_assets(GeoRegion::Ru, &assets)
+        with_corrupt_cache_and_unchanged_etags(|gm, rule_sets| {
+            gm.update_region_rule_sets(GeoRegion::Ru, rule_sets)
                 .map(|result| matches!(result, RegionUpdate::Updated { .. }))
-        });
-    }
-
-    #[test]
-    fn service_refresh_replaces_a_corrupt_cache_despite_an_unchanged_etag() {
-        with_corrupt_cache_and_unchanged_etags(|gm, assets| {
-            let refs: Vec<&GeoAsset> = assets.iter().collect();
-            gm.update_service_assets(RoutedService::Steam, &refs)
         });
     }
 
@@ -1199,12 +970,12 @@ mod tests {
                 CAPTIVE_PORTAL_PAGE.to_vec(),
             )
         });
-        let assets = stub_assets(&base);
-        let geoip = gm.geo_dir.join(assets[0].filename);
+        let rule_sets = stub_rule_sets(&base);
+        let geoip = gm.rule_set_path(rule_sets[0]);
         fs::write(&geoip, crate::test_helpers::RULE_SET_BYTES).unwrap();
 
         let err = gm
-            .update_assets_if_needed(&[&assets[0]])
+            .update_rule_sets_if_needed(&rule_sets[..1])
             .unwrap_err()
             .to_string();
 
@@ -1222,32 +993,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = GeoManager::new().unwrap();
-        let (geoip, geosite) = gm.local_paths(GeoRegion::Ru).unwrap();
-        fs::write(&geoip, crate::test_helpers::RULE_SET_BYTES).unwrap();
-        fs::write(&geosite, CAPTIVE_PORTAL_PAGE).unwrap();
+        let [geosite, geoip] = region_rule_sets(GeoRegion::Ru) else {
+            unreachable!()
+        };
+        fs::write(gm.rule_set_path(geoip), crate::test_helpers::RULE_SET_BYTES).unwrap();
+        fs::write(gm.rule_set_path(geosite), CAPTIVE_PORTAL_PAGE).unwrap();
         assert!(!gm.has_databases(GeoRegion::Ru));
 
-        for (_, path) in gm.service_local_paths(RoutedService::Steam) {
-            fs::write(path, b"SRS").unwrap();
-        }
-        assert!(!gm.has_service_databases(RoutedService::Steam));
-    }
-
-    #[test]
-    fn local_paths_match_region_assets() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        let gm = GeoManager::new().unwrap();
-        assert!(gm.local_paths(GeoRegion::Global).is_none());
-        for region in RULE_REGIONS {
-            let (geoip, geosite) = gm.local_paths(region).unwrap();
-            let a = region_assets(region).unwrap();
-            assert_eq!(geoip.file_name().unwrap(), a.geoip.filename);
-            assert_eq!(geosite.file_name().unwrap(), a.geosite.filename);
-            assert!(geoip.starts_with(&gm.geo_dir));
-            assert!(geosite.starts_with(&gm.geo_dir));
-        }
+        fs::write(gm.rule_set_path(geosite), b"SRS").unwrap();
+        assert!(!gm.has_databases(GeoRegion::Ru));
     }
 
     #[test]
@@ -1260,15 +1014,9 @@ mod tests {
         let mut etags = HashMap::new();
         let mut updated_at = HashMap::new();
         for region in RULE_REGIONS {
-            let a = region_assets(region).unwrap();
-            etags.insert(
-                a.geoip.filename.to_string(),
-                format!("etag-{}-ip", region.as_str()),
-            );
-            etags.insert(
-                a.geosite.filename.to_string(),
-                format!("etag-{}-site", region.as_str()),
-            );
+            for rule_set in region_rule_sets(region) {
+                etags.insert(rule_set.filename(), format!("etag-{}", rule_set.tag));
+            }
             updated_at.insert(region, now);
         }
         let meta = GeoMetadata {
@@ -1276,24 +1024,18 @@ mod tests {
             updated_at,
             checked_at: HashMap::new(),
             region_retry_states: HashMap::new(),
-            service_retry_states: HashMap::new(),
-            service_checked_at: HashMap::new(),
             region_next_update: HashMap::new(),
-            service_next_update: HashMap::new(),
             schedule_epoch: 0,
         };
         gm.save_metadata(&meta).unwrap();
         let loaded = gm.load_metadata().unwrap();
         for region in RULE_REGIONS {
-            let a = region_assets(region).unwrap();
-            assert_eq!(
-                loaded.etags.get(a.geoip.filename),
-                Some(&format!("etag-{}-ip", region.as_str()))
-            );
-            assert_eq!(
-                loaded.etags.get(a.geosite.filename),
-                Some(&format!("etag-{}-site", region.as_str()))
-            );
+            for rule_set in region_rule_sets(region) {
+                assert_eq!(
+                    loaded.etags.get(&rule_set.filename()),
+                    Some(&format!("etag-{}", rule_set.tag))
+                );
+            }
             assert!(loaded.updated_at.contains_key(&region));
         }
         assert!(loaded.checked_at.is_empty());
@@ -1316,31 +1058,6 @@ mod tests {
         assert_eq!(gm.last_checked_at(GeoRegion::Cn), Some(cn_checked));
         assert_eq!(gm.last_checked_at(GeoRegion::Ir), None);
         assert_eq!(gm.last_checked_at(GeoRegion::Global), None);
-    }
-
-    #[test]
-    fn service_checked_at_roundtrips_independently() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        let gm = GeoManager::new().unwrap();
-        let checked = Local::now();
-        let mut meta = GeoMetadata::default();
-        meta.service_checked_at
-            .insert(RoutedService::Telegram, checked);
-        meta.checked_at
-            .insert(GeoRegion::Ru, checked - chrono::Duration::hours(1));
-
-        gm.save_metadata(&meta).unwrap();
-
-        assert_eq!(
-            gm.service_checked_at().get(&RoutedService::Telegram),
-            Some(&checked)
-        );
-        assert_eq!(
-            gm.last_checked_at(GeoRegion::Ru),
-            meta.checked_at.get(&GeoRegion::Ru).copied()
-        );
     }
 
     #[test]
@@ -1378,38 +1095,6 @@ mod tests {
         gm.clear_retry_state(GeoRegion::Ru).unwrap();
         assert!(gm.retry_state(GeoRegion::Ru).is_none());
         assert_eq!(gm.retry_state(GeoRegion::Cn), Some(cn));
-    }
-
-    #[test]
-    fn service_retry_backoff_is_independent_from_regions_and_other_services() {
-        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        let gm = GeoManager::new().unwrap();
-
-        gm.record_update_failure(GeoRegion::Ru, 0).unwrap();
-        gm.record_service_failure(RoutedService::Steam, 0).unwrap();
-        let steam = gm
-            .record_service_failure(RoutedService::Steam, 0)
-            .unwrap()
-            .unwrap();
-        let telegram = gm
-            .record_service_failure(RoutedService::Telegram, 0)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(steam.consecutive_failures, 2);
-        assert_eq!(telegram.consecutive_failures, 1);
-        assert_eq!(
-            gm.retry_state(GeoRegion::Ru).unwrap().consecutive_failures,
-            1
-        );
-        gm.record_service_schedule_success(RoutedService::Steam, 7, 0)
-            .unwrap();
-        let states = gm.service_retry_states();
-        assert!(!states.contains_key(&RoutedService::Steam));
-        assert_eq!(states[&RoutedService::Telegram], telegram);
-        assert!(gm.retry_state(GeoRegion::Ru).is_some());
     }
 
     #[test]
@@ -1488,7 +1173,11 @@ mod tests {
         let gm = GeoManager::new().unwrap();
         assert!(gm.has_databases(GeoRegion::Global));
         for region in RULE_REGIONS {
-            let (geoip, geosite) = gm.local_paths(region).unwrap();
+            let [geosite, geoip] = region_rule_sets(region) else {
+                unreachable!()
+            };
+            let geoip = gm.rule_set_path(geoip);
+            let geosite = gm.rule_set_path(geosite);
             let _ = fs::remove_file(&geoip);
             let _ = fs::remove_file(&geosite);
 
