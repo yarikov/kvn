@@ -16,6 +16,7 @@ mod omarchy;
 mod onboarding;
 mod paths;
 mod redaction;
+mod route_plan;
 mod runtime_lock;
 mod services;
 mod singbox;

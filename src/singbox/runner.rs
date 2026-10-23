@@ -96,12 +96,12 @@ fn stop_child(child: &mut Child) {
     let _ = child.wait();
 }
 
-fn collect_geo_availability() -> GeoAvailability {
+fn collect_geo_availability(required: &[&'static crate::geo::RuleSet]) -> GeoAvailability {
     let mut geo = GeoAvailability::default();
     let Ok(gm) = crate::geo::GeoManager::new() else {
         return geo;
     };
-    for rule_set in crate::geo::RULE_SETS {
+    for rule_set in required {
         if gm.has_rule_set(rule_set) {
             geo.rule_sets
                 .insert(rule_set.tag, gm.rule_set_path(rule_set));
@@ -122,8 +122,9 @@ pub fn start(
     settings: &Settings,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<StartedSingBox> {
-    let geo = collect_geo_availability();
-    let routing_fallback = geo.routing_fallback(settings.geo_routing.mode());
+    let geo = collect_geo_availability(&crate::route_plan::required_rule_sets(settings));
+    let routing_fallback =
+        geo.routing_fallback(&crate::route_plan::RoutePlan::for_settings(settings));
     let mut config_validated = false;
     let handle = start_with(
         CLASH_API_START_ATTEMPTS,
@@ -353,34 +354,45 @@ mod tests {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
-        let geo = collect_geo_availability();
+        let geo = collect_geo_availability(crate::geo::RULE_SETS);
         assert!(geo.rule_sets.is_empty());
     }
 
     #[test]
-    fn collect_geo_availability_lists_each_usable_rule_set_by_tag() {
+    fn collect_geo_availability_lists_the_usable_required_rule_sets_by_tag() {
         use crate::config::profile::{GeoRegion, RoutingMode};
+        use crate::route_plan::RoutePlan;
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = crate::geo::GeoManager::new().unwrap();
-        let [geosite, geoip] = crate::geo::region_rule_sets(GeoRegion::Ru) else {
+        let bypass_ru = RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Ru));
+        let required: Vec<_> = bypass_ru.rule_sets().collect();
+        let [geosite, geoip] = required[..] else {
             unreachable!()
         };
-        let bypass_ru = RoutingMode::Bypass(GeoRegion::Ru);
+        let [_, geoip_cn] = crate::geo::region_rule_sets(GeoRegion::Cn) else {
+            unreachable!()
+        };
 
         fs::write(gm.rule_set_path(geoip), crate::test_helpers::RULE_SET_BYTES).unwrap();
-        let geo = collect_geo_availability();
+        fs::write(
+            gm.rule_set_path(geoip_cn),
+            crate::test_helpers::RULE_SET_BYTES,
+        )
+        .unwrap();
+        let geo = collect_geo_availability(&required);
         assert_eq!(geo.path(geoip), Some(&gm.rule_set_path(geoip)));
         assert_eq!(geo.path(geosite), None);
-        assert!(geo.lacks_region_rule_sets(&bypass_ru));
+        assert_eq!(geo.path(geoip_cn), None);
+        assert!(geo.lacks_rule_sets_of(&bypass_ru));
 
         fs::write(
             gm.rule_set_path(geosite),
             crate::test_helpers::RULE_SET_BYTES,
         )
         .unwrap();
-        assert!(!collect_geo_availability().lacks_region_rule_sets(&bypass_ru));
+        assert!(!collect_geo_availability(&required).lacks_rule_sets_of(&bypass_ru));
     }
 
     fn sing_box_on_path() -> bool {

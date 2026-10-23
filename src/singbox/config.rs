@@ -5,11 +5,11 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
 use crate::config::profile::{
-    ActiveDns, DnsRule, DnsServer, FINALMASK_PARAM, FakeIpServer, GeoRegion, NaiveConfig, Profile,
-    ProtocolConfig, RoutingFallback, RoutingMode, Settings, SocksConfig, SocksVersion,
-    read_stream_finalmask,
+    ActiveDns, DnsRule, DnsServer, FINALMASK_PARAM, FakeIpServer, NaiveConfig, Profile,
+    ProtocolConfig, RoutingFallback, Settings, SocksConfig, SocksVersion, read_stream_finalmask,
 };
 use crate::geo::{RuleSet, RuleSetKind};
+use crate::route_plan::{Outbound, RoutePlan};
 use crate::singbox::outbound::{
     build_anytls_outbound, build_http_outbound, build_hysteria2_outbound, build_naive_outbound,
     build_shadowsocks_outbound, build_shadowtls_outbounds, build_socks_outbound,
@@ -29,20 +29,13 @@ impl GeoAvailability {
         self.rule_sets.get(rule_set.tag)
     }
 
-    pub fn lacks_region_rule_sets(&self, routing_mode: &RoutingMode) -> bool {
-        match routing_mode {
-            RoutingMode::Global => false,
-            RoutingMode::Bypass(region) | RoutingMode::Only(region) => {
-                crate::geo::region_rule_sets(*region)
-                    .iter()
-                    .any(|rule_set| self.path(rule_set).is_none())
-            }
-        }
+    pub fn lacks_rule_sets_of(&self, plan: &RoutePlan) -> bool {
+        plan.rule_sets()
+            .any(|rule_set| self.path(rule_set).is_none())
     }
 
-    pub fn routing_fallback(&self, routing_mode: RoutingMode) -> Option<RoutingFallback> {
-        self.lacks_region_rule_sets(&routing_mode)
-            .then(|| RoutingFallback::for_mode(routing_mode))
+    pub fn routing_fallback(&self, plan: &RoutePlan) -> Option<RoutingFallback> {
+        plan.fallback.filter(|_| self.lacks_rule_sets_of(plan))
     }
 
     #[cfg(test)]
@@ -92,7 +85,7 @@ pub fn generate_config(
         Some(RoutingFallback::Direct) => build_config(profile, settings, geo, clash_api_port),
         None => {
             let routing_mode = settings.geo_routing.mode();
-            if geo.lacks_region_rule_sets(&routing_mode) {
+            if geo.lacks_rule_sets_of(&RoutePlan::for_mode(routing_mode)) {
                 anyhow::bail!(
                     "{routing_mode} routing needs its region rule-sets, which are not downloaded"
                 );
@@ -110,14 +103,14 @@ fn build_config(
 ) -> anyhow::Result<Value> {
     let mut proxy_outbounds = build_outbound(profile)?;
     proxy_outbounds.push(json!({ "type": "direct", "tag": "direct" }));
-    let routing_mode = settings.geo_routing.mode();
+    let plan = RoutePlan::for_settings(settings);
     let active_dns = settings.dns.active().with_context(|| {
         format!(
             "dns.current_preset {:?} does not name a DNS preset",
             settings.dns.current_preset
         )
     })?;
-    let upstreams = DnsUpstreams::new(active_dns, &routing_mode, profile);
+    let upstreams = DnsUpstreams::new(active_dns, &plan, profile);
     let bootstrap = upstreams.bootstrap();
     let resolvers = RouteResolvers {
         default_domain: json!({
@@ -129,7 +122,7 @@ fn build_config(
             "strategy": DNS_STRATEGY,
         }),
     };
-    let (route, rule_sets) = build_route(&routing_mode, resolvers, geo);
+    let (route, rule_sets) = build_route(&plan, resolvers, geo);
     let available_rule_sets: HashSet<&str> = rule_sets
         .iter()
         .filter_map(|rule_set| rule_set["tag"].as_str())
@@ -333,10 +326,10 @@ struct BootstrapResolver {
 }
 
 impl DnsUpstreams {
-    fn new(active: ActiveDns, routing_mode: &RoutingMode, profile: &Profile) -> Self {
+    fn new(active: ActiveDns, plan: &RoutePlan, profile: &Profile) -> Self {
         Self {
             active,
-            through_proxy: final_outbound(routing_mode) == "proxy",
+            through_proxy: plan.final_outbound == Outbound::Proxy,
             carries_udp: proxy_carries_udp(&profile.config),
         }
     }
@@ -427,7 +420,7 @@ pub fn ech_dns_warning(profile: &Profile, settings: &Settings) -> Option<String>
 
 pub fn dns_bypass_warning(profile: &Profile, settings: &Settings) -> Option<String> {
     let active = settings.dns.active()?;
-    let upstreams = DnsUpstreams::new(active, &settings.geo_routing.mode(), profile);
+    let upstreams = DnsUpstreams::new(active, &RoutePlan::for_settings(settings), profile);
     let servers: Vec<String> = upstreams
         .udp_servers_kept_out_of_tunnel()
         .map(|server| format!("{:?} ({})", server.tag(), server.kind_label()))
@@ -639,8 +632,8 @@ struct RuleSetRules {
 }
 
 impl RuleSetRules {
-    fn push(&mut self, rule_set: &RuleSet, path: &PathBuf, outbound: &str) {
-        let rule = json!({ "rule_set": [rule_set.tag], "outbound": outbound });
+    fn push(&mut self, rule_set: &RuleSet, path: &PathBuf, outbound: Outbound) {
+        let rule = json!({ "rule_set": [rule_set.tag], "outbound": outbound.tag() });
         match rule_set.kind {
             RuleSetKind::Geoip => self.ip.push(rule),
             RuleSetKind::Geosite => self.domain.push(rule),
@@ -655,7 +648,7 @@ impl RuleSetRules {
 }
 
 fn build_route(
-    routing_mode: &RoutingMode,
+    plan: &RoutePlan,
     resolvers: RouteResolvers,
     geo: &GeoAvailability,
 ) -> (Value, Vec<Value>) {
@@ -675,30 +668,18 @@ fn build_route(
         }),
     ];
 
-    let mut region = RuleSetRules::default();
-    let mut region_private_rule = None;
-    match routing_mode {
-        RoutingMode::Global => {}
-        RoutingMode::Bypass(geo_region) | RoutingMode::Only(geo_region)
-            if !matches!(geo_region, GeoRegion::Global) =>
-        {
-            let outbound = if matches!(routing_mode, RoutingMode::Bypass(_)) {
-                "direct"
-            } else {
-                "proxy"
-            };
-            region_private_rule = Some(json!({
-                "ip_is_private": true,
-                "outbound": "direct",
-            }));
-            for rule_set in crate::geo::region_rule_sets(*geo_region) {
-                if let Some(path) = geo.path(rule_set) {
-                    region.push(rule_set, path, outbound);
-                }
-            }
+    let mut planned = RuleSetRules::default();
+    for entry in &plan.entries {
+        if let Some(path) = geo.path(entry.rule_set) {
+            planned.push(entry.rule_set, path, entry.outbound);
         }
-        RoutingMode::Bypass(_) | RoutingMode::Only(_) => {}
     }
+    let private_rule = plan.private_direct.then(|| {
+        json!({
+            "ip_is_private": true,
+            "outbound": Outbound::Direct.tag(),
+        })
+    });
 
     // NOTE: TUN connections carry only a destination IP, so domain rule-sets
     // match only after `sniff`; with fake-IP the destination is a domain, so
@@ -706,40 +687,33 @@ fn build_route(
     // over the fake-IP name in sing-box's domain matching, so `sniff` runs only
     // while the destination has no name; an SNI that differs from the queried
     // name (ECH, domain fronting) must not move a connection to another rule.
-    if !region.domain.is_empty() {
+    if !planned.domain.is_empty() {
         rules.push(json!({
             "domain_regex": ["."],
             "invert": true,
             "action": "sniff",
         }));
     }
-    let resolve = (!region.ip.is_empty()).then(|| {
+    let resolve = (!planned.ip.is_empty()).then(|| {
         let mut rule = resolvers.destination;
         rule["action"] = json!("resolve");
         rule
     });
-    rules.extend(region_private_rule);
-    rules.append(&mut region.domain);
+    rules.extend(private_rule);
+    rules.append(&mut planned.domain);
     rules.extend(resolve);
-    rules.append(&mut region.ip);
-    let rule_sets = region.definitions;
+    rules.append(&mut planned.ip);
+    let rule_sets = planned.definitions;
 
     let route = json!({
         "default_domain_resolver": resolvers.default_domain,
         "rules": rules,
         "auto_detect_interface": true,
         "default_mark": 666,
-        "final": final_outbound(routing_mode)
+        "final": plan.final_outbound.tag()
     });
 
     (route, rule_sets)
-}
-
-fn final_outbound(routing_mode: &RoutingMode) -> &'static str {
-    match routing_mode {
-        RoutingMode::Only(_) => "direct",
-        _ => "proxy",
-    }
 }
 
 fn build_outbound(profile: &Profile) -> anyhow::Result<Vec<Value>> {
@@ -846,7 +820,7 @@ mod tests {
     use super::*;
     use crate::config::profile::{
         CustomDnsPreset, DnsConfig, DnsRule, GeoRegion, Profile, ProtocolConfig, RealitySettings,
-        ShadowtlsVersion, TransportConfig, TransportType, VlessConfig, VmessConfig,
+        RoutingMode, ShadowtlsVersion, TransportConfig, TransportType, VlessConfig, VmessConfig,
     };
     use serde_json::json;
 
@@ -2077,7 +2051,7 @@ mod tests {
     #[test]
     fn route_has_default_mark_for_killswitch() {
         let (route, _) = build_route(
-            &RoutingMode::Global,
+            &RoutePlan::for_mode(RoutingMode::Global),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2091,7 +2065,7 @@ mod tests {
     #[test]
     fn build_route_global_has_basic_rules() {
         let (route, rule_sets) = build_route(
-            &RoutingMode::Global,
+            &RoutePlan::for_mode(RoutingMode::Global),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2108,7 +2082,7 @@ mod tests {
     #[test]
     fn build_route_only_ru_has_private_rule_and_final_direct() {
         let (route, _rule_sets) = build_route(
-            &RoutingMode::Only(GeoRegion::Ru),
+            &RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Ru)),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2120,7 +2094,7 @@ mod tests {
     #[test]
     fn build_route_bypass_cn_has_private_rule() {
         let (route, _rule_sets) = build_route(
-            &RoutingMode::Bypass(GeoRegion::Cn),
+            &RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Cn)),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2132,7 +2106,7 @@ mod tests {
     #[test]
     fn build_route_only_cn_has_private_rule_and_final_direct() {
         let (route, _rule_sets) = build_route(
-            &RoutingMode::Only(GeoRegion::Cn),
+            &RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Cn)),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2435,7 +2409,11 @@ mod tests {
             server_port: None,
         };
         let dns = active(vec![doh("remote", "1.1.1.1")], "remote");
-        let upstreams = DnsUpstreams::new(dns, &RoutingMode::Global, &http_profile());
+        let upstreams = DnsUpstreams::new(
+            dns,
+            &RoutePlan::for_mode(RoutingMode::Global),
+            &http_profile(),
+        );
         assert!(upstreams.is_tunnelled(&doh("remote", "1.1.1.1")));
         for server in [udp("plain", "8.8.8.8"), doq] {
             assert!(!upstreams.is_tunnelled(&server), "{server:?}");
@@ -2886,7 +2864,7 @@ mod tests {
     #[test]
     fn build_route_bypass_ir_has_private_rule_and_final_proxy() {
         let (route, rule_sets) = build_route(
-            &RoutingMode::Bypass(GeoRegion::Ir),
+            &RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Ir)),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2904,7 +2882,7 @@ mod tests {
     #[test]
     fn build_route_only_ir_has_private_rule_and_final_direct() {
         let (route, rule_sets) = build_route(
-            &RoutingMode::Only(GeoRegion::Ir),
+            &RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Ir)),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2917,7 +2895,7 @@ mod tests {
     #[test]
     fn build_route_bypass_ru_has_private_rule_and_final_proxy() {
         let (route, rule_sets) = build_route(
-            &RoutingMode::Bypass(GeoRegion::Ru),
+            &RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Ru)),
             default_resolver(),
             &GeoAvailability::all(),
         );
@@ -2953,20 +2931,24 @@ mod tests {
     fn a_regional_mode_without_its_files_falls_back_by_its_own_default() {
         let missing = GeoAvailability::default();
         assert_eq!(
-            missing.routing_fallback(RoutingMode::Bypass(GeoRegion::Cn)),
+            missing.routing_fallback(&RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Cn))),
             Some(RoutingFallback::Global)
         );
         assert_eq!(
-            missing.routing_fallback(RoutingMode::Only(GeoRegion::Ir)),
+            missing.routing_fallback(&RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Ir))),
             Some(RoutingFallback::Direct)
         );
-        assert_eq!(missing.routing_fallback(RoutingMode::Global), None);
         assert_eq!(
-            missing.routing_fallback(RoutingMode::Only(GeoRegion::Global)),
+            missing.routing_fallback(&RoutePlan::for_mode(RoutingMode::Global)),
             None
         );
         assert_eq!(
-            GeoAvailability::all().routing_fallback(RoutingMode::Only(GeoRegion::Ir)),
+            missing.routing_fallback(&RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Global))),
+            None
+        );
+        assert_eq!(
+            GeoAvailability::all()
+                .routing_fallback(&RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Ir))),
             None
         );
     }
@@ -3004,7 +2986,7 @@ mod tests {
     #[test]
     fn build_route_places_rule_sets_by_kind_after_sniff_and_resolve() {
         let (route, _) = build_route(
-            &RoutingMode::Bypass(GeoRegion::Ru),
+            &RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Ru)),
             default_resolver(),
             &GeoAvailability::all(),
         );
