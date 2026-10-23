@@ -316,6 +316,7 @@ pub(crate) fn build_snapshot(
         profiles: model.config.profiles.clone(),
         subscriptions: model.config.subscriptions.clone(),
         settings: model.config.settings.clone(),
+        routing: model.routing.clone(),
         traffic: model.traffic.clone(),
         log_session_offsets: Some(log_session_offsets),
         profile_latencies: model

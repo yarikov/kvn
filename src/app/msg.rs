@@ -102,6 +102,7 @@ pub enum Msg {
     },
     DaemonDisconnected,
     ConfigReloaded(Box<Result<crate::config::profile::Config, IpcError>>),
+    RoutingReloaded(Box<Result<crate::config::routing::RoutingConfig, IpcError>>),
     KillSwitchApplied {
         enabled: bool,
         error: Option<IpcError>,
@@ -412,6 +413,8 @@ pub struct StateSnapshot {
     pub profiles: Vec<Profile>,
     pub subscriptions: Vec<Subscription>,
     pub settings: Settings,
+    #[serde(default)]
+    pub routing: crate::config::routing::RoutingConfig,
     #[serde(default)]
     pub traffic: TrafficStats,
     #[serde(default)]

@@ -263,7 +263,7 @@ fn subscription_already_updating(model: &mut Model, id: uuid::Uuid, name: &str) 
 
 fn update_geo(model: &mut Model) -> Vec<Effect> {
     let mut effects = Vec::new();
-    let selectable = crate::route_plan::selectable_rule_sets(&model.config.settings);
+    let selectable = model.selectable_rule_sets();
     if selectable.is_empty() {
         push_status(
             &mut effects,

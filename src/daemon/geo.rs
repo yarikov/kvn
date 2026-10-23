@@ -9,7 +9,7 @@ use crate::geo::{RuleSet, RuleSetOutcome, RuleSetReport, ScheduleWrite};
 pub(super) fn download_rule_sets(
     tx: &Sender<Msg>,
     model: &Model,
-    rule_sets: Vec<&'static RuleSet>,
+    rule_sets: Vec<RuleSet>,
     only_missing: bool,
     record_schedule: bool,
 ) {
@@ -45,7 +45,7 @@ pub(super) fn download_rule_sets(
 
 pub(super) fn refresh_rule_set_states(tx: &Sender<Msg>, model: &Model) {
     let tx = tx.clone();
-    let selectable = crate::route_plan::selectable_rule_sets(&model.config.settings);
+    let selectable = model.selectable_rule_sets();
     let epoch = model.geo_schedule_epoch;
     thread::spawn(move || {
         let states = crate::geo::GeoManager::new()
@@ -59,7 +59,7 @@ pub(super) fn reset_update_schedules(model: &mut Model) {
     let Ok(manager) = crate::geo::GeoManager::new() else {
         return;
     };
-    let selectable = crate::route_plan::selectable_rule_sets(&model.config.settings);
+    let selectable = model.selectable_rule_sets();
     let enabled = model.config.settings.geo_routing.auto_update != GeoAutoUpdate::Off;
     match manager.reset_update_schedules(&selectable, enabled) {
         Ok(schedule_epoch) => {
@@ -96,7 +96,7 @@ mod tests {
         let mut model = crate::test_helpers::model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Off;
-        for rule_set in crate::route_plan::selectable_rule_sets(&model.config.settings) {
+        for rule_set in model.selectable_rule_sets() {
             model
                 .rule_set_states
                 .entry(rule_set.key())

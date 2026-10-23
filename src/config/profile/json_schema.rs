@@ -109,8 +109,15 @@ pub fn config_json_schema() -> Value {
 }
 
 pub fn schema_diagnostics(document: &Value) -> Vec<ConfigDiagnostic> {
+    schema_diagnostics_against(&SCHEMA, document)
+}
+
+pub(crate) fn schema_diagnostics_against(
+    schema: &Value,
+    document: &Value,
+) -> Vec<ConfigDiagnostic> {
     let mut problems = Vec::new();
-    Validator { root: &SCHEMA }.check(&SCHEMA, document, "", &mut problems);
+    Validator { root: schema }.check(schema, document, "", &mut problems);
     problems
         .into_iter()
         .map(|problem| {
@@ -248,7 +255,10 @@ impl Validator<'_> {
         }
         let properties = schema.get("properties").and_then(Value::as_object);
         for (key, member) in object {
-            let member_pointer = format!("{pointer}/{}", escape(key));
+            let member_pointer = format!(
+                "{pointer}/{}",
+                crate::config::json_pointer::escape_token(key)
+            );
             match (
                 properties.and_then(|properties| properties.get(key)),
                 schema.get("additionalProperties"),
@@ -455,10 +465,6 @@ fn check_format(schema: &Map<String, Value>, value: &Value, pointer: &str, out: 
 fn list(values: &[Value]) -> String {
     let rendered: Vec<_> = values.iter().map(Value::to_string).collect();
     rendered.join(", ")
-}
-
-fn escape(key: &str) -> String {
-    key.replace('~', "~0").replace('/', "~1")
 }
 
 #[cfg(test)]

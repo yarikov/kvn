@@ -12,7 +12,7 @@ pub enum Effect {
     Disconnect,
     RevokeKillSwitchExceptions,
     DownloadRuleSets {
-        rule_sets: Vec<&'static crate::geo::RuleSet>,
+        rule_sets: Vec<crate::geo::RuleSet>,
         only_missing: bool,
         record_schedule: bool,
     },

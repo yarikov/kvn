@@ -7,6 +7,8 @@
 ```
 
 This is the default location; `XDG_CONFIG_HOME` is respected when set.
+Rule-sets live in their own file, `~/.config/kvn-tui/routing.json` (see
+[Rule-sets](#rule-sets)).
 
 Press `e` in the TUI to edit a private copy with `$VISUAL` or `$EDITOR`.
 VS Code, VSCodium, Cursor, Zed and Sublime Text get `--wait` unless the
@@ -432,6 +434,54 @@ portal or error page is rejected and the previous file stays. A damaged
 rule-set file counts as missing and is downloaded again on the next update,
 even when the server reports it unchanged.
 
+### Rule-sets
+
+Every rule-set kvn downloads is declared in `~/.config/kvn-tui/routing.json`,
+next to — not inside — `profiles.json`. kvn creates the file the first time it
+starts with the rule-sets of every region; from then on the file is yours, so
+a mirror or another source for a region's rule-set is a change of its `url`:
+
+```json
+{
+  "schema_version": 1,
+  "rule_sets": {
+    "geoip-ru": {
+      "kind": "geoip",
+      "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs"
+    },
+    "geosite-category-ru": {
+      "kind": "geosite",
+      "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs"
+    }
+  }
+}
+```
+
+- The key is the rule-set's tag: the name DNS rules use in `rule_set`, and the
+  name of the downloaded file, `<tag>.srs` in the geo directory. Tags use
+  lowercase letters, digits and inner hyphens.
+- `kind` is `geoip` for a list of IP networks or `geosite` for a list of
+  domains. kvn does not read the file to find out, so declare it correctly.
+- `url` is an `https://` address of a binary sing-box rule-set (`.srs`). Two
+  rule-sets cannot share one address.
+- The rule-sets of the region modes (`geosite-category-ru`, `geoip-ru`, and so
+  on) cannot be removed or change `kind`: Bypass and Only need them as they
+  are.
+
+A rule-set you add is not downloaded and routes nothing yet; routing rules that
+use it come in a later release. If Steam or Telegram overrides were set in an
+earlier release, the new file also declares `geosite-steam` / `geoip-steam`
+and `geosite-telegram` / `geoip-telegram` from the same sources, so the files
+already downloaded for them are kept.
+
+Changing a rule-set's `url` discards its downloaded file: the next update
+downloads it from the new address. Until then a region mode that needs it runs
+as Global (Bypass) or Direct (Only). kvn reads `routing.json` when the daemon
+starts and when the configuration is reloaded. A file that fails these checks
+is reported in the status line and left untouched: on a reload kvn keeps the
+rule-sets it already loaded, at startup it uses the built-in ones until the
+file is fixed.
+
 ## Themes and logging
 
 Open **Settings › Interface** (`Space i`) and change **Theme** to choose one of
@@ -483,6 +533,7 @@ cannot read it.
 | Resource | Location |
 |----------|----------|
 | Profiles and settings | `~/.config/kvn-tui/profiles.json` |
+| Rule-sets | `~/.config/kvn-tui/routing.json` |
 | Geo rule-sets | `~/.config/kvn-tui/geo/` |
 | Application log | `~/.config/kvn-tui/logs/app.log` |
 | sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |

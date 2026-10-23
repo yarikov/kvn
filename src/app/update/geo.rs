@@ -2,18 +2,17 @@ use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey, UpdateTrigger};
 use crate::config::profile::{GeoAutoUpdate, RoutingFallback};
 use crate::geo::{RuleSet, RuleSetOutcome, RuleSetReport, RuleSetStates};
-use crate::route_plan::required_rule_sets;
 
 use crate::app::update::connection::queue_connect;
 use crate::app::update::status::{DownloadKind, append_download_hint, push_status};
 
 pub(in crate::app::update) fn start_rule_set_download(
     model: &mut Model,
-    rule_sets: Vec<&'static RuleSet>,
+    rule_sets: Vec<RuleSet>,
     trigger: UpdateTrigger,
     only_missing: bool,
 ) -> Option<Effect> {
-    let rule_sets: Vec<&'static RuleSet> = rule_sets
+    let rule_sets: Vec<RuleSet> = rule_sets
         .into_iter()
         .filter(|rule_set| !model.rule_set_updates.contains_key(&rule_set.key()))
         .collect();
@@ -86,7 +85,7 @@ fn failure_text(report: &RuleSetReport) -> Option<String> {
 }
 
 fn reconnect_for_updated_rule_sets(model: &mut Model, updated: &[&RuleSetReport]) {
-    let required = required_rule_sets(&model.config.settings);
+    let required = model.required_rule_sets();
     let routed_update = updated
         .iter()
         .any(|report| required.iter().any(|rule_set| rule_set.key() == report.key));
@@ -116,7 +115,7 @@ pub(in crate::app::update) fn fetch_region_rule_sets(
         StatusKey::Geo,
         AppStatus::Info(format!("{mode} rule-sets are missing — {consequence}")),
     );
-    let required = required_rule_sets(&model.config.settings);
+    let required = model.required_rule_sets();
     effects.extend(start_rule_set_download(
         model,
         required,
@@ -131,14 +130,14 @@ fn leave_routing_fallback(
     fallback: RoutingFallback,
     reports: &[RuleSetReport],
 ) -> Vec<Effect> {
-    let required = required_rule_sets(&model.config.settings);
+    let required = model.required_rule_sets();
     if required
         .iter()
         .any(|rule_set| model.rule_set_updates.contains_key(&rule_set.key()))
     {
         return Vec::new();
     }
-    let missing: Vec<&'static RuleSet> = required
+    let missing: Vec<RuleSet> = required
         .into_iter()
         .filter(|rule_set| {
             !model
@@ -189,8 +188,8 @@ mod tests {
     use crate::test_helpers::*;
     use chrono::Local;
 
-    fn ru_rule_sets() -> Vec<&'static RuleSet> {
-        crate::geo::region_rule_sets(GeoRegion::Ru).to_vec()
+    fn ru_rule_sets() -> Vec<RuleSet> {
+        crate::test_helpers::region_rule_sets(GeoRegion::Ru)
     }
 
     fn report(rule_set: &RuleSet, outcome: RuleSetOutcome) -> RuleSetReport {
@@ -201,7 +200,7 @@ mod tests {
         }
     }
 
-    fn present(rule_sets: &[&RuleSet], present: bool) -> RuleSetStates {
+    fn present(rule_sets: &[RuleSet], present: bool) -> RuleSetStates {
         rule_sets
             .iter()
             .map(|rule_set| {
@@ -247,7 +246,7 @@ mod tests {
     fn states_from_before_a_schedule_reset_keep_the_reset_schedule() {
         let mut model = model_with_profiles(vec![]);
         model.geo_schedule_epoch = 2;
-        let geoip = ru_rule_sets()[1];
+        let geoip = ru_rule_sets()[1].clone();
         let reset_next = Some(Local::now().date_naive());
         model.rule_set_states.insert(
             geoip.key(),
@@ -264,12 +263,12 @@ mod tests {
             next_update: None,
         };
 
-        let geosite = ru_rule_sets()[0];
+        let geosite = ru_rule_sets()[0].clone();
 
         update(
             &mut model,
             Msg::RuleSetsUpdated {
-                reports: vec![report(geoip, RuleSetOutcome::UpToDate)],
+                reports: vec![report(&geoip, RuleSetOutcome::UpToDate)],
                 states: RuleSetStates::from([(geoip.key(), stale.clone()), (geosite.key(), stale)]),
                 epoch: 1,
             },
@@ -288,7 +287,7 @@ mod tests {
     fn states_of_the_current_schedule_update_the_schedule() {
         let mut model = model_with_profiles(vec![]);
         model.geo_schedule_epoch = 2;
-        let geoip = ru_rule_sets()[1];
+        let geoip = ru_rule_sets()[1].clone();
         let failed = RuleSetState {
             retry: Some(retry_state(1)),
             ..RuleSetState::default()
@@ -297,7 +296,7 @@ mod tests {
         update(
             &mut model,
             Msg::RuleSetsUpdated {
-                reports: vec![report(geoip, RuleSetOutcome::Failed("down".into()))],
+                reports: vec![report(&geoip, RuleSetOutcome::Failed("down".into()))],
                 states: RuleSetStates::from([(geoip.key(), failed.clone())]),
                 epoch: 2,
             },
@@ -326,9 +325,7 @@ mod tests {
     #[test]
     fn an_update_logs_each_updated_rule_set_and_ends_its_download() {
         let mut model = model_with_profiles(vec![]);
-        let [geosite, geoip] = ru_rule_sets()[..] else {
-            unreachable!()
-        };
+        let [geosite, geoip] = <[RuleSet; 2]>::try_from(ru_rule_sets()).unwrap();
         model
             .rule_set_updates
             .insert(geoip.key(), UpdateTrigger::Manual);
@@ -337,8 +334,8 @@ mod tests {
             &mut model,
             rule_sets_updated(
                 vec![
-                    report(geosite, RuleSetOutcome::UpToDate),
-                    report(geoip, RuleSetOutcome::Updated),
+                    report(&geosite, RuleSetOutcome::UpToDate),
+                    report(&geoip, RuleSetOutcome::Updated),
                 ],
                 RuleSetStates::new(),
             ),
@@ -361,7 +358,7 @@ mod tests {
         let effects = update(
             &mut model,
             rule_sets_updated(
-                vec![report(ru_rule_sets()[0], RuleSetOutcome::UpToDate)],
+                vec![report(&ru_rule_sets()[0], RuleSetOutcome::UpToDate)],
                 RuleSetStates::new(),
             ),
         );
@@ -377,7 +374,7 @@ mod tests {
     #[test]
     fn a_failed_update_reports_each_rule_set_and_the_download_hint() {
         let mut model = model_with_profiles(vec![]);
-        let geoip = ru_rule_sets()[1];
+        let geoip = ru_rule_sets()[1].clone();
         model
             .rule_set_updates
             .insert(geoip.key(), UpdateTrigger::Automatic);
@@ -385,7 +382,7 @@ mod tests {
         let effects = update(
             &mut model,
             rule_sets_updated(
-                vec![report(geoip, RuleSetOutcome::Failed("net fail".into()))],
+                vec![report(&geoip, RuleSetOutcome::Failed("net fail".into()))],
                 RuleSetStates::new(),
             ),
         );
@@ -415,7 +412,7 @@ mod tests {
         update(
             &mut model,
             rule_sets_updated(
-                vec![report(ru_rule_sets()[1], RuleSetOutcome::Updated)],
+                vec![report(&ru_rule_sets()[1], RuleSetOutcome::Updated)],
                 RuleSetStates::new(),
             ),
         );
@@ -430,7 +427,7 @@ mod tests {
         update(
             &mut model,
             rule_sets_updated(
-                vec![report(ru_rule_sets()[1], RuleSetOutcome::Updated)],
+                vec![report(&ru_rule_sets()[1], RuleSetOutcome::Updated)],
                 RuleSetStates::new(),
             ),
         );
@@ -441,16 +438,14 @@ mod tests {
     #[test]
     fn a_download_skips_rule_sets_that_are_already_downloading() {
         let mut model = model_with_profiles(vec![]);
-        let [geosite, geoip] = ru_rule_sets()[..] else {
-            unreachable!()
-        };
+        let [geosite, geoip] = <[RuleSet; 2]>::try_from(ru_rule_sets()).unwrap();
         model
             .rule_set_updates
             .insert(geoip.key(), UpdateTrigger::Automatic);
 
         let effect = start_rule_set_download(
             &mut model,
-            vec![geosite, geoip],
+            vec![geosite.clone(), geoip.clone()],
             UpdateTrigger::Manual,
             false,
         );
@@ -458,7 +453,7 @@ mod tests {
         assert_eq!(
             effect,
             Some(Effect::DownloadRuleSets {
-                rule_sets: vec![geosite],
+                rule_sets: vec![geosite.clone()],
                 only_missing: false,
                 record_schedule: false,
             })
@@ -474,7 +469,7 @@ mod tests {
         assert_eq!(
             start_rule_set_download(
                 &mut model,
-                vec![geosite, geoip],
+                vec![geosite.clone(), geoip.clone()],
                 UpdateTrigger::Manual,
                 false
             ),
@@ -494,7 +489,7 @@ mod tests {
         }
 
         let effects = crate::app::update::routing::commit_geo_region(&mut model, GeoRegion::Cn);
-        let cn = crate::geo::region_rule_sets(GeoRegion::Cn).to_vec();
+        let cn = crate::test_helpers::region_rule_sets(GeoRegion::Cn);
         assert!(effects.contains(&Effect::DownloadRuleSets {
             rule_sets: cn.clone(),
             only_missing: true,
@@ -522,7 +517,7 @@ mod tests {
     fn a_late_result_for_the_previous_region_leaves_the_current_one_alone() {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.geo_routing.set_region(GeoRegion::Cn);
-        let cn = crate::geo::region_rule_sets(GeoRegion::Cn).to_vec();
+        let cn = crate::test_helpers::region_rule_sets(GeoRegion::Cn);
         let cn_states = present(&cn, false);
         model.rule_set_states = cn_states.clone();
         let checked_before = model.selectable_rule_sets_checked_at();
@@ -530,7 +525,7 @@ mod tests {
         update(
             &mut model,
             rule_sets_updated(
-                vec![report(ru_rule_sets()[1], RuleSetOutcome::Updated)],
+                vec![report(&ru_rule_sets()[1], RuleSetOutcome::Updated)],
                 present(&ru_rule_sets()[1..], true),
             ),
         );
@@ -659,15 +654,13 @@ mod tests {
     #[test]
     fn fallback_connection_reconnects_once_every_rule_set_is_present() {
         let (mut model, _) = connected_in_fallback(false);
-        let [geosite, geoip] = ru_rule_sets()[..] else {
-            unreachable!()
-        };
+        let [geosite, geoip] = <[RuleSet; 2]>::try_from(ru_rule_sets()).unwrap();
 
         update(
             &mut model,
             rule_sets_updated(
-                vec![report(geosite, RuleSetOutcome::Updated)],
-                present(&[geosite], true),
+                vec![report(&geosite, RuleSetOutcome::Updated)],
+                present(std::slice::from_ref(&geosite), true),
             ),
         );
         assert_eq!(model.connection, ConnectionState::Connected);
@@ -675,8 +668,8 @@ mod tests {
         update(
             &mut model,
             rule_sets_updated(
-                vec![report(geoip, RuleSetOutcome::Updated)],
-                present(&[geoip], true),
+                vec![report(&geoip, RuleSetOutcome::Updated)],
+                present(std::slice::from_ref(&geoip), true),
             ),
         );
         assert_eq!(model.connection, ConnectionState::Connecting);

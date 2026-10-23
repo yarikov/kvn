@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 
+pub(crate) fn escape_token(key: &str) -> String {
+    key.replace('~', "~0").replace('/', "~1")
+}
+
 pub(crate) struct JsonIndex {
     offsets: HashMap<String, usize>,
     line_starts: Vec<usize>,
@@ -91,7 +95,7 @@ impl<'a> Scanner<'a> {
             self.skip_whitespace();
             let parent_len = pointer.len();
             pointer.push('/');
-            pointer.push_str(&key.replace('~', "~0").replace('/', "~1"));
+            pointer.push_str(&escape_token(&key));
             self.offsets.insert(pointer.clone(), key_start);
             let indexed = self.index_value(pointer);
             pointer.truncate(parent_len);

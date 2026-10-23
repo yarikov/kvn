@@ -50,6 +50,10 @@ pub fn config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("kvn-tui"))
 }
 
+pub fn routing_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("routing.json"))
+}
+
 pub fn state_dir() -> Option<PathBuf> {
     dirs::state_dir().map(|d| d.join("kvn"))
 }

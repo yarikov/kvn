@@ -9,6 +9,7 @@ use crate::singbox::runner::NotReady;
 
 use super::DaemonShared;
 use super::process_slot::{is_current_attempt, lock_process_slot, stop_retired};
+use crate::singbox::config::RoutingInput;
 use crate::singbox::process_handle::STOP_GRACE_PERIOD;
 
 const LOG_PRUNE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -31,6 +32,7 @@ pub(super) fn connect(
         slot.retire_handle();
     }
     model.connection = ConnectionState::ConnectPending;
+    let routing = model.routing.clone();
     let tx = tx.clone();
     let slot = shared.process_slot.clone();
     let coordinator = shared.connect_coordinator.clone();
@@ -59,7 +61,11 @@ pub(super) fn connect(
         }
         drop(last_pruned);
         let cancelled = || !is_current_attempt(&slot, attempt_id);
-        match start_retrying_until_ready(&tx, &profile, &settings, attempt_id, &cancelled) {
+        let input = RoutingInput {
+            settings: &settings,
+            routing: &routing,
+        };
+        match start_retrying_until_ready(&tx, &profile, input, attempt_id, &cancelled) {
             Ok(crate::singbox::runner::StartedSingBox {
                 handle,
                 routing_fallback,
@@ -101,13 +107,13 @@ pub(super) fn connect(
 fn start_retrying_until_ready(
     tx: &Sender<Msg>,
     profile: &Profile,
-    settings: &Settings,
+    input: RoutingInput,
     attempt_id: u64,
     cancelled: &dyn Fn() -> bool,
 ) -> anyhow::Result<crate::singbox::runner::StartedSingBox> {
     let mut budget = RetryBudget::default();
     loop {
-        let error = match crate::singbox::runner::start(profile, settings, cancelled) {
+        let error = match crate::singbox::runner::start(profile, input, cancelled) {
             Ok(started) => return Ok(started),
             Err(error) => error,
         };

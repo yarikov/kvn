@@ -4,7 +4,12 @@ use crate::config::profile::Profile;
 use uuid::Uuid;
 
 use crate::app::update::connection::reconnect_with_new_settings;
-use crate::app::update::status::push_status;
+use crate::app::update::routing::download_missing_selectable_rule_sets;
+use crate::app::update::status::{
+    DownloadKind, download_allowed, push_download_blocked, push_status,
+};
+use crate::config::routing::RoutingConfig;
+use crate::route_plan::RoutePlan;
 
 pub(crate) fn handle_config_reloaded(
     model: &mut Model,
@@ -96,6 +101,54 @@ pub(crate) fn handle_config_reloaded(
     }
 }
 
+pub(crate) fn handle_routing_reloaded(
+    model: &mut Model,
+    result: Result<RoutingConfig, crate::app::msg::IpcError>,
+) -> Vec<Effect> {
+    let mut effects = vec![Effect::BroadcastState];
+    let routing = match result {
+        Ok(routing) => routing,
+        Err(e) => {
+            push_status(
+                &mut effects,
+                model,
+                StatusKey::Config,
+                AppStatus::Error(format!("Routing configuration reload failed: {e}")),
+            );
+            return effects;
+        }
+    };
+    let old_plan = RoutePlan::for_settings(&model.config.settings, &model.routing);
+    let old_selectable = model.selectable_rule_sets();
+    model.routing = routing;
+    if model.selectable_rule_sets() != old_selectable {
+        effects.push(Effect::RefreshRuleSetStates);
+        if download_allowed(model) {
+            effects.extend(download_missing_selectable_rule_sets(model));
+        } else {
+            push_download_blocked(&mut effects, model, DownloadKind::Geo);
+        }
+    }
+    let new_plan = RoutePlan::for_settings(&model.config.settings, &model.routing);
+    let awaits_download = new_plan
+        .rule_sets()
+        .filter(|rule_set| !old_plan.rule_sets().any(|old| old.url == rule_set.url))
+        .any(|rule_set| downloads(&effects, rule_set));
+    if new_plan != old_plan && !awaits_download && reconnect_with_new_settings(model) {
+        model
+            .logs
+            .push_back("Routing configuration changed — reconnecting".into());
+    }
+    effects
+}
+
+fn downloads(effects: &[Effect], rule_set: &crate::geo::RuleSet) -> bool {
+    effects.iter().any(|effect| {
+        matches!(effect, Effect::DownloadRuleSets { rule_sets, .. }
+            if rule_sets.iter().any(|queued| queued.key() == rule_set.key()))
+    })
+}
+
 fn profile_runtime_changed_for_id(old: &[Profile], new: &[Profile], id: Uuid) -> bool {
     let old = old.iter().find(|profile| profile.id == id);
     let new = new.iter().find(|profile| profile.id == id);
@@ -152,6 +205,97 @@ mod tests {
             vec![
                 Effect::BroadcastState,
                 app_log_info("Configuration reloaded")
+            ]
+        );
+    }
+
+    fn reload_routing(model: &mut Model, routing: RoutingConfig) -> Vec<Effect> {
+        update(model, Msg::RoutingReloaded(Box::new(Ok(routing))))
+    }
+
+    #[test]
+    fn a_reloaded_rule_set_url_downloads_before_it_reconnects() {
+        let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        let profile_id = profile.id;
+        let mut model = model_with_profiles(vec![profile]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .config
+            .settings
+            .geo_routing
+            .set_mode(crate::config::profile::RoutingMode::Bypass(GeoRegion::Ru));
+        model.connection = ConnectionState::Connected;
+        model.active_profile_id = Some(profile_id);
+        let mut routing = RoutingConfig::default();
+        routing.rule_sets.get_mut("geoip-ru").unwrap().url =
+            "https://mirror.example/geoip-ru.srs".into();
+
+        let effects = reload_routing(&mut model, routing.clone());
+
+        assert_eq!(model.routing, routing);
+        assert!(effects.contains(&Effect::RefreshRuleSetStates));
+        assert!(downloads_rule_sets(&effects));
+        assert_eq!(model.connection, ConnectionState::Connected);
+    }
+
+    #[test]
+    fn a_reloaded_rule_set_kind_reconnects_at_once() {
+        let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        let profile_id = profile.id;
+        let mut model = model_with_profiles(vec![profile]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .config
+            .settings
+            .geo_routing
+            .set_mode(crate::config::profile::RoutingMode::Bypass(GeoRegion::Ru));
+        model.connection = ConnectionState::Connected;
+        model.active_profile_id = Some(profile_id);
+        let mut routing = RoutingConfig::default();
+        routing.rule_sets.get_mut("geoip-ru").unwrap().kind =
+            crate::config::routing::RuleSetKind::Geosite;
+
+        reload_routing(&mut model, routing);
+
+        assert_eq!(model.connection, ConnectionState::Connecting);
+    }
+
+    #[test]
+    fn a_reloaded_rule_set_no_mode_routes_changes_nothing_else() {
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        let mut routing = RoutingConfig::default();
+        routing.rule_sets.insert(
+            "ads".into(),
+            crate::config::routing::RuleSetSource {
+                kind: crate::config::routing::RuleSetKind::Geosite,
+                url: "https://example.com/ads.srs".into(),
+            },
+        );
+
+        let effects = reload_routing(&mut model, routing.clone());
+
+        assert_eq!(model.routing, routing);
+        assert_eq!(effects, vec![Effect::BroadcastState]);
+    }
+
+    #[test]
+    fn a_failed_routing_reload_keeps_the_loaded_rule_sets() {
+        let mut model = model_with_profiles(vec![]);
+        model.routing.rule_sets.remove("geoip-ir");
+        let before = model.routing.clone();
+
+        let effects = update(
+            &mut model,
+            Msg::RoutingReloaded(Box::new(Err(crate::app::msg::IpcError::new("bad url")))),
+        );
+
+        assert_eq!(model.routing, before);
+        assert_eq!(
+            effects,
+            vec![
+                Effect::BroadcastState,
+                app_log_error("Routing configuration reload failed: bad url"),
             ]
         );
     }

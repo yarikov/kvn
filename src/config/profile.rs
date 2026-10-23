@@ -20,6 +20,7 @@ pub(crate) use diagnostic::into_result;
 pub use dns::CustomDnsPreset;
 pub use dns::{ActiveDns, DnsConfig, DnsPreset, DnsRule, DnsServer, FakeIpServer};
 pub use entry::Profile;
+pub(crate) use json_schema::schema_diagnostics_against;
 pub use json_schema::{config_json_schema, schema_diagnostics};
 pub use protocol::Protocol;
 pub use protocol_config::{

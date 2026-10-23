@@ -1897,6 +1897,7 @@ esac
             ],
             subscriptions: vec![],
             settings: crate::config::profile::Settings::default(),
+            routing: Default::default(),
             traffic: Default::default(),
             log_session_offsets: None,
             profile_latencies: Default::default(),

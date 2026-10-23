@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::config::profile::{Profile, RoutingFallback, Settings};
-use crate::singbox::config::{GeoAvailability, generate_config};
+use crate::config::profile::{Profile, RoutingFallback};
+use crate::singbox::config::{GeoAvailability, RoutingInput, generate_config};
 use crate::singbox::process_handle::ProcessHandle;
 
 fn resolve_singbox_binary() -> String {
@@ -24,12 +24,12 @@ fn singbox_binary() -> &'static str {
 
 fn write_config(
     profile: &Profile,
-    settings: &Settings,
+    input: RoutingInput,
     geo: &GeoAvailability,
     fallback: Option<RoutingFallback>,
     clash_api_port: u16,
 ) -> Result<PathBuf> {
-    let config = generate_config(profile, settings, geo, clash_api_port, fallback)
+    let config = generate_config(profile, input, geo, clash_api_port, fallback)
         .context("Failed to generate sing-box config")?;
     crate::paths::ensure_runtime_dir()?;
     if let Some(state_dir) = crate::paths::state_dir() {
@@ -96,15 +96,19 @@ fn stop_child(child: &mut Child) {
     let _ = child.wait();
 }
 
-fn collect_geo_availability(required: &[&'static crate::geo::RuleSet]) -> GeoAvailability {
+fn collect_geo_availability(required: &[crate::geo::RuleSet]) -> GeoAvailability {
     let mut geo = GeoAvailability::default();
     let Ok(gm) = crate::geo::GeoManager::new() else {
         return geo;
     };
+    let states = gm.states(required);
     for rule_set in required {
-        if gm.has_rule_set(rule_set) {
+        if states
+            .get(&rule_set.key())
+            .is_some_and(|state| state.present)
+        {
             geo.rule_sets
-                .insert(rule_set.tag, gm.rule_set_path(rule_set));
+                .insert(rule_set.tag.to_string(), gm.rule_set_path(rule_set));
         }
     }
     geo
@@ -119,19 +123,20 @@ pub struct StartedSingBox {
 
 pub fn start(
     profile: &Profile,
-    settings: &Settings,
+    input: RoutingInput,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<StartedSingBox> {
-    let geo = collect_geo_availability(&crate::route_plan::required_rule_sets(settings));
-    let routing_fallback =
-        geo.routing_fallback(&crate::route_plan::RoutePlan::for_settings(settings));
+    let RoutingInput { settings, routing } = input;
+    let geo = collect_geo_availability(&crate::route_plan::required_rule_sets(settings, routing));
+    let routing_fallback = geo.routing_fallback(&crate::route_plan::RoutePlan::for_settings(
+        settings, routing,
+    ));
     let mut config_validated = false;
     let handle = start_with(
         CLASH_API_START_ATTEMPTS,
         crate::net::allocate_loopback_port,
         |clash_api_port| {
-            let config_path =
-                write_config(profile, settings, &geo, routing_fallback, clash_api_port)?;
+            let config_path = write_config(profile, input, &geo, routing_fallback, clash_api_port)?;
             if !config_validated {
                 check_config(&config_path, cancelled)?;
                 config_validated = true;
@@ -293,7 +298,8 @@ fn spawn_stderr_drain(stderr: ChildStderr) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::profile::Profile;
+    use crate::config::profile::{Profile, Settings};
+    use crate::config::routing::RoutingConfig;
     use std::cell::RefCell;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -325,7 +331,10 @@ mod tests {
         let settings = Settings::default();
         let path = write_config(
             &profile,
-            &settings,
+            RoutingInput {
+                settings: &settings,
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::default(),
             None,
             TEST_CLASH_PORT,
@@ -366,12 +375,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = crate::geo::GeoManager::new().unwrap();
-        let bypass_ru = RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Ru));
-        let required: Vec<_> = bypass_ru.rule_sets().collect();
-        let [geosite, geoip] = required[..] else {
+        let bypass_ru = RoutePlan::for_mode(
+            RoutingMode::Bypass(GeoRegion::Ru),
+            &RoutingConfig::default(),
+        );
+        let required: Vec<_> = bypass_ru.rule_sets().cloned().collect();
+        let [geosite, geoip] = &required[..] else {
             unreachable!()
         };
-        let [_, geoip_cn] = crate::geo::region_rule_sets(GeoRegion::Cn) else {
+        let [_, geoip_cn] = &crate::test_helpers::region_rule_sets(GeoRegion::Cn)[..] else {
             unreachable!()
         };
 
@@ -409,7 +421,10 @@ mod tests {
     fn check_generated_config(profile: &Profile) -> Result<()> {
         let path = write_config(
             profile,
-            &Settings::default(),
+            RoutingInput {
+                settings: &Settings::default(),
+                routing: &RoutingConfig::default(),
+            },
             &GeoAvailability::default(),
             None,
             TEST_CLASH_PORT,

@@ -21,7 +21,7 @@ enum RuleSetFreshness {
 
 fn rule_set_freshness(model: &Model, now: chrono::DateTime<chrono::Local>) -> RuleSetFreshness {
     let routing = &model.config.settings.geo_routing;
-    let selectable = crate::route_plan::selectable_rule_sets(&model.config.settings);
+    let selectable = model.selectable_rule_sets();
 
     if selectable.is_empty() {
         return RuleSetFreshness::Disabled;
@@ -426,7 +426,7 @@ mod tests {
     }
 
     fn mark_ru_rule_sets_updating(model: &mut Model) {
-        for rule_set in crate::geo::region_rule_sets(GeoRegion::Ru) {
+        for rule_set in crate::test_helpers::region_rule_sets(GeoRegion::Ru) {
             model
                 .rule_set_updates
                 .insert(rule_set.key(), crate::app::model::UpdateTrigger::Manual);

@@ -35,7 +35,7 @@ pub(in crate::app::update) fn on_connected(
     let warnings: Vec<String> = profile
         .map(|p| {
             [
-                crate::singbox::config::dns_bypass_warning(p, running_settings),
+                crate::singbox::config::dns_bypass_warning(p, running_settings, &model.routing),
                 crate::singbox::config::certificate_pin_warning(p),
                 crate::singbox::config::ech_dns_warning(p, running_settings),
             ]
@@ -837,8 +837,12 @@ mod tests {
             final_server: "plain".into(),
         }];
         dns.current_preset = "plain".into();
-        let warning =
-            crate::singbox::config::dns_bypass_warning(&profile, &model.config.settings).unwrap();
+        let warning = crate::singbox::config::dns_bypass_warning(
+            &profile,
+            &model.config.settings,
+            &model.routing,
+        )
+        .unwrap();
         let effects = on_connected(&mut model, 1, profile.id, 0, None);
         assert_eq!(model.connection, ConnectionState::Connected);
         assert_eq!(model.status, Some(AppStatus::Error(warning.clone())));
