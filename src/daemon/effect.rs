@@ -61,6 +61,7 @@ pub(super) fn execute_daemon_effect(
             ));
         }
         Effect::ReloadConfig => config_io::reload(tx),
+        Effect::AddRegionModes { region } => config_io::add_region_modes(tx, region),
         Effect::UpdateSubscription { id } => subscription::fetch(tx, model, id),
         Effect::FetchTrafficStats {
             attempt_id,

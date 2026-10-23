@@ -4,9 +4,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::GeoAutoUpdate;
-use crate::config::routing::RoutingConfig;
+use crate::config::routing::{GLOBAL_MODE_ID, RoutingConfig};
 
-/// Selected geo region for rule-set downloads and routing mode availability.
+/// Country whose default routing modes the first-run tour adds to `routing.json`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum GeoRegion {
@@ -41,26 +41,17 @@ impl GeoRegion {
             GeoRegion::Ir => "IR",
         }
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RoutingMode {
-    #[default]
-    Global,
-    Bypass(GeoRegion),
-    Only(GeoRegion),
-}
-
-impl RoutingMode {
-    pub fn available(region: Option<GeoRegion>) -> Vec<RoutingMode> {
-        match region {
-            Some(r) if !matches!(r, GeoRegion::Global) => vec![
-                RoutingMode::Global,
-                RoutingMode::Bypass(r),
-                RoutingMode::Only(r),
-            ],
-            _ => vec![RoutingMode::Global],
+    pub fn of_default_mode(id: &str) -> Option<GeoRegion> {
+        if id == GLOBAL_MODE_ID {
+            return Some(GeoRegion::Global);
         }
+        let code = id
+            .strip_prefix("bypass_")
+            .or_else(|| id.strip_prefix("only_"))?;
+        GeoRegion::ALL
+            .into_iter()
+            .find(|region| *region != GeoRegion::Global && region.as_str() == code)
     }
 }
 
@@ -89,83 +80,17 @@ impl std::fmt::Display for RoutingFallback {
     }
 }
 
-impl RoutingMode {
-    pub fn id(self) -> String {
-        match self {
-            RoutingMode::Global => "global".to_string(),
-            RoutingMode::Bypass(r) => format!("bypass_{}", r.as_str()),
-            RoutingMode::Only(r) => format!("only_{}", r.as_str()),
-        }
-    }
+fn global_mode_id() -> String {
+    GLOBAL_MODE_ID.to_string()
 }
 
-impl std::fmt::Display for RoutingMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RoutingMode::Global => f.write_str("Global"),
-            RoutingMode::Bypass(r) => write!(f, "Bypass {}", r.code_upper()),
-            RoutingMode::Only(r) => write!(f, "Only {}", r.code_upper()),
-        }
-    }
-}
-
-impl Serialize for RoutingMode {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&self.id())
-    }
-}
-
-impl JsonSchema for RoutingMode {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "RoutingMode".into()
-    }
-
-    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        let mut modes = Vec::new();
-        for mode in GeoRegion::ALL
-            .iter()
-            .flat_map(|region| RoutingMode::available(Some(*region)))
-        {
-            let value = serde_json::to_value(mode).expect("RoutingMode serializes to a string");
-            if !modes.contains(&value) {
-                modes.push(value);
-            }
-        }
-        schemars::json_schema!({ "type": "string", "enum": modes })
-    }
-}
-
-impl<'de> Deserialize<'de> for RoutingMode {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let s = String::deserialize(d)?;
-        if s == "global" {
-            return Ok(RoutingMode::Global);
-        }
-        let parse_region = |code: &str| -> Option<GeoRegion> {
-            GeoRegion::ALL.iter().copied().find(|r| r.as_str() == code)
-        };
-        if let Some(code) = s.strip_prefix("bypass_") {
-            return parse_region(code).map(RoutingMode::Bypass).ok_or_else(|| {
-                D::Error::custom(format!("unknown region in routing mode `{}`", s))
-            });
-        }
-        if let Some(code) = s.strip_prefix("only_") {
-            return parse_region(code).map(RoutingMode::Only).ok_or_else(|| {
-                D::Error::custom(format!("unknown region in routing mode `{}`", s))
-            });
-        }
-        Err(D::Error::custom(format!("unknown routing mode `{}`", s)))
-    }
-}
-
-/// Geo-region and routing-mode preferences.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
+/// Routing-mode selection and rule-set update preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct GeoRouting {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_region: Option<GeoRegion>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub selected_region_modes: HashMap<GeoRegion, RoutingMode>,
+    /// Id of the selected mode in `routing.json`, such as `bypass_ru`. An id
+    /// the file does not declare routes as `global`.
+    #[serde(default = "global_mode_id")]
+    pub mode: String,
     #[serde(default)]
     pub auto_update: GeoAutoUpdate,
     /// Steam and Telegram overrides written by v0.35 and earlier, kept
@@ -177,27 +102,54 @@ pub struct GeoRouting {
     )]
     #[schemars(skip)]
     pub(crate) legacy_service_routes: Option<serde_json::Value>,
+    #[serde(default, rename = "current_region", skip_serializing)]
+    #[schemars(skip)]
+    pub(crate) legacy_current_region: Option<GeoRegion>,
+    #[serde(default, rename = "selected_region_modes", skip_serializing)]
+    #[schemars(skip)]
+    pub(crate) legacy_selected_region_modes: HashMap<GeoRegion, String>,
+}
+
+impl Default for GeoRouting {
+    fn default() -> Self {
+        Self {
+            mode: global_mode_id(),
+            auto_update: GeoAutoUpdate::default(),
+            legacy_service_routes: None,
+            legacy_current_region: None,
+            legacy_selected_region_modes: HashMap::new(),
+        }
+    }
 }
 
 impl GeoRouting {
-    pub fn mode(&self, routing: &RoutingConfig) -> RoutingMode {
-        self.current_region
-            .and_then(|r| self.selected_region_modes.get(&r).copied())
-            .filter(|mode| {
-                RoutingMode::available(self.current_region).contains(mode)
-                    && routing.declares(*mode)
-            })
-            .unwrap_or(RoutingMode::Global)
-    }
-
-    pub fn set_region(&mut self, region: GeoRegion) {
-        self.current_region = Some(region);
-    }
-
-    pub fn set_mode(&mut self, mode: RoutingMode) {
-        if let Some(region) = self.current_region {
-            self.selected_region_modes.insert(region, mode);
+    pub fn mode<'a>(&'a self, routing: &RoutingConfig) -> &'a str {
+        if routing.declares(&self.mode) {
+            &self.mode
+        } else {
+            GLOBAL_MODE_ID
         }
+    }
+
+    pub fn set_mode(&mut self, id: &str) {
+        self.mode = id.to_string();
+    }
+
+    pub(crate) fn select_legacy_region_mode(&mut self) {
+        self.mode = self
+            .legacy_current_region
+            .and_then(|region| self.legacy_selected_region_modes.get(&region))
+            .cloned()
+            .unwrap_or_else(global_mode_id);
+    }
+
+    pub(crate) fn predates_mode_selection(&self) -> bool {
+        self.legacy_current_region.is_some()
+    }
+
+    pub(crate) fn forget_legacy_regions(&mut self) {
+        self.legacy_current_region = None;
+        self.legacy_selected_region_modes.clear();
     }
 
     pub fn used_regions(&self) -> Vec<GeoRegion> {
@@ -205,14 +157,27 @@ impl GeoRouting {
             .into_iter()
             .filter(|region| {
                 *region != GeoRegion::Global
-                    && (self.current_region == Some(*region)
-                        || self.selected_region_modes.contains_key(region))
+                    && (GeoRegion::of_default_mode(&self.mode) == Some(*region)
+                        || self.legacy_current_region == Some(*region)
+                        || self.legacy_selected_region_modes.contains_key(region))
             })
             .collect()
     }
 
-    pub fn available_modes(&self, routing: &RoutingConfig) -> Vec<RoutingMode> {
-        routing.modes_of(self.current_region)
+    // TODO: drop once the omakvn plugin selects modes by id (TASK-26); it
+    // still reads current_region and selected_region_modes from the snapshot.
+    pub(crate) fn plugin_region_fields(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut fields = serde_json::Map::new();
+        let Some(region) = GeoRegion::of_default_mode(&self.mode) else {
+            return fields;
+        };
+        fields.insert("current_region".into(), region.as_str().into());
+        let mut selected = serde_json::Map::new();
+        if region != GeoRegion::Global {
+            selected.insert(region.as_str().into(), self.mode.clone().into());
+        }
+        fields.insert("selected_region_modes".into(), selected.into());
+        fields
     }
 }
 
@@ -222,41 +187,42 @@ mod tests {
     use crate::config::profile::*;
 
     #[test]
-    fn a_mode_stored_for_another_region_reads_as_global() {
+    fn a_mode_missing_from_routing_json_reads_as_global() {
         let mut routing = GeoRouting::default();
-        routing.set_region(GeoRegion::Ru);
-        routing.set_mode(RoutingMode::Bypass(GeoRegion::Cn));
-        assert_eq!(routing.mode(&RoutingConfig::default()), RoutingMode::Global);
-
-        routing.set_region(GeoRegion::Global);
-        routing.set_mode(RoutingMode::Only(GeoRegion::Ru));
-        assert_eq!(routing.mode(&RoutingConfig::default()), RoutingMode::Global);
-    }
-
-    #[test]
-    fn a_mode_missing_from_routing_json_is_unavailable_and_reads_as_global() {
-        let mut routing = GeoRouting::default();
-        routing.set_region(GeoRegion::Ru);
-        routing.set_mode(RoutingMode::Only(GeoRegion::Ru));
+        routing.set_mode("only_ru");
         let mut config = RoutingConfig::default();
-        config.modes.retain(|mode| mode.id != "only_ru");
+        assert_eq!(routing.mode(&config), "only_ru");
 
-        assert_eq!(
-            routing.available_modes(&config),
-            [RoutingMode::Global, RoutingMode::Bypass(GeoRegion::Ru)]
-        );
-        assert_eq!(routing.mode(&config), RoutingMode::Global);
+        config.modes.retain(|mode| mode.id != "only_ru");
+        assert_eq!(routing.mode(&config), "global");
     }
 
     #[test]
-    fn routing_mode_display() {
-        assert_eq!(RoutingMode::Global.to_string(), "Global");
-        assert_eq!(RoutingMode::Bypass(GeoRegion::Ru).to_string(), "Bypass RU");
-        assert_eq!(RoutingMode::Only(GeoRegion::Ru).to_string(), "Only RU");
-        assert_eq!(RoutingMode::Bypass(GeoRegion::Cn).to_string(), "Bypass CN");
-        assert_eq!(RoutingMode::Only(GeoRegion::Cn).to_string(), "Only CN");
-        assert_eq!(RoutingMode::Bypass(GeoRegion::Ir).to_string(), "Bypass IR");
-        assert_eq!(RoutingMode::Only(GeoRegion::Ir).to_string(), "Only IR");
+    fn default_selection_is_global_and_is_written() {
+        let routing = GeoRouting::default();
+        assert_eq!(routing.mode(&RoutingConfig::default()), "global");
+        assert_eq!(
+            serde_json::to_value(&routing).unwrap()["mode"],
+            serde_json::json!("global")
+        );
+        let parsed: GeoRouting = serde_json::from_str("{}").unwrap();
+        assert_eq!(parsed, routing);
+    }
+
+    #[test]
+    fn default_mode_ids_name_their_region() {
+        let cases = [
+            ("global", Some(GeoRegion::Global)),
+            ("bypass_ru", Some(GeoRegion::Ru)),
+            ("only_cn", Some(GeoRegion::Cn)),
+            ("bypass_ir", Some(GeoRegion::Ir)),
+            ("bypass_global", None),
+            ("only_xx", None),
+            ("work", None),
+        ];
+        for (id, region) in cases {
+            assert_eq!(GeoRegion::of_default_mode(id), region, "{id}");
+        }
     }
 
     #[test]
@@ -266,125 +232,65 @@ mod tests {
     }
 
     #[test]
-    fn routing_mode_serde_round_trip_matches_legacy_wire_format() {
-        let cases: &[(RoutingMode, &str)] = &[
-            (RoutingMode::Global, r#""global""#),
-            (RoutingMode::Bypass(GeoRegion::Ru), r#""bypass_ru""#),
-            (RoutingMode::Only(GeoRegion::Ru), r#""only_ru""#),
-            (RoutingMode::Bypass(GeoRegion::Cn), r#""bypass_cn""#),
-            (RoutingMode::Only(GeoRegion::Cn), r#""only_cn""#),
-            (RoutingMode::Bypass(GeoRegion::Ir), r#""bypass_ir""#),
-            (RoutingMode::Only(GeoRegion::Ir), r#""only_ir""#),
-        ];
-        for (mode, wire) in cases {
-            assert_eq!(
-                serde_json::to_string(mode).unwrap(),
-                *wire,
-                "ser {:?}",
-                mode
-            );
-            let parsed: RoutingMode = serde_json::from_str(wire).unwrap();
-            assert_eq!(parsed, *mode, "de {}", wire);
-        }
+    fn legacy_regions_are_read_but_never_written() {
+        let document = serde_json::json!({
+            "current_region": "ru",
+            "selected_region_modes": { "ru": "only_ru", "cn": "bypass_cn" }
+        });
+        let mut routing: GeoRouting = serde_json::from_value(document).unwrap();
+        assert!(routing.predates_mode_selection());
+        assert_eq!(routing.used_regions(), [GeoRegion::Ru, GeoRegion::Cn]);
+
+        routing.select_legacy_region_mode();
+        assert_eq!(routing.mode, "only_ru");
+        let written = serde_json::to_value(&routing).unwrap();
+        assert!(written.get("current_region").is_none());
+        assert!(written.get("selected_region_modes").is_none());
+
+        routing.forget_legacy_regions();
+        assert!(!routing.predates_mode_selection());
+        assert_eq!(routing.used_regions(), [GeoRegion::Ru]);
     }
 
     #[test]
-    fn routing_mode_deserialize_rejects_unknown_strings() {
-        assert!(serde_json::from_str::<RoutingMode>(r#""bogus""#).is_err());
-        assert!(serde_json::from_str::<RoutingMode>(r#""bypass_xx""#).is_err());
-        assert!(serde_json::from_str::<RoutingMode>(r#""only_""#).is_err());
+    fn a_legacy_region_without_a_stored_mode_selects_global() {
+        let mut routing: GeoRouting =
+            serde_json::from_value(serde_json::json!({ "current_region": "cn" })).unwrap();
+        routing.set_mode("bypass_ru");
+        routing.select_legacy_region_mode();
+        assert_eq!(routing.mode, "global");
+        assert_eq!(routing.used_regions(), [GeoRegion::Cn]);
     }
 
     #[test]
-    fn geo_region_all_contains_every_variant() {
-        for r in GeoRegion::ALL {
-            match r {
-                GeoRegion::Global | GeoRegion::Ru | GeoRegion::Cn | GeoRegion::Ir => {}
-            }
-        }
-        assert_eq!(GeoRegion::ALL.len(), 4);
-    }
-
-    #[test]
-    fn routing_mode_available() {
-        assert_eq!(RoutingMode::available(None), vec![RoutingMode::Global]);
-        for region in [GeoRegion::Ru, GeoRegion::Cn, GeoRegion::Ir] {
-            assert_eq!(
-                RoutingMode::available(Some(region)),
-                vec![
-                    RoutingMode::Global,
-                    RoutingMode::Bypass(region),
-                    RoutingMode::Only(region),
-                ],
-                "region {:?}",
-                region,
-            );
-        }
+    fn plugin_region_fields_follow_the_selected_mode() {
+        let fields = |mode: &str| {
+            let mut routing = GeoRouting::default();
+            routing.set_mode(mode);
+            serde_json::Value::Object(routing.plugin_region_fields())
+        };
         assert_eq!(
-            RoutingMode::available(Some(GeoRegion::Global)),
-            vec![RoutingMode::Global]
-        );
-    }
-
-    #[test]
-    fn geo_routing_mode_falls_back_to_global() {
-        let g = GeoRouting::default();
-        assert_eq!(g.mode(&RoutingConfig::default()), RoutingMode::Global);
-    }
-
-    #[test]
-    fn geo_routing_set_mode_persists_per_region() {
-        let mut g = GeoRouting::default();
-        g.set_region(GeoRegion::Ru);
-        g.set_mode(RoutingMode::Bypass(GeoRegion::Ru));
-        assert_eq!(
-            g.mode(&RoutingConfig::default()),
-            RoutingMode::Bypass(GeoRegion::Ru)
+            fields("only_ru"),
+            serde_json::json!({
+                "current_region": "ru",
+                "selected_region_modes": { "ru": "only_ru" }
+            })
         );
         assert_eq!(
-            g.selected_region_modes.get(&GeoRegion::Ru),
-            Some(&RoutingMode::Bypass(GeoRegion::Ru))
+            fields("global"),
+            serde_json::json!({ "current_region": "global", "selected_region_modes": {} })
         );
-
-        g.set_region(GeoRegion::Cn);
-        g.set_mode(RoutingMode::Only(GeoRegion::Cn));
-        assert_eq!(
-            g.mode(&RoutingConfig::default()),
-            RoutingMode::Only(GeoRegion::Cn)
-        );
-        g.set_region(GeoRegion::Ru);
-        assert_eq!(
-            g.mode(&RoutingConfig::default()),
-            RoutingMode::Bypass(GeoRegion::Ru)
-        );
-    }
-
-    #[test]
-    fn geo_routing_available_modes_uses_current_region() {
-        let mut g = GeoRouting::default();
-        assert_eq!(
-            g.available_modes(&RoutingConfig::default()),
-            vec![RoutingMode::Global]
-        );
-        g.set_region(GeoRegion::Ru);
-        assert_eq!(
-            g.available_modes(&RoutingConfig::default()),
-            vec![
-                RoutingMode::Global,
-                RoutingMode::Bypass(GeoRegion::Ru),
-                RoutingMode::Only(GeoRegion::Ru)
-            ]
-        );
+        assert_eq!(fields("work"), serde_json::json!({}));
     }
 
     #[test]
     fn service_routes_of_an_older_build_survive_a_save_unchanged() {
         let service_routes = serde_json::json!({ "steam": "direct", "telegram": "proxy" });
         let document = serde_json::json!({
-            "geo_routing": { "current_region": "ru", "service_routes": service_routes }
+            "geo_routing": { "mode": "bypass_ru", "service_routes": service_routes }
         });
         let settings: Settings = serde_json::from_value(document).unwrap();
-        assert_eq!(settings.geo_routing.current_region, Some(GeoRegion::Ru));
+        assert_eq!(settings.geo_routing.mode, "bypass_ru");
         assert_eq!(
             serde_json::to_value(&settings).unwrap()["geo_routing"]["service_routes"],
             service_routes

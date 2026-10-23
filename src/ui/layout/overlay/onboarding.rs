@@ -189,9 +189,9 @@ fn title(model: &Model, step: OnboardingStep) -> &'static str {
     match step {
         OnboardingStep::Welcome => "Welcome to kvn",
         OnboardingStep::Region => "Choose a region",
-        OnboardingStep::Routing => match country_region(model) {
-            Some(_) => "Choose a routing mode",
-            None => "Routing mode",
+        OnboardingStep::Routing => match offers_modes(model) {
+            true => "Choose a routing mode",
+            false => "Routing mode",
         },
         OnboardingStep::Profiles => "Add your first profile",
         OnboardingStep::Connected => "You’re connected!",
@@ -207,9 +207,9 @@ fn primary_action(model: &Model, step: OnboardingStep) -> &'static str {
     match step {
         OnboardingStep::Welcome => "start",
         OnboardingStep::Region => "choose a region",
-        OnboardingStep::Routing => match country_region(model) {
-            Some(_) => "choose a mode",
-            None => "continue",
+        OnboardingStep::Routing => match offers_modes(model) {
+            true => "choose a mode",
+            false => "continue",
         },
         OnboardingStep::Profiles => "open profile list",
         OnboardingStep::Connected => "continue",
@@ -324,11 +324,19 @@ fn body(model: &Model, step: OnboardingStep) -> Vec<Passage> {
     }
 }
 
+fn offers_modes(model: &Model) -> bool {
+    OnboardingStep::Routing
+        .handoff_screen(&model.routing)
+        .is_some()
+}
+
 fn country_region(model: &Model) -> Option<GeoRegion> {
-    match model.config.settings.geo_routing.current_region {
-        Some(GeoRegion::Global) | None => None,
-        Some(region) => Some(region),
-    }
+    model
+        .routing
+        .mode_ids()
+        .into_iter()
+        .filter_map(GeoRegion::of_default_mode)
+        .find(|region| *region != GeoRegion::Global)
 }
 
 fn routing_body(model: &Model) -> Vec<Passage> {
@@ -417,7 +425,9 @@ mod tests {
 
     fn card(step: OnboardingStep) -> Model {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         model.onboarding.state.step = step;
         model.onboarding.include_omarchy_card = true;
         model.overlay = Overlay::Onboarding(step);
@@ -449,11 +459,7 @@ mod tests {
     #[test]
     fn draw_routing_card_for_the_global_region_snapshot() {
         let mut model = card(OnboardingStep::Routing);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(GeoRegion::Global);
+        model.routing = crate::config::routing::RoutingConfig::for_new_file(&Default::default());
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 

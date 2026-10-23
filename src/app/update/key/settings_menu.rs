@@ -1,8 +1,7 @@
 use crate::app::effect::Effect;
 use crate::app::model::{
-    AppStatus, Model, Overlay, RoutingSettingsItem, SettingsMenuEntry, SettingsMenuPage, StatusKey,
+    AppStatus, Model, Overlay, SettingsMenuEntry, SettingsMenuPage, StatusKey,
 };
-use crate::config::profile::GeoRegion;
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::update::routing::commit_routing_settings;
@@ -43,11 +42,11 @@ pub(in crate::app::update) fn handle_settings_menu(
             cycle_routing_draft(model, false);
         }
         (SettingsMenuPage::Routing, KeyCode::Enter) => {
-            let settings = model.shown_routing_settings();
+            let mode = model.shown_routing_mode().to_string();
             if model.routing_settings_draft.take().is_none() {
                 return vec![];
             }
-            return commit_routing_settings(model, settings);
+            return commit_routing_settings(model, &mode);
         }
         (SettingsMenuPage::Connection, KeyCode::Char('l') | KeyCode::Right) => {
             cycle_connection_draft(model);
@@ -191,49 +190,19 @@ fn clear_settings_drafts(model: &mut Model) {
 }
 
 fn cycle_routing_draft(model: &mut Model, forward: bool) {
-    let shown = model.shown_routing_settings();
-    let item = RoutingSettingsItem::available(shown.region)
-        .get(model.settings_menu_selected)
-        .copied();
-    match item {
-        Some(RoutingSettingsItem::Region) => {
-            let current = GeoRegion::ALL
-                .iter()
-                .position(|region| *region == shown.region)
-                .unwrap_or(0);
-            let next = if forward {
-                (current + 1) % GeoRegion::ALL.len()
-            } else {
-                (current + GeoRegion::ALL.len() - 1) % GeoRegion::ALL.len()
-            };
-            let region = GeoRegion::ALL[next];
-            let mode = model
-                .config
-                .settings
-                .geo_routing
-                .selected_region_modes
-                .get(&region)
-                .copied()
-                .unwrap_or_default();
-            let draft = model.routing_settings_draft.get_or_insert_default();
-            draft.region = Some(region);
-            draft.mode = Some(mode);
-        }
-        Some(RoutingSettingsItem::Mode) => {
-            let modes = model.routing.modes_of(Some(shown.region));
-            let current = modes
-                .iter()
-                .position(|mode| *mode == shown.mode)
-                .unwrap_or(0);
-            let next = if forward {
-                (current + 1) % modes.len()
-            } else {
-                (current + modes.len() - 1) % modes.len()
-            };
-            model.routing_settings_draft.get_or_insert_default().mode = Some(modes[next]);
-        }
-        None => {}
+    let modes = model.routing.mode_ids();
+    if modes.is_empty() {
+        return;
     }
+    let shown = model.shown_routing_mode();
+    let current = modes.iter().position(|id| *id == shown).unwrap_or(0);
+    let next = if forward {
+        (current + 1) % modes.len()
+    } else {
+        (current + modes.len() - 1) % modes.len()
+    };
+    let mode = modes[next].to_string();
+    model.routing_settings_draft.get_or_insert_default().mode = Some(mode);
 }
 
 fn cycle_connection_draft(model: &mut Model) {
@@ -313,7 +282,7 @@ mod tests {
     use crate::app::update::key::handle_key;
     use crate::app::update::key::sources::handle_sources;
     use crate::app::update::update;
-    use crate::config::profile::{IconSet, RoutingMode};
+    use crate::config::profile::IconSet;
     use crate::test_helpers::*;
 
     #[test]
@@ -635,64 +604,45 @@ mod tests {
     }
 
     #[test]
-    fn settings_routing_global_skips_mode_during_navigation() {
+    fn settings_routing_cycles_every_mode_of_routing_json() {
         let mut model = model_with_profiles(vec![]);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
         model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         handle_key(&mut model, key('r'));
-
-        assert_eq!(model.shown_routing_settings().region, GeoRegion::Global);
         handle_key(&mut model, key('j'));
         assert_eq!(model.settings_menu_selected, 0);
-        handle_key(&mut model, key('G'));
-        assert_eq!(model.settings_menu_selected, 0);
-    }
-
-    #[test]
-    fn settings_routing_restores_region_mode_after_global() {
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_mode(RoutingMode::Bypass(GeoRegion::Ru));
-        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
-        handle_key(&mut model, key('r'));
-
-        handle_key(&mut model, key('h'));
-        let shown = model.shown_routing_settings();
-        assert_eq!(shown.region, GeoRegion::Global);
-        assert_eq!(shown.mode, RoutingMode::Global);
-        assert_eq!(RoutingSettingsItem::available(shown.region).len(), 1);
 
         handle_key(&mut model, key('l'));
-        let shown = model.shown_routing_settings();
-        assert_eq!(shown.region, GeoRegion::Ru);
-        assert_eq!(shown.mode, RoutingMode::Bypass(GeoRegion::Ru));
-        assert_eq!(RoutingSettingsItem::available(shown.region).len(), 2);
+        assert_eq!(model.shown_routing_mode(), "only_ru");
+        handle_key(&mut model, key('l'));
+        assert_eq!(model.shown_routing_mode(), "global");
+        handle_key(&mut model, key('h'));
+        assert_eq!(model.shown_routing_mode(), "only_ru");
+        assert_eq!(model.config.settings.geo_routing.mode, "bypass_ru");
     }
 
     #[test]
     fn repeated_routing_enter_keeps_the_mode_merged_from_disk() {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         handle_key(&mut model, key('r'));
-        handle_key(&mut model, key('j'));
         handle_key(&mut model, key('l'));
         handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
 
         let mut merged = model.config.clone();
-        merged
-            .settings
-            .geo_routing
-            .set_mode(RoutingMode::Only(GeoRegion::Ru));
+        merged.settings.geo_routing.set_mode("only_ru");
         model.replace_config_preserving_selection(merged);
 
         assert!(handle_key(&mut model, KeyEvent::from(KeyCode::Enter)).is_empty());
         assert_eq!(
             model.config.settings.geo_routing.mode(&model.routing),
-            RoutingMode::Only(GeoRegion::Ru)
+            "only_ru"
         );
     }
 
@@ -766,10 +716,11 @@ mod tests {
     #[test]
     fn enter_applies_and_keeps_the_settings_page_open() {
         let mut routing = model_with_profiles(vec![]);
+        routing
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         routing.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         handle_key(&mut routing, key('r'));
-        handle_key(&mut routing, key('l'));
-        handle_key(&mut routing, key('j'));
         handle_key(&mut routing, key('l'));
         let effects = handle_key(&mut routing, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
@@ -777,12 +728,8 @@ mod tests {
             Overlay::SettingsMenu(SettingsMenuPage::Routing)
         );
         assert_eq!(
-            routing.config.settings.geo_routing.current_region,
-            Some(GeoRegion::Ru)
-        );
-        assert_eq!(
             routing.config.settings.geo_routing.mode(&routing.routing),
-            crate::config::profile::RoutingMode::Bypass(GeoRegion::Ru)
+            "bypass_ru"
         );
         assert_eq!(
             effects

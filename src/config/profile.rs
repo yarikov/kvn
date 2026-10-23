@@ -31,7 +31,7 @@ pub use protocol_options::{
     Hysteria2Obfs, Hysteria2ObfsType, ShadowsocksCipher, ShadowtlsVersion, SocksVersion,
     TuicCongestion, TuicUdpRelayMode, VmessSecurity,
 };
-pub use routing::{GeoRegion, GeoRouting, RoutingFallback, RoutingMode};
+pub use routing::{GeoRegion, GeoRouting, RoutingFallback};
 pub use schedule::{
     GeoAutoUpdate, RetryState, SubscriptionAutoUpdate, next_update_window_date, update_window_open,
 };

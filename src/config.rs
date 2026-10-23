@@ -290,14 +290,7 @@ mod tests {
         let path = file.path().to_path_buf();
 
         let mut config = Config::default();
-        config
-            .settings
-            .geo_routing
-            .set_region(profile::GeoRegion::Ru);
-        config
-            .settings
-            .geo_routing
-            .set_mode(profile::RoutingMode::Only(profile::GeoRegion::Ru));
+        config.settings.geo_routing.set_mode("only_ru");
         config.profiles.push(profile::Profile::new_vless(
             "Test".to_string(),
             "1.2.3.4".to_string(),
@@ -596,10 +589,6 @@ mod tests {
 
     fn with_steam_direct() -> Config {
         let mut config = Config::default();
-        config
-            .settings
-            .geo_routing
-            .set_region(profile::GeoRegion::Ru);
         config.settings.geo_routing.legacy_service_routes =
             Some(serde_json::json!({ "steam": "direct" }));
         config
@@ -615,6 +604,7 @@ mod tests {
         let profiles_path = dir.path().join("profiles.json");
         let routing_path = dir.path().join("routing.json");
         let mut config = with_steam_direct();
+        config.settings.geo_routing.set_mode("bypass_ru");
         let mut routing = routing::RoutingConfig::for_new_file(&config.settings.geo_routing);
         written_routing(&routing_path, &routing);
 

@@ -4,7 +4,7 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use crate::config::load_config;
-use crate::config::profile::{Config, GeoRegion, Profile};
+use crate::config::profile::{Config, Profile};
 use crate::config::routing::RoutingConfig;
 use crate::ui::styles::Theme;
 use chrono::{DateTime, Local};
@@ -93,18 +93,10 @@ impl SettingsMenuEntry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RoutingSettings {
-    pub region: GeoRegion,
-    pub mode: crate::config::profile::RoutingMode,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoutingSettingsDraft {
     #[serde(default)]
-    pub region: Option<GeoRegion>,
-    #[serde(default)]
-    pub mode: Option<crate::config::profile::RoutingMode>,
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,22 +130,6 @@ impl DnsSettingsItem {
 
     pub fn from_index(idx: usize) -> Option<Self> {
         Self::ALL.get(idx).copied()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RoutingSettingsItem {
-    Region,
-    Mode,
-}
-
-impl RoutingSettingsItem {
-    pub fn available(region: GeoRegion) -> Vec<Self> {
-        let mut items = vec![Self::Region];
-        if region != GeoRegion::Global {
-            items.push(Self::Mode);
-        }
-        items
     }
 }
 
@@ -409,7 +385,7 @@ fn load_rule_set_states(
     let Ok(manager) = crate::geo::GeoManager::new() else {
         return (0, crate::geo::RuleSetStates::new());
     };
-    let selectable = crate::route_plan::selectable_rule_sets(settings, routing);
+    let selectable = crate::route_plan::selectable_rule_sets(routing);
     let epoch = manager.schedule_epoch();
     let _ = manager.ensure_update_schedules(
         &selectable,
@@ -472,7 +448,7 @@ impl Model {
     }
 
     pub fn selectable_rule_sets(&self) -> Vec<crate::geo::RuleSet> {
-        crate::route_plan::selectable_rule_sets(&self.config.settings, &self.routing)
+        crate::route_plan::selectable_rule_sets(&self.routing)
     }
 
     pub fn selectable_rule_sets_checked_at(&self) -> Option<DateTime<Local>> {
@@ -542,6 +518,7 @@ impl Model {
                 Config::default()
             }
         };
+        let predates_mode_selection = config.settings.geo_routing.predates_mode_selection();
         let mut routing_loaded = true;
         let mut routing = match crate::config::load_routing(
             &config.settings.geo_routing,
@@ -556,9 +533,10 @@ impl Model {
                     None => msg,
                 });
                 routing_loaded = false;
-                RoutingConfig::default()
+                RoutingConfig::for_new_file(&config.settings.geo_routing)
             }
         };
+        config.settings.geo_routing.forget_legacy_regions();
         if routing_loaded && !config_persistence_blocked {
             match crate::config::move_service_routes(&mut config, &mut routing) {
                 Ok(true) => {
@@ -600,10 +578,7 @@ impl Model {
 
         let now = chrono::Utc::now();
         let onboarding = crate::onboarding::OnboardingProgress::new(
-            crate::onboarding::load_for_daemon(
-                config.settings.geo_routing.current_region.is_some(),
-                now,
-            ),
+            crate::onboarding::load_for_daemon(predates_mode_selection, now),
             show_omarchy_card(),
         );
         let support_prompt = crate::support_prompt::load_for_daemon(onboarding.state.completed_at);
@@ -842,25 +817,16 @@ impl Model {
     pub fn settings_menu_len(&self, page: SettingsMenuPage) -> usize {
         match page {
             SettingsMenuPage::Root => SettingsMenuEntry::ALL.len(),
-            SettingsMenuPage::Routing => {
-                RoutingSettingsItem::available(self.shown_routing_settings().region).len()
-            }
+            SettingsMenuPage::Routing => 1,
             SettingsMenuPage::Connection | SettingsMenuPage::Interface => 2,
         }
     }
 
-    pub fn shown_routing_settings(&self) -> RoutingSettings {
-        let geo_routing = &self.config.settings.geo_routing;
-        let mut shown = RoutingSettings {
-            region: geo_routing.current_region.unwrap_or(GeoRegion::Global),
-            mode: geo_routing.mode(&self.routing),
-        };
-        let Some(draft) = &self.routing_settings_draft else {
-            return shown;
-        };
-        shown.region = draft.region.unwrap_or(shown.region);
-        shown.mode = draft.mode.unwrap_or(shown.mode);
-        shown
+    pub fn shown_routing_mode(&self) -> &str {
+        self.routing_settings_draft
+            .as_ref()
+            .and_then(|draft| draft.mode.as_deref())
+            .unwrap_or_else(|| self.config.settings.geo_routing.mode(&self.routing))
     }
 
     pub fn shown_connection_settings(&self) -> ConnectionSettings {
@@ -1006,7 +972,9 @@ impl Model {
 #[cfg(test)]
 impl Model {
     pub fn test_new(config: Config) -> Self {
-        Self::in_memory(config)
+        let mut model = Self::in_memory(config);
+        model.routing = RoutingConfig::for_new_file(&Default::default());
+        model
     }
 }
 
@@ -1231,6 +1199,50 @@ mod tests {
     }
 
     #[test]
+    fn a_v7_region_becomes_the_selected_mode_after_routing_json_holds_its_modes() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
+        let state_dir = tempfile::tempdir().unwrap();
+        let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", state_dir.path());
+        crate::paths::ensure_config_dirs().unwrap();
+        let profiles = crate::paths::profiles_path().unwrap();
+        std::fs::write(
+            &profiles,
+            r#"{ "schema_version": 7, "settings": { "geo_routing": {
+                "current_region": "cn",
+                "selected_region_modes": { "ru": "bypass_ru", "cn": "only_cn" }
+            } } }"#,
+        )
+        .unwrap();
+
+        let model = Model::new().unwrap();
+
+        assert_eq!(
+            model.config.settings.geo_routing.mode(&model.routing),
+            "only_cn"
+        );
+        let on_disk = crate::config::routing::load_routing_at(
+            &crate::paths::routing_path().unwrap(),
+            &Default::default(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            on_disk.mode_ids(),
+            ["global", "bypass_ru", "only_ru", "bypass_cn", "only_cn"]
+        );
+        assert_eq!(model.routing, on_disk);
+        assert!(!model.config.settings.geo_routing.predates_mode_selection());
+        assert!(model.onboarding.is_complete());
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&profiles).unwrap()).unwrap();
+        assert_eq!(saved["schema_version"], 8);
+        assert_eq!(saved["settings"]["geo_routing"]["mode"], "only_cn");
+    }
+
+    #[test]
     fn a_completed_tour_without_a_region_opens_the_main_screen() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -1244,7 +1256,7 @@ mod tests {
         crate::onboarding::save_at(&crate::paths::onboarding_path().unwrap(), &ended).unwrap();
 
         let model = Model::new().unwrap();
-        assert_eq!(model.config.settings.geo_routing.current_region, None);
+        assert_eq!(model.config.settings.geo_routing.mode, "global");
         assert_eq!(model.overlay, Overlay::None);
     }
 

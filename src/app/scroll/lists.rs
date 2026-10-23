@@ -43,15 +43,7 @@ pub(crate) fn list(model: &Model) -> Option<(Vec<Option<usize>>, usize)> {
                 .collect();
             return Some((rows, state.selected));
         }
-        Overlay::RoutingMode => (
-            model
-                .config
-                .settings
-                .geo_routing
-                .available_modes(&model.routing)
-                .len(),
-            model.routing_selected,
-        ),
+        Overlay::RoutingMode => (model.routing.mode_ids().len(), model.routing_selected),
         Overlay::GeoRegions => (GeoRegion::ALL.len(), model.geo_region_selected),
         Overlay::DnsSettings => (DnsSettingsItem::ALL.len(), model.dns_selected),
         Overlay::SettingsMenu(page) => {
@@ -96,8 +88,7 @@ mod tests {
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let mut model = crate::test_helpers::model_with_subscription();
         model.routing_settings_draft = Some(RoutingSettingsDraft {
-            region: Some(GeoRegion::Ru),
-            ..Default::default()
+            mode: Some("bypass_ru".into()),
         });
         for overlay in [
             Overlay::None,

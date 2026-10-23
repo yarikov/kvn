@@ -8,22 +8,12 @@ use super::popup::draw_selection_modal;
 use super::{APPLY_ACTION, overlay_footer, settings_heading};
 
 pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
-    let modes = model
-        .config
-        .settings
-        .geo_routing
-        .available_modes(&model.routing);
-    let label_strings: Vec<String> = modes
-        .iter()
-        .map(|mode| model.routing.mode_name(*mode))
-        .collect();
+    let modes = model.routing.mode_ids();
+    let label_strings: Vec<String> = modes.iter().map(|id| model.routing.mode_name(id)).collect();
     let labels: Vec<&str> = label_strings.iter().map(String::as_str).collect();
+    let selected = model.config.settings.geo_routing.mode(&model.routing);
     let active = (!awaits(model, OnboardingStep::Routing))
-        .then(|| {
-            modes
-                .iter()
-                .position(|m| *m == model.config.settings.geo_routing.mode(&model.routing))
-        })
+        .then(|| modes.iter().position(|id| *id == selected))
         .flatten();
     draw_selection_modal(
         frame,
@@ -41,16 +31,6 @@ pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
 pub(super) fn draw_region(frame: &mut Frame, model: &Model, area: Rect) {
     use crate::config::profile::GeoRegion;
     let labels = GeoRegion::ALL.map(geo_region_label);
-    let active = (!awaits(model, OnboardingStep::Region))
-        .then(|| {
-            model
-                .config
-                .settings
-                .geo_routing
-                .current_region
-                .and_then(|r| GeoRegion::ALL.iter().position(|x| *x == r))
-        })
-        .flatten();
     draw_selection_modal(
         frame,
         &model.theme,
@@ -59,7 +39,7 @@ pub(super) fn draw_region(frame: &mut Frame, model: &Model, area: Rect) {
         &labels,
         model.geo_region_selected,
         model.overlay_scroll,
-        active,
+        None,
         overlay_footer(model, Some(APPLY_ACTION), false, false),
     );
 }
@@ -68,7 +48,7 @@ fn awaits(model: &Model, step: OnboardingStep) -> bool {
     model.onboarding.awaiting == Some(step)
 }
 
-pub(super) fn geo_region_label(region: crate::config::profile::GeoRegion) -> &'static str {
+fn geo_region_label(region: crate::config::profile::GeoRegion) -> &'static str {
     use crate::config::profile::GeoRegion;
 
     match region {
@@ -98,10 +78,8 @@ mod tests {
         ] {
             let mut model = model_with_profiles(vec![]);
             model
-                .config
-                .settings
-                .geo_routing
-                .set_region(crate::config::profile::GeoRegion::Ru);
+                .routing
+                .add_region_modes(crate::config::profile::GeoRegion::Ru);
             model.overlay = overlay;
             model.onboarding.awaiting = Some(step);
 
@@ -119,10 +97,8 @@ mod tests {
     fn draw_routing_mode_overlay_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model
-            .config
-            .settings
-            .geo_routing
-            .set_region(crate::config::profile::GeoRegion::Ru);
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         model.overlay = Overlay::RoutingMode;
         model.routing_selected = 2;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
@@ -132,10 +108,8 @@ mod tests {
     fn selection_overlay_styles_active_row_like_connected_profile() {
         let mut model = model_with_profiles(vec![]);
         model
-            .config
-            .settings
-            .geo_routing
-            .set_region(crate::config::profile::GeoRegion::Ru);
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         model.overlay = Overlay::RoutingMode;
         model.routing_selected = 2;
 
@@ -172,11 +146,6 @@ mod tests {
     #[test]
     fn draw_routing_mode_overlay_global_snapshot() {
         let mut model = model_with_profiles(vec![]);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(crate::config::profile::GeoRegion::Global);
         model.overlay = Overlay::RoutingMode;
         model.routing_selected = 0;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));

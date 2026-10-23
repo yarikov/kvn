@@ -58,8 +58,8 @@ fn build_docs_preview_state_at(
     preview_now: chrono::DateTime<chrono::Local>,
 ) -> Result<DocsPreviewState> {
     use crate::config::profile::{
-        Config, GeoAutoUpdate, GeoRegion, Hysteria2Config, ProtocolConfig, RoutingMode,
-        Subscription, SubscriptionAutoUpdate, TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
+        Config, GeoAutoUpdate, Hysteria2Config, ProtocolConfig, Subscription,
+        SubscriptionAutoUpdate, TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
     };
     use chrono::Timelike;
     use uuid::Uuid;
@@ -204,8 +204,6 @@ fn build_docs_preview_state_at(
     config.settings.auto_connect = true;
     config.settings.kill_switch = true;
     config.settings.allow_insecure_http_subscriptions = true;
-    config.settings.geo_routing.set_region(GeoRegion::Ru);
-    config.settings.geo_routing.set_mode(RoutingMode::Global);
     config.settings.geo_routing.auto_update = GeoAutoUpdate::Every3d;
 
     let deprecated_http_warning = crate::config::subscription::deprecated_http_warning(
@@ -215,6 +213,10 @@ fn build_docs_preview_state_at(
     .context("first documentation-preview subscription should use deprecated HTTP")?;
 
     let mut model = Model::in_memory(config);
+    model.routing = crate::config::routing::RoutingConfig::for_new_file(&Default::default());
+    model
+        .routing
+        .add_region_modes(crate::config::profile::GeoRegion::Ru);
     model.theme = crate::ui::styles::Theme::from_palette(palette);
     model.connection = ConnectionState::Connected;
     model.active_profile_id = Some(active_id);

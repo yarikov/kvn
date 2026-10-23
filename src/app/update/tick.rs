@@ -197,7 +197,9 @@ mod tests {
 
     fn ru_auto_updated() -> Model {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
         model
     }
@@ -307,18 +309,19 @@ mod tests {
     fn rule_set_auto_update_skips_off_global_and_rule_sets_in_flight() {
         let mut model = model_with_profiles(vec![]);
         let now = after_update_window();
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         assert!(!is_due(&model, now));
 
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(GeoRegion::Global);
+        let ru_modes = std::mem::replace(
+            &mut model.routing,
+            crate::config::routing::RoutingConfig::for_new_file(&Default::default()),
+        );
         assert!(!is_due(&model, now));
 
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing = ru_modes;
         for rule_set in crate::test_helpers::region_rule_sets(GeoRegion::Ru) {
             model
                 .rule_set_updates

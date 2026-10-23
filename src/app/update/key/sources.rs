@@ -521,11 +521,6 @@ mod tests {
     #[test]
     fn normal_mode_shift_u_in_global_is_noop() {
         let mut model = model_with_profiles(vec![]);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(GeoRegion::Global);
 
         let effects = handle_sources(&mut model, key('U'));
         assert!(!model.geo_updating());
@@ -907,16 +902,12 @@ mod tests {
     #[test]
     fn manual_geo_update_is_blocked_only_by_disconnected_kill_switch() {
         let mut direct = model_with_profiles(vec![]);
-        direct.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        direct.routing.add_region_modes(GeoRegion::Ru);
         let effects = update(&mut direct, Msg::Key(key('U')));
         assert!(downloads_rule_sets(&effects));
 
         let mut blocked = model_with_profiles(vec![]);
-        blocked
-            .config
-            .settings
-            .geo_routing
-            .set_region(GeoRegion::Ru);
+        blocked.routing.add_region_modes(GeoRegion::Ru);
         blocked.config.settings.kill_switch = true;
         let effects = update(&mut blocked, Msg::Key(key('U')));
         assert!(!downloads_rule_sets(&effects));
@@ -1042,7 +1033,7 @@ mod tests {
             443,
             "u".into(),
         )]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing.add_region_modes(GeoRegion::Ru);
 
         let effects = handle_sources(&mut model, key('u'));
 
@@ -1058,7 +1049,7 @@ mod tests {
     #[test]
     fn logs_pane_forwards_shift_u() {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing.add_region_modes(GeoRegion::Ru);
         model.main_pane_focus = crate::app::model::MainPaneFocus::Logs;
 
         let effects = handle_key(&mut model, key('U'));

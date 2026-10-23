@@ -65,6 +65,10 @@ impl Config {
             self.migrate_v6_to_v7();
             self.schema_version = 7;
         }
+        if self.schema_version == 7 && target_version >= 8 {
+            self.migrate_v7_to_v8();
+            self.schema_version = 8;
+        }
         debug_assert_eq!(self.schema_version, target_version);
         Ok(())
     }
@@ -143,6 +147,10 @@ impl Config {
     fn migrate_v6_to_v7(&mut self) {
         self.settings.legacy_dns_strategy = None;
         self.settings.dns.legacy_strategy = None;
+    }
+
+    fn migrate_v7_to_v8(&mut self) {
+        self.settings.geo_routing.select_legacy_region_mode();
     }
 
     fn move_websocket_path_early_data(&mut self) {
@@ -518,6 +526,25 @@ mod tests {
             assert!(saved["settings"].get("dns_strategy").is_none());
             assert!(saved["settings"]["dns"].get("strategy").is_none());
         }
+    }
+
+    #[test]
+    fn migrate_v7_selects_the_mode_of_the_current_region() {
+        let json = r#"{ "schema_version": 7, "settings": { "geo_routing": {
+            "current_region": "cn",
+            "selected_region_modes": { "ru": "bypass_ru", "cn": "only_cn" }
+        } } }"#;
+        let mut cfg: Config = serde_json::from_str(json).unwrap();
+
+        cfg.migrate_to(8).unwrap();
+
+        assert_eq!(cfg.schema_version, 8);
+        assert_eq!(cfg.settings.geo_routing.mode, "only_cn");
+        let saved = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(
+            saved["settings"]["geo_routing"],
+            serde_json::json!({ "mode": "only_cn", "auto_update": "off" })
+        );
     }
 
     #[test]

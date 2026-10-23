@@ -38,8 +38,6 @@ pub(crate) fn handle_config_reloaded(
             ) && model
                 .connecting_profile_id
                 .is_some_and(|id| !config.profiles.iter().any(|profile| profile.id == id));
-            let region_changed = model.config.settings.geo_routing.current_region
-                != config.settings.geo_routing.current_region;
             model.replace_config_preserving_selection(config);
             model.config_persistence_blocked = false;
             model.unsaved_state_merge_base = None;
@@ -63,9 +61,6 @@ pub(crate) fn handle_config_reloaded(
                         ConnectionState::Connecting | ConnectionState::Idle => {}
                     }
                 }
-            }
-            if region_changed {
-                effects.push(Effect::RefreshRuleSetStates);
             }
             let reconnecting = model.connection == ConnectionState::Connecting
                 && (active_profile_changed
@@ -142,6 +137,27 @@ pub(crate) fn handle_routing_reloaded(
     effects
 }
 
+pub(crate) fn handle_region_modes_saved(
+    model: &mut Model,
+    region: crate::config::profile::GeoRegion,
+    result: Result<RoutingConfig, crate::app::msg::IpcError>,
+) -> Vec<Effect> {
+    if let Err(e) = &result {
+        let mut effects = vec![Effect::BroadcastState];
+        push_status(
+            &mut effects,
+            model,
+            StatusKey::Config,
+            AppStatus::Error(format!(
+                "Routing modes of region {} were not saved to routing.json: {e}",
+                region.code_upper()
+            )),
+        );
+        return effects;
+    }
+    handle_routing_reloaded(model, result)
+}
+
 fn downloads(effects: &[Effect], rule_set: &crate::geo::RuleSet) -> bool {
     effects.iter().any(|effect| {
         matches!(effect, Effect::DownloadRuleSets { rule_sets, .. }
@@ -194,7 +210,7 @@ mod tests {
             443,
             "u1".to_string(),
         )]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing.add_region_modes(GeoRegion::Ru);
         let config = model.config.clone();
         model.config_persistence_blocked = true;
         model.unsaved_state_merge_base = Some(config.clone());
@@ -219,15 +235,11 @@ mod tests {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_mode(crate::config::profile::RoutingMode::Bypass(GeoRegion::Ru));
+        model.routing.add_region_modes(GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(profile_id);
-        let mut routing = RoutingConfig::default();
+        let mut routing = model.routing.clone();
         routing.rule_sets.get_mut("geoip-ru").unwrap().url =
             "https://mirror.example/geoip-ru.srs".into();
 
@@ -244,15 +256,11 @@ mod tests {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_mode(crate::config::profile::RoutingMode::Bypass(GeoRegion::Ru));
+        model.routing.add_region_modes(GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(profile_id);
-        let mut routing = RoutingConfig::default();
+        let mut routing = model.routing.clone();
         routing.rule_sets.get_mut("geoip-ru").unwrap().kind =
             crate::config::routing::RuleSetKind::Geosite;
 
@@ -264,8 +272,8 @@ mod tests {
     #[test]
     fn a_reloaded_rule_set_no_mode_routes_changes_nothing_else() {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        let mut routing = RoutingConfig::default();
+        model.routing.add_region_modes(GeoRegion::Ru);
+        let mut routing = model.routing.clone();
         routing.rule_sets.insert(
             "ads".into(),
             crate::config::routing::RuleSetSource {
@@ -297,6 +305,51 @@ mod tests {
             vec![
                 Effect::BroadcastState,
                 app_log_error("Routing configuration reload failed: bad url"),
+            ]
+        );
+    }
+
+    #[test]
+    fn saved_region_modes_apply_the_file_as_written() {
+        let mut model = model_with_profiles(vec![]);
+        model.routing.add_region_modes(GeoRegion::Ru);
+        let mut written = model.routing.clone();
+        written.modes[1].name = "Home".into();
+
+        let effects = update(
+            &mut model,
+            Msg::RegionModesSaved {
+                region: GeoRegion::Ru,
+                result: Box::new(Ok(written.clone())),
+            },
+        );
+
+        assert_eq!(model.routing, written);
+        assert_eq!(effects, vec![Effect::BroadcastState]);
+    }
+
+    #[test]
+    fn unsaved_region_modes_are_reported_and_kept_in_memory() {
+        let mut model = model_with_profiles(vec![]);
+        model.routing.add_region_modes(GeoRegion::Cn);
+        let before = model.routing.clone();
+
+        let effects = update(
+            &mut model,
+            Msg::RegionModesSaved {
+                region: GeoRegion::Cn,
+                result: Box::new(Err(crate::app::msg::IpcError::new("read-only"))),
+            },
+        );
+
+        assert_eq!(model.routing, before);
+        assert_eq!(
+            effects,
+            vec![
+                Effect::BroadcastState,
+                app_log_error(
+                    "Routing modes of region CN were not saved to routing.json: read-only"
+                ),
             ]
         );
     }
@@ -510,10 +563,7 @@ mod tests {
         ));
 
         let mut changed = original.clone();
-        changed.geo_routing.set_region(GeoRegion::Ru);
-        changed
-            .geo_routing
-            .set_mode(crate::config::profile::RoutingMode::Only(GeoRegion::Ru));
+        changed.geo_routing.set_mode("only_ru");
         assert!(connection_settings_changed(
             &original,
             &changed,

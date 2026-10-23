@@ -10,7 +10,7 @@ use super::{
     into_result,
 };
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 7;
+pub const CURRENT_SCHEMA_VERSION: u32 = 8;
 
 fn default_schema_version() -> u32 {
     0
@@ -304,55 +304,11 @@ mod tests {
         }
         profile.tags = vec!["tag1".to_string()];
         config.profiles.push(profile);
-        config.settings.geo_routing.set_region(GeoRegion::Ru);
-        config
-            .settings
-            .geo_routing
-            .set_mode(RoutingMode::Bypass(GeoRegion::Ru));
+        config.settings.geo_routing.set_mode("bypass_ru");
 
         let json = serde_json::to_string(&config).unwrap();
         let restored: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(config, restored);
-    }
-
-    #[test]
-    fn config_serde_roundtrip_with_geo_routing() {
-        let mut config = Config::default();
-        config
-            .settings
-            .geo_routing
-            .selected_region_modes
-            .insert(GeoRegion::Ru, RoutingMode::Bypass(GeoRegion::Ru));
-        config
-            .settings
-            .geo_routing
-            .selected_region_modes
-            .insert(GeoRegion::Cn, RoutingMode::Only(GeoRegion::Cn));
-        config.settings.geo_routing.current_region = Some(GeoRegion::Ru);
-
-        let json = serde_json::to_string(&config).unwrap();
-        let restored: Config = serde_json::from_str(&json).unwrap();
-        assert_eq!(config, restored);
-        assert_eq!(
-            restored
-                .settings
-                .geo_routing
-                .selected_region_modes
-                .get(&GeoRegion::Ru)
-                .copied()
-                .unwrap_or(RoutingMode::Global),
-            RoutingMode::Bypass(GeoRegion::Ru)
-        );
-        assert_eq!(
-            restored
-                .settings
-                .geo_routing
-                .selected_region_modes
-                .get(&GeoRegion::Cn)
-                .copied()
-                .unwrap_or(RoutingMode::Global),
-            RoutingMode::Only(GeoRegion::Cn)
-        );
     }
 
     #[test]

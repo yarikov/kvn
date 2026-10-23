@@ -24,7 +24,7 @@ fn tunnel_already_up(model: &Model, step: OnboardingStep) -> bool {
 }
 
 pub(in crate::app::update) fn handoff(model: &mut Model, step: OnboardingStep) -> Vec<Effect> {
-    let Some(screen) = step.handoff_screen(&model.config) else {
+    let Some(screen) = step.handoff_screen(&model.routing) else {
         return vec![];
     };
     if tunnel_already_up(model, step) {

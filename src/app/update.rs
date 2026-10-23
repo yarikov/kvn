@@ -72,6 +72,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::StateUpdate { .. } | Msg::IpcReadFailed { .. } | Msg::DaemonDisconnected => vec![],
         Msg::ConfigReloaded(result) => handle_config_reloaded(model, *result),
         Msg::RoutingReloaded(result) => config_reload::handle_routing_reloaded(model, *result),
+        Msg::RegionModesSaved { region, result } => {
+            config_reload::handle_region_modes_saved(model, region, *result)
+        }
         Msg::KillSwitchApplied { enabled, error } => {
             handle_kill_switch_applied(model, enabled, error)
         }
