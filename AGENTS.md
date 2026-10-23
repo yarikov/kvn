@@ -99,7 +99,7 @@ The Omarchy bar widget is not in this repository: it is the standalone [omakvn](
 
 | Guide | Covers |
 |-------|--------|
-| [`src/app/AGENTS.md`](src/app/AGENTS.md) | `update` submodules and key handlers; first-run tour, region selection, disable confirmation, auto-connect, wheel scrolling and pointer focus |
+| [`src/app/AGENTS.md`](src/app/AGENTS.md) | `update` submodules and key handlers; first-run tour, mode and region selection, disable confirmation, auto-connect, wheel scrolling and pointer focus |
 | [`src/daemon/AGENTS.md`](src/daemon/AGENTS.md) | Effect execution: what each `daemon/` submodule owns |
 | [`src/tui_client/AGENTS.md`](src/tui_client/AGENTS.md) | The client loop, its handlers, and client-local keys |
 | [`src/config/AGENTS.md`](src/config/AGENTS.md) | `config::profile` submodules; share-link parsing, the DNS model and its generation, schema migrations, external editor sessions and JSON Schema |
@@ -233,7 +233,7 @@ Rules of thumb:
 - How to write a rendering snapshot (styles, window size, when to add one) is in [`src/ui/AGENTS.md`](src/ui/AGENTS.md) § Rendering Snapshots.
 - Use regular unit tests for functional behavior only: input handling, model transitions, persistence, emitted effects, validation, and business logic.
 - When changing existing logic, test only what the change actually changed. Do not add a test — or an assertion inside a new test — that re-verifies behavior the change left alone; the existing tests already cover it, and the duplicate only makes the diff look bigger than the change. Rebind or rename the existing test instead when a change moves behavior from one input to another.
-- A behavior is asserted at exactly one layer — the one that implements it. A test of an outer layer asserts only what that layer adds, never the inner layer's semantics again: `handle_ipc_command` tests assert that the command reaches the shared `commit_*` helper and that `Effect::BroadcastState` is appended, while `update/key/regions.rs` owns the per-region commit semantics; `generate_config` tests assert composition, while the `build_route` / `build_dns` tests own block contents; `fetch_subscription` tests assert the wire round-trip, while the `build_request_headers` and `hwid_response_error` tests own header and message contents.
+- A behavior is asserted at exactly one layer — the one that implements it. A test of an outer layer asserts only what that layer adds, never the inner layer's semantics again: `handle_ipc_command` tests assert that the command reaches the shared `commit_*` helper and that `Effect::BroadcastState` is appended, while `update/key/regions.rs` owns the mode and region commit semantics; `generate_config` tests assert composition, while the `build_route` / `build_dns` tests own block contents; `fetch_subscription` tests assert the wire round-trip, while the `build_request_headers` and `hwid_response_error` tests own header and message contents.
 - Example pattern: create a default `Profile`, generate a config, assert on JSON structure.
 
 ### Coverage Policy
@@ -273,7 +273,7 @@ Background work is executed in dedicated threads spawned by the **daemon** (`dae
 - **Suspend watcher** — `services/suspend.rs` runs a blocking zbus listener that sends `Msg::SystemResumed`; the daemon auto-reconnects on resume even when no TUI is attached.
 - **IPC server** — `ipc.rs` accepts Unix socket connections from clients, parses NDJSON commands, and forwards them into the daemon's mpsc channel as `Msg::IpcCommand`, or as `Msg::IpcRequest` when the command carries a request id for a correlated reply.
 - **Signal handler** — turns `SIGTERM` / `SIGINT` into `Quit`, so the daemon cleans up sing-box and the socket.
-- **Effects** — slow effects run on a short-lived thread that sends its result back through the daemon's channel: `Connect`, the rule-set effects (`DownloadRuleSets`, `RefreshRuleSetStates`), `UpdateSubscription`, `TestProfile`, `FetchTrafficStats`, `ApplyKillSwitch`, `CheckAutoConnectPolkit`, `CheckIntegrationSetup`, and `ReloadConfig`.
+- **Effects** — slow effects run on a short-lived thread that sends its result back through the daemon's channel: `Connect`, the rule-set effects (`DownloadRuleSets`, `RefreshRuleSetStates`), `UpdateSubscription`, `TestProfile`, `FetchTrafficStats`, `ApplyKillSwitch`, `CheckAutoConnectPolkit`, `CheckIntegrationSetup`, `ReloadConfig`, and `AddRegionModes`.
 - **App log** — app status messages are appended to the app log with an `[app]` prefix (`Effect::AppendAppLog`), next to the sing-box log, so both are visible in the TUI log panel.
 - **State I/O** — `services/waybar.rs` writes `state.json` on connect/disconnect for waybar integration.
 
@@ -292,8 +292,8 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
   - Commands: `Attach`, `Detach`, `ClearErrorStatus`, `Key`, `SelectSource`, `MoveSourceSelection` (legacy relative selection), `ScrollViewport` (wheel navigation with a correlated viewport result), `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `Toggle`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `CheckOnboarding`, `CheckSupportPrompt`, `ResolveSupportPrompt`, `DismissSupportPrompt`, `Paste`, `Copied`, `ReloadConfig`, `ApplyEditedConfig` (correlated), `Quit`, `ClientError`.
   - Responses: `StateSnapshot` pushed by the daemon after every state change.
   - The semantic commands (`ConnectProfile` through `SetAutoConnect`) exist for non-TUI clients — the Omarchy Quickshell module and the `kvn status/connect/disconnect/reconnect/toggle` CLI subcommands.
-  - Overlay commits (routing mode, geo region) are shared between the key handlers and IPC via `commit_routing_mode` / `commit_geo_region` in `update/routing.rs` so both paths run identical logic.
-  - The snapshot includes the complete config (`profiles` and `settings`) so the TUI client always renders the current data.
+  - The routing-mode commit is shared between the mode picker and IPC `SetRoutingMode` via `commit_routing_mode` in `update/routing.rs` so both paths run identical logic. `SetGeoRegion` is accepted and ignored; only the tour's region picker commits a region (`commit_geo_region`).
+  - The snapshot includes the complete config (`profiles` and `settings`) so the TUI client always renders the current data. Its `settings.geo_routing` also carries `current_region` / `selected_region_modes` derived from the selected mode (`GeoRouting::plugin_region_fields`), which released omakvn plugins still read; they never reach `profiles.json`.
 - `handle_ipc_command` unconditionally appends `Effect::BroadcastState` to every IPC command result, ensuring the daemon always pushes state after user interaction.
 - `handle_geo_result`, `Msg::ConnectFailed`, and the `handle_tick` idle fallback also append `Effect::BroadcastState` so state mutations that don't produce other broadcast-triggering effects are still visible to the TUI.
 

@@ -682,9 +682,7 @@ mod tests {
 
     #[test]
     fn fallback_connection_warns_about_dns_as_global_routing_runs_it() {
-        use crate::config::profile::{
-            CustomDnsPreset, DnsServer, GeoRegion, ProtocolConfig, RoutingMode,
-        };
+        use crate::config::profile::{CustomDnsPreset, DnsServer, ProtocolConfig};
 
         let profile = Profile {
             config: ProtocolConfig::Http(Default::default()),
@@ -693,6 +691,9 @@ mod tests {
         let profile_id = profile.id;
         let dns_warned = |routing_fallback: Option<RoutingFallback>| {
             let mut model = model_with_profiles(vec![profile.clone()]);
+            model
+                .routing
+                .add_region_modes(crate::config::profile::GeoRegion::Ru);
             let settings = &mut model.config.settings;
             settings.dns.custom_presets = vec![CustomDnsPreset {
                 name: "home".to_string(),
@@ -705,10 +706,7 @@ mod tests {
                 final_server: "plain".to_string(),
             }];
             settings.dns.current_preset = "home".to_string();
-            settings.geo_routing.set_region(GeoRegion::Ru);
-            settings
-                .geo_routing
-                .set_mode(RoutingMode::Only(GeoRegion::Ru));
+            settings.geo_routing.set_mode("only_ru");
             model.connection = ConnectionState::ConnectPending;
             update(
                 &mut model,

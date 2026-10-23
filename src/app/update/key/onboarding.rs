@@ -36,7 +36,7 @@ pub(in crate::app::update) fn handle_onboarding(
 }
 
 fn primary_action(model: &mut Model, step: OnboardingStep) -> Vec<Effect> {
-    if step.handoff_screen(&model.config).is_some() {
+    if step.handoff_screen(&model.routing).is_some() {
         return onboarding::handoff(model, step);
     }
     if step == OnboardingStep::Finish {
@@ -57,7 +57,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.onboarding.state.step = step;
         model.overlay = Overlay::Onboarding(step);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing.add_region_modes(GeoRegion::Ru);
         model
     }
 
@@ -100,13 +100,9 @@ mod tests {
     }
 
     #[test]
-    fn the_routing_card_only_hands_off_for_a_country_region() {
+    fn the_routing_card_hands_off_only_when_there_are_modes_to_choose() {
         let mut model = tour_at(OnboardingStep::Routing);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_region(GeoRegion::Global);
+        model.routing = crate::config::routing::RoutingConfig::for_new_file(&Default::default());
 
         handle_key(&mut model, enter());
 
@@ -274,7 +270,6 @@ mod tests {
         use crate::app::update::tick::handle_tick;
 
         let mut model = tour_at(OnboardingStep::Region);
-        model.config.settings.geo_routing.current_region = None;
 
         handle_key(&mut model, enter());
         assert_eq!(model.overlay, Overlay::GeoRegions);
@@ -291,18 +286,15 @@ mod tests {
 
     #[test]
     fn the_region_picker_cannot_be_left_without_choosing_one() {
-        for region in [None, Some(GeoRegion::Ru)] {
-            let mut model = tour_at(OnboardingStep::Region);
-            model.config.settings.geo_routing.current_region = region;
+        let mut model = tour_at(OnboardingStep::Region);
 
-            handle_key(&mut model, enter());
-            assert_eq!(model.overlay, Overlay::GeoRegions);
+        handle_key(&mut model, enter());
+        assert_eq!(model.overlay, Overlay::GeoRegions);
 
-            for code in [KeyCode::Esc, KeyCode::Char('q')] {
-                assert!(handle_key(&mut model, KeyEvent::from(code)).is_empty());
-                assert_eq!(model.overlay, Overlay::GeoRegions, "{code:?} closed it");
-                assert_eq!(model.onboarding.awaiting, Some(OnboardingStep::Region));
-            }
+        for code in [KeyCode::Esc, KeyCode::Char('q')] {
+            assert!(handle_key(&mut model, KeyEvent::from(code)).is_empty());
+            assert_eq!(model.overlay, Overlay::GeoRegions, "{code:?} closed it");
+            assert_eq!(model.onboarding.awaiting, Some(OnboardingStep::Region));
         }
 
         let mut model = tour_at(OnboardingStep::Region);
@@ -330,12 +322,11 @@ mod tests {
     #[test]
     fn a_rejected_mode_does_not_advance_the_tour() {
         use crate::app::update::routing::commit_routing_mode;
-        use crate::config::profile::RoutingMode;
 
         let mut model = tour_at(OnboardingStep::Routing);
         handle_key(&mut model, enter());
 
-        commit_routing_mode(&mut model, RoutingMode::Bypass(GeoRegion::Cn));
+        commit_routing_mode(&mut model, "bypass_cn");
 
         assert!(model.status_is_error());
         assert_eq!(model.onboarding.state.step, OnboardingStep::Routing);

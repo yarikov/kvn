@@ -506,6 +506,21 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_settings_carry_the_region_the_omakvn_plugin_reads() {
+        let mut snapshot = sample_snapshot();
+        snapshot.settings.geo_routing.set_mode("bypass_cn");
+
+        let value = serde_json::to_value(&snapshot).unwrap();
+
+        let geo_routing = &value["settings"]["geo_routing"];
+        assert_eq!(geo_routing["mode"], "bypass_cn");
+        assert_eq!(geo_routing["current_region"], "cn");
+        assert_eq!(geo_routing["selected_region_modes"]["cn"], "bypass_cn");
+        let parsed: StateSnapshot = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.settings.geo_routing.mode, "bypass_cn");
+    }
+
+    #[test]
     fn a_snapshot_from_a_daemon_without_the_tour_flag_still_parses() {
         let mut value = serde_json::to_value(sample_snapshot()).unwrap();
         value.as_object_mut().unwrap().remove("onboarding_complete");

@@ -262,14 +262,6 @@ pub fn region_rule_sets(region: crate::config::profile::GeoRegion) -> Vec<crate:
         .collect()
 }
 
-pub fn download_missing_rule_sets_of(region: crate::config::profile::GeoRegion) -> Effect {
-    Effect::DownloadRuleSets {
-        rule_sets: crate::test_helpers::region_rule_sets(region),
-        only_missing: true,
-        record_schedule: false,
-    }
-}
-
 pub fn app_log_info(message: &str) -> Effect {
     Effect::AppendAppLog {
         level: "INFO".to_string(),

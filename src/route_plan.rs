@@ -1,4 +1,4 @@
-use crate::config::profile::{RoutingFallback, RoutingMode, Settings};
+use crate::config::profile::{RoutingFallback, Settings};
 pub use crate::config::routing::Outbound;
 use crate::config::routing::{ModeDefinition, RoutingConfig};
 use crate::geo::RuleSet;
@@ -19,9 +19,9 @@ pub struct RoutePlan {
 }
 
 impl RoutePlan {
-    pub fn for_mode(mode: RoutingMode, routing: &RoutingConfig) -> Self {
+    pub fn for_mode(id: &str, routing: &RoutingConfig) -> Self {
         routing
-            .mode(&mode.id())
+            .mode(id)
             .map_or_else(Self::everything_through_proxy, |definition| {
                 Self::for_definition(definition, routing)
             })
@@ -79,10 +79,10 @@ pub fn active_rule_sets(settings: &Settings, routing: &RoutingConfig) -> Vec<Rul
         .collect()
 }
 
-pub fn selectable_rule_sets(settings: &Settings, routing: &RoutingConfig) -> Vec<RuleSet> {
+pub fn selectable_rule_sets(routing: &RoutingConfig) -> Vec<RuleSet> {
     let mut selectable: Vec<RuleSet> = Vec::new();
-    for mode in settings.geo_routing.available_modes(routing) {
-        for entry in RoutePlan::for_mode(mode, routing).entries {
+    for id in routing.mode_ids() {
+        for entry in RoutePlan::for_mode(id, routing).entries {
             if !selectable.contains(&entry.rule_set) {
                 selectable.push(entry.rule_set);
             }
@@ -94,7 +94,7 @@ pub fn selectable_rule_sets(settings: &Settings, routing: &RoutingConfig) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::profile::GeoRegion;
+    use crate::config::profile::{GeoRegion, GeoRouting};
 
     fn tags_and_outbounds(plan: &RoutePlan) -> Vec<(&str, Outbound)> {
         plan.entries
@@ -103,9 +103,16 @@ mod tests {
             .collect()
     }
 
+    fn tags(rule_sets: Vec<RuleSet>) -> Vec<String> {
+        rule_sets
+            .into_iter()
+            .map(|rule_set| rule_set.tag.into_owned())
+            .collect()
+    }
+
     #[test]
     fn global_routes_everything_through_the_proxy_without_rule_sets() {
-        let plan = RoutePlan::for_mode(RoutingMode::Global, &RoutingConfig::default());
+        let plan = RoutePlan::for_mode("global", &RoutingConfig::default());
         assert!(plan.entries.is_empty());
         assert!(!plan.private_direct);
         assert_eq!(plan.final_outbound, Outbound::Proxy);
@@ -114,10 +121,7 @@ mod tests {
 
     #[test]
     fn bypass_sends_the_region_direct_and_falls_back_to_global() {
-        let plan = RoutePlan::for_mode(
-            RoutingMode::Bypass(GeoRegion::Ru),
-            &RoutingConfig::default(),
-        );
+        let plan = RoutePlan::for_mode("bypass_ru", &RoutingConfig::default());
         assert_eq!(
             tags_and_outbounds(&plan),
             [
@@ -132,7 +136,7 @@ mod tests {
 
     #[test]
     fn only_tunnels_the_region_and_falls_back_to_direct() {
-        let plan = RoutePlan::for_mode(RoutingMode::Only(GeoRegion::Cn), &RoutingConfig::default());
+        let plan = RoutePlan::for_mode("only_cn", &RoutingConfig::default());
         assert_eq!(
             tags_and_outbounds(&plan),
             [
@@ -152,18 +156,15 @@ mod tests {
             "https://mirror.example/geoip-ru.srs".into();
         routing.rule_sets.remove("geosite-category-ru");
 
-        let plan = RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Ru), &routing);
+        let plan = RoutePlan::for_mode("bypass_ru", &routing);
 
         let urls: Vec<&str> = plan.rule_sets().map(|rule_set| &*rule_set.url).collect();
         assert_eq!(urls, ["https://mirror.example/geoip-ru.srs"]);
     }
 
     #[test]
-    fn a_region_mode_for_the_global_region_routes_no_rule_sets() {
-        let plan = RoutePlan::for_mode(
-            RoutingMode::Bypass(GeoRegion::Global),
-            &RoutingConfig::default(),
-        );
+    fn a_mode_missing_from_routing_json_routes_no_rule_sets() {
+        let plan = RoutePlan::for_mode("bypass_global", &RoutingConfig::default());
         assert!(plan.entries.is_empty());
         assert!(!plan.private_direct);
     }
@@ -173,31 +174,22 @@ mod tests {
         let mut settings = Settings::default();
         assert!(active_rule_sets(&settings, &RoutingConfig::default()).is_empty());
 
-        settings.geo_routing.set_region(GeoRegion::Ir);
-        settings
-            .geo_routing
-            .set_mode(RoutingMode::Only(GeoRegion::Ir));
-        let tags: Vec<String> = active_rule_sets(&settings, &RoutingConfig::default())
-            .into_iter()
-            .map(|rule_set| rule_set.tag.into_owned())
-            .collect();
-        assert_eq!(tags, ["geosite-category-ir", "geoip-ir"]);
+        settings.geo_routing.set_mode("only_ir");
+        assert_eq!(
+            tags(active_rule_sets(&settings, &RoutingConfig::default())),
+            ["geosite-category-ir", "geoip-ir"]
+        );
     }
 
     #[test]
-    fn selectable_rule_sets_are_those_of_every_mode_of_the_region_once() {
-        let mut settings = Settings::default();
-        assert!(selectable_rule_sets(&settings, &RoutingConfig::default()).is_empty());
+    fn selectable_rule_sets_are_those_of_every_mode_in_routing_json_once() {
+        let mut routing = RoutingConfig::for_new_file(&GeoRouting::default());
+        assert!(selectable_rule_sets(&routing).is_empty());
 
-        settings.geo_routing.set_region(GeoRegion::Ru);
+        routing.add_region_modes(GeoRegion::Ru);
         assert_eq!(
-            settings.geo_routing.mode(&RoutingConfig::default()),
-            RoutingMode::Global
+            tags(selectable_rule_sets(&routing)),
+            ["geosite-category-ru", "geoip-ru"]
         );
-        let tags: Vec<String> = selectable_rule_sets(&settings, &RoutingConfig::default())
-            .into_iter()
-            .map(|rule_set| rule_set.tag.into_owned())
-            .collect();
-        assert_eq!(tags, ["geosite-category-ru", "geoip-ru"]);
     }
 }

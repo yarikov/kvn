@@ -16,8 +16,9 @@ the tunnel, which deliberately does not, and what the network can still see.
 ## Routing modes
 
 The routing mode decides which traffic uses the tunnel. Change it in
-**Settings › Routing** (`Space r`): pick a country **Region** first, and the
-**Mode** row then offers Bypass and Only next to Global.
+**Settings › Routing** (`Space r`): the **Mode** row offers every mode of
+`routing.json`. The first-run tour adds Bypass and Only of the country you
+choose next to Global.
 
 | Mode | Through the VPN | Directly, past the VPN |
 |------|-----------------|------------------------|
@@ -226,9 +227,9 @@ tunnel (or directly, as your routing mode decides), and while disconnected
 they go directly. With the kill switch on, kvn makes them only while the tunnel
 is up.
 
-- **Rule-sets** for the selected region are downloaded from
-  `raw.githubusercontent.com` (SagerNet repositories), on first use and on the
-  `geo_routing.auto_update` schedule.
+- **Rule-sets** of the modes in `routing.json` are downloaded from their
+  `url` — for the built-in ones `raw.githubusercontent.com` (SagerNet
+  repositories) — on first use and on the `geo_routing.auto_update` schedule.
 - **Subscriptions** are fetched from their URL with
   `User-Agent: kvn-tui/<version>`. A subscription with `send_hwid` also sends
   an installation identifier, the kernel version, and the system locale; see

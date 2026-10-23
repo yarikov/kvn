@@ -218,7 +218,7 @@ mod tests {
     use super::*;
     use crate::app::msg::Msg;
     use crate::app::update::update;
-    use crate::config::profile::{GeoRegion, Profile, RetryState, RoutingMode};
+    use crate::config::profile::{GeoRegion, Profile, RetryState};
     use crate::geo::RuleSetState;
     use crate::test_helpers::*;
     use chrono::Local;
@@ -265,12 +265,14 @@ mod tests {
         }
     }
 
-    fn connected(mode: RoutingMode) -> Model {
+    fn connected(mode: &str) -> Model {
         let a = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let b = Profile::new_vless("B".into(), "2.2.2.2".into(), 443, "u2".into());
         let active_id = a.id;
         let mut model = model_with_profiles(vec![a, b]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         model.config.settings.geo_routing.set_mode(mode);
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(active_id);
@@ -440,7 +442,7 @@ mod tests {
 
     #[test]
     fn an_update_of_a_routed_rule_set_reconnects_the_active_profile_not_the_cursor() {
-        let mut model = connected(RoutingMode::Bypass(GeoRegion::Ru));
+        let mut model = connected("bypass_ru");
         let active_id = model.active_profile_id;
         model.select_next();
 
@@ -457,7 +459,7 @@ mod tests {
 
     #[test]
     fn an_update_of_a_rule_set_the_mode_does_not_route_keeps_the_connection() {
-        let mut model = connected(RoutingMode::Global);
+        let mut model = connected("global");
 
         update(
             &mut model,
@@ -515,7 +517,9 @@ mod tests {
     #[test]
     fn a_region_change_during_a_scheduled_download_keeps_the_download_in_flight() {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         let ru = ru_rule_sets();
         for rule_set in &ru {
             model
@@ -551,7 +555,9 @@ mod tests {
     #[test]
     fn a_late_result_for_the_previous_region_leaves_the_current_one_alone() {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Cn);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Cn);
         let cn = crate::test_helpers::region_rule_sets(GeoRegion::Cn);
         let cn_states = present(&cn, false);
         model.rule_set_states = cn_states.clone();
@@ -577,12 +583,10 @@ mod tests {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model
-            .config
-            .settings
-            .geo_routing
-            .set_mode(RoutingMode::Bypass(GeoRegion::Ru));
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
         model.connection = ConnectionState::ConnectPending;
         if downloading {
             for rule_set in ru_rule_sets() {
@@ -634,12 +638,10 @@ mod tests {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model
-            .config
-            .settings
-            .geo_routing
-            .set_mode(RoutingMode::Only(GeoRegion::Ru));
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("only_ru");
         model.connection = ConnectionState::ConnectPending;
         update(
             &mut model,
@@ -716,12 +718,10 @@ mod tests {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model
-            .config
-            .settings
-            .geo_routing
-            .set_mode(RoutingMode::Bypass(GeoRegion::Ru));
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
         model
             .routing
             .adopt_service_routes(&serde_json::json!({ "steam": "direct" }));

@@ -8,7 +8,7 @@ use crate::app::update::key::handle_key;
 use crate::app::update::key::settings_menu::{set_auto_connect, set_kill_switch};
 use crate::app::update::onboarding;
 use crate::app::update::paste::handle_clipboard_text;
-use crate::app::update::routing::{commit_geo_region, commit_routing_mode};
+use crate::app::update::routing::commit_routing_mode;
 use crate::app::update::status::{handle_copied_status, push_status};
 
 pub(in crate::app::update) fn handle_ipc_command(
@@ -84,8 +84,8 @@ pub(in crate::app::update) fn handle_ipc_command(
         IpcCommand::Disconnect => semantic::disconnect(model),
         IpcCommand::Reconnect => semantic::reconnect(model),
         IpcCommand::Toggle => semantic::toggle(model),
-        IpcCommand::SetRoutingMode { mode } => commit_routing_mode(model, mode),
-        IpcCommand::SetGeoRegion { region } => commit_geo_region(model, region),
+        IpcCommand::SetRoutingMode { mode } => commit_routing_mode(model, &mode),
+        IpcCommand::SetGeoRegion { .. } => vec![],
         IpcCommand::SetKillSwitch { enabled } => set_kill_switch(model, enabled),
         IpcCommand::SetAutoConnect { enabled } => set_auto_connect(model, enabled),
         IpcCommand::Paste { text } => handle_clipboard_text(model, &text),
@@ -189,7 +189,7 @@ mod tests {
     use crate::app::model::DnsSettingsItem;
     use crate::app::msg::Msg;
     use crate::app::update::update;
-    use crate::config::profile::{GeoRegion, Profile, RoutingMode};
+    use crate::config::profile::{GeoRegion, Profile};
     use crate::test_helpers::*;
 
     #[test]
@@ -303,16 +303,18 @@ mod tests {
     #[test]
     fn ipc_command_set_routing_mode_reaches_the_commit_and_broadcasts() {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         let effects = handle_ipc_command(
             &mut model,
             crate::app::msg::IpcCommand::SetRoutingMode {
-                mode: RoutingMode::Bypass(GeoRegion::Ru),
+                mode: "bypass_ru".into(),
             },
         );
         assert_eq!(
             model.config.settings.geo_routing.mode(&model.routing),
-            RoutingMode::Bypass(GeoRegion::Ru)
+            "bypass_ru"
         );
         assert_eq!(effects.last(), Some(&Effect::BroadcastState));
     }
@@ -320,11 +322,13 @@ mod tests {
     #[test]
     fn ipc_command_set_routing_mode_reconnects_when_connected() {
         let (mut model, _) = connected_model();
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         let effects = handle_ipc_command(
             &mut model,
             crate::app::msg::IpcCommand::SetRoutingMode {
-                mode: RoutingMode::Bypass(GeoRegion::Ru),
+                mode: "bypass_ru".into(),
             },
         );
         assert_eq!(model.connection, ConnectionState::Connecting);
@@ -344,29 +348,28 @@ mod tests {
         let effects = handle_ipc_command(
             &mut model,
             crate::app::msg::IpcCommand::SetRoutingMode {
-                mode: RoutingMode::Only(GeoRegion::Ru),
+                mode: "only_cn".into(),
             },
         );
         assert_eq!(
             model.config.settings.geo_routing.mode(&model.routing),
-            RoutingMode::Global
+            "global"
         );
         assert!(!effects.contains(&Effect::SaveConfig));
         assert_eq!(
             effects,
             vec![
-                app_log_error(
-                    "Routing mode change failed: Only RU is unavailable for region GLOBAL"
-                ),
+                app_log_error("Routing mode change failed: only_cn is not a mode of routing.json"),
                 Effect::BroadcastState,
             ]
         );
     }
 
     #[test]
-    fn ipc_command_set_geo_region_reaches_the_commit_and_broadcasts() {
+    fn ipc_command_set_geo_region_is_accepted_and_changes_nothing() {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("only_ru");
+        let routing = model.routing.clone();
 
         let effects = handle_ipc_command(
             &mut model,
@@ -375,27 +378,9 @@ mod tests {
             },
         );
 
-        assert_eq!(
-            model.config.settings.geo_routing.current_region,
-            Some(GeoRegion::Cn)
-        );
-        assert_eq!(effects.last(), Some(&Effect::BroadcastState));
-    }
-
-    #[test]
-    fn ipc_command_set_geo_region_same_region_only_saves() {
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
-        let effects = handle_ipc_command(
-            &mut model,
-            crate::app::msg::IpcCommand::SetGeoRegion {
-                region: GeoRegion::Ru,
-            },
-        );
-        assert!(!model.geo_updating());
-        assert!(!downloads_rule_sets(&effects));
-        assert!(!effects.contains(&Effect::RefreshRuleSetStates));
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert_eq!(effects, vec![Effect::BroadcastState]);
+        assert_eq!(model.config.settings.geo_routing.mode, "only_ru");
+        assert_eq!(model.routing, routing);
     }
 
     #[test]

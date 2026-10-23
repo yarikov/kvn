@@ -199,7 +199,11 @@ Clients talk to the daemon in newline-delimited JSON over
   `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect` and
   others are for clients without a keyboard model: the CLI and the Omarchy
   plugin. They share the commit helpers with the key handlers, so both paths
-  run the same logic.
+  run the same logic. `SetRoutingMode` selects a mode of `routing.json` by
+  `id`. `SetGeoRegion` is accepted and changes nothing: the region is no longer
+  a setting. For Omarchy plugins that predate mode ids, the snapshot's
+  `settings.geo_routing` also carries `current_region` and
+  `selected_region_modes`, derived from the selected mode.
 - **StateSnapshot**: after every state change the daemon pushes a full
   snapshot, including the complete config, to every attached client. There are
   no diffs to get out of sync. A client that cannot take a snapshot within
@@ -279,8 +283,8 @@ Connecting (`src/singbox/`):
    the user. If the Clash API port was taken in the meantime, the start is
    retried with a new port, up to three times.
 
-The generated config carries the routing mode (Global, Bypass or Only for the
-selected country), the DNS preset and the fwmark that
+The generated config carries the routing mode (a mode of `routing.json`, such
+as Global, Bypass RU or Only RU), the DNS preset and the fwmark that
 lets sing-box's own packets pass the kill switch. What goes through the tunnel
 in each mode is described in [What kvn protects](privacy.md). The settings
 are described in the [configuration guide](configuration.md).

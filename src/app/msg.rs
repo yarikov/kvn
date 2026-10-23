@@ -2,7 +2,7 @@ use crate::app::model::{
     ConnectionSettingsDraft, ConnectionState, MainPaneFocus, Overlay, RoutingSettingsDraft,
     TrafficStats,
 };
-use crate::config::profile::{GeoRegion, Profile, RoutingMode, Settings, Subscription};
+use crate::config::profile::{GeoRegion, Profile, Settings, Subscription};
 use crate::geo::{RuleSetReport, RuleSetStates};
 use crate::ui::styles::Theme;
 use crossterm::event::{KeyEvent, MouseEvent};
@@ -103,6 +103,10 @@ pub enum Msg {
     DaemonDisconnected,
     ConfigReloaded(Box<Result<crate::config::profile::Config, IpcError>>),
     RoutingReloaded(Box<Result<crate::config::routing::RoutingConfig, IpcError>>),
+    RegionModesSaved {
+        region: GeoRegion,
+        result: Box<Result<crate::config::routing::RoutingConfig, IpcError>>,
+    },
     KillSwitchApplied {
         enabled: bool,
         error: Option<IpcError>,
@@ -166,7 +170,7 @@ pub enum IpcCommand {
     Reconnect,
     Toggle,
     SetRoutingMode {
-        mode: RoutingMode,
+        mode: String,
     },
     SetGeoRegion {
         region: GeoRegion,
@@ -281,7 +285,7 @@ mod tests {
             IpcCommand::Reconnect,
             IpcCommand::Toggle,
             IpcCommand::SetRoutingMode {
-                mode: RoutingMode::Bypass(GeoRegion::Ru),
+                mode: "bypass_ru".into(),
             },
             IpcCommand::SetGeoRegion {
                 region: GeoRegion::Cn,
@@ -345,6 +349,21 @@ pub enum ConfigEditResult {
     Failed {
         message: String,
     },
+}
+
+fn serialize_settings_with_plugin_region<S: serde::Serializer>(
+    settings: &Settings,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::Serialize;
+    let mut value = serde_json::to_value(settings).map_err(serde::ser::Error::custom)?;
+    if let Some(geo_routing) = value
+        .get_mut("geo_routing")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        geo_routing.extend(settings.geo_routing.plugin_region_fields());
+    }
+    value.serialize(serializer)
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -412,6 +431,7 @@ pub struct StateSnapshot {
     pub main_pane_focus: MainPaneFocus,
     pub profiles: Vec<Profile>,
     pub subscriptions: Vec<Subscription>,
+    #[serde(serialize_with = "serialize_settings_with_plugin_region")]
     pub settings: Settings,
     #[serde(default)]
     pub routing: crate::config::routing::RoutingConfig,
