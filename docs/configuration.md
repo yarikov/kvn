@@ -501,10 +501,16 @@ of the regions you have used; from then on the file is yours:
   Mode setting still offers Global, Bypass and Only of the current region, so a
   region whose modes are not in the file offers only Global.
 
-If Steam or Telegram overrides were set in an earlier release, the new file
-also declares `geosite-steam` / `geoip-steam` and `geosite-telegram` /
-`geoip-telegram` from the same sources, so the files already downloaded for
-them are kept.
+A rule-set that is not required and has no file yet is named in the status
+line when a connection comes up (`Not routed until downloaded: …`); kvn
+downloads it and reconnects once it is there.
+
+Steam and Telegram overrides set in an earlier release become rules: the first
+time kvn starts, every mode in the file gets `geosite-steam` / `geoip-steam`
+(and `geosite-telegram` / `geoip-telegram`) with the override's route ahead of
+its own rules, the rule-sets keep their sources and downloaded files, and the
+old `service_routes` setting leaves `profiles.json`. While `routing.json` fails
+its checks the move waits, and the overrides stay where they are.
 
 kvn reads `routing.json` when the daemon starts and when the configuration is
 reloaded. A file that fails these checks is reported in the status line and

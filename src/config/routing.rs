@@ -190,11 +190,40 @@ impl RoutingConfig {
     pub fn for_new_file(geo_routing: &GeoRouting) -> Self {
         let mut config = Self::with_region_modes(&geo_routing.used_regions());
         for (service, rule_sets) in LEGACY_SERVICE_RULE_SETS {
-            if legacy_service_enabled(geo_routing.legacy_service_routes.as_ref(), service) {
+            if legacy_service_route(geo_routing.legacy_service_routes.as_ref(), service).is_some() {
                 config.insert_all(rule_sets);
             }
         }
         config
+    }
+
+    pub fn adopt_service_routes(&mut self, legacy_service_routes: &Value) -> bool {
+        let before = self.clone();
+        let mut rules = Vec::new();
+        for (service, rule_sets) in LEGACY_SERVICE_RULE_SETS {
+            let Some(route) = legacy_service_route(Some(legacy_service_routes), service) else {
+                continue;
+            };
+            for rule_set in rule_sets {
+                if !self.rule_sets.contains_key(&*rule_set.tag) {
+                    self.insert_all(std::slice::from_ref(rule_set));
+                }
+                rules.push(ModeRule {
+                    rule_set: rule_set.tag.to_string(),
+                    route,
+                    required: false,
+                });
+            }
+        }
+        for mode in &mut self.modes {
+            let missing: Vec<ModeRule> = rules
+                .iter()
+                .filter(|rule| !mode.rules.iter().any(|own| own.rule_set == rule.rule_set))
+                .cloned()
+                .collect();
+            mode.rules.splice(0..0, missing);
+        }
+        *self != before
     }
 
     pub fn mode(&self, id: &str) -> Option<&ModeDefinition> {
@@ -366,11 +395,12 @@ fn problem(pointer: String, message: impl std::fmt::Display) -> ConfigDiagnostic
     ConfigDiagnostic::new(pointer, message)
 }
 
-fn legacy_service_enabled(legacy_service_routes: Option<&Value>, service: &str) -> bool {
-    legacy_service_routes
-        .and_then(|routes| routes.get(service))
-        .and_then(Value::as_str)
-        .is_some_and(|route| matches!(route, "proxy" | "direct"))
+fn legacy_service_route(legacy_service_routes: Option<&Value>, service: &str) -> Option<Outbound> {
+    match legacy_service_routes?.get(service)?.as_str()? {
+        "proxy" => Some(Outbound::Proxy),
+        "direct" => Some(Outbound::Direct),
+        _ => None,
+    }
 }
 
 fn is_valid_tag(tag: &str) -> bool {
@@ -436,6 +466,20 @@ fn parse_routing(contents: &str, path: &Path) -> Result<RoutingConfig> {
     let config: RoutingConfig =
         serde_json::from_value(document).with_context(|| format!("Failed to parse {path:?}"))?;
     into_result(config.diagnostics()).with_context(|| format!("Invalid {path:?}"))?;
+    Ok(config)
+}
+
+pub(crate) fn update_routing_at(
+    path: &Path,
+    change: impl FnOnce(&mut RoutingConfig) -> bool,
+) -> Result<RoutingConfig> {
+    let contents = fs::read_to_string(path).with_context(|| format!("Failed to read {path:?}"))?;
+    let mut config = parse_routing(&contents, path)?;
+    if change(&mut config) {
+        let json = serde_json::to_string_pretty(&config)?;
+        crate::atomic_write::write_if_unchanged(path, json.as_bytes(), Some(contents.as_bytes()))
+            .with_context(|| format!("Failed to update {path:?}"))?;
+    }
     Ok(config)
 }
 
@@ -584,6 +628,54 @@ mod tests {
             assert!(both.rule_set(tag).is_some(), "{tag}");
         }
         assert!(both.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn service_routes_become_the_first_rules_of_every_mode() {
+        let legacy = json!({ "steam": "direct", "telegram": "proxy" });
+        let mut config = RoutingConfig::for_new_file(&geo_routing(&[GeoRegion::Ru], None));
+        config.rule_sets.insert(
+            "geoip-telegram".into(),
+            RuleSetSource {
+                kind: RuleSetKind::Geoip,
+                url: "https://mirror.example/telegram.srs".into(),
+            },
+        );
+
+        assert!(config.adopt_service_routes(&legacy));
+
+        let expected: Vec<(&str, Outbound)> = vec![
+            ("geosite-steam", Outbound::Direct),
+            ("geoip-steam", Outbound::Direct),
+            ("geosite-telegram", Outbound::Proxy),
+            ("geoip-telegram", Outbound::Proxy),
+        ];
+        for mode in &config.modes {
+            let leading: Vec<(&str, Outbound)> = mode.rules[..4]
+                .iter()
+                .map(|rule| (rule.rule_set.as_str(), rule.route))
+                .collect();
+            assert_eq!(leading, expected, "{}", mode.id);
+            assert!(mode.rules[..4].iter().all(|rule| !rule.required));
+        }
+        assert_eq!(
+            config.mode("bypass_ru").unwrap().rules[4].rule_set,
+            "geosite-category-ru"
+        );
+        assert_eq!(
+            config.rule_sets["geoip-telegram"].url,
+            "https://mirror.example/telegram.srs"
+        );
+        assert!(config.diagnostics().is_empty());
+        assert!(!config.adopt_service_routes(&legacy));
+    }
+
+    #[test]
+    fn disabled_service_routes_add_nothing() {
+        let mut config = RoutingConfig::default();
+
+        assert!(!config.adopt_service_routes(&json!({ "steam": "disabled" })));
+        assert!(!config.adopt_service_routes(&json!({})));
     }
 
     #[test]

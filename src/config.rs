@@ -177,6 +177,34 @@ pub fn load_routing(
     routing::load_routing_at(&path, geo_routing, create_missing)
 }
 
+pub fn move_service_routes(
+    config: &mut Config,
+    routing: &mut routing::RoutingConfig,
+) -> Result<bool> {
+    let profiles_path =
+        crate::paths::profiles_path().context("Failed to determine profiles path")?;
+    let routing_path =
+        crate::paths::routing_path().context("Failed to determine routing config path")?;
+    move_service_routes_at(&profiles_path, &routing_path, config, routing)
+}
+
+fn move_service_routes_at(
+    profiles_path: &Path,
+    routing_path: &Path,
+    config: &mut Config,
+    routing: &mut routing::RoutingConfig,
+) -> Result<bool> {
+    let Some(legacy) = config.settings.geo_routing.legacy_service_routes.clone() else {
+        return Ok(false);
+    };
+    *routing = routing::update_routing_at(routing_path, |routing| {
+        routing.adopt_service_routes(&legacy)
+    })?;
+    config.settings.geo_routing.legacy_service_routes = None;
+    save_config_at(profiles_path, config)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 pub fn save_config(config: &Config) -> Result<()> {
     let path = crate::paths::profiles_path().context("Failed to determine profiles path")?;
@@ -564,5 +592,90 @@ mod tests {
 
         assert_eq!(loaded.settings.tun_interface, "kvn0");
         assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+    }
+
+    fn with_steam_direct() -> Config {
+        let mut config = Config::default();
+        config
+            .settings
+            .geo_routing
+            .set_region(profile::GeoRegion::Ru);
+        config.settings.geo_routing.legacy_service_routes =
+            Some(serde_json::json!({ "steam": "direct" }));
+        config
+    }
+
+    fn written_routing(path: &Path, config: &routing::RoutingConfig) {
+        std::fs::write(path, serde_json::to_string_pretty(config).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn service_routes_move_into_routing_json_before_profiles_json_drops_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles_path = dir.path().join("profiles.json");
+        let routing_path = dir.path().join("routing.json");
+        let mut config = with_steam_direct();
+        let mut routing = routing::RoutingConfig::for_new_file(&config.settings.geo_routing);
+        written_routing(&routing_path, &routing);
+
+        assert!(
+            move_service_routes_at(&profiles_path, &routing_path, &mut config, &mut routing)
+                .unwrap()
+        );
+
+        let on_disk = routing::load_routing_at(&routing_path, &Default::default(), false).unwrap();
+        assert_eq!(on_disk, routing);
+        assert_eq!(
+            routing.mode("bypass_ru").unwrap().rules[0].rule_set,
+            "geosite-steam"
+        );
+        assert_eq!(config.settings.geo_routing.legacy_service_routes, None);
+        let saved = load_config_at_read_only(&profiles_path).unwrap();
+        assert_eq!(saved.settings.geo_routing.legacy_service_routes, None);
+        assert!(
+            !move_service_routes_at(&profiles_path, &routing_path, &mut config, &mut routing)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn a_move_interrupted_before_profiles_json_is_saved_repeats_without_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles_path = dir.path().join("profiles.json");
+        let routing_path = dir.path().join("routing.json");
+        let mut routing =
+            routing::RoutingConfig::for_new_file(&with_steam_direct().settings.geo_routing);
+        routing.adopt_service_routes(&serde_json::json!({ "steam": "direct" }));
+        written_routing(&routing_path, &routing);
+        let adopted = routing.clone();
+
+        move_service_routes_at(
+            &profiles_path,
+            &routing_path,
+            &mut with_steam_direct(),
+            &mut routing,
+        )
+        .unwrap();
+
+        assert_eq!(routing, adopted);
+    }
+
+    #[test]
+    fn an_invalid_routing_json_keeps_the_overrides_in_profiles_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles_path = dir.path().join("profiles.json");
+        let routing_path = dir.path().join("routing.json");
+        std::fs::write(&routing_path, "{ not json").unwrap();
+        let mut config = with_steam_direct();
+        let mut routing = routing::RoutingConfig::default();
+
+        assert!(
+            move_service_routes_at(&profiles_path, &routing_path, &mut config, &mut routing)
+                .is_err()
+        );
+
+        assert!(config.settings.geo_routing.legacy_service_routes.is_some());
+        assert!(!profiles_path.exists());
+        assert_eq!(routing, routing::RoutingConfig::default());
     }
 }

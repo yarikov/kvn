@@ -53,10 +53,11 @@ pub(in crate::app::update) fn on_connected(
             None => "Connected".to_string(),
         }),
     );
-    if let Some(fallback) = routing_fallback {
-        effects.extend(crate::app::update::geo::fetch_region_rule_sets(
+    match routing_fallback {
+        Some(fallback) => effects.extend(crate::app::update::geo::fetch_region_rule_sets(
             model, fallback,
-        ));
+        )),
+        None => effects.extend(crate::app::update::geo::fetch_skipped_rule_sets(model)),
     }
     for (index, warning) in warnings.into_iter().enumerate() {
         push_status(
