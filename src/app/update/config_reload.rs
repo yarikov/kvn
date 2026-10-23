@@ -21,7 +21,7 @@ pub(crate) fn handle_config_reloaded(
             let kill_switch_ignored = config.settings.kill_switch != old_settings.kill_switch;
             config.settings.kill_switch = old_settings.kill_switch;
             let runtime_settings_changed =
-                connection_settings_changed(&old_settings, &config.settings);
+                connection_settings_changed(&old_settings, &config.settings, &model.routing);
             let active_profile_changed = model.active_profile_id.is_some_and(|id| {
                 profile_runtime_changed_for_id(&model.config.profiles, &config.profiles, id)
             });
@@ -168,10 +168,11 @@ pub(in crate::app::update) fn profile_runtime_changed(old: &Profile, new: &Profi
 fn connection_settings_changed(
     old: &crate::config::profile::Settings,
     new: &crate::config::profile::Settings,
+    routing: &RoutingConfig,
 ) -> bool {
     old.tun_interface != new.tun_interface
         || old.dns != new.dns
-        || old.geo_routing.mode() != new.geo_routing.mode()
+        || old.geo_routing.mode(routing) != new.geo_routing.mode(routing)
         || old.logs.level != new.logs.level
 }
 
@@ -494,18 +495,30 @@ mod tests {
         let original = crate::config::profile::Settings::default();
         let mut changed = original.clone();
         changed.dns.fakeip_enabled = true;
-        assert!(connection_settings_changed(&original, &changed));
+        assert!(connection_settings_changed(
+            &original,
+            &changed,
+            &RoutingConfig::default()
+        ));
 
         let mut changed = original.clone();
         changed.logs.level = "debug".into();
-        assert!(connection_settings_changed(&original, &changed));
+        assert!(connection_settings_changed(
+            &original,
+            &changed,
+            &RoutingConfig::default()
+        ));
 
         let mut changed = original.clone();
         changed.geo_routing.set_region(GeoRegion::Ru);
         changed
             .geo_routing
             .set_mode(crate::config::profile::RoutingMode::Only(GeoRegion::Ru));
-        assert!(connection_settings_changed(&original, &changed));
+        assert!(connection_settings_changed(
+            &original,
+            &changed,
+            &RoutingConfig::default()
+        ));
     }
 
     #[test]

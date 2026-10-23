@@ -4,6 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::GeoAutoUpdate;
+use crate::config::routing::RoutingConfig;
 
 /// Selected geo region for rule-set downloads and routing mode availability.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema)]
@@ -71,10 +72,10 @@ pub enum RoutingFallback {
 }
 
 impl RoutingFallback {
-    pub fn for_mode(mode: RoutingMode) -> Self {
-        match mode {
-            RoutingMode::Only(_) => Self::Direct,
-            RoutingMode::Global | RoutingMode::Bypass(_) => Self::Global,
+    pub fn to(outbound: crate::config::routing::Outbound) -> Self {
+        match outbound {
+            crate::config::routing::Outbound::Proxy => Self::Global,
+            crate::config::routing::Outbound::Direct => Self::Direct,
         }
     }
 }
@@ -84,6 +85,16 @@ impl std::fmt::Display for RoutingFallback {
         match self {
             Self::Global => f.write_str("Global"),
             Self::Direct => f.write_str("Direct"),
+        }
+    }
+}
+
+impl RoutingMode {
+    pub fn id(self) -> String {
+        match self {
+            RoutingMode::Global => "global".to_string(),
+            RoutingMode::Bypass(r) => format!("bypass_{}", r.as_str()),
+            RoutingMode::Only(r) => format!("only_{}", r.as_str()),
         }
     }
 }
@@ -100,11 +111,7 @@ impl std::fmt::Display for RoutingMode {
 
 impl Serialize for RoutingMode {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        match self {
-            RoutingMode::Global => s.serialize_str("global"),
-            RoutingMode::Bypass(r) => s.serialize_str(&format!("bypass_{}", r.as_str())),
-            RoutingMode::Only(r) => s.serialize_str(&format!("only_{}", r.as_str())),
-        }
+        s.serialize_str(&self.id())
     }
 }
 
@@ -173,10 +180,13 @@ pub struct GeoRouting {
 }
 
 impl GeoRouting {
-    pub fn mode(&self) -> RoutingMode {
+    pub fn mode(&self, routing: &RoutingConfig) -> RoutingMode {
         self.current_region
             .and_then(|r| self.selected_region_modes.get(&r).copied())
-            .filter(|mode| self.available_modes().contains(mode))
+            .filter(|mode| {
+                RoutingMode::available(self.current_region).contains(mode)
+                    && routing.declares(*mode)
+            })
             .unwrap_or(RoutingMode::Global)
     }
 
@@ -190,8 +200,19 @@ impl GeoRouting {
         }
     }
 
-    pub fn available_modes(&self) -> Vec<RoutingMode> {
-        RoutingMode::available(self.current_region)
+    pub fn used_regions(&self) -> Vec<GeoRegion> {
+        GeoRegion::ALL
+            .into_iter()
+            .filter(|region| {
+                *region != GeoRegion::Global
+                    && (self.current_region == Some(*region)
+                        || self.selected_region_modes.contains_key(region))
+            })
+            .collect()
+    }
+
+    pub fn available_modes(&self, routing: &RoutingConfig) -> Vec<RoutingMode> {
+        routing.modes_of(self.current_region)
     }
 }
 
@@ -205,11 +226,26 @@ mod tests {
         let mut routing = GeoRouting::default();
         routing.set_region(GeoRegion::Ru);
         routing.set_mode(RoutingMode::Bypass(GeoRegion::Cn));
-        assert_eq!(routing.mode(), RoutingMode::Global);
+        assert_eq!(routing.mode(&RoutingConfig::default()), RoutingMode::Global);
 
         routing.set_region(GeoRegion::Global);
         routing.set_mode(RoutingMode::Only(GeoRegion::Ru));
-        assert_eq!(routing.mode(), RoutingMode::Global);
+        assert_eq!(routing.mode(&RoutingConfig::default()), RoutingMode::Global);
+    }
+
+    #[test]
+    fn a_mode_missing_from_routing_json_is_unavailable_and_reads_as_global() {
+        let mut routing = GeoRouting::default();
+        routing.set_region(GeoRegion::Ru);
+        routing.set_mode(RoutingMode::Only(GeoRegion::Ru));
+        let mut config = RoutingConfig::default();
+        config.modes.retain(|mode| mode.id != "only_ru");
+
+        assert_eq!(
+            routing.available_modes(&config),
+            [RoutingMode::Global, RoutingMode::Bypass(GeoRegion::Ru)]
+        );
+        assert_eq!(routing.mode(&config), RoutingMode::Global);
     }
 
     #[test]
@@ -293,7 +329,7 @@ mod tests {
     #[test]
     fn geo_routing_mode_falls_back_to_global() {
         let g = GeoRouting::default();
-        assert_eq!(g.mode(), RoutingMode::Global);
+        assert_eq!(g.mode(&RoutingConfig::default()), RoutingMode::Global);
     }
 
     #[test]
@@ -301,7 +337,10 @@ mod tests {
         let mut g = GeoRouting::default();
         g.set_region(GeoRegion::Ru);
         g.set_mode(RoutingMode::Bypass(GeoRegion::Ru));
-        assert_eq!(g.mode(), RoutingMode::Bypass(GeoRegion::Ru));
+        assert_eq!(
+            g.mode(&RoutingConfig::default()),
+            RoutingMode::Bypass(GeoRegion::Ru)
+        );
         assert_eq!(
             g.selected_region_modes.get(&GeoRegion::Ru),
             Some(&RoutingMode::Bypass(GeoRegion::Ru))
@@ -309,18 +348,27 @@ mod tests {
 
         g.set_region(GeoRegion::Cn);
         g.set_mode(RoutingMode::Only(GeoRegion::Cn));
-        assert_eq!(g.mode(), RoutingMode::Only(GeoRegion::Cn));
+        assert_eq!(
+            g.mode(&RoutingConfig::default()),
+            RoutingMode::Only(GeoRegion::Cn)
+        );
         g.set_region(GeoRegion::Ru);
-        assert_eq!(g.mode(), RoutingMode::Bypass(GeoRegion::Ru));
+        assert_eq!(
+            g.mode(&RoutingConfig::default()),
+            RoutingMode::Bypass(GeoRegion::Ru)
+        );
     }
 
     #[test]
     fn geo_routing_available_modes_uses_current_region() {
         let mut g = GeoRouting::default();
-        assert_eq!(g.available_modes(), vec![RoutingMode::Global]);
+        assert_eq!(
+            g.available_modes(&RoutingConfig::default()),
+            vec![RoutingMode::Global]
+        );
         g.set_region(GeoRegion::Ru);
         assert_eq!(
-            g.available_modes(),
+            g.available_modes(&RoutingConfig::default()),
             vec![
                 RoutingMode::Global,
                 RoutingMode::Bypass(GeoRegion::Ru),

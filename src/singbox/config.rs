@@ -31,12 +31,12 @@ impl GeoAvailability {
     }
 
     pub fn lacks_rule_sets_of(&self, plan: &RoutePlan) -> bool {
-        plan.rule_sets()
+        plan.required_rule_sets()
             .any(|rule_set| self.path(rule_set).is_none())
     }
 
     pub fn routing_fallback(&self, plan: &RoutePlan) -> Option<RoutingFallback> {
-        plan.fallback.filter(|_| self.lacks_rule_sets_of(plan))
+        self.lacks_rule_sets_of(plan).then_some(plan.fallback)
     }
 
     #[cfg(test)]
@@ -94,10 +94,11 @@ pub fn generate_config(
         ),
         Some(RoutingFallback::Direct) => build_config(profile, input, geo, clash_api_port),
         None => {
-            let routing_mode = input.settings.geo_routing.mode();
+            let routing_mode = input.settings.geo_routing.mode(input.routing);
             if geo.lacks_rule_sets_of(&RoutePlan::for_mode(routing_mode, input.routing)) {
                 anyhow::bail!(
-                    "{routing_mode} routing needs its region rule-sets, which are not downloaded"
+                    "{} routing needs its region rule-sets, which are not downloaded",
+                    input.routing.mode_name(routing_mode)
                 );
             }
             build_config(profile, input, geo, clash_api_port)
@@ -3066,6 +3067,30 @@ mod tests {
                 &RoutingConfig::default()
             )),
             None
+        );
+    }
+
+    #[test]
+    fn only_a_missing_required_rule_set_falls_back() {
+        let mut routing = RoutingConfig::default();
+        let bypass_ru = routing
+            .modes
+            .iter_mut()
+            .find(|mode| mode.id == "bypass_ru")
+            .unwrap();
+        bypass_ru.rules[0].required = false;
+        let plan = RoutePlan::for_mode(RoutingMode::Bypass(GeoRegion::Ru), &routing);
+        let only_geoip = GeoAvailability {
+            rule_sets: HashMap::from([(
+                "geoip-ru".to_string(),
+                PathBuf::from("/geo/geoip-ru.srs"),
+            )]),
+        };
+
+        assert_eq!(only_geoip.routing_fallback(&plan), None);
+        assert_eq!(
+            GeoAvailability::default().routing_fallback(&plan),
+            Some(RoutingFallback::Global)
         );
     }
 

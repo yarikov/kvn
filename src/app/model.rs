@@ -460,8 +460,15 @@ impl Model {
         !self.rule_set_updates.is_empty()
     }
 
+    pub fn active_rule_sets(&self) -> Vec<crate::geo::RuleSet> {
+        crate::route_plan::active_rule_sets(&self.config.settings, &self.routing)
+    }
+
     pub fn required_rule_sets(&self) -> Vec<crate::geo::RuleSet> {
-        crate::route_plan::required_rule_sets(&self.config.settings, &self.routing)
+        crate::route_plan::RoutePlan::for_settings(&self.config.settings, &self.routing)
+            .required_rule_sets()
+            .cloned()
+            .collect()
     }
 
     pub fn selectable_rule_sets(&self) -> Vec<crate::geo::RuleSet> {
@@ -536,7 +543,7 @@ impl Model {
             }
         };
         let routing = match crate::config::load_routing(
-            config.settings.geo_routing.legacy_service_routes.as_ref(),
+            &config.settings.geo_routing,
             !config_persistence_blocked,
         ) {
             Ok(routing) => routing,
@@ -826,7 +833,7 @@ impl Model {
         let geo_routing = &self.config.settings.geo_routing;
         let mut shown = RoutingSettings {
             region: geo_routing.current_region.unwrap_or(GeoRegion::Global),
-            mode: geo_routing.mode(),
+            mode: geo_routing.mode(&self.routing),
         };
         let Some(draft) = &self.routing_settings_draft else {
             return shown;

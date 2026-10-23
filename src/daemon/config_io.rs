@@ -296,13 +296,10 @@ pub(super) fn reload(tx: &Sender<Msg>) {
     let tx = tx.clone();
     thread::spawn(move || {
         let result = crate::config::load_config().and_then(|c| c.validate().map(|_| c));
-        let routing = crate::config::load_routing(
-            result
-                .as_ref()
-                .ok()
-                .and_then(|config| config.settings.geo_routing.legacy_service_routes.as_ref()),
-            result.is_ok(),
-        )
+        let routing = match &result {
+            Ok(config) => crate::config::load_routing(&config.settings.geo_routing, true),
+            Err(_) => crate::config::load_routing(&Default::default(), false),
+        }
         .map_err(IpcError::from);
         let _ = tx.send(Msg::ConfigReloaded(Box::new(
             result.map_err(IpcError::from),
@@ -400,14 +397,17 @@ mod tests {
                 ..
             })
         ));
-        let committed = model.config.settings.geo_routing.mode();
+        let committed = model.config.settings.geo_routing.mode(&model.routing);
         apply_onboarding_writes(&mut model, effects);
 
         assert_eq!(model.onboarding.state.step, OnboardingStep::Routing);
         assert_eq!(model.onboarding.awaiting, None);
         assert!(model.onboarding.card_pending);
         assert_eq!(model.overlay, Overlay::None);
-        assert_eq!(model.config.settings.geo_routing.mode(), committed);
+        assert_eq!(
+            model.config.settings.geo_routing.mode(&model.routing),
+            committed
+        );
         assert_eq!(
             model.config.settings.geo_routing.current_region,
             Some(GeoRegion::Ru)

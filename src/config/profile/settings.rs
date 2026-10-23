@@ -374,7 +374,11 @@ mod tests {
         assert!(s.geo_routing.current_region.is_none());
         assert!(s.geo_routing.selected_region_modes.is_empty());
         assert_eq!(s.geo_routing.auto_update, GeoAutoUpdate::Off);
-        assert_eq!(s.geo_routing.mode(), RoutingMode::Global);
+        assert_eq!(
+            s.geo_routing
+                .mode(&crate::config::routing::RoutingConfig::default()),
+            RoutingMode::Global
+        );
         assert_eq!(s.logs.level, "info");
         assert_eq!(s.logs.line_retention.app, 1_000);
         assert_eq!(s.logs.line_retention.singbox, 100_000);

@@ -85,7 +85,7 @@ fn failure_text(report: &RuleSetReport) -> Option<String> {
 }
 
 fn reconnect_for_updated_rule_sets(model: &mut Model, updated: &[&RuleSetReport]) {
-    let required = model.required_rule_sets();
+    let required = model.active_rule_sets();
     let routed_update = updated
         .iter()
         .any(|report| required.iter().any(|rule_set| rule_set.key() == report.key));
@@ -104,7 +104,9 @@ pub(in crate::app::update) fn fetch_region_rule_sets(
     fallback: RoutingFallback,
 ) -> Vec<Effect> {
     let mut effects = Vec::new();
-    let mode = model.config.settings.geo_routing.mode();
+    let mode = model
+        .routing
+        .mode_name(model.config.settings.geo_routing.mode(&model.routing));
     let consequence = match fallback {
         RoutingFallback::Global => "running in Global while they download through the VPN",
         RoutingFallback::Direct => "nothing uses the VPN until they download",
@@ -115,7 +117,7 @@ pub(in crate::app::update) fn fetch_region_rule_sets(
         StatusKey::Geo,
         AppStatus::Info(format!("{mode} rule-sets are missing — {consequence}")),
     );
-    let required = model.required_rule_sets();
+    let required = model.active_rule_sets();
     effects.extend(start_rule_set_download(
         model,
         required,
@@ -161,7 +163,9 @@ fn leave_routing_fallback(
         return Vec::new();
     }
     let mut effects = Vec::new();
-    let mode = model.config.settings.geo_routing.mode();
+    let mode = model
+        .routing
+        .mode_name(model.config.settings.geo_routing.mode(&model.routing));
     let consequence = match fallback {
         RoutingFallback::Global => "running in Global",
         RoutingFallback::Direct => "nothing uses the VPN",
@@ -674,5 +678,32 @@ mod tests {
         );
         assert_eq!(model.connection, ConnectionState::Connecting);
         assert_eq!(model.connecting_profile_id, model.active_profile_id);
+    }
+
+    #[test]
+    fn fallback_connection_does_not_wait_for_an_optional_rule_set() {
+        let (mut model, _) = connected_in_fallback(false);
+        let [geosite, geoip] = <[RuleSet; 2]>::try_from(ru_rule_sets()).unwrap();
+        model
+            .routing
+            .modes
+            .iter_mut()
+            .find(|mode| mode.id == "bypass_ru")
+            .unwrap()
+            .rules[0]
+            .required = false;
+
+        update(
+            &mut model,
+            rule_sets_updated(
+                vec![
+                    report(&geosite, RuleSetOutcome::Failed("net fail".into())),
+                    report(&geoip, RuleSetOutcome::Updated),
+                ],
+                present(std::slice::from_ref(&geoip), true),
+            ),
+        );
+
+        assert_eq!(model.connection, ConnectionState::Connecting);
     }
 }

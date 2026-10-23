@@ -311,7 +311,7 @@ mod tests {
             },
         );
         assert_eq!(
-            model.config.settings.geo_routing.mode(),
+            model.config.settings.geo_routing.mode(&model.routing),
             RoutingMode::Bypass(GeoRegion::Ru)
         );
         assert_eq!(effects.last(), Some(&Effect::BroadcastState));
@@ -348,7 +348,7 @@ mod tests {
             },
         );
         assert_eq!(
-            model.config.settings.geo_routing.mode(),
+            model.config.settings.geo_routing.mode(&model.routing),
             RoutingMode::Global
         );
         assert!(!effects.contains(&Effect::SaveConfig));

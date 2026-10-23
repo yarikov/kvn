@@ -220,7 +220,7 @@ fn cycle_routing_draft(model: &mut Model, forward: bool) {
             draft.mode = Some(mode);
         }
         Some(RoutingSettingsItem::Mode) => {
-            let modes = crate::config::profile::RoutingMode::available(Some(shown.region));
+            let modes = model.routing.modes_of(Some(shown.region));
             let current = modes
                 .iter()
                 .position(|mode| *mode == shown.mode)
@@ -691,7 +691,7 @@ mod tests {
 
         assert!(handle_key(&mut model, KeyEvent::from(KeyCode::Enter)).is_empty());
         assert_eq!(
-            model.config.settings.geo_routing.mode(),
+            model.config.settings.geo_routing.mode(&model.routing),
             RoutingMode::Only(GeoRegion::Ru)
         );
     }
@@ -781,7 +781,7 @@ mod tests {
             Some(GeoRegion::Ru)
         );
         assert_eq!(
-            routing.config.settings.geo_routing.mode(),
+            routing.config.settings.geo_routing.mode(&routing.routing),
             crate::config::profile::RoutingMode::Bypass(GeoRegion::Ru)
         );
         assert_eq!(

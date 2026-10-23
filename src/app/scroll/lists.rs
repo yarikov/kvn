@@ -44,7 +44,12 @@ pub(crate) fn list(model: &Model) -> Option<(Vec<Option<usize>>, usize)> {
             return Some((rows, state.selected));
         }
         Overlay::RoutingMode => (
-            model.config.settings.geo_routing.available_modes().len(),
+            model
+                .config
+                .settings
+                .geo_routing
+                .available_modes(&model.routing)
+                .len(),
             model.routing_selected,
         ),
         Overlay::GeoRegions => (GeoRegion::ALL.len(), model.geo_region_selected),

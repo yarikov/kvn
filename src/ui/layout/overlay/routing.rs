@@ -8,14 +8,21 @@ use super::popup::draw_selection_modal;
 use super::{APPLY_ACTION, overlay_footer, settings_heading};
 
 pub(super) fn draw_mode(frame: &mut Frame, model: &Model, area: Rect) {
-    let modes = model.config.settings.geo_routing.available_modes();
-    let label_strings: Vec<String> = modes.iter().map(|m| m.to_string()).collect();
+    let modes = model
+        .config
+        .settings
+        .geo_routing
+        .available_modes(&model.routing);
+    let label_strings: Vec<String> = modes
+        .iter()
+        .map(|mode| model.routing.mode_name(*mode))
+        .collect();
     let labels: Vec<&str> = label_strings.iter().map(String::as_str).collect();
     let active = (!awaits(model, OnboardingStep::Routing))
         .then(|| {
             modes
                 .iter()
-                .position(|m| *m == model.config.settings.geo_routing.mode())
+                .position(|m| *m == model.config.settings.geo_routing.mode(&model.routing))
         })
         .flatten();
     draw_selection_modal(

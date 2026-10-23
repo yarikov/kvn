@@ -74,7 +74,7 @@ pub(super) fn draw(
             use crate::config::profile::GeoRegion;
 
             let geo_routing = &model.config.settings.geo_routing;
-            let mode = geo_routing.mode();
+            let mode = geo_routing.mode(&model.routing);
             let has_draft = model.routing_settings_draft.is_some();
             let crate::app::model::RoutingSettings {
                 region: shown_region,
@@ -88,7 +88,7 @@ pub(super) fn draw(
             if shown_region != GeoRegion::Global {
                 settings.push((
                     "Mode",
-                    shown_mode.to_string(),
+                    model.routing.mode_name(shown_mode),
                     has_draft && mode != shown_mode,
                 ));
             }
@@ -96,9 +96,11 @@ pub(super) fn draw(
                 .iter()
                 .map(|region| visual_width(geo_region_label(*region)))
                 .chain(GeoRegion::ALL.iter().flat_map(|region| {
-                    crate::config::profile::RoutingMode::available(Some(*region))
+                    model
+                        .routing
+                        .modes_of(Some(*region))
                         .into_iter()
-                        .map(|mode| visual_width(&mode.to_string()))
+                        .map(|mode| visual_width(&model.routing.mode_name(mode)))
                 }))
                 .max()
                 .unwrap_or(0);

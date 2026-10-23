@@ -6,7 +6,11 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::app::update::routing::{commit_geo_region, commit_routing_mode};
 
 pub(in crate::app::update) fn handle_routing_mode(model: &mut Model, key: KeyEvent) -> Vec<Effect> {
-    let available = model.config.settings.geo_routing.available_modes();
+    let available = model
+        .config
+        .settings
+        .geo_routing
+        .available_modes(&model.routing);
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => {
             crate::ui::nav::select_next(&mut model.routing_selected, available.len());
@@ -53,10 +57,14 @@ pub(in crate::app::update) fn handle_geo_region(model: &mut Model, key: KeyEvent
 
 pub(in crate::app::update) fn open_routing_mode(model: &mut Model) {
     model.overlay = Overlay::RoutingMode;
-    let available = model.config.settings.geo_routing.available_modes();
+    let available = model
+        .config
+        .settings
+        .geo_routing
+        .available_modes(&model.routing);
     model.routing_selected = available
         .iter()
-        .position(|m| *m == model.config.settings.geo_routing.mode())
+        .position(|m| *m == model.config.settings.geo_routing.mode(&model.routing))
         .unwrap_or(0);
 }
 
@@ -112,7 +120,7 @@ mod tests {
 
         let effects = handle_routing_mode(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
-            model.config.settings.geo_routing.mode(),
+            model.config.settings.geo_routing.mode(&model.routing),
             RoutingMode::Only(GeoRegion::Ru)
         );
         assert_eq!(model.overlay, Overlay::None);
@@ -237,7 +245,7 @@ mod tests {
             Some(GeoRegion::Global)
         );
         assert_eq!(
-            model.config.settings.geo_routing.mode(),
+            model.config.settings.geo_routing.mode(&model.routing),
             RoutingMode::Global
         );
         assert_eq!(
@@ -281,7 +289,7 @@ mod tests {
             Some(GeoRegion::Cn)
         );
         assert_eq!(
-            model.config.settings.geo_routing.mode(),
+            model.config.settings.geo_routing.mode(&model.routing),
             RoutingMode::Global
         );
         assert!(downloads_rule_sets(&effects));
@@ -294,10 +302,66 @@ mod tests {
             Some(GeoRegion::Ru)
         );
         assert_eq!(
-            model.config.settings.geo_routing.mode(),
+            model.config.settings.geo_routing.mode(&model.routing),
             RoutingMode::Bypass(GeoRegion::Ru)
         );
         assert!(effects.iter().any(|e| matches!(e, Effect::AppendAppLog { message, .. } if message.contains("Routing mode changed: Bypass RU"))));
+    }
+
+    #[test]
+    fn a_mode_routing_json_does_not_declare_is_refused() {
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing.modes.retain(|mode| mode.id != "only_ru");
+
+        let effects = commit_routing_mode(&mut model, RoutingMode::Only(GeoRegion::Ru));
+
+        assert!(!effects.contains(&Effect::SaveConfig));
+        assert_eq!(
+            model
+                .config
+                .settings
+                .geo_routing
+                .selected_region_modes
+                .get(&GeoRegion::Ru),
+            None
+        );
+    }
+
+    #[test]
+    fn a_region_switch_keeps_the_stored_mode_routing_json_lacks() {
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .config
+            .settings
+            .geo_routing
+            .set_mode(RoutingMode::Bypass(GeoRegion::Ru));
+        model.routing.modes.retain(|mode| mode.id != "bypass_ru");
+
+        commit_geo_region(&mut model, GeoRegion::Cn);
+
+        assert_eq!(
+            model.config.settings.geo_routing.selected_region_modes[&GeoRegion::Ru],
+            RoutingMode::Bypass(GeoRegion::Ru)
+        );
+    }
+
+    #[test]
+    fn a_mode_change_reports_the_name_routing_json_gives() {
+        let mut model = model_with_profiles(vec![]);
+        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .modes
+            .iter_mut()
+            .find(|mode| mode.id == "bypass_ru")
+            .unwrap()
+            .name = "Home".into();
+
+        let effects = commit_routing_mode(&mut model, RoutingMode::Bypass(GeoRegion::Ru));
+
+        assert!(effects.contains(&app_log_info("Routing mode changed: Home")));
     }
 
     #[test]
@@ -309,7 +373,7 @@ mod tests {
 
         handle_routing_mode(&mut model, KeyEvent::from(KeyCode::Enter));
         assert_eq!(
-            model.config.settings.geo_routing.mode(),
+            model.config.settings.geo_routing.mode(&model.routing),
             RoutingMode::Bypass(GeoRegion::Ru)
         );
         assert_eq!(

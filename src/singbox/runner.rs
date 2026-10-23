@@ -127,7 +127,7 @@ pub fn start(
     cancelled: &dyn Fn() -> bool,
 ) -> Result<StartedSingBox> {
     let RoutingInput { settings, routing } = input;
-    let geo = collect_geo_availability(&crate::route_plan::required_rule_sets(settings, routing));
+    let geo = collect_geo_availability(&crate::route_plan::active_rule_sets(settings, routing));
     let routing_fallback = geo.routing_fallback(&crate::route_plan::RoutePlan::for_settings(
         settings, routing,
     ));
