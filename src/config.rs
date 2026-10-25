@@ -616,8 +616,8 @@ mod tests {
         let on_disk = routing::load_routing_at(&routing_path, &Default::default(), false).unwrap();
         assert_eq!(on_disk, routing);
         assert_eq!(
-            routing.mode("bypass_ru").unwrap().rules[0].rule_set,
-            "geosite-steam"
+            routing.mode("bypass_ru").unwrap().rules[0].matches,
+            routing::RuleMatch::RuleSet("geosite-steam".into())
         );
         assert_eq!(config.settings.geo_routing.legacy_service_routes, None);
         let saved = load_config_at_read_only(&profiles_path).unwrap();

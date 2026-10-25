@@ -239,14 +239,6 @@ impl Settings {
         self.theme == OMARCHY_THEME_SENTINEL
     }
 
-    pub fn with_global_routing(&self) -> Self {
-        let mut settings = self.clone();
-        settings
-            .geo_routing
-            .set_mode(crate::config::routing::GLOBAL_MODE_ID);
-        settings
-    }
-
     pub fn for_this_desktop() -> Self {
         Self {
             icons: IconSet::for_this_desktop(),

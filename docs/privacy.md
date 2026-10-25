@@ -34,14 +34,15 @@ address with the list, kvn may look the name up again through your main DNS
 server, along the same path as your other DNS questions.
 
 The region's lists are files kvn downloads. Bypass and Only never run without
-them. Until they are on disk, a connection starts with the mode's default for
-all traffic instead, and the status bar shows the substitution:
+them. Until they are on disk, a connection starts without the missing lists —
+their traffic goes the way of everything else in the mode — and the status bar
+shows the substitution; rules of your own keep working:
 
-- Bypass becomes Global (`Bypass RU → Global`): all traffic uses the tunnel,
-  and the lists download through it, which works where the download site is
-  blocked directly.
-- Only becomes Direct (`Only RU → Direct`): nothing uses the tunnel, and the
-  lists download directly. Only is meant for use abroad with a server inside
+- Bypass becomes Global (`Bypass RU → Global`): all other traffic uses the
+  tunnel, and the lists download through it, which works where the download
+  site is blocked directly.
+- Only becomes Direct (`Only RU → Direct`): nothing else uses the tunnel, and
+  the lists download directly. Only is meant for use abroad with a server inside
   the region, so the tunnel would carry all your traffic into that country.
 
 Either way the download also works with the kill switch on, and kvn reconnects
@@ -54,7 +55,11 @@ The local network your computer is directly connected to — for example
 system routes it before traffic reaches the tunnel. Other private addresses,
 such as another network behind your router or a work network, are sent through
 the VPN in Global mode, where they are usually unreachable; Bypass and Only
-send every private address directly.
+send every private address directly, through their `{ "ip": "private" }` rule.
+
+Your own rules in `routing.json` — by domain, IP address or rule-set —
+change what each mode sends where; the first rule that matches wins (see
+[Rule-sets and modes](configuration.md#rule-sets-and-modes)).
 
 The tunnel carries IPv4 only; IPv6 is blocked in every mode, see
 [IPv4 only](#ipv4-only).
@@ -77,7 +82,7 @@ selected DNS preset (see the [configuration guide](configuration.md#dns)):
 - **Global and Bypass:** questions to public DNS servers travel through the
   tunnel. Your provider does not see them.
 - **Sites sent directly because of their name** — on the region's list in
-  Bypass, or on the list of a service set to `direct` in any mode — are the
+  Bypass, or named by any other rule that routes them `direct` — are the
   exception: kvn asks a direct copy of your main DNS server about them, past
   the tunnel. A content network answers with the servers nearest to whoever
   asks, so a question sent through the VPN would return servers chosen for the
@@ -88,7 +93,10 @@ selected DNS preset (see the [configuration guide](configuration.md#dns)):
   its main server, for example
   `{ "rule_set": ["geosite-category-ru"], "server": "remote" }`.
 - **Only:** every DNS question is sent directly, like the rest of the traffic
-  outside the region.
+  outside the region — also for names a rule of yours sends through the
+  tunnel. With fake-IP on, a name routed through the tunnel by a rule placed
+  above the IP rules is looked up by the VPN server instead; kvn warns about
+  such a rule below them.
 - **Local DNS servers** — a router such as `192.168.1.1`, a resolver on
   `127.0.0.1`, or a link-local or `100.64.0.0/10` address — are always queried
   directly, because they are only reachable on your own network.

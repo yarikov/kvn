@@ -108,18 +108,140 @@ impl Outbound {
     }
 }
 
-/// Sends the traffic a rule-set matches to an outbound.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleMatch {
+    RuleSet(String),
+    Domain(String),
+    Ip(String),
+    PrivateNetworks,
+}
+
+impl RuleMatch {
+    const PRIVATE_NETWORKS: &str = "private";
+
+    fn key(&self) -> &'static str {
+        match self {
+            Self::RuleSet(_) => "rule_set",
+            Self::Domain(_) => "domain",
+            Self::Ip(_) | Self::PrivateNetworks => "ip",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ModeRuleFields", into = "ModeRuleFields")]
 pub struct ModeRule {
-    /// Tag of a rule-set declared in `rule_sets`.
-    pub rule_set: String,
-    /// Where the matching traffic goes: `proxy` or `direct`.
+    pub matches: RuleMatch,
     pub route: Outbound,
-    /// Whether the mode needs the rule-set: while its file is missing, a
-    /// required rule-set sends all traffic to the mode's `final` outbound.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub required: bool,
+}
+
+impl ModeRule {
+    pub fn rule_set(tag: &str, route: Outbound, required: bool) -> Self {
+        Self {
+            matches: RuleMatch::RuleSet(tag.to_string()),
+            route,
+            required,
+        }
+    }
+
+    fn private_networks_direct() -> Self {
+        Self {
+            matches: RuleMatch::PrivateNetworks,
+            route: Outbound::Direct,
+            required: false,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModeRuleFields {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rule_set: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    domain: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ip: Option<String>,
+    route: Outbound,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    required: bool,
+}
+
+impl TryFrom<ModeRuleFields> for ModeRule {
+    type Error = String;
+
+    fn try_from(fields: ModeRuleFields) -> Result<Self, Self::Error> {
+        let matches = match (fields.rule_set, fields.domain, fields.ip) {
+            (Some(tag), None, None) => RuleMatch::RuleSet(tag),
+            (None, Some(domain), None) => RuleMatch::Domain(domain),
+            (None, None, Some(ip)) if ip == RuleMatch::PRIVATE_NETWORKS => {
+                RuleMatch::PrivateNetworks
+            }
+            (None, None, Some(ip)) => RuleMatch::Ip(ip),
+            _ => return Err("a rule needs exactly one of rule_set, domain and ip".into()),
+        };
+        Ok(Self {
+            matches,
+            route: fields.route,
+            required: fields.required,
+        })
+    }
+}
+
+impl From<ModeRule> for ModeRuleFields {
+    fn from(rule: ModeRule) -> Self {
+        let mut fields = Self {
+            rule_set: None,
+            domain: None,
+            ip: None,
+            route: rule.route,
+            required: rule.required,
+        };
+        match rule.matches {
+            RuleMatch::RuleSet(tag) => fields.rule_set = Some(tag),
+            RuleMatch::Domain(domain) => fields.domain = Some(domain),
+            RuleMatch::Ip(ip) => fields.ip = Some(ip),
+            RuleMatch::PrivateNetworks => fields.ip = Some(RuleMatch::PRIVATE_NETWORKS.into()),
+        }
+        fields
+    }
+}
+
+impl JsonSchema for ModeRule {
+    fn schema_name() -> Cow<'static, str> {
+        "ModeRule".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let route = generator.subschema_for::<Outbound>();
+        let branch = |key: &str, description: &str, required: bool| {
+            let mut properties = serde_json::json!({
+                key: { "type": "string", "minLength": 1, "description": description },
+                "route": route.clone(),
+            });
+            if required {
+                properties["required"] = serde_json::json!({
+                    "type": "boolean",
+                    "description": "Whether the mode needs the rule-set: while its file is missing, the mode runs without its required rules and sends their traffic to its final outbound."
+                });
+            }
+            serde_json::json!({
+                "type": "object",
+                "properties": properties,
+                "required": [key, "route"],
+                "additionalProperties": false,
+            })
+        };
+        schemars::json_schema!({
+            "description": "Sends what one condition matches to `route` (`proxy` or `direct`). Rules apply in order, first match wins.",
+            "oneOf": [
+                branch("rule_set", "Tag of a rule-set declared in `rule_sets`.", true),
+                branch("domain", "A domain and its subdomains.", false),
+                branch("ip", "An IP address, a CIDR network, or `private` for private networks (LAN, loopback).", false),
+            ]
+        })
+    }
 }
 
 /// A routing mode: its rules, in order, and where the rest of the traffic goes.
@@ -133,10 +255,7 @@ pub struct ModeDefinition {
     /// Where traffic no rule matches goes: `proxy` or `direct`.
     #[serde(rename = "final")]
     pub final_outbound: Outbound,
-    /// Whether private networks (LAN, loopback) stay outside the tunnel.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub private_direct: bool,
-    /// Rules, first match wins.
+    /// Rules, in order; the first rule that matches decides.
     #[serde(default)]
     pub rules: Vec<ModeRule>,
 }
@@ -227,17 +346,13 @@ impl RoutingConfig {
                 if !self.rule_sets.contains_key(&*rule_set.tag) {
                     self.insert_all(std::slice::from_ref(rule_set));
                 }
-                rules.push(ModeRule {
-                    rule_set: rule_set.tag.to_string(),
-                    route,
-                    required: false,
-                });
+                rules.push(ModeRule::rule_set(&rule_set.tag, route, false));
             }
         }
         for mode in &mut self.modes {
             let missing: Vec<ModeRule> = rules
                 .iter()
-                .filter(|rule| !mode.rules.iter().any(|own| own.rule_set == rule.rule_set))
+                .filter(|rule| !mode.rules.iter().any(|own| own.matches == rule.matches))
                 .cloned()
                 .collect();
             mode.rules.splice(0..0, missing);
@@ -354,14 +469,30 @@ impl RoutingConfig {
                 if mode.id == GLOBAL_MODE_ID && rule.required {
                     diagnostics.push(problem(
                         format!("{pointer}/rules/{rule_index}/required"),
-                        "must be false: the global mode is what other modes fall back to",
+                        "must be false: the global mode runs whenever the selected mode is missing, so it must not wait for a download",
                     ));
                 }
-                if !self.rule_sets.contains_key(&rule.rule_set) {
-                    diagnostics.push(problem(
-                        format!("{pointer}/rules/{rule_index}/rule_set"),
-                        format!("rule set {} is not declared in rule_sets", rule.rule_set),
-                    ));
+                let rule_pointer = format!("{pointer}/rules/{rule_index}/{}", rule.matches.key());
+                match &rule.matches {
+                    RuleMatch::RuleSet(tag) if !self.rule_sets.contains_key(tag) => {
+                        diagnostics.push(problem(
+                            rule_pointer,
+                            format!("rule set {tag} is not declared in rule_sets"),
+                        ));
+                    }
+                    RuleMatch::Domain(domain) if !is_plain_domain(domain) => {
+                        diagnostics.push(problem(
+                            rule_pointer,
+                            "must be a domain such as example.com, without a scheme, path, wildcard or spaces; it matches the domain and its subdomains",
+                        ));
+                    }
+                    RuleMatch::Ip(ip) if !is_ip_or_network(ip) => {
+                        diagnostics.push(problem(
+                            rule_pointer,
+                            "must be an IP address, a CIDR network such as 10.0.0.0/8, or private",
+                        ));
+                    }
+                    _ => {}
                 }
             }
         }
@@ -382,7 +513,6 @@ fn global_mode() -> ModeDefinition {
         id: GLOBAL_MODE_ID.to_string(),
         name: "Global".to_string(),
         final_outbound: Outbound::Proxy,
-        private_direct: false,
         rules: Vec::new(),
     }
 }
@@ -397,14 +527,11 @@ fn region_modes(region: GeoRegion) -> Vec<ModeDefinition> {
             id: format!("{kind}_{}", region.as_str()),
             name: format!("{name} {}", region.code_upper()),
             final_outbound,
-            private_direct: true,
-            rules: tags
-                .iter()
-                .map(|tag| ModeRule {
-                    rule_set: tag.to_string(),
-                    route: region_outbound,
-                    required: true,
-                })
+            rules: std::iter::once(ModeRule::private_networks_direct())
+                .chain(
+                    tags.iter()
+                        .map(|tag| ModeRule::rule_set(tag, region_outbound, true)),
+                )
                 .collect(),
         }
     };
@@ -412,6 +539,14 @@ fn region_modes(region: GeoRegion) -> Vec<ModeDefinition> {
         mode("bypass", "Bypass", Outbound::Direct, Outbound::Proxy),
         mode("only", "Only", Outbound::Proxy, Outbound::Direct),
     ]
+}
+
+fn is_plain_domain(domain: &str) -> bool {
+    !domain.contains(|c: char| c == '*' || c == '/' || c.is_whitespace())
+}
+
+fn is_ip_or_network(value: &str) -> bool {
+    value.parse::<std::net::IpAddr>().is_ok() || super::profile::is_ip_prefix(value)
 }
 
 fn is_valid_mode_id(id: &str) -> bool {
@@ -607,23 +742,21 @@ mod tests {
         let global = config.mode("global").unwrap();
         assert_eq!(global.name, "Global");
         assert_eq!(global.final_outbound, Outbound::Proxy);
-        assert!(!global.private_direct);
         assert!(global.rules.is_empty());
 
         let only_ir = config.mode("only_ir").unwrap();
         assert_eq!(only_ir.name, "Only IR");
         assert_eq!(only_ir.final_outbound, Outbound::Direct);
-        assert!(only_ir.private_direct);
         assert_eq!(
             only_ir.rules,
-            ["geosite-category-ir", "geoip-ir"].map(|tag| ModeRule {
-                rule_set: tag.to_string(),
-                route: Outbound::Proxy,
-                required: true,
-            })
+            [
+                ModeRule::private_networks_direct(),
+                ModeRule::rule_set("geosite-category-ir", Outbound::Proxy, true),
+                ModeRule::rule_set("geoip-ir", Outbound::Proxy, true),
+            ]
         );
         assert_eq!(
-            config.mode("bypass_cn").unwrap().rules[0].route,
+            config.mode("bypass_cn").unwrap().rules[1].route,
             Outbound::Direct
         );
     }
@@ -686,14 +819,20 @@ mod tests {
         for mode in &config.modes {
             let leading: Vec<(&str, Outbound)> = mode.rules[..4]
                 .iter()
-                .map(|rule| (rule.rule_set.as_str(), rule.route))
+                .map(|rule| match &rule.matches {
+                    RuleMatch::RuleSet(tag) => (tag.as_str(), rule.route),
+                    other => panic!("expected a rule-set rule, got {other:?}"),
+                })
                 .collect();
             assert_eq!(leading, expected, "{}", mode.id);
             assert!(mode.rules[..4].iter().all(|rule| !rule.required));
         }
         assert_eq!(
-            config.mode("bypass_ru").unwrap().rules[4].rule_set,
-            "geosite-category-ru"
+            config.mode("bypass_ru").unwrap().rules[4..6],
+            [
+                ModeRule::private_networks_direct(),
+                ModeRule::rule_set("geosite-category-ru", Outbound::Direct, true),
+            ]
         );
         assert_eq!(
             config.rule_sets["geoip-telegram"].url,
@@ -759,6 +898,16 @@ mod tests {
             .find(|mode| mode.id == "global")
             .unwrap();
         global.final_outbound = Outbound::Direct;
+        global.rules = serde_json::from_value(json!([
+            { "ip": "10.0.0.0/8", "route": "direct" },
+            { "ip": "2001:db8::1", "route": "direct" },
+            { "ip": "10.0.0.300", "route": "direct" },
+            { "domain": "corp.example", "route": "direct" },
+            { "domain": "*.corp.example", "route": "direct" },
+            { "domain": "https://corp.example", "route": "direct" },
+            { "domain": "corp example", "route": "direct" },
+        ]))
+        .unwrap();
         let mut copy = config.mode("only_ir").unwrap().clone();
         copy.id = "Only IR".into();
         config.modes.push(copy.clone());
@@ -780,8 +929,12 @@ mod tests {
             pointers(&config),
             [
                 "/modes/0/final".to_string(),
-                format!("/modes/{cn}/rules/1/rule_set"),
-                format!("/modes/{only_cn}/rules/1/rule_set"),
+                "/modes/0/rules/2/ip".to_string(),
+                "/modes/0/rules/4/domain".to_string(),
+                "/modes/0/rules/5/domain".to_string(),
+                "/modes/0/rules/6/domain".to_string(),
+                format!("/modes/{cn}/rules/2/rule_set"),
+                format!("/modes/{only_cn}/rules/2/rule_set"),
                 format!("/modes/{}/id", last - 1),
                 format!("/modes/{last}/id"),
             ]
@@ -791,11 +944,9 @@ mod tests {
         assert!(pointers(&config).contains(&"/modes".to_string()));
 
         let mut config = RoutingConfig::default();
-        config.modes[0].rules.push(ModeRule {
-            rule_set: "geoip-ru".into(),
-            route: Outbound::Direct,
-            required: true,
-        });
+        config.modes[0]
+            .rules
+            .push(ModeRule::rule_set("geoip-ru", Outbound::Direct, true));
         assert_eq!(pointers(&config), ["/modes/0/rules/0/required"]);
     }
 
@@ -934,5 +1085,48 @@ mod tests {
         config.modes.clear();
         assert!(config.declares("global"));
         assert_eq!(config.mode_name("global"), "Global");
+    }
+
+    #[test]
+    fn a_rule_names_exactly_one_condition_and_round_trips() {
+        let rules = json!([
+            { "rule_set": "geoip-ru", "route": "direct", "required": true },
+            { "domain": "corp.example", "route": "direct" },
+            { "ip": "private", "route": "direct" },
+            { "ip": "10.0.0.0/8", "route": "proxy" },
+        ]);
+        let parsed: Vec<ModeRule> = serde_json::from_value(rules.clone()).unwrap();
+        assert_eq!(parsed[2].matches, RuleMatch::PrivateNetworks);
+        assert_eq!(parsed[3].matches, RuleMatch::Ip("10.0.0.0/8".into()));
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), rules);
+
+        for rule in [
+            json!({ "route": "direct" }),
+            json!({ "domain": "a.example", "ip": "10.0.0.1", "route": "direct" }),
+        ] {
+            let error = serde_json::from_value::<ModeRule>(rule).unwrap_err();
+            assert!(error.to_string().contains("exactly one of"), "{error}");
+        }
+    }
+
+    #[test]
+    fn the_schema_allows_required_only_on_rule_set_rules() {
+        let mut document = serde_json::to_value(RoutingConfig::default()).unwrap();
+        document["modes"][0]["rules"] = json!([
+            { "domain": "corp.example", "route": "direct", "required": true }
+        ]);
+        let diagnostics = schema_diagnostics_against(&SCHEMA, &document);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.pointer.starts_with("/modes/0/rules/0")),
+            "{diagnostics:?}"
+        );
+
+        document["modes"][0]["rules"] = json!([
+            { "domain": "corp.example", "route": "direct" },
+            { "rule_set": "geoip-ru", "route": "direct", "required": false },
+        ]);
+        assert!(schema_diagnostics_against(&SCHEMA, &document).is_empty());
     }
 }

@@ -147,8 +147,8 @@ not the daemon is running and cannot be combined with `--killswitch`.
 kvn doctor
 ```
 
-Runs a read-only check of sing-box, the configuration, the daemon, the
-clipboard, and the optional integrations, with a remediation hint for each
+Runs a read-only check of sing-box, the configuration (`profiles.json`,
+`routing.json`, and a rule order that sends names past the VPN), the daemon, the clipboard, and the optional integrations, with a remediation hint for each
 problem. It exits with a non-zero status when a
 required check fails; warnings alone do not change the exit status.
 

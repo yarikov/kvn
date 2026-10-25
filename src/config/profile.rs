@@ -18,6 +18,7 @@ pub use diagnostic::ConfigDiagnostic;
 pub(crate) use diagnostic::into_result;
 #[cfg(test)]
 pub use dns::CustomDnsPreset;
+pub(crate) use dns::is_ip_prefix;
 pub use dns::{ActiveDns, DnsConfig, DnsPreset, DnsRule, DnsServer, FakeIpServer};
 pub use entry::Profile;
 pub(crate) use json_schema::schema_diagnostics_against;
