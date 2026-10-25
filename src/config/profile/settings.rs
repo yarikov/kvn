@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::dns::DnsStrategy;
-use super::{ConfigDiagnostic, DnsConfig, GeoRouting, RoutingMode};
+use super::{ConfigDiagnostic, DnsConfig, GeoRouting};
 
 /// Per-file on-disk log line limits.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
@@ -241,7 +241,9 @@ impl Settings {
 
     pub fn with_global_routing(&self) -> Self {
         let mut settings = self.clone();
-        settings.geo_routing.set_mode(RoutingMode::Global);
+        settings
+            .geo_routing
+            .set_mode(crate::config::routing::GLOBAL_MODE_ID);
         settings
     }
 
@@ -371,13 +373,11 @@ mod tests {
         assert!(!s.auto_connect);
         assert!(!s.kill_switch);
         assert!(s.last_connected_profile.is_none());
-        assert!(s.geo_routing.current_region.is_none());
-        assert!(s.geo_routing.selected_region_modes.is_empty());
         assert_eq!(s.geo_routing.auto_update, GeoAutoUpdate::Off);
         assert_eq!(
             s.geo_routing
                 .mode(&crate::config::routing::RoutingConfig::default()),
-            RoutingMode::Global
+            "global"
         );
         assert_eq!(s.logs.level, "info");
         assert_eq!(s.logs.line_retention.app, 1_000);

@@ -369,21 +369,19 @@ mod tests {
 
     #[test]
     fn collect_geo_availability_lists_the_usable_required_rule_sets_by_tag() {
-        use crate::config::profile::{GeoRegion, RoutingMode};
         use crate::route_plan::RoutePlan;
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let gm = crate::geo::GeoManager::new().unwrap();
-        let bypass_ru = RoutePlan::for_mode(
-            RoutingMode::Bypass(GeoRegion::Ru),
-            &RoutingConfig::default(),
-        );
+        let bypass_ru = RoutePlan::for_mode("bypass_ru", &RoutingConfig::default());
         let required: Vec<_> = bypass_ru.rule_sets().cloned().collect();
         let [geosite, geoip] = &required[..] else {
             unreachable!()
         };
-        let [_, geoip_cn] = &crate::test_helpers::region_rule_sets(GeoRegion::Cn)[..] else {
+        let [_, geoip_cn] =
+            &crate::test_helpers::region_rule_sets(crate::config::profile::GeoRegion::Cn)[..]
+        else {
             unreachable!()
         };
 

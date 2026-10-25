@@ -86,10 +86,8 @@ mod tests {
             }),
             ("routing-mode", |model: &mut Model| {
                 model
-                    .config
-                    .settings
-                    .geo_routing
-                    .set_region(crate::config::profile::GeoRegion::Ru);
+                    .routing
+                    .add_region_modes(crate::config::profile::GeoRegion::Ru);
                 model.overlay = Overlay::RoutingMode;
                 model.routing_selected = 2;
             }),

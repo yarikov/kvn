@@ -12,7 +12,6 @@ use crate::ui::layout::text::visual_width;
 use super::popup::{
     settings_content_sized_rect, settings_content_width, settings_popup_width, settings_row_width,
 };
-use super::routing::geo_region_label;
 use super::settings_row::{settings_full_width_line, settings_value_layout, settings_value_line};
 use super::{APPLY_ACTION, SETTINGS_HEADING, overlay_footer, settings_heading};
 
@@ -71,37 +70,17 @@ pub(super) fn draw(
             popup_width
         }
         SettingsMenuPage::Routing => {
-            use crate::config::profile::GeoRegion;
-
-            let geo_routing = &model.config.settings.geo_routing;
-            let mode = geo_routing.mode(&model.routing);
-            let has_draft = model.routing_settings_draft.is_some();
-            let crate::app::model::RoutingSettings {
-                region: shown_region,
-                mode: shown_mode,
-            } = model.shown_routing_settings();
-            let mut settings = vec![(
-                "Region",
-                geo_region_label(shown_region).to_string(),
-                has_draft && geo_routing.current_region != Some(shown_region),
+            let shown = model.shown_routing_mode();
+            let settings = vec![(
+                "Mode",
+                model.routing.mode_name(shown),
+                shown != model.config.settings.geo_routing.mode(&model.routing),
             )];
-            if shown_region != GeoRegion::Global {
-                settings.push((
-                    "Mode",
-                    model.routing.mode_name(shown_mode),
-                    has_draft && mode != shown_mode,
-                ));
-            }
-            let stable_value_width = GeoRegion::ALL
-                .iter()
-                .map(|region| visual_width(geo_region_label(*region)))
-                .chain(GeoRegion::ALL.iter().flat_map(|region| {
-                    model
-                        .routing
-                        .modes_of(Some(*region))
-                        .into_iter()
-                        .map(|mode| visual_width(&model.routing.mode_name(mode)))
-                }))
+            let stable_value_width = model
+                .routing
+                .mode_ids()
+                .into_iter()
+                .map(|id| visual_width(&model.routing.mode_name(id)))
                 .max()
                 .unwrap_or(0);
             let layout = settings_value_layout(&settings, stable_value_width, area, &frame_widths);
@@ -274,17 +253,9 @@ mod tests {
     fn draw_routing_menu_country_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model
-            .config
-            .settings
-            .geo_routing
-            .set_region(crate::config::profile::GeoRegion::Ru);
-        model
-            .config
-            .settings
-            .geo_routing
-            .set_mode(crate::config::profile::RoutingMode::Bypass(
-                crate::config::profile::GeoRegion::Ru,
-            ));
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }

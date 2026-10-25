@@ -174,7 +174,7 @@ otherwise the notice is skipped and logged. kvn recognises:
 |-------|---------|-------------|
 | `tun_interface` | `kvn0` | Name of the sing-box TUN interface; must start with `kvn` |
 | `dns` | Cloudflare DoH | DNS presets, the active preset, and fake-IP state |
-| `geo_routing` | no region; `auto_update` every 7 days on a new installation, `off` when the field or section is absent (`I` changes it at any time) | Country modes and rule-set updates |
+| `geo_routing` | `mode` `global`; `auto_update` every 7 days on a new installation, `off` when the field or section is absent (`I` changes it at any time) | Selected routing mode and rule-set updates |
 | `auto_connect` | `false` | Connect to `last_connected_profile` at startup |
 | `kill_switch` | `false` | Persisted kill-switch state |
 | `last_connected_profile` | `null` | Last connected profile; maintained by the application |
@@ -399,10 +399,10 @@ with the VPN server's address in Bypass and your own in Only.
 
 ## Geo routing
 
-Open **Settings › Routing** (`Space r`) and set **Region** to `ru`, `cn`,
-`ir`, or `global`, then pick the **Mode**. Country regions offer Global,
-Bypass, and Only modes; `global` skips country rule-set downloads and offers
-Global mode only. The last mode selected for each country is retained.
+Open **Settings › Routing** (`Space r`) and pick the **Mode**: the row offers
+every mode of [`routing.json`](#rule-sets-and-modes), in the file's order. The
+region you choose in the first-run tour (`ru`, `cn`, `ir` or `global`) adds
+its Bypass and Only modes to the file next to Global; `global` adds none.
 Bypass and Only need the country's rule-sets: without them a connection runs
 Bypass as Global and Only as Direct, downloads the files and reconnects in the
 chosen mode (see [Routing modes](privacy.md#routing-modes)).
@@ -412,17 +412,14 @@ The following snippet belongs inside `settings`:
 ```json
 {
   "geo_routing": {
-    "current_region": "ru",
-    "selected_region_modes": {
-      "ru": "bypass_ru"
-    },
+    "mode": "bypass_ru",
     "auto_update": "every_1d"
   }
 }
 ```
 
-Routing modes are serialized as `global`, `bypass_<region>`, or
-`only_<region>`. Geo update schedules are `off`, `every_1d`, `every_3d`, and
+`mode` is the `id` of a mode in `routing.json`; one the file does not declare
+runs as `global`. Geo update schedules are `off`, `every_1d`, `every_3d`, and
 `every_7d`. The legacy value `every_12h` behaves as `every_1d`, and the schema
 migration rewrites it.
 
@@ -439,7 +436,9 @@ even when the server reports it unchanged.
 Rule-sets and routing modes are declared in `~/.config/kvn-tui/routing.json`,
 next to — not inside — `profiles.json`. kvn creates the file the first time it
 starts, with the rule-sets of every region and the Global mode plus the modes
-of the regions you have used; from then on the file is yours:
+of the regions you have used; from then on the file is yours, and kvn adds to
+it only the modes of the region you choose in the first-run tour, when they are
+missing:
 
 ```json
 {
@@ -497,9 +496,10 @@ of the regions you have used; from then on the file is yours:
   left out until its file is there.
 - The `global` mode is required, its `final` is `proxy` and none of its rules
   is `required`: it is what the other modes fall back to. A mode missing from
-  the file cannot be selected; a selected mode that is gone runs as Global. The
-  Mode setting still offers Global, Bypass and Only of the current region, so a
-  region whose modes are not in the file offers only Global.
+  the file cannot be selected; a selected mode that is gone runs as Global.
+- The Mode setting lists the modes in the order of the file. Every rule-set a
+  mode in the file uses is downloaded, so switching between them needs no
+  download.
 
 A rule-set that is not required and has no file yet is named in the status
 line when a connection comes up (`Not routed until downloaded: …`); kvn

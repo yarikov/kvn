@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use super::json_pointer::escape_token;
 use super::profile::{
-    ConfigDiagnostic, GeoRegion, GeoRouting, RoutingMode, into_result, schema_diagnostics_against,
+    ConfigDiagnostic, GeoRegion, GeoRouting, into_result, schema_diagnostics_against,
 };
 use crate::geo::RuleSet;
 
@@ -174,17 +174,36 @@ impl RoutingConfig {
             json_schema: None,
             schema_version: ROUTING_SCHEMA_VERSION,
             rule_sets: BTreeMap::new(),
-            modes: vec![default_mode(RoutingMode::Global)],
+            modes: vec![global_mode()],
         };
         config.insert_all(crate::geo::RULE_SETS);
         for region in regions {
-            for mode in RoutingMode::available(Some(*region)) {
-                if config.mode(&mode.id()).is_none() {
-                    config.modes.push(default_mode(mode));
-                }
-            }
+            config.add_region_modes(*region);
         }
         config
+    }
+
+    pub fn add_region_modes(&mut self, region: GeoRegion) -> bool {
+        let mut extended = self.clone();
+        for mode in region_modes(region) {
+            if extended.mode(&mode.id).is_none() {
+                extended.modes.push(mode);
+            }
+        }
+        let missing: Vec<RuleSet> = crate::geo::RULE_SETS
+            .iter()
+            .filter(|rule_set| {
+                crate::geo::region_rule_set_tags(region).contains(&&*rule_set.tag)
+                    && !extended.rule_sets.contains_key(&*rule_set.tag)
+            })
+            .cloned()
+            .collect();
+        extended.insert_all(&missing);
+        if extended == *self || !extended.diagnostics().is_empty() {
+            return false;
+        }
+        *self = extended;
+        true
     }
 
     pub fn for_new_file(geo_routing: &GeoRouting) -> Self {
@@ -230,20 +249,20 @@ impl RoutingConfig {
         self.modes.iter().find(|mode| mode.id == id)
     }
 
-    pub fn declares(&self, mode: RoutingMode) -> bool {
-        mode == RoutingMode::Global || self.mode(&mode.id()).is_some()
+    pub fn declares(&self, id: &str) -> bool {
+        id == GLOBAL_MODE_ID || self.mode(id).is_some()
     }
 
-    pub fn modes_of(&self, region: Option<GeoRegion>) -> Vec<RoutingMode> {
-        RoutingMode::available(region)
-            .into_iter()
-            .filter(|mode| self.declares(*mode))
-            .collect()
+    pub fn mode_ids(&self) -> Vec<&str> {
+        self.modes.iter().map(|mode| mode.id.as_str()).collect()
     }
 
-    pub fn mode_name(&self, mode: RoutingMode) -> String {
-        self.mode(&mode.id())
-            .map_or_else(|| mode.to_string(), |definition| definition.name.clone())
+    pub fn mode_name(&self, id: &str) -> String {
+        match self.mode(id) {
+            Some(definition) => definition.name.clone(),
+            None if id == GLOBAL_MODE_ID => "Global".to_string(),
+            None => id.to_string(),
+        }
     }
 
     fn insert_all(&mut self, rule_sets: &[RuleSet]) {
@@ -356,29 +375,43 @@ impl RoutingConfig {
     }
 }
 
-const GLOBAL_MODE_ID: &str = "global";
+pub const GLOBAL_MODE_ID: &str = "global";
 
-fn default_mode(mode: RoutingMode) -> ModeDefinition {
-    let (region, region_outbound, final_outbound) = match mode {
-        RoutingMode::Global => (None, Outbound::Direct, Outbound::Proxy),
-        RoutingMode::Bypass(region) => (Some(region), Outbound::Direct, Outbound::Proxy),
-        RoutingMode::Only(region) => (Some(region), Outbound::Proxy, Outbound::Direct),
-    };
-    let tags = region.map_or(&[][..], crate::geo::region_rule_set_tags);
+fn global_mode() -> ModeDefinition {
     ModeDefinition {
-        id: mode.id(),
-        name: mode.to_string(),
-        final_outbound,
-        private_direct: !tags.is_empty(),
-        rules: tags
-            .iter()
-            .map(|tag| ModeRule {
-                rule_set: tag.to_string(),
-                route: region_outbound,
-                required: true,
-            })
-            .collect(),
+        id: GLOBAL_MODE_ID.to_string(),
+        name: "Global".to_string(),
+        final_outbound: Outbound::Proxy,
+        private_direct: false,
+        rules: Vec::new(),
     }
+}
+
+fn region_modes(region: GeoRegion) -> Vec<ModeDefinition> {
+    let tags = crate::geo::region_rule_set_tags(region);
+    if tags.is_empty() {
+        return Vec::new();
+    }
+    let mode = |kind: &str, name: &str, region_outbound: Outbound, final_outbound: Outbound| {
+        ModeDefinition {
+            id: format!("{kind}_{}", region.as_str()),
+            name: format!("{name} {}", region.code_upper()),
+            final_outbound,
+            private_direct: true,
+            rules: tags
+                .iter()
+                .map(|tag| ModeRule {
+                    rule_set: tag.to_string(),
+                    route: region_outbound,
+                    required: true,
+                })
+                .collect(),
+        }
+    };
+    vec![
+        mode("bypass", "Bypass", Outbound::Direct, Outbound::Proxy),
+        mode("only", "Only", Outbound::Proxy, Outbound::Direct),
+    ]
 }
 
 fn is_valid_mode_id(id: &str) -> bool {
@@ -513,10 +546,10 @@ mod tests {
 
     fn geo_routing(regions: &[GeoRegion], legacy: Option<Value>) -> GeoRouting {
         GeoRouting {
-            current_region: regions.first().copied(),
-            selected_region_modes: regions
+            legacy_current_region: regions.first().copied(),
+            legacy_selected_region_modes: regions
                 .iter()
-                .map(|region| (*region, RoutingMode::Global))
+                .map(|region| (*region, GLOBAL_MODE_ID.to_string()))
                 .collect(),
             legacy_service_routes: legacy,
             ..GeoRouting::default()
@@ -852,5 +885,54 @@ mod tests {
             load_routing_at(&path, &GeoRouting::default(), true).unwrap_err()
         );
         assert!(version_error.contains("upgrade kvn"), "{version_error}");
+    }
+
+    #[test]
+    fn region_modes_are_added_once_with_their_rule_sets() {
+        let mut config = RoutingConfig::for_new_file(&GeoRouting::default());
+        config.rule_sets.remove("geoip-cn");
+
+        assert!(config.add_region_modes(GeoRegion::Cn));
+        assert_eq!(mode_ids(&config), ["global", "bypass_cn", "only_cn"]);
+        assert_eq!(
+            config.rule_set("geoip-cn"),
+            crate::geo::RULE_SETS
+                .iter()
+                .find(|rule_set| rule_set.tag == "geoip-cn")
+                .cloned()
+        );
+        assert!(!config.add_region_modes(GeoRegion::Cn));
+        assert!(!config.add_region_modes(GeoRegion::Global));
+    }
+
+    #[test]
+    fn region_modes_that_would_break_the_file_are_not_added() {
+        let mut config = RoutingConfig::for_new_file(&GeoRouting::default());
+        config.rule_sets.remove("geoip-ir");
+        config
+            .rule_sets
+            .insert("mirror".into(), custom(&crate::geo::RULE_SETS[4].url));
+        let before = config.clone();
+
+        assert!(!config.add_region_modes(GeoRegion::Ir));
+        assert_eq!(config, before);
+    }
+
+    #[test]
+    fn modes_are_listed_and_named_from_the_file() {
+        let mut config = RoutingConfig::for_new_file(&GeoRouting::default());
+        config.modes[0].name = "Everything".into();
+        config.add_region_modes(GeoRegion::Ru);
+
+        assert_eq!(config.mode_ids(), ["global", "bypass_ru", "only_ru"]);
+        assert_eq!(config.mode_name("global"), "Everything");
+        assert_eq!(config.mode_name("only_ru"), "Only RU");
+        assert_eq!(config.mode_name("work"), "work");
+        assert!(config.declares("bypass_ru"));
+        assert!(!config.declares("work"));
+
+        config.modes.clear();
+        assert!(config.declares("global"));
+        assert_eq!(config.mode_name("global"), "Global");
     }
 }

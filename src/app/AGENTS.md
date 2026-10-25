@@ -1,13 +1,12 @@
 # Agent Guide: App behavior
 
-This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply here too. It covers the module layout of `src/app/update/`, the reducers in `src/app/` and the client code that drives them: the first-run tour (`src/onboarding.rs`, `app/update/onboarding.rs`, `tui_client/handler/key/onboarding.rs`), status events, region selection, disable confirmation, auto-connect, and wheel scrolling and pointer focus (`app/scroll*`, `tui_client/handler/{mouse,wheel,scroll,pointer}.rs`). Read it before changing that code.
+This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply here too. It covers the module layout of `src/app/update/`, the reducers in `src/app/` and the client code that drives them: the first-run tour (`src/onboarding.rs`, `app/update/onboarding.rs`, `tui_client/handler/key/onboarding.rs`), status events, mode and region selection, disable confirmation, auto-connect, and wheel scrolling and pointer focus (`app/scroll*`, `tui_client/handler/{mouse,wheel,scroll,pointer}.rs`). Read it before changing that code.
 
-## Geo Region Selection
-- `settings.geo_routing.current_region` (`Option<GeoRegion>`) controls which country rule-sets are downloaded and which routing modes are shown.
-- `GeoRegion::Ru` / `Cn` / `Ir` — download that country's geoip/geosite, enable `Global` / `Bypass(region)` / `Only(region)`.
-- `GeoRegion::Global` — skip geo downloads, only `Global` mode is available.
-- The first-run tour (see § First-Run Onboarding) owns the first region choice: its `Region` card hands off to the region picker, and the mode and region pickers open from nowhere else. Both end only by choosing — they ignore `q`/`Esc` and offer no close action. A region or mode set over IPC while a picker is open leaves it on screen with that value marked active, and `Enter` confirms or replaces it. A completed tour with no region stored opens the main screen and behaves as `Global`.
-- The region can be changed at runtime on Settings › Routing (`Space r`), whose Region and Mode edits are drafted in `Model::routing_settings_draft` and committed together on Enter. When the region changes, the previous region's mode is saved into `geo_routing.selected_region_modes` and the new region's previously stored mode is restored (falling back to `Global`).
+## Mode and Region Selection
+- `settings.geo_routing.mode` (a `String`) is the `id` of the selected mode in `routing.json`; `GeoRouting::mode(routing)` returns it when the file declares it and `global` otherwise. There is no region setting: the mode picker and Settings › Routing (`Space r`, one Mode row drafted in `Model::routing_settings_draft`) list `RoutingConfig::mode_ids` in file order, and what is downloaded is the rule-sets of every mode in the file (`route_plan::selectable_rule_sets`).
+- `GeoRegion` survives only to add default modes: the tour's region picker commits through `commit_geo_region`, which calls `RoutingConfig::add_region_modes` on `Model::routing` (pure; it adds the missing `bypass_<region>` / `only_<region>` and their rule-sets, and refuses a change that would make the file invalid) and emits `Effect::AddRegionModes`. The daemon repeats the change on disk with `routing::update_routing_at` and answers `Msg::RegionModesSaved`, which applies the file as written or reports that it was not saved. A region whose modes exist, and `global`, change nothing. The selected mode does not change: the `Routing` card follows.
+- The first-run tour (see § First-Run Onboarding) owns the region choice: its `Region` card hands off to the region picker, and the mode and region pickers open from nowhere else. Both end only by choosing — they ignore `q`/`Esc` and offer no close action. A mode set over IPC while the mode picker is open leaves it on screen with that mode marked active, and `Enter` confirms or replaces it; the region picker marks nothing active. IPC `SetGeoRegion` is accepted and ignored.
+- How a v7 region becomes the selected mode is in `src/config/AGENTS.md`, bullet **Schema v7 → v8**.
 
 ## First-Run Onboarding
 
@@ -49,7 +48,8 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   `StateSnapshot::onboarding_complete` carries `is_complete()` for the Omarchy
   plugin, which blocks its controls until the tour is finished: neither the
   overlay nor `awaiting` covers the `card_pending` gap. The TUI ignores it.
-- An install that already has a geo region is **grandfathered**:
+- An install whose `profiles.json` still names a geo region (schema v7 and
+  earlier, `GeoRouting::predates_mode_selection`) is **grandfathered**:
   `onboarding::load_for_daemon` records it complete and persists that, so nobody
   who already uses kvn sees the tour.
 - **Card keys**: `Enter` performs the step and moves on; there is no skip, no way
@@ -182,10 +182,12 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   `handle_routing_mode` have no `q`/`Esc` branch, so both steps end only by
   committing, which advances the card.
 - **`Routing` hands off only where there is a choice.**
-  `OnboardingStep::handoff_screen` takes the `Config`: under a country region it
-  returns `HandoffScreen::RoutingMode` (the mode picker, not the full `Space r`
-  page), and under `Global` or no region it returns `None`, so `Enter` just moves
-  the card on. The card's title and primary action branch the same way. The
+  `OnboardingStep::handoff_screen` takes the `RoutingConfig`: when
+  `routing.json` has a mode besides `global` it returns
+  `HandoffScreen::RoutingMode` (the mode picker, not the full `Space r` page),
+  and otherwise `None`, so `Enter` just moves the card on. The card's title and
+  primary action branch the same way, and its text names the first country
+  whose default modes the file holds. The
   trigger lives in `commit_routing_mode`, placed after its availability check so
   a mode rejected through IPC cannot advance the tour while confirming the
   current mode still does.

@@ -94,7 +94,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let mut model = crate::test_helpers::model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing.add_region_modes(GeoRegion::Ru);
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Off;
         for rule_set in model.selectable_rule_sets() {
             model
@@ -124,7 +124,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path()) };
         let mut model = crate::test_helpers::model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing.add_region_modes(GeoRegion::Ru);
         let before = model.geo_schedule_epoch;
 
         super::reset_update_schedules(&mut model);
@@ -146,7 +146,7 @@ mod tests {
         std::fs::create_dir_all(&geo_dir).unwrap();
         std::fs::set_permissions(&geo_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
         let mut model = crate::test_helpers::model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing.add_region_modes(GeoRegion::Ru);
 
         super::reset_update_schedules(&mut model);
 

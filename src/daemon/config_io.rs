@@ -292,15 +292,36 @@ pub(super) fn commit_edited(
     }
 }
 
+pub(super) fn add_region_modes(tx: &Sender<Msg>, region: crate::config::profile::GeoRegion) {
+    let tx = tx.clone();
+    thread::spawn(move || {
+        let result = crate::paths::routing_path()
+            .context("Failed to determine routing config path")
+            .and_then(|path| {
+                crate::config::routing::update_routing_at(&path, |routing| {
+                    routing.add_region_modes(region)
+                })
+            })
+            .map_err(IpcError::from);
+        let _ = tx.send(Msg::RegionModesSaved {
+            region,
+            result: Box::new(result),
+        });
+    });
+}
+
 pub(super) fn reload(tx: &Sender<Msg>) {
     let tx = tx.clone();
     thread::spawn(move || {
-        let result = crate::config::load_config().and_then(|c| c.validate().map(|_| c));
+        let mut result = crate::config::load_config().and_then(|c| c.validate().map(|_| c));
         let routing = match &result {
             Ok(config) => crate::config::load_routing(&config.settings.geo_routing, true),
             Err(_) => crate::config::load_routing(&Default::default(), false),
         }
         .map_err(IpcError::from);
+        if let Ok(config) = &mut result {
+            config.settings.geo_routing.forget_legacy_regions();
+        }
         let _ = tx.send(Msg::ConfigReloaded(Box::new(
             result.map_err(IpcError::from),
         )));
@@ -350,7 +371,7 @@ mod tests {
         let _state_home = unwritable_state_home(dir.path());
 
         let mut model = tour_at(OnboardingStep::Doctor);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing.add_region_modes(GeoRegion::Ru);
         let effects = update(&mut model, Msg::Key(enter()));
         assert_eq!(
             model.overlay,
@@ -385,7 +406,7 @@ mod tests {
         let _state_home = unwritable_state_home(dir.path());
 
         let mut model = tour_at(OnboardingStep::Routing);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing.add_region_modes(GeoRegion::Ru);
         update(&mut model, Msg::Key(enter()));
         assert_eq!(model.overlay, Overlay::RoutingMode);
 
@@ -397,7 +418,12 @@ mod tests {
                 ..
             })
         ));
-        let committed = model.config.settings.geo_routing.mode(&model.routing);
+        let committed = model
+            .config
+            .settings
+            .geo_routing
+            .mode(&model.routing)
+            .to_string();
         apply_onboarding_writes(&mut model, effects);
 
         assert_eq!(model.onboarding.state.step, OnboardingStep::Routing);
@@ -408,10 +434,6 @@ mod tests {
             model.config.settings.geo_routing.mode(&model.routing),
             committed
         );
-        assert_eq!(
-            model.config.settings.geo_routing.current_region,
-            Some(GeoRegion::Ru)
-        );
     }
 
     #[test]
@@ -421,7 +443,7 @@ mod tests {
         let _state_home = EnvVarGuard::set("XDG_STATE_HOME", dir.path());
 
         let mut model = tour_at(OnboardingStep::Finish);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model.routing.add_region_modes(GeoRegion::Ru);
         let effects = update(&mut model, Msg::Key(enter()));
         let completed_at = model.onboarding.state.completed_at.unwrap();
         apply_onboarding_writes(&mut model, effects);

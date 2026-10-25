@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Widget, Wrap};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::model::{AppStatus, ConnectionState, Model};
-use crate::config::profile::RoutingMode;
+use crate::config::routing::GLOBAL_MODE_ID;
 
 const RULE_SET_STALE_GRACE_MINUTES: u64 = 60;
 
@@ -211,7 +211,7 @@ impl<'a> Widget for StatusBar<'a> {
             .geo_routing
             .mode(&self.model.routing);
         right.push(match self.model.routing_fallback {
-            Some(fallback) if routing_mode != RoutingMode::Global => (
+            Some(fallback) if routing_mode != GLOBAL_MODE_ID => (
                 format!(
                     "{} → {fallback}",
                     self.model.routing.mode_name(routing_mode)
@@ -424,7 +424,9 @@ mod tests {
 
     fn model_with_region_rule_sets() -> Model {
         let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         model
     }
 
@@ -554,12 +556,10 @@ mod tests {
             443,
             "u1".to_string(),
         )]);
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
         model
-            .config
-            .settings
-            .geo_routing
-            .set_mode(crate::config::profile::RoutingMode::Bypass(GeoRegion::Ru));
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(model.config.profiles[0].id);
         model.routing_fallback = Some(crate::config::profile::RoutingFallback::Global);
@@ -707,7 +707,9 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.kill_switch = true;
         model.config.settings.auto_connect = true;
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         model.mark_selectable_rule_sets_checked(chrono::Local::now());
         let area = Rect::new(0, 0, 18, 1);
         let mut buf = Buffer::empty(area);
@@ -726,7 +728,9 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.config.settings.kill_switch = true;
         model.config.settings.auto_connect = true;
-        model.config.settings.geo_routing.set_region(GeoRegion::Ru);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
         model.mark_selectable_rule_sets_checked(
             chrono::Local
                 .with_ymd_and_hms(2026, 5, 31, 13, 41, 0)

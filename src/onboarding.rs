@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::config::profile::{Config, GeoRegion};
+use crate::config::routing::RoutingConfig;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -119,13 +119,10 @@ impl OnboardingStep {
         Some(self.command(setup)?.replace(" \\\n  ", " "))
     }
 
-    pub fn handoff_screen(self, config: &Config) -> Option<HandoffScreen> {
+    pub fn handoff_screen(self, routing: &RoutingConfig) -> Option<HandoffScreen> {
         match self {
             Self::Region => Some(HandoffScreen::GeoRegions),
-            Self::Routing => match config.settings.geo_routing.current_region {
-                Some(GeoRegion::Global) | None => None,
-                Some(_) => Some(HandoffScreen::RoutingMode),
-            },
+            Self::Routing => (routing.modes.len() > 1).then_some(HandoffScreen::RoutingMode),
             Self::Profiles => Some(HandoffScreen::MainScreen),
             Self::Welcome
             | Self::Connected
@@ -403,19 +400,18 @@ mod tests {
     fn only_the_three_acting_steps_hand_off() {
         use HandoffScreen::*;
 
-        let mut config = Config::default();
-        config.settings.geo_routing.set_region(GeoRegion::Ru);
+        let routing = RoutingConfig::default();
 
         assert_eq!(
-            OnboardingStep::Region.handoff_screen(&config),
+            OnboardingStep::Region.handoff_screen(&routing),
             Some(GeoRegions)
         );
         assert_eq!(
-            OnboardingStep::Routing.handoff_screen(&config),
+            OnboardingStep::Routing.handoff_screen(&routing),
             Some(RoutingMode)
         );
         assert_eq!(
-            OnboardingStep::Profiles.handoff_screen(&config),
+            OnboardingStep::Profiles.handoff_screen(&routing),
             Some(MainScreen)
         );
 
@@ -428,29 +424,25 @@ mod tests {
             OnboardingStep::Omarchy,
             OnboardingStep::Finish,
         ] {
-            assert_eq!(step.handoff_screen(&config), None, "{step:?}");
+            assert_eq!(step.handoff_screen(&routing), None, "{step:?}");
         }
     }
 
     #[test]
     fn routing_hands_off_only_where_there_are_modes_to_choose() {
-        let mut config = Config::default();
-        assert_eq!(OnboardingStep::Routing.handoff_screen(&config), None);
+        use crate::config::profile::GeoRegion;
 
-        config
-            .settings
-            .geo_routing
-            .set_region(crate::config::profile::GeoRegion::Global);
-        assert_eq!(OnboardingStep::Routing.handoff_screen(&config), None);
+        let mut routing = RoutingConfig::for_new_file(&Default::default());
+        assert_eq!(OnboardingStep::Routing.handoff_screen(&routing), None);
 
-        for region in [GeoRegion::Ru, GeoRegion::Cn, GeoRegion::Ir] {
-            config.settings.geo_routing.set_region(region);
-            assert_eq!(
-                OnboardingStep::Routing.handoff_screen(&config),
-                Some(HandoffScreen::RoutingMode),
-                "{region:?}"
-            );
-        }
+        routing.add_region_modes(GeoRegion::Global);
+        assert_eq!(OnboardingStep::Routing.handoff_screen(&routing), None);
+
+        routing.add_region_modes(GeoRegion::Ir);
+        assert_eq!(
+            OnboardingStep::Routing.handoff_screen(&routing),
+            Some(HandoffScreen::RoutingMode)
+        );
     }
 
     #[test]

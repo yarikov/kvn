@@ -47,6 +47,9 @@ pub enum Effect {
         message: String,
     },
     ReloadConfig,
+    AddRegionModes {
+        region: crate::config::profile::GeoRegion,
+    },
     ApplyKillSwitch {
         enabled: bool,
     },

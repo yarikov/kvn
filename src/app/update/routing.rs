@@ -1,43 +1,31 @@
 use crate::app::effect::Effect;
-use crate::app::model::{AppStatus, ConnectionState, Model, RoutingSettings, StatusKey};
-use crate::config::profile::{GeoRegion, RoutingMode};
+use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey};
+use crate::config::profile::GeoRegion;
 
 use crate::app::update::connection::queue_connect;
 use crate::app::update::status::{
     DownloadKind, download_allowed, push_download_blocked, push_status,
 };
 
-pub(in crate::app::update) fn commit_routing_mode(
-    model: &mut Model,
-    mode: RoutingMode,
-) -> Vec<Effect> {
-    let region = model.config.settings.geo_routing.current_region;
-    if !model.routing.modes_of(region).contains(&mode) {
+pub(in crate::app::update) fn commit_routing_mode(model: &mut Model, id: &str) -> Vec<Effect> {
+    if !model.routing.declares(id) {
         let mut effects = vec![];
         push_status(
             &mut effects,
             model,
             StatusKey::Routing,
             AppStatus::Error(format!(
-                "Routing mode change failed: {mode} is unavailable for region {}",
-                region.map(|r| r.code_upper()).unwrap_or("GLOBAL")
+                "Routing mode change failed: {id} is not a mode of routing.json"
             )),
         );
         return effects;
     }
-    let changed = model.config.settings.geo_routing.mode(&model.routing) != mode;
-    model.config.settings.geo_routing.set_mode(mode);
+    let changed = select_mode(model, id);
     let mut effects =
         super::onboarding::outcome(model, super::onboarding::Trigger::RoutingCommitted);
     effects.push(Effect::SaveConfig);
-    let reconnecting = if changed && model.connection == ConnectionState::Connected {
-        model
-            .active_profile_id
-            .is_some_and(|active_id| queue_connect(model, active_id))
-    } else {
-        false
-    };
-    let name = model.routing.mode_name(mode);
+    let reconnecting = changed && reconnect_to_apply_mode(model);
+    let name = model.routing.mode_name(id);
     let status = if reconnecting {
         format!("Routing mode changed: {name} — reconnecting")
     } else {
@@ -52,54 +40,22 @@ pub(in crate::app::update) fn commit_routing_mode(
     effects
 }
 
-pub(in crate::app::update) fn commit_routing_settings(
-    model: &mut Model,
-    settings: RoutingSettings,
-) -> Vec<Effect> {
-    if !model
-        .routing
-        .modes_of(Some(settings.region))
-        .contains(&settings.mode)
-    {
+pub(in crate::app::update) fn commit_routing_settings(model: &mut Model, id: &str) -> Vec<Effect> {
+    if !model.routing.declares(id) {
         let mut effects = vec![];
         push_status(
             &mut effects,
             model,
             StatusKey::Routing,
             AppStatus::Error(format!(
-                "Routing mode change failed: {} is unavailable for region {}",
-                settings.mode,
-                settings.region.code_upper()
+                "Routing mode change failed: {id} is not a mode of routing.json"
             )),
         );
         return effects;
     }
-
-    let old_region = model.config.settings.geo_routing.current_region;
-    let old_mode = model.config.settings.geo_routing.mode(&model.routing);
-    let region_changed = old_region != Some(settings.region);
-    let mode_changed = old_mode != settings.mode;
-    if !region_changed && !mode_changed {
+    if !select_mode(model, id) {
         return vec![];
     }
-
-    if region_changed && let Some(region) = old_region {
-        model
-            .config
-            .settings
-            .geo_routing
-            .selected_region_modes
-            .entry(region)
-            .or_insert(old_mode);
-    }
-    model
-        .config
-        .settings
-        .geo_routing
-        .set_region(settings.region);
-    model.config.settings.geo_routing.set_mode(settings.mode);
-
-    let connection = model.connection;
     let mut effects = vec![Effect::SaveConfig, Effect::BroadcastState];
     push_status(
         &mut effects,
@@ -107,106 +63,51 @@ pub(in crate::app::update) fn commit_routing_settings(
         StatusKey::Routing,
         AppStatus::Info("Routing settings changed".into()),
     );
-
-    if region_changed {
-        effects.push(Effect::RefreshRuleSetStates);
-        if settings.region != GeoRegion::Global {
-            if download_allowed(model) {
-                effects.extend(download_missing_selectable_rule_sets(model));
-            } else {
-                push_download_blocked(&mut effects, model, DownloadKind::Geo);
-            }
-        }
-    }
-
-    if connection == ConnectionState::Connected {
-        if let Some(active_id) = model.active_profile_id {
-            queue_connect(model, active_id);
-        }
-    } else if connection == ConnectionState::Idle
-        && region_changed
-        && model.config.settings.auto_connect
-        && let Some(profile_id) = model.config.settings.last_connected_profile
-        && let Some(idx) = model
-            .config
-            .profiles
-            .iter()
-            .position(|profile| profile.id == profile_id)
-    {
-        model.selected = crate::app::model::row_for_profile(&model.config, idx);
-        queue_connect(model, profile_id);
-    }
-
+    reconnect_to_apply_mode(model);
     effects
+}
+
+fn select_mode(model: &mut Model, id: &str) -> bool {
+    let changed = model.config.settings.geo_routing.mode(&model.routing) != id;
+    model.config.settings.geo_routing.set_mode(id);
+    changed
+}
+
+fn reconnect_to_apply_mode(model: &mut Model) -> bool {
+    model.connection == ConnectionState::Connected
+        && model
+            .active_profile_id
+            .is_some_and(|active_id| queue_connect(model, active_id))
 }
 
 pub(in crate::app::update) fn commit_geo_region(
     model: &mut Model,
     region: GeoRegion,
 ) -> Vec<Effect> {
-    let old_region = model.config.settings.geo_routing.current_region;
-    let old_mode = model.config.settings.geo_routing.mode(&model.routing);
-    let changed = old_region != Some(region);
-    model.config.settings.geo_routing.set_region(region);
+    let added = model.routing.add_region_modes(region);
     let mut effects =
         super::onboarding::outcome(model, super::onboarding::Trigger::RegionCommitted);
-    effects.push(Effect::SaveConfig);
-    if changed {
-        effects.push(Effect::RefreshRuleSetStates);
-    }
     push_status(
         &mut effects,
         model,
         StatusKey::Routing,
         AppStatus::Info(format!("Geo region selected: {}", region.as_str())),
     );
-
-    if changed && region != GeoRegion::Global {
-        if download_allowed(model) {
-            if let Some(download) = download_missing_selectable_rule_sets(model) {
-                push_status(
-                    &mut effects,
-                    model,
-                    StatusKey::Geo,
-                    AppStatus::Info("Checking geo databases…".to_string()),
-                );
-                effects.push(download);
-            }
-        } else {
-            push_download_blocked(&mut effects, model, DownloadKind::Geo);
-        }
+    if !added {
+        return effects;
     }
-
-    if changed {
-        if let Some(old_region) = old_region {
-            model
-                .config
-                .settings
-                .geo_routing
-                .selected_region_modes
-                .entry(old_region)
-                .or_insert(old_mode);
-        }
-        let new_mode = model.config.settings.geo_routing.mode(&model.routing);
-        if new_mode != old_mode {
-            push_status(
-                &mut effects,
-                model,
-                StatusKey::Routing,
-                AppStatus::Info(format!(
-                    "Routing mode changed: {}",
-                    model.routing.mode_name(new_mode)
-                )),
-            );
-        }
-    }
-
-    if changed
-        && model.connection == ConnectionState::Connected
-        && let Some(active_id) = model.active_profile_id
-        && queue_connect(model, active_id)
-    {
-        model.logs.push_back("Region changed — reconnecting".into());
+    effects.push(Effect::AddRegionModes { region });
+    effects.push(Effect::RefreshRuleSetStates);
+    if !download_allowed(model) {
+        push_download_blocked(&mut effects, model, DownloadKind::Geo);
+    } else if let Some(download) = download_missing_selectable_rule_sets(model) {
+        push_status(
+            &mut effects,
+            model,
+            StatusKey::Geo,
+            AppStatus::Info("Checking geo databases…".to_string()),
+        );
+        effects.push(download);
     }
     effects
 }
