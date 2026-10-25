@@ -69,6 +69,7 @@ pub enum Msg {
         attempt_id: u64,
         profile_id: Uuid,
         routing_fallback: Option<crate::config::profile::RoutingFallback>,
+        skipped_rule_sets: Vec<crate::geo::RuleSet>,
     },
     ConnectFailed {
         attempt_id: u64,

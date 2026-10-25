@@ -525,14 +525,16 @@ connects and in `kvn doctor`; move such rules above the first IP rule.
 
 A rule-set that is not required and has no file yet is named in the status
 line when a connection comes up (`Not routed until downloaded: …`); kvn
-downloads it and reconnects once it is there.
+downloads it and reconnects once it is there. After a failed download it waits
+for the next retry instead of trying again on every connection.
 
-Steam and Telegram overrides set in an earlier release become rules: the first
-time kvn starts, every mode in the file gets `geosite-steam` / `geoip-steam`
+Steam and Telegram overrides set in an earlier release become rules: when the
+daemon starts, every mode in the file gets `geosite-steam` / `geoip-steam`
 (and `geosite-telegram` / `geoip-telegram`) with the override's route ahead of
 its own rules, the rule-sets keep their sources and downloaded files, and the
 old `service_routes` setting leaves `profiles.json`. While `routing.json` fails
-its checks the move waits, and the overrides stay where they are.
+its checks the move waits for the next start, and the overrides stay where they
+are.
 
 kvn reads `routing.json` when the daemon starts and when the configuration is
 reloaded. A file that fails these checks is reported in the status line and

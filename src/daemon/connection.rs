@@ -69,6 +69,7 @@ pub(super) fn connect(
             Ok(crate::singbox::runner::StartedSingBox {
                 handle,
                 routing_fallback,
+                skipped_rule_sets,
             }) => {
                 let pid = handle.pid;
                 let stale_handle = {
@@ -91,6 +92,7 @@ pub(super) fn connect(
                     profile_id: profile.id,
                     attempt_id,
                     routing_fallback,
+                    skipped_rule_sets,
                 });
             }
             Err(_) if cancelled() => {}

@@ -45,7 +45,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             profile_id,
             attempt_id,
             routing_fallback,
-        } => on_connected(model, pid, profile_id, attempt_id, routing_fallback),
+            skipped_rule_sets,
+        } => on_connected(
+            model,
+            pid,
+            profile_id,
+            attempt_id,
+            routing_fallback,
+            skipped_rule_sets,
+        ),
         Msg::SubscriptionFetched { id, result } => {
             let mut effects = handle_subscription_result(model, id, result);
             effects.push(Effect::BroadcastState);

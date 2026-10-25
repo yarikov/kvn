@@ -35,7 +35,8 @@ same route and the same rule-set sources, so the files already downloaded are
 kept and both services are routed as before. The `service_routes` setting
 leaves `profiles.json`; an older kvn started afterwards routes Steam and
 Telegram by the mode, like any other traffic. If `routing.json` cannot be read,
-kvn reports it and moves the overrides once the file is fixed.
+kvn reports it and moves the overrides the next time the daemon starts after
+the file is fixed (`systemctl --user restart kvn-tui.service`).
 
 ## v0.35.0
 

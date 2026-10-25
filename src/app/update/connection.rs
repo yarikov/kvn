@@ -12,6 +12,7 @@ pub(in crate::app::update) fn on_connected(
     profile_id: Uuid,
     attempt_id: u64,
     routing_fallback: Option<RoutingFallback>,
+    skipped_rule_sets: Vec<crate::geo::RuleSet>,
 ) -> Vec<Effect> {
     if attempt_id != model.connect_attempt_id {
         return vec![];
@@ -61,7 +62,10 @@ pub(in crate::app::update) fn on_connected(
         Some(fallback) => effects.extend(crate::app::update::geo::fetch_region_rule_sets(
             model, fallback,
         )),
-        None => effects.extend(crate::app::update::geo::fetch_skipped_rule_sets(model)),
+        None => effects.extend(crate::app::update::geo::fetch_skipped_rule_sets(
+            model,
+            skipped_rule_sets,
+        )),
     }
     for (index, warning) in warnings.into_iter().enumerate() {
         push_status(
@@ -527,6 +531,7 @@ mod tests {
                 profile_id: Uuid::new_v4(),
                 attempt_id: 1,
                 routing_fallback: None,
+                skipped_rule_sets: Vec::new(),
             },
         );
 
@@ -569,6 +574,7 @@ mod tests {
                 profile_id: id,
                 attempt_id: 0,
                 routing_fallback: None,
+                skipped_rule_sets: Vec::new(),
             },
         );
         assert_eq!(model.connection, ConnectionState::Connected);
@@ -597,6 +603,7 @@ mod tests {
                 profile_id: uuid::Uuid::new_v4(),
                 attempt_id: 0,
                 routing_fallback: None,
+                skipped_rule_sets: Vec::new(),
             },
         );
 
@@ -629,6 +636,7 @@ mod tests {
                 profile_id: a_id,
                 attempt_id: 0,
                 routing_fallback: None,
+                skipped_rule_sets: Vec::new(),
             },
         );
         assert_eq!(model.active_profile_id, Some(a_id));
@@ -701,6 +709,7 @@ mod tests {
                 profile_id: id,
                 attempt_id: 0,
                 routing_fallback: None,
+                skipped_rule_sets: Vec::new(),
             },
         );
         assert_eq!(model.connection, ConnectionState::Connected);
@@ -739,7 +748,7 @@ mod tests {
         let warning =
             crate::singbox::config::ech_dns_warning(&profile, &model.config.settings).unwrap();
 
-        on_connected(&mut model, 1, profile.id, 0, None);
+        on_connected(&mut model, 1, profile.id, 0, None, Vec::new());
 
         assert_eq!(model.status, Some(AppStatus::Error(warning)));
     }
@@ -753,7 +762,7 @@ mod tests {
         let mut model = model_with_profiles(vec![profile.clone()]);
         let warning = crate::singbox::config::certificate_pin_warning(&profile).unwrap();
 
-        let effects = on_connected(&mut model, 1, profile.id, 0, None);
+        let effects = on_connected(&mut model, 1, profile.id, 0, None, Vec::new());
 
         assert_eq!(model.status, Some(AppStatus::Error(warning.clone())));
         assert!(effects.contains(&app_log_error(&warning)));
@@ -767,7 +776,7 @@ mod tests {
             .insert("pinSHA256".into(), "AB:CD".into());
         let mut model = model_with_profiles(vec![profile.clone()]);
 
-        on_connected(&mut model, 1, profile.id, 0, None);
+        on_connected(&mut model, 1, profile.id, 0, None, Vec::new());
 
         let keys: Vec<_> = model.status_events.iter().map(|event| event.key).collect();
         assert_eq!(
@@ -800,7 +809,7 @@ mod tests {
             &model.routing,
         )
         .unwrap();
-        let effects = on_connected(&mut model, 1, profile.id, 0, None);
+        let effects = on_connected(&mut model, 1, profile.id, 0, None, Vec::new());
         assert_eq!(model.connection, ConnectionState::Connected);
         assert_eq!(model.status, Some(AppStatus::Error(warning.clone())));
         assert!(effects.contains(&app_log_error(&warning)));
@@ -949,6 +958,7 @@ mod tests {
                 profile_id: id,
                 attempt_id: 0,
                 routing_fallback: None,
+                skipped_rule_sets: Vec::new(),
             },
         );
         assert_eq!(model.traffic, TrafficStats::default());
