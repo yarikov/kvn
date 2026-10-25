@@ -347,9 +347,14 @@ impl RoutingConfig {
                     self.insert_all(std::slice::from_ref(rule_set));
                     changed = true;
                 }
-                rules.push(ModeRule::rule_set(&rule_set.tag, route, false));
+                rules.push((
+                    rule_set.kind,
+                    ModeRule::rule_set(&rule_set.tag, route, false),
+                ));
             }
         }
+        rules.sort_by_key(|(kind, _)| *kind != RuleSetKind::Geosite);
+        let rules: Vec<ModeRule> = rules.into_iter().map(|(_, rule)| rule).collect();
         for mode in &mut self.modes {
             let missing: Vec<ModeRule> = rules
                 .iter()
@@ -814,8 +819,8 @@ mod tests {
 
         let expected: Vec<(&str, Outbound)> = vec![
             ("geosite-steam", Outbound::Direct),
-            ("geoip-steam", Outbound::Direct),
             ("geosite-telegram", Outbound::Proxy),
+            ("geoip-steam", Outbound::Direct),
             ("geoip-telegram", Outbound::Proxy),
         ];
         for mode in &config.modes {
