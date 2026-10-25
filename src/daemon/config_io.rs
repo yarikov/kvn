@@ -605,6 +605,7 @@ mod tests {
                 profile_id,
                 attempt_id: 0,
                 routing_fallback: None,
+                skipped_rule_sets: Vec::new(),
             },
         );
 
@@ -631,6 +632,7 @@ mod tests {
                 profile_id,
                 attempt_id: 0,
                 routing_fallback: None,
+                skipped_rule_sets: Vec::new(),
             },
         );
 

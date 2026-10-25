@@ -35,6 +35,16 @@ impl GeoAvailability {
             .any(|rule_set| self.path(rule_set).is_none())
     }
 
+    pub fn skipped_rule_sets(&self, plan: &RoutePlan) -> Vec<RuleSet> {
+        let mut skipped: Vec<RuleSet> = Vec::new();
+        for rule_set in plan.optional_rule_sets() {
+            if self.path(rule_set).is_none() && !skipped.contains(rule_set) {
+                skipped.push(rule_set.clone());
+            }
+        }
+        skipped
+    }
+
     pub fn routing_fallback(&self, plan: &RoutePlan) -> Option<RoutingFallback> {
         self.lacks_rule_sets_of(plan).then_some(plan.fallback)
     }
@@ -459,9 +469,7 @@ pub fn rule_order_dns_warning(
         return None;
     }
     let matches = route_matches(&plan, |rule_set| {
-        states
-            .get(&rule_set.key())
-            .is_some_and(|state| state.present)
+        crate::geo::rule_set_present(states, rule_set)
     });
     let first_address_rule = matches
         .iter()
@@ -3193,6 +3201,35 @@ mod tests {
                 .routing_fallback(&RoutePlan::for_mode("only_ir", &RoutingConfig::default())),
             None
         );
+    }
+
+    #[test]
+    fn skipped_rule_sets_are_the_missing_optional_ones_once() {
+        let mut routing = RoutingConfig::default();
+        let bypass = routing
+            .modes
+            .iter_mut()
+            .find(|m| m.id == "bypass_ru")
+            .unwrap();
+        bypass.rules.extend(
+            serde_json::from_value::<Vec<crate::config::routing::ModeRule>>(json!([
+                { "rule_set": "geoip-cn", "route": "proxy" },
+                { "rule_set": "geoip-ir", "route": "proxy" },
+                { "rule_set": "geoip-cn", "route": "direct" },
+            ]))
+            .unwrap(),
+        );
+        let geo = GeoAvailability {
+            rule_sets: HashMap::from([(
+                "geoip-ir".to_string(),
+                PathBuf::from("/geo/geoip-ir.srs"),
+            )]),
+        };
+
+        let skipped = geo.skipped_rule_sets(&RoutePlan::for_mode("bypass_ru", &routing));
+
+        let tags: Vec<&str> = skipped.iter().map(|rule_set| &*rule_set.tag).collect();
+        assert_eq!(tags, ["geoip-cn"]);
     }
 
     #[test]

@@ -407,6 +407,7 @@ mod tests {
                 profile_id,
                 attempt_id,
                 routing_fallback: None,
+                skipped_rule_sets: Vec::new(),
             },
         );
         assert_eq!(model.onboarding.awaiting, None);

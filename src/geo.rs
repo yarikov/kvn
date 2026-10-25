@@ -239,6 +239,12 @@ pub struct RuleSetState {
 
 pub type RuleSetStates = HashMap<String, RuleSetState>;
 
+pub fn rule_set_present(states: &RuleSetStates, rule_set: &RuleSet) -> bool {
+    states
+        .get(&rule_set.key())
+        .is_some_and(|state| state.present)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleSetOutcome {
     Updated,

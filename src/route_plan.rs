@@ -83,6 +83,13 @@ impl RoutePlan {
         self.entries.iter().filter_map(PlanEntry::rule_set)
     }
 
+    pub fn optional_rule_sets(&self) -> impl Iterator<Item = &RuleSet> + '_ {
+        self.entries
+            .iter()
+            .filter(|entry| !entry.required)
+            .filter_map(PlanEntry::rule_set)
+    }
+
     pub fn required_rule_sets(&self) -> impl Iterator<Item = &RuleSet> + '_ {
         self.entries
             .iter()

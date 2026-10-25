@@ -336,7 +336,7 @@ impl RoutingConfig {
     }
 
     pub fn adopt_service_routes(&mut self, legacy_service_routes: &Value) -> bool {
-        let before = self.clone();
+        let mut changed = false;
         let mut rules = Vec::new();
         for (service, rule_sets) in LEGACY_SERVICE_RULE_SETS {
             let Some(route) = legacy_service_route(Some(legacy_service_routes), service) else {
@@ -345,6 +345,7 @@ impl RoutingConfig {
             for rule_set in rule_sets {
                 if !self.rule_sets.contains_key(&*rule_set.tag) {
                     self.insert_all(std::slice::from_ref(rule_set));
+                    changed = true;
                 }
                 rules.push(ModeRule::rule_set(&rule_set.tag, route, false));
             }
@@ -355,9 +356,10 @@ impl RoutingConfig {
                 .filter(|rule| !mode.rules.iter().any(|own| own.matches == rule.matches))
                 .cloned()
                 .collect();
+            changed |= !missing.is_empty();
             mode.rules.splice(0..0, missing);
         }
-        *self != before
+        changed
     }
 
     pub fn mode(&self, id: &str) -> Option<&ModeDefinition> {

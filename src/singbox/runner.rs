@@ -103,10 +103,7 @@ fn collect_geo_availability(required: &[crate::geo::RuleSet]) -> GeoAvailability
     };
     let states = gm.states(required);
     for rule_set in required {
-        if states
-            .get(&rule_set.key())
-            .is_some_and(|state| state.present)
-        {
+        if crate::geo::rule_set_present(&states, rule_set) {
             geo.rule_sets
                 .insert(rule_set.tag.to_string(), gm.rule_set_path(rule_set));
         }
@@ -119,6 +116,7 @@ const CLASH_API_START_ATTEMPTS: usize = 3;
 pub struct StartedSingBox {
     pub handle: ProcessHandle,
     pub routing_fallback: Option<RoutingFallback>,
+    pub skipped_rule_sets: Vec<crate::geo::RuleSet>,
 }
 
 pub fn start(
@@ -128,9 +126,9 @@ pub fn start(
 ) -> Result<StartedSingBox> {
     let RoutingInput { settings, routing } = input;
     let geo = collect_geo_availability(&crate::route_plan::active_rule_sets(settings, routing));
-    let routing_fallback = geo.routing_fallback(&crate::route_plan::RoutePlan::for_settings(
-        settings, routing,
-    ));
+    let plan = crate::route_plan::RoutePlan::for_settings(settings, routing);
+    let routing_fallback = geo.routing_fallback(&plan);
+    let skipped_rule_sets = geo.skipped_rule_sets(&plan);
     let mut config_validated = false;
     let handle = start_with(
         CLASH_API_START_ATTEMPTS,
@@ -156,6 +154,7 @@ pub fn start(
     Ok(StartedSingBox {
         handle,
         routing_fallback,
+        skipped_rule_sets,
     })
 }
 

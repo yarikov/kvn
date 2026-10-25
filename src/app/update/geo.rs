@@ -99,17 +99,21 @@ fn reconnect_for_updated_rule_sets(model: &mut Model, updated: &[&RuleSetReport]
     }
 }
 
-pub(in crate::app::update) fn fetch_skipped_rule_sets(model: &mut Model) -> Vec<Effect> {
-    let skipped: Vec<RuleSet> = model
-        .active_rule_sets()
-        .into_iter()
-        .filter(|rule_set| {
-            !model
-                .rule_set_states
-                .get(&rule_set.key())
-                .is_some_and(|state| state.present)
-        })
-        .collect();
+pub(in crate::app::update) fn fetch_skipped_rule_sets(
+    model: &mut Model,
+    skipped: Vec<RuleSet>,
+) -> Vec<Effect> {
+    if skipped
+        .iter()
+        .any(|rule_set| model.rule_set_present(rule_set))
+        && let Some(active_id) = model.active_profile_id
+        && queue_connect(model, active_id)
+    {
+        model
+            .logs
+            .push_back("Reconnecting to apply new geo databases".into());
+        return Vec::new();
+    }
     if skipped.is_empty() {
         return Vec::new();
     }
@@ -121,9 +125,14 @@ pub(in crate::app::update) fn fetch_skipped_rule_sets(model: &mut Model) -> Vec<
         StatusKey::Geo,
         AppStatus::Info(format!("Not routed until downloaded: {}", tags.join(", "))),
     );
+    let now = chrono::Local::now();
+    let due: Vec<RuleSet> = skipped
+        .into_iter()
+        .filter(|rule_set| !model.rule_set_retry_pending(rule_set, now))
+        .collect();
     effects.extend(start_rule_set_download(
         model,
-        skipped,
+        due,
         UpdateTrigger::Manual,
         true,
     ));
@@ -172,12 +181,7 @@ fn leave_routing_fallback(
     }
     let missing: Vec<RuleSet> = required
         .into_iter()
-        .filter(|rule_set| {
-            !model
-                .rule_set_states
-                .get(&rule_set.key())
-                .is_some_and(|state| state.present)
-        })
+        .filter(|rule_set| !model.rule_set_present(rule_set))
         .collect();
     if missing.is_empty() {
         if let Some(active_id) = model.active_profile_id {
@@ -602,6 +606,7 @@ mod tests {
                 profile_id,
                 attempt_id: 0,
                 routing_fallback: Some(RoutingFallback::Global),
+                skipped_rule_sets: Vec::new(),
             },
         );
         (model, effects)
@@ -650,6 +655,7 @@ mod tests {
                 profile_id,
                 attempt_id: 0,
                 routing_fallback: Some(RoutingFallback::Direct),
+                skipped_rule_sets: Vec::new(),
             },
         );
         assert_eq!(
@@ -714,22 +720,19 @@ mod tests {
     }
 
     #[test]
-    fn a_connection_names_and_downloads_the_optional_rule_sets_it_skipped() {
+    fn a_connection_reconnects_when_a_skipped_rule_set_arrived_meanwhile() {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
         model
             .routing
-            .add_region_modes(crate::config::profile::GeoRegion::Ru);
-        model.config.settings.geo_routing.set_mode("bypass_ru");
-        model
-            .routing
             .adopt_service_routes(&serde_json::json!({ "steam": "direct" }));
-        model.apply_rule_set_states(present(&ru_rule_sets(), true), model.geo_schedule_epoch);
         model.connection = ConnectionState::ConnectPending;
-        let steam: Vec<RuleSet> = ["geosite-steam", "geoip-steam"]
-            .map(|tag| model.routing.rule_set(tag).unwrap())
-            .to_vec();
+        let geosite = model.routing.rule_set("geosite-steam").unwrap();
+        model.apply_rule_set_states(
+            present(std::slice::from_ref(&geosite), true),
+            model.geo_schedule_epoch,
+        );
 
         let effects = update(
             &mut model,
@@ -738,11 +741,55 @@ mod tests {
                 profile_id,
                 attempt_id: 0,
                 routing_fallback: None,
+                skipped_rule_sets: vec![geosite],
+            },
+        );
+
+        assert_eq!(model.connection, ConnectionState::Connecting);
+        assert!(!downloads_rule_sets(&effects));
+        assert!(
+            !effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::AppendAppLog { message, .. } if message.starts_with("Not routed")))
+        );
+    }
+
+    #[test]
+    fn a_connection_names_and_downloads_the_optional_rule_sets_it_skipped() {
+        let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        let profile_id = profile.id;
+        let mut model = model_with_profiles(vec![profile]);
+        model
+            .routing
+            .adopt_service_routes(&serde_json::json!({ "steam": "direct" }));
+        model.connection = ConnectionState::ConnectPending;
+        let [geosite, geoip] =
+            ["geosite-steam", "geoip-steam"].map(|tag| model.routing.rule_set(tag).unwrap());
+        model.rule_set_states.insert(
+            geoip.key(),
+            crate::geo::RuleSetState {
+                retry: Some(RetryState {
+                    consecutive_failures: 1,
+                    retry_at: Local::now() + chrono::Duration::hours(1),
+                    attempt_date: None,
+                }),
+                ..Default::default()
+            },
+        );
+
+        let effects = update(
+            &mut model,
+            Msg::Connected {
+                pid: 1,
+                profile_id,
+                attempt_id: 0,
+                routing_fallback: None,
+                skipped_rule_sets: vec![geosite.clone(), geoip],
             },
         );
 
         assert!(effects.contains(&Effect::DownloadRuleSets {
-            rule_sets: steam,
+            rule_sets: vec![geosite],
             only_missing: true,
             record_schedule: false,
         }));

@@ -378,6 +378,14 @@ pub struct Model {
     pub pending_tests: VecDeque<Uuid>,
 }
 
+fn note_startup_error(startup_error: &mut Option<String>, message: String) {
+    tracing::error!("{message}");
+    *startup_error = Some(match startup_error.take() {
+        Some(previous) => format!("{previous}; {message}"),
+        None => message,
+    });
+}
+
 fn load_rule_set_states(
     settings: &crate::config::profile::Settings,
     routing: &RoutingConfig,
@@ -473,6 +481,21 @@ impl Model {
         }
     }
 
+    pub fn rule_set_present(&self, rule_set: &crate::geo::RuleSet) -> bool {
+        crate::geo::rule_set_present(&self.rule_set_states, rule_set)
+    }
+
+    pub fn rule_set_retry_pending(
+        &self,
+        rule_set: &crate::geo::RuleSet,
+        now: chrono::DateTime<chrono::Local>,
+    ) -> bool {
+        self.rule_set_states
+            .get(&rule_set.key())
+            .and_then(|state| state.retry.as_ref())
+            .is_some_and(|retry| retry.retry_at > now)
+    }
+
     pub fn apply_rule_set_states(&mut self, states: crate::geo::RuleSetStates, epoch: u64) {
         let current_schedule = epoch == self.geo_schedule_epoch;
         for (key, mut state) in states {
@@ -502,18 +525,19 @@ impl Model {
             Ok(cfg) => match cfg.validate() {
                 Ok(()) => cfg,
                 Err(e) => {
-                    let msg =
-                        format!("Configuration load failed: invalid config; using defaults: {e:#}");
-                    tracing::error!("{msg}");
-                    startup_error = Some(msg);
+                    note_startup_error(
+                        &mut startup_error,
+                        format!("Configuration load failed: invalid config; using defaults: {e:#}"),
+                    );
                     config_persistence_blocked = true;
                     Config::default()
                 }
             },
             Err(e) => {
-                let msg = format!("Configuration load failed; using defaults: {e:#}");
-                tracing::error!("{msg}");
-                startup_error = Some(msg);
+                note_startup_error(
+                    &mut startup_error,
+                    format!("Configuration load failed; using defaults: {e:#}"),
+                );
                 config_persistence_blocked = true;
                 Config::default()
             }
@@ -526,12 +550,10 @@ impl Model {
         ) {
             Ok(routing) => routing,
             Err(e) => {
-                let msg = format!("Routing configuration load failed; using defaults: {e:#}");
-                tracing::error!("{msg}");
-                startup_error = Some(match startup_error.take() {
-                    Some(previous) => format!("{previous}; {msg}"),
-                    None => msg,
-                });
+                note_startup_error(
+                    &mut startup_error,
+                    format!("Routing configuration load failed; using defaults: {e:#}"),
+                );
                 routing_loaded = false;
                 RoutingConfig::for_new_file(&config.settings.geo_routing)
             }
@@ -543,16 +565,10 @@ impl Model {
                     tracing::info!("Moved the Steam and Telegram overrides into routing.json rules")
                 }
                 Ok(false) => {}
-                Err(e) => {
-                    let msg = format!(
-                        "Steam and Telegram overrides were not moved to routing.json: {e:#}"
-                    );
-                    tracing::error!("{msg}");
-                    startup_error = Some(match startup_error.take() {
-                        Some(previous) => format!("{previous}; {msg}"),
-                        None => msg,
-                    });
-                }
+                Err(e) => note_startup_error(
+                    &mut startup_error,
+                    format!("Steam and Telegram overrides were not moved to routing.json: {e:#}"),
+                ),
             }
         }
         let default_selected = 0;
@@ -566,12 +582,10 @@ impl Model {
                 false
             }
             Err(e) => {
-                let msg = format!("Stale VPN cleanup failed: {e:#}");
-                tracing::error!("{msg}");
-                startup_error = Some(match startup_error.take() {
-                    Some(previous) => format!("{previous}; {msg}"),
-                    None => msg,
-                });
+                note_startup_error(
+                    &mut startup_error,
+                    format!("Stale VPN cleanup failed: {e:#}"),
+                );
                 true
             }
         };
