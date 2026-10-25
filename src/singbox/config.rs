@@ -10,7 +10,7 @@ use crate::config::profile::{
 };
 use crate::config::routing::RoutingConfig;
 use crate::geo::{RuleSet, RuleSetKind};
-use crate::route_plan::{Outbound, RoutePlan};
+use crate::route_plan::{Outbound, PlanEntry, PlanMatch, RoutePlan};
 use crate::singbox::outbound::{
     build_anytls_outbound, build_http_outbound, build_hysteria2_outbound, build_naive_outbound,
     build_shadowsocks_outbound, build_shadowtls_outbounds, build_socks_outbound,
@@ -80,49 +80,37 @@ pub fn generate_config(
     input: RoutingInput,
     geo: &GeoAvailability,
     clash_api_port: u16,
-    fallback: Option<RoutingFallback>,
+    runs_in_fallback: bool,
 ) -> anyhow::Result<Value> {
-    match fallback {
-        Some(RoutingFallback::Global) => build_config(
-            profile,
-            RoutingInput {
-                settings: &input.settings.with_global_routing(),
-                ..input
-            },
-            geo,
-            clash_api_port,
-        ),
-        Some(RoutingFallback::Direct) => build_config(profile, input, geo, clash_api_port),
-        None => {
-            let routing_mode = input.settings.geo_routing.mode(input.routing);
-            if geo.lacks_rule_sets_of(&RoutePlan::for_mode(routing_mode, input.routing)) {
-                anyhow::bail!(
-                    "{} routing needs its region rule-sets, which are not downloaded",
-                    input.routing.mode_name(routing_mode)
-                );
-            }
-            build_config(profile, input, geo, clash_api_port)
-        }
+    let plan = RoutePlan::for_settings(input.settings, input.routing);
+    if !runs_in_fallback && geo.lacks_rule_sets_of(&plan) {
+        anyhow::bail!(
+            "{} routing needs its region rule-sets, which are not downloaded",
+            input
+                .routing
+                .mode_name(input.settings.geo_routing.mode(input.routing))
+        );
     }
+    build_config(profile, input, &plan, geo, clash_api_port)
 }
 
 fn build_config(
     profile: &Profile,
     input: RoutingInput,
+    plan: &RoutePlan,
     geo: &GeoAvailability,
     clash_api_port: u16,
 ) -> anyhow::Result<Value> {
-    let RoutingInput { settings, routing } = input;
+    let settings = input.settings;
     let mut proxy_outbounds = build_outbound(profile)?;
     proxy_outbounds.push(json!({ "type": "direct", "tag": "direct" }));
-    let plan = RoutePlan::for_settings(settings, routing);
     let active_dns = settings.dns.active().with_context(|| {
         format!(
             "dns.current_preset {:?} does not name a DNS preset",
             settings.dns.current_preset
         )
     })?;
-    let upstreams = DnsUpstreams::new(active_dns, &plan, profile);
+    let upstreams = DnsUpstreams::new(active_dns, plan, profile);
     let bootstrap = upstreams.bootstrap();
     let resolvers = RouteResolvers {
         default_domain: json!({
@@ -134,7 +122,7 @@ fn build_config(
             "strategy": DNS_STRATEGY,
         }),
     };
-    let (route, rule_sets) = build_route(&plan, resolvers, geo);
+    let (route, rule_sets) = build_route(plan, resolvers, geo);
     let routed_rule_sets: RoutedRuleSets = plan
         .rule_sets()
         .filter(|rule_set| geo.path(rule_set).is_some())
@@ -144,7 +132,7 @@ fn build_config(
         &upstreams,
         bootstrap,
         &routed_rule_sets,
-        &domain_rule_set_outbounds(&route, &routed_rule_sets),
+        &domain_routes(plan, geo),
         &ech_dns_lookup_names(&proxy_outbounds),
     );
 
@@ -199,7 +187,7 @@ fn build_dns(
     upstreams: &DnsUpstreams,
     bootstrap: BootstrapResolver,
     routed_rule_sets: &RoutedRuleSets,
-    domain_routes: &[(&str, &str)],
+    domain_routes: &[DomainRoute],
     ech_lookup_names: &[String],
 ) -> Value {
     let active = &upstreams.active;
@@ -259,21 +247,18 @@ fn ech_lookup_rule(names: &[String], bootstrap_tag: &str) -> Option<Value> {
     })
 }
 
-fn domain_rule_set_outbounds<'a>(
-    route: &'a Value,
-    routed_rule_sets: &RoutedRuleSets,
-) -> Vec<(&'a str, &'a str)> {
-    route["rules"]
-        .as_array()
+type DomainRoute = (Map<String, Value>, &'static str);
+
+fn domain_routes(plan: &RoutePlan, geo: &GeoAvailability) -> Vec<DomainRoute> {
+    route_matches(plan, |rule_set| geo.path(rule_set).is_some())
         .into_iter()
-        .flatten()
-        .filter_map(|rule| Some((rule["rule_set"][0].as_str()?, rule["outbound"].as_str()?)))
-        .filter(|(tag, _)| routed_rule_sets.get(tag) == Some(&RuleSetKind::Geosite))
+        .filter(|route_match| route_match.needs == Destination::Name)
+        .map(|route_match| (route_match.condition(), route_match.outbound.tag()))
         .collect()
 }
 
 fn direct_destination_rules(
-    domain_routes: &[(&str, &str)],
+    domain_routes: &[DomainRoute],
     final_server: &str,
     bootstrap: &BootstrapResolver,
 ) -> Vec<Value> {
@@ -286,13 +271,13 @@ fn direct_destination_rules(
         .map_or(0, |last_direct| last_direct + 1);
     domain_routes[..mirrored_routes]
         .iter()
-        .map(|(tag, outbound)| {
+        .map(|(condition, outbound)| {
             let server = if *outbound == "direct" {
                 bootstrap.tag.as_str()
             } else {
                 final_server
             };
-            json!({ "rule_set": [tag], "server": server })
+            with_server(Value::Object(condition.clone()), server, false)
         })
         .collect()
 }
@@ -451,6 +436,48 @@ pub fn dns_bypass_warning(
             servers.join(", "),
             profile.protocol(),
             profile.name,
+        )
+    })
+}
+
+pub fn rule_order_dns_warning(
+    profile: &Profile,
+    settings: &Settings,
+    routing: &RoutingConfig,
+    states: &crate::geo::RuleSetStates,
+) -> Option<String> {
+    let active = settings.dns.active()?;
+    if !active.fakeip_catch_all {
+        return None;
+    }
+    let plan = RoutePlan::for_settings(settings, routing);
+    if DnsUpstreams::new(active, &plan, profile)
+        .bootstrap()
+        .server
+        .is_some()
+    {
+        return None;
+    }
+    let matches = route_matches(&plan, |rule_set| {
+        states
+            .get(&rule_set.key())
+            .is_some_and(|state| state.present)
+    });
+    let first_address_rule = matches
+        .iter()
+        .position(|route_match| route_match.needs == Destination::Address)?;
+    let tunnelled_names: Vec<String> = matches[first_address_rule..]
+        .iter()
+        .filter(|route_match| {
+            route_match.needs == Destination::Name && route_match.outbound == Outbound::Proxy
+        })
+        .map(|route_match| route_match.values.join(", "))
+        .collect();
+    (!tunnelled_names.is_empty()).then(|| {
+        format!(
+            "{} is looked up past the VPN: it sits below {}, whose address check resolves names through direct DNS in this mode; move it above to keep its lookup in the tunnel",
+            tunnelled_names.join(", "),
+            matches[first_address_rule].values.join(", ")
         )
     })
 }
@@ -649,27 +676,138 @@ struct RouteResolvers {
     destination: Value,
 }
 
-#[derive(Default)]
-struct RuleSetRules {
-    domain: Vec<Value>,
-    ip: Vec<Value>,
-    definitions: Vec<Value>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RouteField {
+    RuleSet,
+    DomainSuffix,
+    IpCidr,
+    PrivateNetworks,
 }
 
-impl RuleSetRules {
-    fn push(&mut self, rule_set: &RuleSet, path: &PathBuf, outbound: Outbound) {
-        let rule = json!({ "rule_set": [rule_set.tag], "outbound": outbound.tag() });
-        match rule_set.kind {
-            RuleSetKind::Geoip => self.ip.push(rule),
-            RuleSetKind::Geosite => self.domain.push(rule),
+impl RouteField {
+    fn key(self) -> &'static str {
+        match self {
+            Self::RuleSet => "rule_set",
+            Self::DomainSuffix => "domain_suffix",
+            Self::IpCidr => "ip_cidr",
+            Self::PrivateNetworks => "ip_is_private",
         }
-        self.definitions.push(json!({
+    }
+
+    fn mergeable(self) -> bool {
+        !matches!(self, Self::RuleSet | Self::PrivateNetworks)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Destination {
+    Any,
+    Name,
+    Address,
+}
+
+struct RouteMatch {
+    field: RouteField,
+    values: Vec<String>,
+    needs: Destination,
+    outbound: Outbound,
+}
+
+impl RouteMatch {
+    fn of(entry: &PlanEntry) -> Self {
+        let (field, values, needs) = match &entry.matches {
+            PlanMatch::RuleSet(rule_set) => (
+                RouteField::RuleSet,
+                vec![rule_set.tag.to_string()],
+                match rule_set.kind {
+                    RuleSetKind::Geosite => Destination::Name,
+                    RuleSetKind::Geoip => Destination::Address,
+                },
+            ),
+            PlanMatch::Domain(domain) => (
+                RouteField::DomainSuffix,
+                vec![domain.clone()],
+                Destination::Name,
+            ),
+            PlanMatch::Ip(ip) => (
+                RouteField::IpCidr,
+                vec![ip_network(ip)],
+                Destination::Address,
+            ),
+            PlanMatch::PrivateNetworks => {
+                (RouteField::PrivateNetworks, Vec::new(), Destination::Any)
+            }
+        };
+        Self {
+            field,
+            values,
+            needs,
+            outbound: entry.outbound,
+        }
+    }
+
+    fn absorbs(&self, next: &Self) -> bool {
+        self.field.mergeable() && self.field == next.field && self.outbound == next.outbound
+    }
+
+    fn condition(&self) -> Map<String, Value> {
+        let value = match self.field {
+            RouteField::PrivateNetworks => json!(true),
+            _ => json!(self.values),
+        };
+        Map::from_iter([(self.field.key().to_string(), value)])
+    }
+
+    fn rule(&self) -> Value {
+        let mut rule = self.condition();
+        rule.insert("outbound".to_string(), json!(self.outbound.tag()));
+        Value::Object(rule)
+    }
+}
+
+fn ip_network(ip: &str) -> String {
+    match ip.parse::<IpAddr>() {
+        Ok(IpAddr::V4(_)) => format!("{ip}/32"),
+        Ok(IpAddr::V6(_)) => format!("{ip}/128"),
+        Err(_) => ip.to_string(),
+    }
+}
+
+fn route_matches(plan: &RoutePlan, present: impl Fn(&RuleSet) -> bool) -> Vec<RouteMatch> {
+    let mut matches: Vec<RouteMatch> = Vec::new();
+    for entry in &plan.entries {
+        if entry.rule_set().is_some_and(|rule_set| !present(rule_set)) {
+            continue;
+        }
+        let next = RouteMatch::of(entry);
+        match matches.last_mut() {
+            Some(last) if last.absorbs(&next) => last.values.extend(next.values),
+            _ => matches.push(next),
+        }
+    }
+    matches
+}
+
+fn rule_set_definitions(plan: &RoutePlan, geo: &GeoAvailability) -> Vec<Value> {
+    let mut definitions: Vec<Value> = Vec::new();
+    for rule_set in plan.rule_sets() {
+        let Some(path) = geo.path(rule_set) else {
+            continue;
+        };
+        if definitions
+            .iter()
+            .any(|known| known["tag"] == *rule_set.tag)
+        {
+            continue;
+        }
+        definitions.push(json!({
             "tag": rule_set.tag,
             "type": "local",
             "format": "binary",
             "path": path,
         }));
     }
+    definitions
 }
 
 fn build_route(
@@ -693,42 +831,46 @@ fn build_route(
         }),
     ];
 
-    let mut planned = RuleSetRules::default();
-    for entry in &plan.entries {
-        if let Some(path) = geo.path(&entry.rule_set) {
-            planned.push(&entry.rule_set, path, entry.outbound);
+    let mut sniffed = false;
+    let mut resolved = false;
+    for route_match in route_matches(plan, |rule_set| geo.path(rule_set).is_some()) {
+        // NOTE: TUN connections carry only a destination IP, so name rules
+        // match only after `sniff`; with fake-IP the destination is a name, so
+        // address rules match only after `resolve`. A sniffed name takes
+        // precedence over the fake-IP name in sing-box's domain matching, so
+        // `sniff` runs only while the destination has no name; an SNI that
+        // differs from the queried name (ECH, domain fronting) must not move a
+        // connection to another rule. A later `resolve` replaces the addresses
+        // an earlier one found (sing-box 1.14), so a name sent directly below
+        // the tunnelled `resolve` is resolved again through the direct
+        // resolver, or a content network would answer for the VPN's location.
+        match route_match.needs {
+            Destination::Name if !sniffed => {
+                sniffed = true;
+                rules.push(json!({
+                    "domain_regex": ["."],
+                    "invert": true,
+                    "action": "sniff",
+                }));
+            }
+            Destination::Address if !resolved => {
+                resolved = true;
+                rules.push(resolve_rule(Map::new(), &resolvers.destination));
+            }
+            _ => {}
         }
+        if resolved
+            && route_match.needs == Destination::Name
+            && route_match.outbound == Outbound::Direct
+            && resolvers.default_domain != resolvers.destination
+        {
+            rules.push(resolve_rule(
+                route_match.condition(),
+                &resolvers.default_domain,
+            ));
+        }
+        rules.push(route_match.rule());
     }
-    let private_rule = plan.private_direct.then(|| {
-        json!({
-            "ip_is_private": true,
-            "outbound": Outbound::Direct.tag(),
-        })
-    });
-
-    // NOTE: TUN connections carry only a destination IP, so domain rule-sets
-    // match only after `sniff`; with fake-IP the destination is a domain, so
-    // IP rule-sets match only after `resolve`. A sniffed name takes precedence
-    // over the fake-IP name in sing-box's domain matching, so `sniff` runs only
-    // while the destination has no name; an SNI that differs from the queried
-    // name (ECH, domain fronting) must not move a connection to another rule.
-    if !planned.domain.is_empty() {
-        rules.push(json!({
-            "domain_regex": ["."],
-            "invert": true,
-            "action": "sniff",
-        }));
-    }
-    let resolve = (!planned.ip.is_empty()).then(|| {
-        let mut rule = resolvers.destination;
-        rule["action"] = json!("resolve");
-        rule
-    });
-    rules.extend(private_rule);
-    rules.append(&mut planned.domain);
-    rules.extend(resolve);
-    rules.append(&mut planned.ip);
-    let rule_sets = planned.definitions;
 
     let route = json!({
         "default_domain_resolver": resolvers.default_domain,
@@ -738,7 +880,15 @@ fn build_route(
         "final": plan.final_outbound.tag()
     });
 
-    (route, rule_sets)
+    (route, rule_set_definitions(plan, geo))
+}
+
+fn resolve_rule(mut condition: Map<String, Value>, resolver: &Value) -> Value {
+    if let Value::Object(resolver) = resolver {
+        condition.extend(resolver.clone());
+    }
+    condition.insert("action".to_string(), json!("resolve"));
+    Value::Object(condition)
 }
 
 fn build_outbound(profile: &Profile) -> anyhow::Result<Vec<Value>> {
@@ -905,7 +1055,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
 
@@ -929,7 +1079,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         assert_eq!(config["log"]["level"].as_str(), Some("info"));
@@ -948,7 +1098,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         assert_eq!(config["log"]["level"].as_str(), Some("debug"));
@@ -967,7 +1117,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         assert_eq!(config["log"]["level"].as_str(), Some("info"));
@@ -985,7 +1135,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -1008,7 +1158,7 @@ mod tests {
                 },
                 &GeoAvailability::all(),
                 port,
-                None,
+                false,
             )
             .unwrap();
             assert_eq!(
@@ -1030,7 +1180,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         let controller = config["experimental"]["clash_api"]["external_controller"]
@@ -1980,7 +2130,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         let outbounds = config["outbounds"].as_array().unwrap();
@@ -2607,7 +2757,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         let rule = &config["dns"]["rules"][0];
@@ -2655,28 +2805,38 @@ mod tests {
         }
     }
 
+    fn domain_route(key: &str, values: Value, outbound: &'static str) -> DomainRoute {
+        (Map::from_iter([(key.to_string(), values)]), outbound)
+    }
+
     #[test]
     fn direct_destination_rules_mirror_domain_routes_up_to_the_last_direct_one() {
         let bootstrap = through_proxy(active(vec![doh("remote", "1.1.1.1")], "remote")).bootstrap();
         let routes = [
-            ("geosite-cn", "proxy"),
-            ("geosite-category-ru", "direct"),
-            ("geosite-category-ir", "proxy"),
+            domain_route("rule_set", json!(["geosite-cn"]), "proxy"),
+            domain_route("domain_suffix", json!(["corp.example"]), "direct"),
+            domain_route("rule_set", json!(["geosite-category-ru"]), "direct"),
+            domain_route("rule_set", json!(["geosite-category-ir"]), "proxy"),
         ];
         assert_eq!(
             direct_destination_rules(&routes, "remote", &bootstrap),
             vec![
                 json!({ "rule_set": ["geosite-cn"], "server": "remote" }),
+                json!({ "domain_suffix": ["corp.example"], "server": "bootstrap" }),
                 json!({ "rule_set": ["geosite-category-ru"], "server": "bootstrap" }),
             ]
         );
-        assert!(direct_destination_rules(&routes[2..], "remote", &bootstrap).is_empty());
+        assert!(direct_destination_rules(&routes[3..], "remote", &bootstrap).is_empty());
     }
 
     #[test]
     fn direct_destination_rules_are_empty_when_the_final_server_stays_direct() {
         let bootstrap = through_proxy(active(vec![local()], "local")).bootstrap();
-        let routes = [("geosite-category-ru", "direct")];
+        let routes = [domain_route(
+            "rule_set",
+            json!(["geosite-category-ru"]),
+            "direct",
+        )];
         assert!(direct_destination_rules(&routes, "local", &bootstrap).is_empty());
     }
 
@@ -2693,7 +2853,11 @@ mod tests {
             &upstreams,
             upstreams.bootstrap(),
             &RoutedRuleSets::new(),
-            &[("geosite-category-ru", "direct")],
+            &[domain_route(
+                "rule_set",
+                json!(["geosite-category-ru"]),
+                "direct",
+            )],
             &[],
         );
         assert_eq!(
@@ -2717,7 +2881,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -2805,7 +2969,7 @@ mod tests {
                 },
                 &GeoAvailability::all(),
                 TEST_CLASH_PORT,
-                None,
+                false,
             )
             .unwrap();
             config["dns"].get("rules").is_some()
@@ -2826,7 +2990,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -2848,7 +3012,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -2873,7 +3037,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         assert!(
@@ -2898,7 +3062,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         assert_eq!(config["dns"]["final"], "quad9");
@@ -2925,7 +3089,7 @@ mod tests {
             },
             &GeoAvailability::all(),
             TEST_CLASH_PORT,
-            None,
+            false,
         )
         .unwrap();
         let servers = config["dns"]["servers"].as_array().unwrap();
@@ -2992,7 +3156,7 @@ mod tests {
                 },
                 &GeoAvailability::default(),
                 TEST_CLASH_PORT,
-                None,
+                false,
             )
             .unwrap_err();
             assert_eq!(
@@ -3039,7 +3203,7 @@ mod tests {
             .iter_mut()
             .find(|mode| mode.id == "bypass_ru")
             .unwrap();
-        bypass_ru.rules[0].required = false;
+        bypass_ru.rules[1].required = false;
         let plan = RoutePlan::for_mode("bypass_ru", &routing);
         let only_geoip = GeoAvailability {
             rule_sets: HashMap::from([(
@@ -3056,48 +3220,232 @@ mod tests {
     }
 
     #[test]
-    fn fallback_config_routes_everything_by_the_fallback() {
-        for (mode, fallback, final_outbound) in [
-            ("bypass_ru", RoutingFallback::Global, "proxy"),
-            ("only_ru", RoutingFallback::Direct, "direct"),
+    fn fallback_config_runs_the_mode_without_its_missing_rule_sets() {
+        let available = GeoAvailability {
+            rule_sets: ["geoip-cn", "geoip-ru"]
+                .into_iter()
+                .map(|tag| (tag.to_string(), PathBuf::from(format!("/geo/{tag}.srs"))))
+                .collect(),
+        };
+        for (mode, final_outbound, region_route) in [
+            ("bypass_ru", "proxy", "direct"),
+            ("only_ru", "direct", "proxy"),
         ] {
+            let mut routing = RoutingConfig::default();
+            let definition = routing.modes.iter_mut().find(|m| m.id == mode).unwrap();
+            definition.rules.extend(
+                serde_json::from_value::<Vec<crate::config::routing::ModeRule>>(json!([
+                    { "domain": "corp.example", "route": "direct" },
+                    { "rule_set": "geoip-cn", "route": "proxy" },
+                ]))
+                .unwrap(),
+            );
             let mut settings = Settings::default();
             settings.geo_routing.set_mode(mode);
+
             let config = generate_config(
                 &test_profile(),
                 RoutingInput {
                     settings: &settings,
-                    routing: &RoutingConfig::default(),
+                    routing: &routing,
                 },
-                &GeoAvailability::default(),
+                &available,
                 TEST_CLASH_PORT,
-                Some(fallback),
+                true,
             )
             .unwrap();
+
+            let rules = config["route"]["rules"].as_array().unwrap();
             assert_eq!(config["route"]["final"], final_outbound);
-            assert!(config["route"].get("rule_set").is_none());
+            assert!(rules.contains(&json!({ "ip_is_private": true, "outbound": "direct" })));
+            assert!(
+                rules.contains(&json!({ "domain_suffix": ["corp.example"], "outbound": "direct" }))
+            );
+            assert!(rules.contains(&json!({ "rule_set": ["geoip-cn"], "outbound": "proxy" })));
+            assert!(rules.contains(&json!({ "rule_set": ["geoip-ru"], "outbound": region_route })));
+            assert!(
+                !rules
+                    .iter()
+                    .any(|rule| rule["rule_set"] == json!(["geosite-category-ru"]))
+            );
+            assert_eq!(config["route"]["rule_set"].as_array().unwrap().len(), 2);
         }
     }
 
     #[test]
-    fn build_route_places_rule_sets_by_kind_after_sniff_and_resolve() {
+    fn rule_order_dns_warning_names_tunnelled_names_below_a_direct_resolve() {
+        let mut routing = RoutingConfig::default();
+        let only_ru = routing
+            .modes
+            .iter_mut()
+            .find(|m| m.id == "only_ru")
+            .unwrap();
+        only_ru.rules.push(
+            serde_json::from_value(json!({ "domain": "youtube.com", "route": "proxy" })).unwrap(),
+        );
+        let mut settings = Settings::default();
+        settings.geo_routing.set_mode("only_ru");
+        settings.dns.fakeip_enabled = true;
+        let present: crate::geo::RuleSetStates =
+            crate::test_helpers::region_rule_sets(crate::config::profile::GeoRegion::Ru)
+                .into_iter()
+                .map(|rule_set| {
+                    (
+                        rule_set.key(),
+                        crate::geo::RuleSetState {
+                            present: true,
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect();
+        let warning =
+            |settings: &Settings, routing: &RoutingConfig, states: &crate::geo::RuleSetStates| {
+                rule_order_dns_warning(&test_profile(), settings, routing, states)
+            };
+
+        assert_eq!(
+            warning(&settings, &routing, &present).as_deref(),
+            Some(
+                "youtube.com is looked up past the VPN: it sits below geoip-ru, whose address check resolves names through direct DNS in this mode; move it above to keep its lookup in the tunnel"
+            )
+        );
+        let missing = crate::geo::RuleSetStates::new();
+        assert_eq!(warning(&settings, &routing, &missing), None);
+        let mut without_fakeip = settings.clone();
+        without_fakeip.dns.fakeip_enabled = false;
+        assert_eq!(warning(&without_fakeip, &routing, &present), None);
+        let mut bypass = settings.clone();
+        bypass.geo_routing.set_mode("bypass_ru");
+        let bypass_ru = routing
+            .modes
+            .iter_mut()
+            .find(|m| m.id == "bypass_ru")
+            .unwrap();
+        bypass_ru.rules.push(
+            serde_json::from_value(json!({ "domain": "youtube.com", "route": "proxy" })).unwrap(),
+        );
+        assert_eq!(warning(&bypass, &routing, &present), None);
+
+        let only_ru = routing
+            .modes
+            .iter_mut()
+            .find(|m| m.id == "only_ru")
+            .unwrap();
+        let moved = only_ru.rules.pop().unwrap();
+        only_ru.rules.insert(1, moved);
+        assert_eq!(warning(&settings, &routing, &present), None);
+    }
+
+    fn user_rules(routing: &mut RoutingConfig, rules: Value) {
+        routing
+            .modes
+            .iter_mut()
+            .find(|mode| mode.id == "global")
+            .unwrap()
+            .rules = serde_json::from_value(rules).unwrap();
+    }
+
+    fn user_route_rules(route: &Value) -> Vec<Value> {
+        route["rules"].as_array().unwrap()[3..].to_vec()
+    }
+
+    #[test]
+    fn build_route_keeps_the_region_rules_ahead_of_resolve() {
         let (route, _) = build_route(
             &RoutePlan::for_mode("bypass_ru", &RoutingConfig::default()),
             default_resolver(),
             &GeoAvailability::all(),
         );
-        let rules = route["rules"].as_array().unwrap();
-        let position =
-            |predicate: &dyn Fn(&Value) -> bool| rules.iter().position(predicate).unwrap();
-        let sniff = position(&|r| r["action"] == "sniff");
-        let resolve = position(&|r| r["action"] == "resolve");
-        let geosite_rule = position(&|r| r["rule_set"] == json!(["geosite-category-ru"]));
-        let geoip_rule = position(&|r| r["rule_set"] == json!(["geoip-ru"]));
-        assert!(sniff < geosite_rule);
-        assert_eq!(rules[sniff]["domain_regex"], json!(["."]));
-        assert_eq!(rules[sniff]["invert"], true);
-        assert!(geosite_rule < resolve && resolve < geoip_rule);
-        assert_eq!(rules[resolve]["server"], "remote");
+        assert_eq!(
+            user_route_rules(&route),
+            [
+                json!({ "ip_is_private": true, "outbound": "direct" }),
+                json!({ "domain_regex": ["."], "invert": true, "action": "sniff" }),
+                json!({ "rule_set": ["geosite-category-ru"], "outbound": "direct" }),
+                json!({ "server": "remote", "strategy": DNS_STRATEGY, "action": "resolve" }),
+                json!({ "rule_set": ["geoip-ru"], "outbound": "direct" }),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_route_follows_the_file_order_and_resolves_direct_names_directly() {
+        let mut routing = RoutingConfig::default();
+        user_rules(
+            &mut routing,
+            json!([
+                { "rule_set": "geoip-ru", "route": "proxy" },
+                { "rule_set": "geosite-category-ru", "route": "direct" },
+                { "domain": "a.example", "route": "direct" },
+                { "domain": "b.example", "route": "direct" },
+                { "ip": "203.0.113.7", "route": "proxy" },
+                { "ip": "2001:db8::/32", "route": "proxy" },
+                { "ip": "private", "route": "direct" },
+            ]),
+        );
+
+        let (route, _) = build_route(
+            &RoutePlan::for_mode("global", &routing),
+            default_resolver(),
+            &GeoAvailability::all(),
+        );
+
+        let direct_resolve = |condition: Value| {
+            let mut rule = condition;
+            rule["server"] = json!("bootstrap");
+            rule["strategy"] = json!(DNS_STRATEGY);
+            rule["action"] = json!("resolve");
+            rule
+        };
+        assert_eq!(
+            user_route_rules(&route),
+            [
+                json!({ "server": "remote", "strategy": DNS_STRATEGY, "action": "resolve" }),
+                json!({ "rule_set": ["geoip-ru"], "outbound": "proxy" }),
+                json!({ "domain_regex": ["."], "invert": true, "action": "sniff" }),
+                direct_resolve(json!({ "rule_set": ["geosite-category-ru"] })),
+                json!({ "rule_set": ["geosite-category-ru"], "outbound": "direct" }),
+                direct_resolve(json!({ "domain_suffix": ["a.example", "b.example"] })),
+                json!({ "domain_suffix": ["a.example", "b.example"], "outbound": "direct" }),
+                json!({ "ip_cidr": ["203.0.113.7/32", "2001:db8::/32"], "outbound": "proxy" }),
+                json!({ "ip_is_private": true, "outbound": "direct" }),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_route_skips_the_direct_resolve_when_dns_already_stays_direct() {
+        let mut routing = RoutingConfig::default();
+        user_rules(
+            &mut routing,
+            json!([
+                { "ip": "203.0.113.0/24", "route": "proxy" },
+                { "domain": "a.example", "route": "direct" },
+                { "rule_set": "geoip-cn", "route": "direct" },
+            ]),
+        );
+        let resolver = json!({ "server": "local", "strategy": DNS_STRATEGY });
+
+        let (route, rule_sets) = build_route(
+            &RoutePlan::for_mode("global", &routing),
+            RouteResolvers {
+                default_domain: resolver.clone(),
+                destination: resolver,
+            },
+            &GeoAvailability::default(),
+        );
+
+        assert_eq!(
+            user_route_rules(&route),
+            [
+                json!({ "server": "local", "strategy": DNS_STRATEGY, "action": "resolve" }),
+                json!({ "ip_cidr": ["203.0.113.0/24"], "outbound": "proxy" }),
+                json!({ "domain_regex": ["."], "invert": true, "action": "sniff" }),
+                json!({ "domain_suffix": ["a.example"], "outbound": "direct" }),
+            ]
+        );
+        assert!(rule_sets.is_empty());
     }
 
     #[test]

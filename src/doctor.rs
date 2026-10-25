@@ -6,6 +6,8 @@ use std::process::{Command, Output};
 
 use anyhow::Result;
 
+use crate::config::profile::Config;
+use crate::config::routing::RoutingConfig;
 use crate::onboarding::{IntegrationSetup, SetupState};
 
 const MIN_SINGBOX_VERSION: (u64, u64, u64) = (1, 14, 0);
@@ -87,7 +89,13 @@ fn collect(root: &Path) -> Vec<Check> {
         )),
     }
 
-    checks.push(check_config());
+    let (config_check, config) = check_config();
+    checks.push(config_check);
+    let (routing_check, routing) = check_routing();
+    checks.push(routing_check);
+    if let (Some(config), Some(routing)) = (&config, &routing) {
+        checks.extend(check_rule_order(config, routing));
+    }
     checks.extend(check_daemon());
     checks.push(check_clipboard());
     checks.push(check_killswitch(root));
@@ -241,26 +249,95 @@ fn check_capabilities(path: &Path) -> Check {
     }
 }
 
-fn check_config() -> Check {
+fn unresolved_config_directory() -> Check {
+    Check::failure(
+        "the configuration directory could not be resolved",
+        "Ensure HOME or XDG_CONFIG_HOME points to a writable directory.",
+    )
+}
+
+fn check_config() -> (Check, Option<Config>) {
     let Some(path) = crate::paths::profiles_path() else {
-        return Check::failure(
-            "the configuration directory could not be resolved",
-            "Ensure HOME or XDG_CONFIG_HOME points to a writable directory.",
-        );
+        return (unresolved_config_directory(), None);
     };
     if !path.exists() {
-        return Check::pass(format!(
+        let check = Check::pass(format!(
             "configuration will be created on first launch: {}",
             path.display()
         ));
+        return (check, None);
     }
-    match crate::config::load_config_at_read_only(&path).and_then(|config| config.validate()) {
-        Ok(()) => Check::pass(format!("configuration is valid: {}", path.display())),
-        Err(error) => Check::failure(
-            format!("configuration is invalid: {error:#}"),
-            format!("Correct {} or restore its backup.", path.display()),
+    match crate::config::load_config_at_read_only(&path)
+        .and_then(|config| config.validate().map(|()| config))
+    {
+        Ok(config) => (
+            Check::pass(format!("configuration is valid: {}", path.display())),
+            Some(config),
+        ),
+        Err(error) => (
+            Check::failure(
+                format!("configuration is invalid: {error:#}"),
+                format!("Correct {} or restore its backup.", path.display()),
+            ),
+            None,
         ),
     }
+}
+
+fn check_routing() -> (Check, Option<RoutingConfig>) {
+    let Some(path) = crate::paths::routing_path() else {
+        return (unresolved_config_directory(), None);
+    };
+    if !path.exists() {
+        let check = Check::pass(format!(
+            "routing configuration will be created on first launch: {}",
+            path.display()
+        ));
+        return (check, None);
+    }
+    match crate::config::routing::load_routing_at(&path, &Default::default(), false) {
+        Ok(routing) => (
+            Check::pass(format!(
+                "routing configuration is valid: {}",
+                path.display()
+            )),
+            Some(routing),
+        ),
+        Err(error) => (
+            Check::failure(
+                format!("routing configuration is invalid: {error:#}"),
+                format!(
+                    "Correct {} or delete it to recreate the defaults.",
+                    path.display()
+                ),
+            ),
+            None,
+        ),
+    }
+}
+
+fn check_rule_order(config: &Config, routing: &RoutingConfig) -> Option<Check> {
+    let profile = config
+        .settings
+        .last_connected_profile
+        .and_then(|id| config.profiles.iter().find(|profile| profile.id == id))
+        .or(config.profiles.first())?;
+    let states = crate::geo::GeoManager::new()
+        .ok()?
+        .states(&crate::route_plan::active_rule_sets(
+            &config.settings,
+            routing,
+        ));
+    let warning = crate::singbox::config::rule_order_dns_warning(
+        profile,
+        &config.settings,
+        routing,
+        &states,
+    )?;
+    Some(Check::warning(
+        warning,
+        "Move the rule above the IP rule in routing.json.",
+    ))
 }
 
 fn check_daemon() -> Vec<Check> {
@@ -880,7 +957,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let _xdg = EnvGuard::set("XDG_CONFIG_HOME", dir.path());
 
-        assert_eq!(check_config().level, Level::Pass);
+        assert_eq!(check_config().0.level, Level::Pass);
         let path = crate::paths::profiles_path().unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
@@ -888,9 +965,83 @@ mod tests {
             serde_json::to_vec(&crate::config::profile::Config::default()).unwrap(),
         )
         .unwrap();
-        assert_eq!(check_config().level, Level::Pass);
+        assert_eq!(check_config().0.level, Level::Pass);
         std::fs::write(path, "not json").unwrap();
-        assert_eq!(check_config().level, Level::Failure);
+        assert_eq!(check_config().0.level, Level::Failure);
+    }
+
+    #[test]
+    fn routing_check_accepts_missing_and_valid_files_and_rejects_invalid_ones() {
+        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _xdg = EnvGuard::set("XDG_CONFIG_HOME", dir.path());
+
+        assert_eq!(check_routing().0.level, Level::Pass);
+        let path = crate::paths::routing_path().unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&crate::config::routing::RoutingConfig::default()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(check_routing().0.level, Level::Pass);
+        std::fs::write(path, r#"{ "schema_version": 1, "modes": [] }"#).unwrap();
+        let (check, _) = check_routing();
+        assert_eq!(check.level, Level::Failure);
+        assert!(
+            check.message.contains("global mode is missing"),
+            "{}",
+            check.message
+        );
+    }
+
+    #[test]
+    fn rule_order_check_counts_only_downloaded_rule_sets() {
+        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _xdg = EnvGuard::set("XDG_CONFIG_HOME", dir.path());
+        let mut config = crate::config::profile::Config::default();
+        config
+            .profiles
+            .push(crate::config::profile::Profile::new_vless(
+                "A".into(),
+                "1.1.1.1".into(),
+                443,
+                crate::test_helpers::TEST_UUID.into(),
+            ));
+        config.settings.geo_routing.set_mode("only_ru");
+        config.settings.dns.fakeip_enabled = true;
+        let mut routing = crate::config::routing::RoutingConfig::default();
+        routing
+            .modes
+            .iter_mut()
+            .find(|mode| mode.id == "only_ru")
+            .unwrap()
+            .rules
+            .push(
+                serde_json::from_value(serde_json::json!({
+                    "domain": "youtube.com", "route": "proxy"
+                }))
+                .unwrap(),
+            );
+        assert!(check_rule_order(&config, &routing).is_none());
+
+        let geo = crate::geo::GeoManager::new().unwrap();
+        for rule_set in crate::test_helpers::region_rule_sets(crate::config::profile::GeoRegion::Ru)
+        {
+            std::fs::write(
+                geo.rule_set_path(&rule_set),
+                crate::test_helpers::RULE_SET_BYTES,
+            )
+            .unwrap();
+        }
+        let check = check_rule_order(&config, &routing).unwrap();
+        assert_eq!(check.level, Level::Warning);
+        assert!(
+            check
+                .message
+                .starts_with("youtube.com is looked up past the VPN")
+        );
     }
 
     #[test]

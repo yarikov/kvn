@@ -761,7 +761,7 @@ mod tests {
             .iter_mut()
             .find(|mode| mode.id == "bypass_ru")
             .unwrap()
-            .rules[0]
+            .rules[1]
             .required = false;
 
         update(

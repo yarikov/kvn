@@ -659,7 +659,7 @@ fn unused_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
     name
 }
 
-fn is_ip_prefix(value: &str) -> bool {
+pub(crate) fn is_ip_prefix(value: &str) -> bool {
     let Some((address, prefix_len)) = value.split_once('/') else {
         return false;
     };

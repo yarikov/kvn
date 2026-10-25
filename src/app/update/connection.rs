@@ -29,15 +29,19 @@ pub(in crate::app::update) fn on_connected(
     model.active_profile_id = Some(profile_id);
     let profile = model.config.profiles.iter().find(|p| p.id == profile_id);
     let profile_name = profile.map(|p| p.name.clone());
-    let fallback_settings = (routing_fallback == Some(RoutingFallback::Global))
-        .then(|| model.config.settings.with_global_routing());
-    let running_settings = fallback_settings.as_ref().unwrap_or(&model.config.settings);
+    let settings = &model.config.settings;
     let warnings: Vec<String> = profile
         .map(|p| {
             [
-                crate::singbox::config::dns_bypass_warning(p, running_settings, &model.routing),
+                crate::singbox::config::dns_bypass_warning(p, settings, &model.routing),
+                crate::singbox::config::rule_order_dns_warning(
+                    p,
+                    settings,
+                    &model.routing,
+                    &model.rule_set_states,
+                ),
                 crate::singbox::config::certificate_pin_warning(p),
-                crate::singbox::config::ech_dns_warning(p, running_settings),
+                crate::singbox::config::ech_dns_warning(p, settings),
             ]
             .into_iter()
             .flatten()
@@ -678,52 +682,6 @@ mod tests {
         let effects = update(&mut model, Msg::SystemResumed);
 
         assert!(effects.is_empty());
-    }
-
-    #[test]
-    fn fallback_connection_warns_about_dns_as_global_routing_runs_it() {
-        use crate::config::profile::{CustomDnsPreset, DnsServer, ProtocolConfig};
-
-        let profile = Profile {
-            config: ProtocolConfig::Http(Default::default()),
-            ..Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into())
-        };
-        let profile_id = profile.id;
-        let dns_warned = |routing_fallback: Option<RoutingFallback>| {
-            let mut model = model_with_profiles(vec![profile.clone()]);
-            model
-                .routing
-                .add_region_modes(crate::config::profile::GeoRegion::Ru);
-            let settings = &mut model.config.settings;
-            settings.dns.custom_presets = vec![CustomDnsPreset {
-                name: "home".to_string(),
-                servers: vec![DnsServer::Udp {
-                    tag: "plain".to_string(),
-                    server: "8.8.8.8".to_string(),
-                    server_port: None,
-                }],
-                rules: Vec::new(),
-                final_server: "plain".to_string(),
-            }];
-            settings.dns.current_preset = "home".to_string();
-            settings.geo_routing.set_mode("only_ru");
-            model.connection = ConnectionState::ConnectPending;
-            update(
-                &mut model,
-                Msg::Connected {
-                    pid: 1,
-                    profile_id,
-                    attempt_id: 0,
-                    routing_fallback,
-                },
-            )
-            .iter()
-            .any(|effect| {
-                matches!(effect, Effect::AppendAppLog { message, .. } if message.contains("\"plain\" (UDP)"))
-            })
-        };
-        assert!(dns_warned(Some(RoutingFallback::Global)));
-        assert!(!dns_warned(Some(RoutingFallback::Direct)));
     }
 
     #[test]

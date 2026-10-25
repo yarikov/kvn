@@ -26,10 +26,10 @@ fn write_config(
     profile: &Profile,
     input: RoutingInput,
     geo: &GeoAvailability,
-    fallback: Option<RoutingFallback>,
+    runs_in_fallback: bool,
     clash_api_port: u16,
 ) -> Result<PathBuf> {
-    let config = generate_config(profile, input, geo, clash_api_port, fallback)
+    let config = generate_config(profile, input, geo, clash_api_port, runs_in_fallback)
         .context("Failed to generate sing-box config")?;
     crate::paths::ensure_runtime_dir()?;
     if let Some(state_dir) = crate::paths::state_dir() {
@@ -136,7 +136,13 @@ pub fn start(
         CLASH_API_START_ATTEMPTS,
         crate::net::allocate_loopback_port,
         |clash_api_port| {
-            let config_path = write_config(profile, input, &geo, routing_fallback, clash_api_port)?;
+            let config_path = write_config(
+                profile,
+                input,
+                &geo,
+                routing_fallback.is_some(),
+                clash_api_port,
+            )?;
             if !config_validated {
                 check_config(&config_path, cancelled)?;
                 config_validated = true;
@@ -336,7 +342,7 @@ mod tests {
                 routing: &RoutingConfig::default(),
             },
             &GeoAvailability::default(),
-            None,
+            false,
             TEST_CLASH_PORT,
         )
         .unwrap();
@@ -424,7 +430,7 @@ mod tests {
                 routing: &RoutingConfig::default(),
             },
             &GeoAvailability::default(),
-            None,
+            false,
             TEST_CLASH_PORT,
         )?;
         let result = check_config(&path, &|| false);

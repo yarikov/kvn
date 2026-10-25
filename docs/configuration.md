@@ -459,8 +459,9 @@ missing:
       "id": "bypass_ru",
       "name": "Bypass RU",
       "final": "proxy",
-      "private_direct": true,
       "rules": [
+        { "ip": "private", "route": "direct" },
+        { "domain": "corp.example", "route": "direct" },
         { "rule_set": "geosite-category-ru", "route": "direct", "required": true },
         { "rule_set": "geoip-ru", "route": "direct", "required": true }
       ]
@@ -487,19 +488,40 @@ missing:
   `only_<region>`); lowercase letters, digits and inner hyphens or
   underscores. `name` is shown for the mode.
 - `final` is where traffic no rule matches goes: `proxy` (through the tunnel) or
-  `direct`. `private_direct` keeps private networks outside the tunnel.
-- `rules` send what a rule-set matches to `route` (`proxy` or `direct`); every
-  rule-set a mode uses is downloaded and kept up to date. A `required` rule-set
-  the mode cannot run without: while its file is missing, all traffic goes to
-  the mode's `final` outbound — Bypass runs as Global, Only as Direct — and kvn
-  reconnects once it is downloaded. A rule-set that is not required is simply
-  left out until its file is there.
+  `direct`.
+- `rules` apply in the order of the file, and the first rule that matches a
+  connection decides its `route` (`proxy` or `direct`). Each rule names one
+  condition:
+  - `rule_set` — the tag of a rule-set declared in `rule_sets`; every rule-set
+    a mode uses is downloaded and kept up to date;
+  - `domain` — a domain and all its subdomains: `example.com` matches
+    `example.com` and `www.example.com`, not `badexample.com`;
+  - `ip` — an IP address, a CIDR network such as `10.0.0.0/8`, or `private`
+    for private networks (LAN, loopback). The Bypass and Only modes kvn writes
+    start with `{ "ip": "private", "route": "direct" }`; move it or remove it
+    to route a local network through the tunnel. `private` matches a connection
+    made to a private address, not a name that resolves to one.
+- Only `rule_set` rules can be `required`: the mode cannot run without such a
+  rule-set. While the file of one is missing, the mode runs without that
+  rule-set — what it would match goes to the mode's `final` outbound, so
+  Bypass sends the region through the tunnel and Only keeps it out — and kvn
+  reconnects once the file is downloaded. Your other rules, and the required
+  rule-sets that are already on disk, keep working in the meantime. A rule-set
+  that is not required is simply left out until its file is there.
 - The `global` mode is required, its `final` is `proxy` and none of its rules
-  is `required`: it is what the other modes fall back to. A mode missing from
-  the file cannot be selected; a selected mode that is gone runs as Global.
+  is `required`: a selected mode that is missing from the file runs as Global,
+  which must never wait for a download. A mode missing from the file cannot be
+  selected.
 - The Mode setting lists the modes in the order of the file. Every rule-set a
   mode in the file uses is downloaded, so switching between them needs no
   download.
+
+To check an `ip` rule or an IP rule-set against a name, kvn looks the name up
+first, and every rule below uses that address — the VPN server too receives the
+address, not the name. With fake-IP on and DNS that does not use the tunnel
+(Only mode, a local server), a name sent through the tunnel by a rule below an
+IP rule is therefore looked up past the VPN. kvn warns about it when it
+connects and in `kvn doctor`; move such rules above the first IP rule.
 
 A rule-set that is not required and has no file yet is named in the status
 line when a connection comes up (`Not routed until downloaded: …`); kvn
