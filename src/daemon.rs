@@ -22,7 +22,7 @@ use crate::ipc::{IpcServer, cleanup_socket};
 use crate::runtime_lock::RuntimeLock;
 
 use config_io::commit_config_change;
-use effect::execute_daemon_effect;
+use effect::{EditReply, execute_daemon_effect};
 use process_slot::{ProcessSlot, lock_process_slot, spawn_ticker, stop_retired};
 
 struct DaemonShared {
@@ -139,14 +139,23 @@ fn run_loop(
             Msg::IpcRequest { request_id, .. } => Some(*request_id),
             _ => None,
         };
-        let edit_requested = matches!(
+        let config_edit_requested = matches!(
             &msg,
             Msg::IpcRequest {
                 command: IpcCommand::ApplyEditedConfig { .. },
                 ..
             }
         );
-        let mut config_edit_result = edit_requested.then(missing_edit_result);
+        let routing_edit_requested = matches!(
+            &msg,
+            Msg::IpcRequest {
+                command: IpcCommand::ApplyEditedRouting { .. },
+                ..
+            }
+        );
+        let edit_requested = config_edit_requested || routing_edit_requested;
+        let mut config_edit_result = config_edit_requested.then(missing_edit_result);
+        let mut routing_edit_result = routing_edit_requested.then(missing_edit_result);
         let before = config_io::UpdateBaseline::capture(model);
         let mut effects = update(model, msg);
         config_io::persist_config_changes(model, before, &mut effects);
@@ -166,6 +175,7 @@ fn run_loop(
                     | Effect::PersistSupportPrompt { .. }
                     | Effect::PersistOnboarding { .. }
                     | Effect::CommitEditedConfig { .. }
+                    | Effect::CommitEditedRouting { .. }
                     | Effect::UpdateSubscription { .. }
                     | Effect::BroadcastState
                     | Effect::ApplyKillSwitch { .. }
@@ -176,10 +186,14 @@ fn run_loop(
         }
 
         for effect in effects {
-            if let Some(result) = execute_daemon_effect(effect, tx, model, shared, edit_requested)
-                && edit_requested
-            {
-                config_edit_result = Some(result);
+            match execute_daemon_effect(effect, tx, model, shared, edit_requested) {
+                Some(EditReply::Config(result)) if config_edit_requested => {
+                    config_edit_result = Some(result);
+                }
+                Some(EditReply::Routing(result)) if routing_edit_requested => {
+                    routing_edit_result = Some(result);
+                }
+                _ => {}
             }
         }
 
@@ -190,6 +204,7 @@ fn run_loop(
         if should_broadcast {
             let mut snapshot = build_snapshot(model, log_session_offsets, response_to);
             snapshot.config_edit_result = config_edit_result;
+            snapshot.routing_edit_result = routing_edit_result;
             if response_to.is_some() {
                 snapshot.scroll_result = model.scroll_result.take();
             }
@@ -199,7 +214,7 @@ fn run_loop(
     Ok(())
 }
 
-fn missing_edit_result() -> crate::app::msg::ConfigEditResult {
+fn missing_edit_result<T>() -> crate::app::msg::ConfigEditResult<T> {
     crate::app::msg::ConfigEditResult::Failed {
         message: "Internal error: the daemon did not produce a configuration save result".into(),
     }
@@ -282,6 +297,7 @@ pub(crate) fn build_snapshot(
         supports_viewport_scroll: true,
         response_to,
         config_edit_result: None,
+        routing_edit_result: None,
         scroll_result: None,
         connection: model.connection,
         status: model.status_text().to_string(),
@@ -435,6 +451,67 @@ mod tests {
             .unwrap()
             .join("recovery");
         assert!(!recovery.exists());
+        client.send(&IpcCommand::Quit).unwrap();
+        worker.join().unwrap();
+        cleanup_socket();
+    }
+
+    #[test]
+    fn a_routing_edit_request_saves_the_file_and_applies_it() {
+        use super::*;
+        use crate::app::msg::RoutingEditResult;
+        use crate::config::routing::{RoutingConfig, RoutingEditBase};
+        use crate::ipc::IpcClient;
+        use crate::test_helpers::{ENV_LOCK, EnvVarGuard};
+        use std::time::Duration;
+
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _runtime = EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
+        let _config = EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        crate::paths::ensure_config_dirs().unwrap();
+        let routing_path = crate::paths::routing_path().unwrap();
+        let base = RoutingConfig::default();
+        std::fs::write(&routing_path, serde_json::to_string_pretty(&base).unwrap()).unwrap();
+        let mut edited = base.clone();
+        edited.modes.retain(|mode| mode.id != "only_ir");
+        let mut model = Model::test_new(Default::default());
+        let (tx, rx) = channel();
+        let server = IpcServer::bind(tx.clone()).unwrap();
+        let worker = thread::spawn(move || {
+            let shared = DaemonShared {
+                process_slot: Arc::new(Mutex::new(ProcessSlot::new(0))),
+                connect_coordinator: Arc::new(Mutex::new(())),
+                singbox_log_pruned_at: Arc::new(Mutex::new(None)),
+            };
+            run_loop(
+                &mut model,
+                rx,
+                &tx,
+                &shared,
+                &server,
+                LogSessionOffsets::default(),
+            )
+            .unwrap();
+        });
+        let mut client = IpcClient::connect().unwrap();
+        let mut request = |command| {
+            let id = client.send_request(&command).unwrap();
+            client.read_response(id, Duration::from_secs(2)).unwrap()
+        };
+
+        let response = request(IpcCommand::ApplyEditedRouting {
+            base: RoutingEditBase::Parsed(Box::new(base)),
+            edited: Box::new(edited.clone()),
+        });
+
+        assert!(matches!(
+            response.routing_edit_result,
+            Some(RoutingEditResult::Saved)
+        ));
+        assert!(response.config_edit_result.is_none());
+        assert_eq!(response.routing, edited);
+        assert!(request(IpcCommand::Attach).routing_edit_result.is_none());
         client.send(&IpcCommand::Quit).unwrap();
         worker.join().unwrap();
         cleanup_socket();

@@ -218,7 +218,8 @@ Clients talk to the daemon in newline-delimited JSON over
   TUI restarts itself from the daemon's executable in the same terminal, so the
   two match and the daemon and the VPN are left alone. When the daemon is gone
   for more than 2 seconds, the TUI exits with an error.
-- **Correlated requests**: saving an edited config (`ApplyEditedConfig`),
+- **Correlated requests**: saving an edited config (`ApplyEditedConfig`,
+  `ApplyEditedRouting`),
   wheel scrolling (`ScrollViewport`), pane focus (`SetMainPaneFocus`), CLI
   connection commands (`connect`, `disconnect`, `reconnect`, `toggle`) and
   `disable --support-prompt` carry a request id. Only the matching reply

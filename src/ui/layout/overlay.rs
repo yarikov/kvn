@@ -19,6 +19,7 @@ pub(super) const SETTINGS_HEADING: &str = "Settings";
 pub(super) const APPLY_ACTION: &str = "apply";
 pub(super) const CONFIRM_ACTION: &str = "confirm";
 pub(super) const BACK_ACTION: &str = "⌫ back";
+pub(super) const EDIT_ROUTING_ACTION: &str = "e edit";
 
 pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
     match model.overlay {
@@ -45,10 +46,23 @@ pub(super) fn overlay_footer(
     close: bool,
     back: bool,
 ) -> String {
+    overlay_footer_with_key(model, primary, None, close, back)
+}
+
+pub(super) fn overlay_footer_with_key(
+    model: &Model,
+    primary: Option<&str>,
+    key_action: Option<&str>,
+    close: bool,
+    back: bool,
+) -> String {
     let icons = icons(model.icon_set());
-    let mut actions = Vec::with_capacity(3);
+    let mut actions = Vec::with_capacity(4);
     if let Some(primary) = primary {
         actions.push(format!("{} {primary}", icons.enter));
+    }
+    if let Some(key_action) = key_action {
+        actions.push(key_action.to_string());
     }
     if close {
         actions.push(format!("q/{} close", icons.esc));

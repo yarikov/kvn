@@ -197,6 +197,10 @@ pub enum IpcCommand {
         base: Box<crate::config::profile::Config>,
         edited: Box<crate::config::profile::Config>,
     },
+    ApplyEditedRouting {
+        base: crate::config::routing::RoutingEditBase,
+        edited: Box<crate::config::routing::RoutingConfig>,
+    },
     Quit,
     ClientError {
         message: String,
@@ -319,6 +323,10 @@ mod tests {
                 base: Box::new(crate::config::profile::Config::default()),
                 edited: Box::new(crate::config::profile::Config::default()),
             },
+            IpcCommand::ApplyEditedRouting {
+                base: crate::config::routing::RoutingEditBase::Raw("{".into()),
+                edited: Box::default(),
+            },
             IpcCommand::Quit,
         ];
         for cmd in cmds {
@@ -341,16 +349,13 @@ mod tests {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub enum ConfigEditResult {
+pub enum ConfigEditResult<T = crate::config::profile::Config> {
     Saved,
-    Conflict {
-        current: Box<crate::config::profile::Config>,
-        paths: Vec<String>,
-    },
-    Failed {
-        message: String,
-    },
+    Conflict { current: Box<T>, paths: Vec<String> },
+    Failed { message: String },
 }
+
+pub type RoutingEditResult = ConfigEditResult<crate::config::routing::RoutingConfig>;
 
 fn serialize_settings_with_plugin_region<S: serde::Serializer>(
     settings: &Settings,
@@ -379,6 +384,8 @@ pub struct StateSnapshot {
     pub response_to: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_edit_result: Option<ConfigEditResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing_edit_result: Option<RoutingEditResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_result: Option<crate::app::scroll::ScrollPosition>,
     pub connection: ConnectionState,

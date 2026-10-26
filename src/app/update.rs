@@ -24,7 +24,7 @@ use subscription::handle_subscription_result;
 use tick::handle_tick;
 use traffic::handle_traffic_stats_updated;
 
-pub(crate) use config_reload::handle_config_reloaded;
+pub(crate) use config_reload::{handle_config_reloaded, handle_routing_reloaded};
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     match msg {

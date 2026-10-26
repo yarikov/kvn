@@ -245,7 +245,9 @@ mod tests {
         model.config.settings.last_connected_profile = Some(profile_id);
         model.routing_error = Some("bad url".into());
         let blocked = vec![
-            app_log_error("Connection blocked: routing.json is invalid: bad url"),
+            app_log_error(
+                "Connection blocked: routing.json is invalid (fix it with Space r e): bad url",
+            ),
             Effect::BroadcastState,
         ];
 

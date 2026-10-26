@@ -544,6 +544,24 @@ does not auto-connect, and `Enter`, `r`, `kvn connect`, `kvn reconnect` and
 that breaks while the VPN is connected leaves that connection running; only new
 connections and reconnects are refused.
 
+Press `e` in **Settings › Routing** (`Space r e`) to edit `routing.json` the
+same way as `profiles.json`: kvn opens a copy of the file in `$VISUAL` or
+`$EDITOR` at the mode shown in the Mode row, checks it when the editor exits,
+lists every problem with its line, and offers to reopen it. The copy carries a
+`"$schema"` reference to `$XDG_RUNTIME_DIR/kvn/routing.schema.json`, which is
+not saved into the file. Changes made to `routing.json` while the editor was
+open are merged by mode `id` and rule-set tag; the rules of one mode changed on
+both sides are a conflict, reopened with the same `YOUR EDIT` / `CURRENT`
+markers. The saved file applies at once: new rule-sets download, and a changed
+active mode reconnects. kvn writes the file in its own format, so the order of
+keys and the layout of a hand-written file are not kept; closing the editor
+without a change leaves the file as it is.
+
+When `routing.json` fails its checks, `e` opens the file itself, at the first
+problem. Fixing it lifts the block on connecting; kvn saves it only if nobody
+changed the file in the meantime, and keeps the broken version in
+`~/.config/kvn-tui/recovery/`.
+
 ## Themes and logging
 
 Open **Settings › Interface** (`Space i`) and change **Theme** to choose one of
@@ -599,7 +617,7 @@ cannot read it.
 | Geo rule-sets | `~/.config/kvn-tui/geo/` |
 | Application log | `~/.config/kvn-tui/logs/app.log` |
 | sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |
-| Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved) |
+| Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved); `routing.json.invalid-*` (a broken `routing.json` replaced from the editor) and `routing.json.conflict-invalid-*` (unfinished `routing.json` edits), three each |
 | First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
 | sing-box cache (fake-IP map) | `$XDG_STATE_HOME/kvn/singbox-cache.db` |
@@ -607,9 +625,11 @@ cannot read it.
 | Generated sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
 | Latency-test configs | `$XDG_RUNTIME_DIR/kvn-tui/test-<uuid>.json` |
 | Private editor copy | `$XDG_RUNTIME_DIR/kvn-tui/profiles-edit-<pid>.json` |
+| Private routing editor copy | `$XDG_RUNTIME_DIR/kvn/routing-edit-<pid>.json` |
 | Daemon instance lock | `$XDG_RUNTIME_DIR/kvn/daemon.lock` |
 | Waybar and recovery state | `$XDG_RUNTIME_DIR/kvn/state.json` |
 | Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
+| Routing editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/routing.schema.json` |
 
 The application-owned runtime directory is created with mode `0700`; generated
 sing-box configs and the IPC socket use mode `0600`. No secret-bearing config is

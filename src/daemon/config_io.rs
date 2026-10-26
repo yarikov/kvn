@@ -5,7 +5,7 @@ use anyhow::Context;
 
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, Model, Overlay, StatusKey};
-use crate::app::msg::{ConfigEditResult, IpcError, Msg};
+use crate::app::msg::{ConfigEditResult, IpcError, Msg, RoutingEditResult};
 use crate::config::profile::Config;
 use crate::onboarding::{OnboardingProgress, OnboardingRecovery};
 use crate::support_prompt::SupportPromptState;
@@ -289,6 +289,32 @@ pub(super) fn commit_edited(
             crate::services::log_tailer::append_app_log("ERROR", &message);
             ConfigEditResult::Failed { message }
         }
+    }
+}
+
+pub(super) fn commit_edited_routing(
+    tx: &Sender<Msg>,
+    model: &mut Model,
+    shared: &DaemonShared,
+    base: crate::config::routing::RoutingEditBase,
+    edited: Box<crate::config::routing::RoutingConfig>,
+) -> RoutingEditResult {
+    let commit = crate::paths::routing_path()
+        .context("Failed to determine routing config path")
+        .and_then(|path| crate::config::routing::commit_edit_at(&path, &base, &edited));
+    match commit {
+        Ok(crate::config::routing::RoutingCommit::Saved(routing)) => {
+            for nested in crate::app::update::handle_routing_reloaded(model, Ok(routing)) {
+                execute_daemon_effect(nested, tx, model, shared, false);
+            }
+            RoutingEditResult::Saved
+        }
+        Ok(crate::config::routing::RoutingCommit::Conflict { current, paths }) => {
+            RoutingEditResult::Conflict { current, paths }
+        }
+        Err(error) => RoutingEditResult::Failed {
+            message: format!("{error:#}"),
+        },
     }
 }
 

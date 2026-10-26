@@ -626,22 +626,63 @@ pub fn load_routing_at(
     }
 }
 
-fn parse_routing(contents: &str, path: &Path) -> Result<RoutingConfig> {
-    let document: Value =
-        serde_json::from_str(contents).with_context(|| format!("Failed to parse {path:?}"))?;
+#[derive(Debug)]
+pub(crate) enum RoutingProblem {
+    Json(serde_json::Error),
+    NewerSchema(u64),
+    Invalid(Vec<ConfigDiagnostic>),
+    Shape(serde_json::Error),
+}
+
+impl RoutingProblem {
+    pub(crate) fn into_error(self, path: &Path) -> anyhow::Error {
+        match self {
+            Self::Json(error) | Self::Shape(error) => {
+                anyhow::Error::new(error).context(format!("Failed to parse {path:?}"))
+            }
+            Self::NewerSchema(version) => anyhow::anyhow!(
+                "{path:?} uses schema_version {version}, newer than this build supports (max {ROUTING_SCHEMA_VERSION}); upgrade kvn"
+            ),
+            Self::Invalid(diagnostics) => match into_result(diagnostics) {
+                Err(error) => error.context(format!("Invalid {path:?}")),
+                Ok(()) => anyhow::anyhow!("Invalid {path:?}"),
+            },
+        }
+    }
+}
+
+pub(crate) fn check_routing(contents: &str) -> std::result::Result<RoutingConfig, RoutingProblem> {
+    let document: Value = serde_json::from_str(contents).map_err(RoutingProblem::Json)?;
     if let Some(version) = document.get("schema_version").and_then(Value::as_u64)
         && version > u64::from(ROUTING_SCHEMA_VERSION)
     {
-        anyhow::bail!(
-            "{path:?} uses schema_version {version}, newer than this build supports (max {ROUTING_SCHEMA_VERSION}); upgrade kvn"
-        );
+        return Err(RoutingProblem::NewerSchema(version));
     }
-    into_result(schema_diagnostics_against(&SCHEMA, &document))
-        .with_context(|| format!("Invalid {path:?}"))?;
-    let config: RoutingConfig =
-        serde_json::from_value(document).with_context(|| format!("Failed to parse {path:?}"))?;
-    into_result(config.diagnostics()).with_context(|| format!("Invalid {path:?}"))?;
-    Ok(config)
+    let mut diagnostics = schema_diagnostics_against(&SCHEMA, &document);
+    let config: RoutingConfig = match serde_json::from_value(document) {
+        Ok(config) => config,
+        Err(error) if diagnostics.is_empty() => return Err(RoutingProblem::Shape(error)),
+        Err(_) => return Err(RoutingProblem::Invalid(diagnostics)),
+    };
+    let reported: HashSet<String> = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.pointer.clone())
+        .collect();
+    diagnostics.extend(
+        config
+            .diagnostics()
+            .into_iter()
+            .filter(|diagnostic| !reported.contains(&diagnostic.pointer)),
+    );
+    if diagnostics.is_empty() {
+        Ok(config)
+    } else {
+        Err(RoutingProblem::Invalid(diagnostics))
+    }
+}
+
+fn parse_routing(contents: &str, path: &Path) -> Result<RoutingConfig> {
+    check_routing(contents).map_err(|problem| problem.into_error(path))
 }
 
 pub(crate) fn update_routing_at(
@@ -656,6 +697,67 @@ pub(crate) fn update_routing_at(
             .with_context(|| format!("Failed to update {path:?}"))?;
     }
     Ok(config)
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum RoutingEditBase {
+    Parsed(Box<RoutingConfig>),
+    Raw(String),
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum RoutingCommit {
+    Saved(RoutingConfig),
+    Conflict {
+        current: Box<RoutingConfig>,
+        paths: Vec<String>,
+    },
+}
+
+pub(crate) fn commit_edit_at(
+    path: &Path,
+    base: &RoutingEditBase,
+    edited: &RoutingConfig,
+) -> Result<RoutingCommit> {
+    let contents = fs::read_to_string(path).with_context(|| format!("Failed to read {path:?}"))?;
+    into_result(edited.diagnostics()).context("The edited routing.json is invalid")?;
+    let saved = match base {
+        RoutingEditBase::Parsed(base) => {
+            let current = parse_routing(&contents, path)
+                .context("routing.json changed while it was being edited and is now invalid")?;
+            let edited = RoutingConfig {
+                json_schema: base.json_schema.clone(),
+                ..edited.clone()
+            };
+            match super::merge::merge_routing(base, &current, &edited) {
+                Ok(merged) => merged,
+                Err(super::merge::MergeError::Conflicts(paths)) => {
+                    return Ok(RoutingCommit::Conflict {
+                        current: Box::new(current),
+                        paths,
+                    });
+                }
+                Err(super::merge::MergeError::Invalid(message)) => anyhow::bail!(message),
+            }
+        }
+        RoutingEditBase::Raw(original) => {
+            anyhow::ensure!(
+                contents == *original,
+                "routing.json changed while it was being edited; open it again to edit the current file"
+            );
+            super::recovery::preserve_at(
+                path,
+                super::recovery::RecoveryKind::RoutingArchive,
+                contents.as_bytes(),
+            )?;
+            edited.clone()
+        }
+    };
+    let json = serde_json::to_string_pretty(&saved)?;
+    crate::atomic_write::write_if_unchanged(path, json.as_bytes(), Some(contents.as_bytes()))
+        .with_context(|| format!("Failed to update {path:?}"))?;
+    Ok(RoutingCommit::Saved(saved))
 }
 
 fn create_routing_at(path: &Path, config: &RoutingConfig) -> Result<()> {
@@ -1135,5 +1237,125 @@ mod tests {
             { "rule_set": "geoip-ru", "route": "direct", "required": false },
         ]);
         assert!(schema_diagnostics_against(&SCHEMA, &document).is_empty());
+    }
+
+    fn written(routing: &RoutingConfig) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("routing.json");
+        std::fs::write(&path, serde_json::to_string_pretty(routing).unwrap()).unwrap();
+        (dir, path)
+    }
+
+    fn renamed(routing: &RoutingConfig, id: &str, name: &str) -> RoutingConfig {
+        let mut routing = routing.clone();
+        routing
+            .modes
+            .iter_mut()
+            .find(|mode| mode.id == id)
+            .unwrap()
+            .name = name.into();
+        routing
+    }
+
+    #[test]
+    fn a_saved_edit_merges_with_the_file_and_drops_the_editor_schema() {
+        let base = RoutingConfig::default();
+        let (_dir, path) = written(&renamed(&base, "bypass_ru", "Russia"));
+        let mut edited = renamed(&base, "only_cn", "China");
+        edited.json_schema = Some("file:///run/user/1000/kvn/routing.schema.json".into());
+
+        let commit = commit_edit_at(
+            &path,
+            &RoutingEditBase::Parsed(Box::new(base.clone())),
+            &edited,
+        )
+        .unwrap();
+
+        let on_disk = load_routing_at(&path, &GeoRouting::default(), false).unwrap();
+        assert_eq!(commit, RoutingCommit::Saved(on_disk.clone()));
+        assert_eq!(on_disk.mode_name("bypass_ru"), "Russia");
+        assert_eq!(on_disk.mode_name("only_cn"), "China");
+        assert_eq!(on_disk.json_schema, None);
+    }
+
+    #[test]
+    fn an_edit_of_a_mode_changed_on_disk_returns_the_conflict_and_leaves_the_file() {
+        let base = RoutingConfig::default();
+        let current = renamed(&base, "bypass_ru", "Russia");
+        let (_dir, path) = written(&current);
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        let commit = commit_edit_at(
+            &path,
+            &RoutingEditBase::Parsed(Box::new(base.clone())),
+            &renamed(&base, "bypass_ru", "RU"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            commit,
+            RoutingCommit::Conflict {
+                current: Box::new(current),
+                paths: vec!["modes[bypass_ru].name".into()],
+            }
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn a_fixed_invalid_file_replaces_it_and_keeps_a_recovery_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("routing.json");
+        std::fs::write(&path, "{ broken").unwrap();
+        let edited = RoutingConfig {
+            json_schema: Some("./my.schema.json".into()),
+            ..RoutingConfig::default()
+        };
+
+        let commit =
+            commit_edit_at(&path, &RoutingEditBase::Raw("{ broken".into()), &edited).unwrap();
+
+        assert_eq!(commit, RoutingCommit::Saved(edited.clone()));
+        assert_eq!(
+            load_routing_at(&path, &GeoRouting::default(), false).unwrap(),
+            edited
+        );
+        let copies: Vec<_> = std::fs::read_dir(dir.path().join("recovery"))
+            .unwrap()
+            .map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap())
+            .collect();
+        assert_eq!(copies, ["{ broken"]);
+    }
+
+    #[test]
+    fn an_edit_that_fails_the_routing_checks_is_not_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("routing.json");
+        std::fs::write(&path, "{ broken").unwrap();
+        let mut edited = RoutingConfig::default();
+        edited.modes.retain(|mode| mode.id != "global");
+
+        let error =
+            commit_edit_at(&path, &RoutingEditBase::Raw("{ broken".into()), &edited).unwrap_err();
+
+        assert!(format!("{error:#}").contains("global mode is missing"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
+    }
+
+    #[test]
+    fn an_invalid_file_changed_while_editing_is_not_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("routing.json");
+        std::fs::write(&path, "{ broken again").unwrap();
+
+        let error = commit_edit_at(
+            &path,
+            &RoutingEditBase::Raw("{ broken".into()),
+            &RoutingConfig::default(),
+        )
+        .unwrap_err();
+
+        assert!(format!("{error:#}").contains("changed while it was being edited"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken again");
     }
 }

@@ -110,13 +110,28 @@ pub(crate) fn handle_routing_reloaded(
                 model,
                 StatusKey::Config,
                 AppStatus::Error(format!(
-                    "Routing configuration reload failed; new connections are blocked until routing.json is fixed: {e}"
+                    "Routing configuration reload failed; new connections are blocked until routing.json is fixed (Space r e): {e}"
                 )),
             );
             return effects;
         }
     };
-    model.routing_error = None;
+    if model.routing_error.take().is_some() {
+        push_status(
+            &mut effects,
+            model,
+            StatusKey::Config,
+            AppStatus::Info("Routing configuration loaded; connecting is allowed again".into()),
+        );
+    }
+    if let Some(draft) = &mut model.routing_settings_draft
+        && draft
+            .mode
+            .as_deref()
+            .is_some_and(|mode| !routing.declares(mode))
+    {
+        draft.mode = None;
+    }
     let old_plan = RoutePlan::for_settings(&model.config.settings, &model.routing);
     let old_selectable = model.selectable_rule_sets();
     model.routing = routing;
@@ -320,10 +335,38 @@ mod tests {
             vec![
                 Effect::BroadcastState,
                 app_log_error(
-                    "Routing configuration reload failed; new connections are blocked until routing.json is fixed: bad url"
+                    "Routing configuration reload failed; new connections are blocked until routing.json is fixed (Space r e): bad url"
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn a_routing_reload_drops_a_drafted_mode_the_file_no_longer_has() {
+        let mut model = model_with_profiles(vec![]);
+        model.routing.add_region_modes(GeoRegion::Ir);
+        let mut routing = model.routing.clone();
+        model.routing_settings_draft = Some(crate::app::model::RoutingSettingsDraft {
+            mode: Some("only_ir".into()),
+        });
+
+        update(
+            &mut model,
+            Msg::RoutingReloaded(Box::new(Ok(routing.clone()))),
+        );
+        assert_eq!(
+            model
+                .routing_settings_draft
+                .as_ref()
+                .unwrap()
+                .mode
+                .as_deref(),
+            Some("only_ir")
+        );
+
+        routing.modes.retain(|mode| mode.id != "only_ir");
+        update(&mut model, Msg::RoutingReloaded(Box::new(Ok(routing))));
+        assert_eq!(model.routing_settings_draft.unwrap().mode, None);
     }
 
     #[test]
@@ -332,9 +375,12 @@ mod tests {
         model.routing_error = Some("bad url".into());
         let routing = model.routing.clone();
 
-        update(&mut model, Msg::RoutingReloaded(Box::new(Ok(routing))));
+        let effects = update(&mut model, Msg::RoutingReloaded(Box::new(Ok(routing))));
 
         assert_eq!(model.routing_error, None);
+        assert!(effects.contains(&app_log_info(
+            "Routing configuration loaded; connecting is allowed again"
+        )));
     }
 
     #[test]

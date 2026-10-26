@@ -382,6 +382,7 @@ mod tests {
             supports_viewport_scroll: true,
             response_to: None,
             config_edit_result: None,
+            routing_edit_result: None,
             scroll_result: None,
             connection: ConnectionState::Idle,
             status: "ok".into(),

@@ -8,7 +8,7 @@ mod support;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::model::{MainPaneFocus, Overlay};
+use crate::app::model::{MainPaneFocus, Overlay, SettingsMenuPage};
 use crate::app::msg::IpcCommand;
 
 use super::{ClientLoop, Flow};
@@ -68,6 +68,12 @@ fn overlay(state: &mut ClientLoop, key: KeyEvent, completes_go_first: bool) -> R
         state.needs_redraw = true;
         return Ok(Flow::Continue);
     }
+    if key.code == KeyCode::Char('e')
+        && state.model.overlay == Overlay::SettingsMenu(SettingsMenuPage::Routing)
+    {
+        editor::open(state, editor::EditedFile::Routing)?;
+        return Ok(Flow::Continue);
+    }
     state.forward_key(key)?;
     Ok(Flow::Continue)
 }
@@ -83,7 +89,7 @@ fn sources(state: &mut ClientLoop, key: KeyEvent) -> Result<Flow> {
             clipboard::paste(state)?
         }
         KeyCode::Char('y') => clipboard::copy_selected(state)?,
-        KeyCode::Char('e') => editor::open(state)?,
+        KeyCode::Char('e') => editor::open(state, editor::EditedFile::Profiles)?,
         _ => state.forward_key(key)?,
     }
     Ok(Flow::Continue)
