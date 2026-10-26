@@ -27,8 +27,8 @@ See [Rule-sets and modes](configuration.md#rule-sets-and-modes).
 The region is no longer a setting. `profiles.json` keeps the selected mode as
 `geo_routing.mode` — the mode you used in your current region — and
 `routing.json` gets the modes of every region you have used. **Settings ›
-Routing** (`Space r`) now has only the Mode row, which lists every mode of the
-file.
+Routing** (`Space r`) has a Mode row, which lists every mode of the file, and
+below it the rules of the mode it shows.
 
 Steam and Telegram overrides become rules of every mode in that file, with the
 same route and the same rule-set sources, so the files already downloaded are

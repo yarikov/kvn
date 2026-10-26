@@ -1,6 +1,6 @@
 mod lists;
 
-pub(crate) use lists::{context, list, select, source_rows};
+pub(crate) use lists::{context, list, routing_settings_rows, select, source_rows};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ScrollPosition {

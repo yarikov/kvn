@@ -224,6 +224,19 @@ pub(in crate::ui::layout) fn selection_visible(area: Rect, total: usize) -> usiz
     total.min(height.saturating_sub(6) as usize)
 }
 
+pub(in crate::ui::layout) fn row_window_start(
+    rows: &[Option<usize>],
+    visible: usize,
+    selected: usize,
+    scroll: Option<usize>,
+) -> usize {
+    let line = rows
+        .iter()
+        .position(|row| *row == Some(selected))
+        .unwrap_or(0);
+    selection_window_start(rows.len(), visible, line, scroll)
+}
+
 pub(in crate::ui::layout) fn selection_window_start(
     total: usize,
     visible: usize,

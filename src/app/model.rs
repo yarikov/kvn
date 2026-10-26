@@ -93,6 +93,20 @@ impl SettingsMenuEntry {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutingPageLine {
+    Row(usize),
+    Blank,
+    RulesHeading,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutingSettingsRow {
+    Mode,
+    Rule(usize),
+    Final,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoutingSettingsDraft {
     #[serde(default)]
@@ -836,8 +850,40 @@ impl Model {
     pub fn settings_menu_len(&self, page: SettingsMenuPage) -> usize {
         match page {
             SettingsMenuPage::Root => SettingsMenuEntry::ALL.len(),
-            SettingsMenuPage::Routing => 1,
+            SettingsMenuPage::Routing => self.shown_mode_rules().len() + 2,
             SettingsMenuPage::Connection | SettingsMenuPage::Interface => 2,
+        }
+    }
+
+    pub fn shown_mode_rules(&self) -> &[crate::config::routing::ModeRule] {
+        self.routing
+            .mode(self.shown_routing_mode())
+            .map_or(&[], |mode| mode.rules.as_slice())
+    }
+
+    pub fn routing_page_lines(&self) -> Vec<RoutingPageLine> {
+        let len = self.settings_menu_len(SettingsMenuPage::Routing);
+        [
+            RoutingPageLine::Row(0),
+            RoutingPageLine::Blank,
+            RoutingPageLine::RulesHeading,
+        ]
+        .into_iter()
+        .chain((1..len).map(RoutingPageLine::Row))
+        .collect()
+    }
+
+    pub fn routing_settings_selected(&self) -> usize {
+        let last = self.settings_menu_len(SettingsMenuPage::Routing) - 1;
+        self.settings_menu_selected.min(last)
+    }
+
+    pub fn routing_settings_row(&self) -> RoutingSettingsRow {
+        let rules = self.shown_mode_rules().len();
+        match self.routing_settings_selected() {
+            0 => RoutingSettingsRow::Mode,
+            index if index <= rules => RoutingSettingsRow::Rule(index - 1),
+            _ => RoutingSettingsRow::Final,
         }
     }
 

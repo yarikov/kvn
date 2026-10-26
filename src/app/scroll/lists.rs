@@ -1,4 +1,6 @@
-use crate::app::model::{DnsSettingsItem, Model, Overlay, SourceRow};
+use crate::app::model::{
+    DnsSettingsItem, Model, Overlay, RoutingPageLine, SettingsMenuPage, SourceRow,
+};
 use crate::config::profile::GeoRegion;
 
 pub(crate) fn context(overlay: Overlay) -> Overlay {
@@ -30,6 +32,17 @@ pub(crate) fn source_rows(model: &Model) -> Vec<Option<usize>> {
     visual
 }
 
+pub(crate) fn routing_settings_rows(model: &Model) -> Vec<Option<usize>> {
+    model
+        .routing_page_lines()
+        .into_iter()
+        .map(|line| match line {
+            RoutingPageLine::Row(row) => Some(row),
+            RoutingPageLine::Blank | RoutingPageLine::RulesHeading => None,
+        })
+        .collect()
+}
+
 pub(crate) fn list(model: &Model) -> Option<(Vec<Option<usize>>, usize)> {
     let (len, selected) = match model.overlay {
         Overlay::None => return Some((source_rows(model), model.selected)),
@@ -46,6 +59,12 @@ pub(crate) fn list(model: &Model) -> Option<(Vec<Option<usize>>, usize)> {
         Overlay::RoutingMode => (model.routing.mode_ids().len(), model.routing_selected),
         Overlay::GeoRegions => (GeoRegion::ALL.len(), model.geo_region_selected),
         Overlay::DnsSettings => (DnsSettingsItem::ALL.len(), model.dns_selected),
+        Overlay::SettingsMenu(SettingsMenuPage::Routing) => {
+            return Some((
+                routing_settings_rows(model),
+                model.routing_settings_selected(),
+            ));
+        }
         Overlay::SettingsMenu(page) => {
             (model.settings_menu_len(page), model.settings_menu_selected)
         }
@@ -112,6 +131,22 @@ mod tests {
         assert!(list(&model).is_none());
         select(&mut model, 1);
         assert_eq!(model.overlay, Overlay::ConfirmDelete);
+    }
+
+    #[test]
+    fn routing_settings_rows_skip_the_blank_and_the_rules_heading() {
+        let mut model = crate::test_helpers::model_with_profiles(vec![]);
+        model.routing.add_region_modes(GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+
+        assert_eq!(
+            list(&model),
+            Some((
+                vec![Some(0), None, None, Some(1), Some(2), Some(3), Some(4)],
+                0
+            ))
+        );
     }
 
     #[test]

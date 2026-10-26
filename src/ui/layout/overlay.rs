@@ -5,6 +5,7 @@ pub(super) mod help;
 mod onboarding;
 pub(super) mod popup;
 mod routing;
+mod routing_settings;
 mod settings_menu;
 mod settings_row;
 mod support;

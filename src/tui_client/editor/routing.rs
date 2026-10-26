@@ -8,6 +8,7 @@ use super::{
     EditIssue, EditSession, EditorOutcome, EditorSnapshot, diagnostics_issue, edit_until_saved,
     finish_edit, load_issue, prepared_editor, unresolved_conflicts, write_editor_schema,
 };
+use crate::app::model::RoutingSettingsRow;
 use crate::app::msg::{IpcCommand, RoutingEditResult};
 use crate::config::json_pointer::JsonIndex;
 use crate::config::routing::{RoutingConfig, RoutingEditBase, RoutingProblem, routing_json_schema};
@@ -59,7 +60,7 @@ impl EditSession for RoutingEdit {
     }
 }
 
-pub fn open_routing_editor(mode: &str) -> Result<EditorOutcome> {
+pub fn open_routing_editor(mode: &str, row: RoutingSettingsRow) -> Result<EditorOutcome> {
     let editor = prepared_editor()?;
     let routing_path = crate::paths::routing_path().context("Failed to determine routing path")?;
     let on_disk = fs::read_to_string(&routing_path)
@@ -72,7 +73,7 @@ pub fn open_routing_editor(mode: &str) -> Result<EditorOutcome> {
                 .modes
                 .iter()
                 .position(|candidate| candidate.id == mode)
-                .and_then(|index| JsonIndex::new(&contents).line(&format!("/modes/{index}")));
+                .and_then(|index| JsonIndex::new(&contents).nearest_line(&row_pointer(index, row)));
             (RoutingEditBase::Parsed(Box::new(routing)), contents, line)
         }
         Err(issue) => (RoutingEditBase::Raw(on_disk.clone()), on_disk, issue.line),
@@ -89,6 +90,14 @@ pub fn open_routing_editor(mode: &str) -> Result<EditorOutcome> {
     let mut session = RoutingEdit { base, json_schema };
     let result = edit_until_saved(&path, &mut session, &editor, line, contents.as_bytes());
     finish_edit(snapshot, contents.as_bytes(), result)
+}
+
+fn row_pointer(mode: usize, row: RoutingSettingsRow) -> String {
+    match row {
+        RoutingSettingsRow::Mode => format!("/modes/{mode}"),
+        RoutingSettingsRow::Rule(rule) => format!("/modes/{mode}/rules/{rule}"),
+        RoutingSettingsRow::Final => format!("/modes/{mode}/final"),
+    }
 }
 
 fn snapshot_contents(routing: &RoutingConfig, json_schema: Option<String>) -> Result<String> {
@@ -170,6 +179,16 @@ mod tests {
             check_routing_edit(&pretty(&routing), Path::new("routing.json")).unwrap(),
             routing
         );
+    }
+
+    #[test]
+    fn the_cursor_lands_on_the_selected_row_of_the_mode() {
+        assert_eq!(row_pointer(2, RoutingSettingsRow::Mode), "/modes/2");
+        assert_eq!(
+            row_pointer(2, RoutingSettingsRow::Rule(3)),
+            "/modes/2/rules/3"
+        );
+        assert_eq!(row_pointer(2, RoutingSettingsRow::Final), "/modes/2/final");
     }
 
     #[test]

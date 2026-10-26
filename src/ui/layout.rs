@@ -39,13 +39,16 @@ pub(crate) fn wheel_window(
                 visible,
             ));
         }
-        Overlay::GeoRegions | Overlay::RoutingMode | Overlay::DnsSettings => {
+        Overlay::GeoRegions
+        | Overlay::RoutingMode
+        | Overlay::DnsSettings
+        | Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Routing) => {
             overlay::popup::selection_visible(area, rows.len())
         }
         _ => rows.len(),
     };
     Some((
-        overlay::popup::selection_window_start(rows.len(), visible, selected, model.overlay_scroll),
+        overlay::popup::row_window_start(&rows, visible, selected, model.overlay_scroll),
         visible,
     ))
 }
