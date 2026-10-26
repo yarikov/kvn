@@ -119,11 +119,18 @@ pub enum RuleMatch {
 impl RuleMatch {
     const PRIVATE_NETWORKS: &str = "private";
 
-    fn key(&self) -> &'static str {
+    pub(crate) fn key(&self) -> &'static str {
         match self {
             Self::RuleSet(_) => "rule_set",
             Self::Domain(_) => "domain",
             Self::Ip(_) | Self::PrivateNetworks => "ip",
+        }
+    }
+
+    pub(crate) fn value(&self) -> &str {
+        match self {
+            Self::RuleSet(value) | Self::Domain(value) | Self::Ip(value) => value,
+            Self::PrivateNetworks => Self::PRIVATE_NETWORKS,
         }
     }
 }
@@ -198,11 +205,11 @@ impl From<ModeRule> for ModeRuleFields {
             route: rule.route,
             required: rule.required,
         };
+        let value = Some(rule.matches.value().to_string());
         match rule.matches {
-            RuleMatch::RuleSet(tag) => fields.rule_set = Some(tag),
-            RuleMatch::Domain(domain) => fields.domain = Some(domain),
-            RuleMatch::Ip(ip) => fields.ip = Some(ip),
-            RuleMatch::PrivateNetworks => fields.ip = Some(RuleMatch::PRIVATE_NETWORKS.into()),
+            RuleMatch::RuleSet(_) => fields.rule_set = value,
+            RuleMatch::Domain(_) => fields.domain = value,
+            RuleMatch::Ip(_) | RuleMatch::PrivateNetworks => fields.ip = value,
         }
         fields
     }

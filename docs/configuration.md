@@ -407,6 +407,15 @@ Bypass and Only need the country's rule-sets: without them a connection runs
 Bypass as Global and Only as Direct, downloads the files and reconnects in the
 chosen mode (see [Routing modes](privacy.md#routing-modes)).
 
+Below the Mode row the page lists the rules of the mode the row shows, as
+`routing.json` has them — the key (`rule_set`, `domain` or `ip`), its value and
+the route, top first, since the first rule that matches decides — and last the
+mode's `final`, where everything else goes. The list follows the row before you
+apply it. Move through the rules with `j`/`k`, `gg`/`G` or the mouse wheel; a
+list longer than the window scrolls, with a scrollbar on the right. `h`/`l`
+change the mode only on the Mode row, and `e` opens `routing.json` at the
+selected rule (or at the mode on the Mode row).
+
 The following snippet belongs inside `settings`:
 
 ```json
@@ -546,8 +555,9 @@ connections and reconnects are refused.
 
 Press `e` in **Settings › Routing** (`Space r e`) to edit `routing.json` the
 same way as `profiles.json`: kvn opens a copy of the file in `$VISUAL` or
-`$EDITOR` at the mode shown in the Mode row, checks it when the editor exits,
-lists every problem with its line, and offers to reopen it. The copy carries a
+`$EDITOR` at the mode shown in the Mode row, or at the rule selected below it,
+checks it when the editor exits, lists every problem with its line, and offers
+to reopen it. The copy carries a
 `"$schema"` reference to `$XDG_RUNTIME_DIR/kvn/routing.schema.json`, which is
 not saved into the file. Changes made to `routing.json` while the editor was
 open are merged by mode `id` and rule-set tag; the rules of one mode changed on

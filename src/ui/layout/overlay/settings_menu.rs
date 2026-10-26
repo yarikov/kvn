@@ -39,6 +39,7 @@ pub(super) fn draw(
         Line::from(Span::styled(heading, model.theme.accent())).centered(),
         Line::from(""),
     ];
+    let mut scroll = None;
     let popup_width = match page {
         SettingsMenuPage::Root => {
             let entries =
@@ -73,31 +74,10 @@ pub(super) fn draw(
             popup_width
         }
         SettingsMenuPage::Routing => {
-            let shown = model.shown_routing_mode();
-            let settings = vec![(
-                "Mode",
-                model.routing.mode_name(shown),
-                shown != model.config.settings.geo_routing.mode(&model.routing),
-            )];
-            let stable_value_width = model
-                .routing
-                .mode_ids()
-                .into_iter()
-                .map(|id| visual_width(&model.routing.mode_name(id)))
-                .max()
-                .unwrap_or(0);
-            let layout = settings_value_layout(&settings, stable_value_width, area, &frame_widths);
-            for (index, (name, value, dirty)) in settings.into_iter().enumerate() {
-                lines.push(settings_value_line(
-                    name,
-                    &value,
-                    dirty,
-                    index == model.settings_menu_selected,
-                    layout,
-                    &model.theme,
-                ));
-            }
-            layout.popup_width
+            let page = super::routing_settings::routing_page(model, area, &frame_widths);
+            lines.extend(page.lines);
+            scroll = Some(page.scroll);
+            page.popup_width
         }
         SettingsMenuPage::Connection => {
             let saved_auto_connect = model.config.settings.auto_connect;
@@ -191,6 +171,16 @@ pub(super) fn draw(
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
     frame.render_widget(Paragraph::new(lines).style(model.theme.normal()), inner);
+    if let Some(window) = scroll {
+        let track = Rect::new(
+            popup_area.right().saturating_sub(1),
+            popup_area.y.saturating_add(3),
+            popup_area.width.min(1),
+            window.visible as u16,
+        )
+        .intersection(popup_area);
+        crate::ui::layout::scrollbar::draw_scrollbar(frame, track, window, model.theme.accent());
+    }
 }
 
 pub(super) const AUTO_THEME_LABEL: &str = "auto";
@@ -261,6 +251,37 @@ mod tests {
         model.config.settings.geo_routing.set_mode("bypass_ru");
         model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
+    }
+
+    #[test]
+    fn draw_routing_menu_long_rule_list_at_minimum_size_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        let mode = model
+            .routing
+            .modes
+            .iter_mut()
+            .find(|mode| mode.id == "bypass_ru")
+            .unwrap();
+        for index in 0..8 {
+            mode.rules.push(
+                serde_json::from_value(serde_json::json!({
+                    "domain": format!("service-{index}.a-rather-long-corporate-domain.example"),
+                    "route": "proxy",
+                }))
+                .unwrap(),
+            );
+        }
+        model.config.settings.geo_routing.set_mode("bypass_ru");
+        model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
+        model.settings_menu_selected = 7;
+        insta::assert_snapshot!(crate::test_helpers::snapshot_styles(
+            &model,
+            crate::ui::layout::MIN_TERMINAL_WIDTH,
+            crate::ui::layout::MIN_TERMINAL_HEIGHT
+        ));
     }
 
     #[test]

@@ -40,7 +40,10 @@ pub(super) fn open(state: &mut ClientLoop, file: EditedFile) -> Result<()> {
             let target = state.model.selected_row().map(editor::EditorTarget::from);
             editor::open_profiles_editor(target, state.model.config.clone())
         }
-        EditedFile::Routing => editor::open_routing_editor(state.model.shown_routing_mode()),
+        EditedFile::Routing => editor::open_routing_editor(
+            state.model.shown_routing_mode(),
+            state.model.routing_settings_row(),
+        ),
     });
     let restored = restore_terminal(state);
     input::discard_pending_input();

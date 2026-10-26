@@ -12,6 +12,9 @@ pub(in crate::app::update) fn handle_settings_menu(
     page: SettingsMenuPage,
     key: KeyEvent,
 ) -> Vec<Effect> {
+    if page == SettingsMenuPage::Routing {
+        model.settings_menu_selected = model.routing_settings_selected();
+    }
     let len = model.settings_menu_len(page);
     if page == SettingsMenuPage::Root
         && let KeyCode::Char(key) = key.code
@@ -35,10 +38,14 @@ pub(in crate::app::update) fn handle_settings_menu(
                 open_settings_entry(model, entry);
             }
         }
-        (SettingsMenuPage::Routing, KeyCode::Char('l') | KeyCode::Right) => {
+        (SettingsMenuPage::Routing, KeyCode::Char('l') | KeyCode::Right)
+            if model.settings_menu_selected == 0 =>
+        {
             cycle_routing_draft(model, true);
         }
-        (SettingsMenuPage::Routing, KeyCode::Char('h') | KeyCode::Left) => {
+        (SettingsMenuPage::Routing, KeyCode::Char('h') | KeyCode::Left)
+            if model.settings_menu_selected == 0 =>
+        {
             cycle_routing_draft(model, false);
         }
         (SettingsMenuPage::Routing, KeyCode::Enter) => {
@@ -612,8 +619,6 @@ mod tests {
         model.config.settings.geo_routing.set_mode("bypass_ru");
         model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         handle_key(&mut model, key('r'));
-        handle_key(&mut model, key('j'));
-        assert_eq!(model.settings_menu_selected, 0);
 
         handle_key(&mut model, key('l'));
         assert_eq!(model.shown_routing_mode(), "only_ru");
@@ -622,6 +627,55 @@ mod tests {
         handle_key(&mut model, key('h'));
         assert_eq!(model.shown_routing_mode(), "only_ru");
         assert_eq!(model.config.settings.geo_routing.mode, "bypass_ru");
+    }
+
+    #[test]
+    fn settings_routing_moves_through_the_rules_and_cycles_only_on_mode() {
+        let mut model = model_with_profiles(vec![]);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        handle_key(&mut model, key('r'));
+        let rules = model.shown_mode_rules().len();
+
+        handle_key(&mut model, key('G'));
+        assert_eq!(model.settings_menu_selected, rules + 1);
+        assert_eq!(
+            model.routing_settings_row(),
+            crate::app::model::RoutingSettingsRow::Final
+        );
+        handle_key(&mut model, key('j'));
+        assert_eq!(model.settings_menu_selected, rules + 1);
+
+        handle_key(&mut model, key('k'));
+        assert_eq!(
+            model.routing_settings_row(),
+            crate::app::model::RoutingSettingsRow::Rule(rules - 1)
+        );
+        handle_key(&mut model, key('l'));
+        assert_eq!(model.routing_settings_draft, None);
+    }
+
+    #[test]
+    fn a_selection_past_the_rules_of_a_shorter_mode_moves_back_onto_them() {
+        let mut model = model_with_profiles(vec![]);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
+        handle_key(&mut model, key('r'));
+        handle_key(&mut model, key('G'));
+
+        model.config.settings.geo_routing.set_mode("global");
+        assert_eq!(
+            model.routing_settings_row(),
+            crate::app::model::RoutingSettingsRow::Final
+        );
+        handle_key(&mut model, key('k'));
+        assert_eq!(model.settings_menu_selected, 0);
     }
 
     #[test]
