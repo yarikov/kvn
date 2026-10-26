@@ -554,7 +554,7 @@ impl Model {
                 note_startup_error(
                     &mut startup_error,
                     format!(
-                        "Routing configuration load failed; connecting is blocked until routing.json is fixed: {e:#}"
+                        "Routing configuration load failed; connecting is blocked until routing.json is fixed (Space r e): {e:#}"
                     ),
                 );
                 routing_error = Some(format!("{e:#}"));

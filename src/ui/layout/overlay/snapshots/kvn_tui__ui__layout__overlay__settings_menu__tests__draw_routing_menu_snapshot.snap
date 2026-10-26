@@ -16,13 +16,13 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
-│                                       ┌───────────────────────────────┐                                       │
-│                                       │      Settings › Routing       │                                       │
-│                                       │                               │                                       │
-│                                       │       Mode ‹ Global ›         │                                       │
-│                                       │                               │                                       │
-│                                       │ 󰌑 apply · q/󱊷 close · ⌫ back  │                                       │
-│                                       └───────────────────────────────┘                                       │
+│                                   ┌───────────────────────────────────────┐                                   │
+│                                   │          Settings › Routing           │                                   │
+│                                   │                                       │                                   │
+│                                   │           Mode ‹ Global ›             │                                   │
+│                                   │                                       │                                   │
+│                                   │ 󰌑 apply · e edit · q/󱊷 close · ⌫ back │                                   │
+│                                   └───────────────────────────────────────┘                                   │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

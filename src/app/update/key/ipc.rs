@@ -92,6 +92,9 @@ pub(in crate::app::update) fn handle_ipc_command(
         IpcCommand::Copied { target } => handle_copied_status(model, target),
         IpcCommand::ReloadConfig => vec![Effect::ReloadConfig],
         IpcCommand::ApplyEditedConfig { base, edited } => apply_edited_config(model, base, edited),
+        IpcCommand::ApplyEditedRouting { base, edited } => {
+            vec![Effect::CommitEditedRouting { base, edited }]
+        }
         IpcCommand::ClientError { message } => {
             let mut effects = Vec::new();
             push_status(
@@ -253,6 +256,29 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::ReloadConfig);
         assert_eq!(effects, vec![Effect::ReloadConfig, Effect::BroadcastState]);
+    }
+
+    #[test]
+    fn ipc_apply_edited_routing_commits_the_edit() {
+        let mut model = model_with_profiles(vec![]);
+        let base = crate::config::routing::RoutingEditBase::Raw("{".into());
+        let edited = Box::<crate::config::routing::RoutingConfig>::default();
+
+        let effects = handle_ipc_command(
+            &mut model,
+            crate::app::msg::IpcCommand::ApplyEditedRouting {
+                base: base.clone(),
+                edited: edited.clone(),
+            },
+        );
+
+        assert_eq!(
+            effects,
+            vec![
+                Effect::CommitEditedRouting { base, edited },
+                Effect::BroadcastState
+            ]
+        );
     }
 
     #[test]

@@ -2,10 +2,15 @@ use std::sync::mpsc::Sender;
 
 use crate::app::effect::Effect;
 use crate::app::model::Model;
-use crate::app::msg::{ConfigEditResult, Msg};
+use crate::app::msg::{ConfigEditResult, Msg, RoutingEditResult};
 
 use super::process_slot::lock_process_slot;
 use super::{DaemonShared, config_io, connection, geo, profile_test, subscription, traffic};
+
+pub(super) enum EditReply {
+    Config(ConfigEditResult),
+    Routing(RoutingEditResult),
+}
 
 pub(super) fn execute_daemon_effect(
     effect: Effect,
@@ -13,7 +18,7 @@ pub(super) fn execute_daemon_effect(
     model: &mut Model,
     shared: &DaemonShared,
     reply_requested: bool,
-) -> Option<ConfigEditResult> {
+) -> Option<EditReply> {
     match effect {
         Effect::Connect {
             profile,
@@ -44,21 +49,26 @@ pub(super) fn execute_daemon_effect(
         }
         Effect::SaveConfigConflict { edited, conflicts } => {
             if reply_requested {
-                return Some(ConfigEditResult::Failed {
+                return Some(EditReply::Config(ConfigEditResult::Failed {
                     message: conflicts.join(", "),
-                });
+                }));
             }
             config_io::save_conflict(model, edited, conflicts)
         }
         Effect::CommitEditedConfig { base, edited } => {
-            return Some(config_io::commit_edited(
+            return Some(EditReply::Config(config_io::commit_edited(
                 tx,
                 model,
                 shared,
                 base,
                 edited,
                 reply_requested,
-            ));
+            )));
+        }
+        Effect::CommitEditedRouting { base, edited } => {
+            return Some(EditReply::Routing(config_io::commit_edited_routing(
+                tx, model, shared, base, edited,
+            )));
         }
         Effect::ReloadConfig => config_io::reload(tx),
         Effect::AddRegionModes { region } => config_io::add_region_modes(tx, region),

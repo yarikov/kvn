@@ -52,7 +52,7 @@ kvn connect Work &&
 
 A connection that fails later is reported by `kvn status`, not by the command
 that started it. While `routing.json` fails its checks, all three fail at once
-with `Connection blocked: routing.json is invalid: <problem>`; see
+with `Connection blocked: routing.json is invalid (fix it with Space r e): <problem>`; see
 [Rule-sets and modes](configuration.md#rule-sets-and-modes).
 
 ### status

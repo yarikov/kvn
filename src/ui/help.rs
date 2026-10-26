@@ -77,6 +77,7 @@ const SETTINGS: &[(&str, &str)] = &[
     ("Space d", "DNS"),
     ("Space i", "Interface"),
     ("Space r", "Routing"),
+    ("Space r e", "Open routing.json in $EDITOR"),
 ];
 
 const DIALOGS: &[(&str, &str)] = &[

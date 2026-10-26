@@ -4,6 +4,7 @@ use anyhow::Context;
 use serde_json::Value;
 
 use super::profile::Config;
+use super::routing::RoutingConfig;
 
 pub(crate) mod resolution;
 
@@ -69,6 +70,47 @@ pub(crate) fn merge_configs(
     Ok(config)
 }
 
+pub(crate) fn merge_routing(
+    base: &RoutingConfig,
+    current: &RoutingConfig,
+    edited: &RoutingConfig,
+) -> Result<RoutingConfig, MergeError> {
+    for (label, routing) in [("base", base), ("current", current), ("edited", edited)] {
+        if let Some(problem) = routing.diagnostics().first() {
+            return Err(MergeError::Invalid(format!(
+                "{label} routing configuration is invalid: {}",
+                problem.message
+            )));
+        }
+    }
+    let [base, current, edited] = [base, current, edited].map(|routing| {
+        serde_json::to_value(routing).expect("RoutingConfig serialization cannot fail")
+    });
+    let mut conflicts = Vec::new();
+    let merged = merge_value(
+        Some(&base),
+        Some(&current),
+        Some(&edited),
+        "",
+        &mut conflicts,
+        false,
+    );
+    if !conflicts.is_empty() {
+        return Err(MergeError::Conflicts(conflicts));
+    }
+    let routing: RoutingConfig =
+        serde_json::from_value(merged.expect("root routing configuration cannot be deleted"))
+            .context("merged routing configuration is invalid")
+            .map_err(|error| MergeError::Invalid(format!("{error:#}")))?;
+    if let Some(problem) = routing.diagnostics().first() {
+        return Err(MergeError::Invalid(format!(
+            "merged routing configuration is invalid: {}",
+            problem.message
+        )));
+    }
+    Ok(routing)
+}
+
 fn merge_value(
     base: Option<&Value>,
     current: Option<&Value>,
@@ -111,7 +153,7 @@ fn merge_value(
             Some(Value::Object(out))
         }
         (Some(Value::Array(b)), Some(Value::Array(c)), Some(Value::Array(e)))
-            if path == "profiles" || path == "subscriptions" =>
+            if matches!(path, "profiles" | "subscriptions" | "modes") =>
         {
             merge_uuid_array(b, c, e, path, conflicts, prefer_edited)
         }
@@ -371,5 +413,73 @@ mod tests {
         edited.profiles.clear();
         let merged = merge_configs(&base, &base, &edited).unwrap();
         assert_eq!(merged.settings.last_connected_profile, None);
+    }
+
+    fn routing_mode<'a>(
+        routing: &'a mut RoutingConfig,
+        id: &str,
+    ) -> &'a mut crate::config::routing::ModeDefinition {
+        routing.modes.iter_mut().find(|mode| mode.id == id).unwrap()
+    }
+
+    #[test]
+    fn merges_routing_modes_by_id_and_rule_sets_by_tag() {
+        let base = RoutingConfig::default();
+        let mut current = base.clone();
+        routing_mode(&mut current, "bypass_ru").name = "Russia".into();
+        let mut work = base.rule_sets["geoip-ru"].clone();
+        work.url = "https://example.com/work.srs".into();
+        current.rule_sets.insert("work".into(), work);
+        let mut edited = base.clone();
+        routing_mode(&mut edited, "only_cn").name = "China".into();
+        edited
+            .modes
+            .retain(|mode| mode.id != "bypass_ir" && mode.id != "only_ir");
+        edited.rule_sets.remove("geoip-ir");
+
+        let merged = merge_routing(&base, &current, &edited).unwrap();
+
+        assert_eq!(merged.mode("bypass_ru").unwrap().name, "Russia");
+        assert_eq!(merged.mode("only_cn").unwrap().name, "China");
+        assert!(merged.mode("bypass_ir").is_none());
+        assert!(merged.rule_sets.contains_key("work"));
+        assert!(!merged.rule_sets.contains_key("geoip-ir"));
+    }
+
+    #[test]
+    fn rules_of_a_mode_changed_on_both_sides_conflict_as_a_whole() {
+        let base = RoutingConfig::default();
+        let mut current = base.clone();
+        routing_mode(&mut current, "bypass_ru").rules.pop();
+        let mut edited = base.clone();
+        routing_mode(&mut edited, "bypass_ru").rules.remove(0);
+
+        assert_eq!(
+            merge_routing(&base, &current, &edited).unwrap_err(),
+            MergeError::Conflicts(vec!["modes[bypass_ru].rules".into()])
+        );
+    }
+
+    #[test]
+    fn a_merge_that_breaks_routing_checks_is_refused() {
+        let base = RoutingConfig::default();
+        let mut current = base.clone();
+        current.rule_sets.remove("geosite-cn");
+        current
+            .modes
+            .retain(|mode| mode.id != "bypass_cn" && mode.id != "only_cn");
+        let mut edited = base.clone();
+        routing_mode(&mut edited, "global")
+            .rules
+            .push(crate::config::routing::ModeRule::rule_set(
+                "geosite-cn",
+                crate::config::routing::Outbound::Direct,
+                false,
+            ));
+
+        assert!(matches!(
+            merge_routing(&base, &current, &edited),
+            Err(MergeError::Invalid(message)) if message.contains("geosite-cn")
+        ));
     }
 }

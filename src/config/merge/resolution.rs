@@ -1,11 +1,9 @@
 use serde_json::Value;
 
-use crate::config::profile::Config;
-
-pub(crate) fn document(base: &Config, current: &Config, edited: &Config) -> String {
-    let base = serde_json::to_value(base).expect("Config serialization cannot fail");
-    let current = serde_json::to_value(current).expect("Config serialization cannot fail");
-    let edited = serde_json::to_value(edited).expect("Config serialization cannot fail");
+pub(crate) fn document<T: serde::Serialize>(base: &T, current: &T, edited: &T) -> String {
+    let [base, current, edited] = [base, current, edited].map(|document| {
+        serde_json::to_value(document).expect("configuration serialization cannot fail")
+    });
     let merge = |prefer_edited| {
         super::merge_value(
             Some(&base),
@@ -83,7 +81,7 @@ pub(crate) fn first_marker_line(contents: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::profile::Profile;
+    use crate::config::profile::{Config, Profile};
 
     fn choose(document: &str, edited: bool) -> Config {
         let mut include = true;

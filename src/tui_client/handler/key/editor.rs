@@ -14,20 +14,38 @@ use super::super::ClientLoop;
 use super::super::pointer::PointerShape;
 use super::super::toast::ToastKey;
 
-pub(super) fn open(state: &mut ClientLoop) -> Result<()> {
+#[derive(Clone, Copy)]
+pub(super) enum EditedFile {
+    Profiles,
+    Routing,
+}
+
+impl EditedFile {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Profiles => "Configuration",
+            Self::Routing => "Routing configuration",
+        }
+    }
+}
+
+pub(super) fn open(state: &mut ClientLoop, file: EditedFile) -> Result<()> {
     state.clear_log_selection();
     if !state.event_reader_control.pause() {
         state.event_reader_control.resume();
         anyhow::bail!("Timed out while pausing terminal input for external editor");
     }
-    let result = leave_terminal(state).and_then(|()| {
-        let target = state.model.selected_row().map(editor::EditorTarget::from);
-        editor::open_profiles_editor(target, state.model.config.clone())
+    let result = leave_terminal(state).and_then(|()| match file {
+        EditedFile::Profiles => {
+            let target = state.model.selected_row().map(editor::EditorTarget::from);
+            editor::open_profiles_editor(target, state.model.config.clone())
+        }
+        EditedFile::Routing => editor::open_routing_editor(state.model.shown_routing_mode()),
     });
     let restored = restore_terminal(state);
     input::discard_pending_input();
     state.event_reader_control.resume();
-    let status = editor_status(result);
+    let status = editor_status(file, result);
     let reported = if let Some(AppStatus::Error(message)) = &status {
         state.report_error(message.clone())
     } else {
@@ -45,21 +63,20 @@ pub(super) fn open(state: &mut ClientLoop) -> Result<()> {
     Ok(())
 }
 
-fn editor_status(result: Result<editor::EditorOutcome>) -> Option<AppStatus> {
+fn editor_status(file: EditedFile, result: Result<editor::EditorOutcome>) -> Option<AppStatus> {
+    let label = file.label();
     match result {
-        Ok(editor::EditorOutcome::Saved) => None,
+        Ok(editor::EditorOutcome::Saved | editor::EditorOutcome::Unchanged) => None,
         Ok(editor::EditorOutcome::Cancelled { recovery }) => {
             Some(AppStatus::Info(match recovery {
                 Some(path) => format!(
-                    "Configuration edit cancelled; edited version saved to {}",
+                    "{label} edit cancelled; edited version saved to {}",
                     path.display()
                 ),
-                None => "Configuration edit cancelled".into(),
+                None => format!("{label} edit cancelled"),
             }))
         }
-        Err(error) => Some(AppStatus::Error(format!(
-            "Configuration edit failed: {error:#}"
-        ))),
+        Err(error) => Some(AppStatus::Error(format!("{label} edit failed: {error:#}"))),
     }
 }
 
@@ -129,7 +146,10 @@ mod tests {
     fn explicit_cancellation_uses_an_informational_status() {
         for recovery in [None, Some(std::path::PathBuf::from("/tmp/recovery.json"))] {
             let expected_path = recovery.clone();
-            let status = editor_status(Ok(editor::EditorOutcome::Cancelled { recovery }));
+            let status = editor_status(
+                EditedFile::Profiles,
+                Ok(editor::EditorOutcome::Cancelled { recovery }),
+            );
             let Some(AppStatus::Info(message)) = status else {
                 panic!("expected informational cancellation")
             };
@@ -142,9 +162,12 @@ mod tests {
 
     #[test]
     fn restoration_and_reporting_failures_keep_the_editor_error_and_recovery_path() {
-        let status = editor_status(Err(anyhow::anyhow!(
-            "Edited version saved to /tmp/recovery.json: editor failed"
-        )));
+        let status = editor_status(
+            EditedFile::Profiles,
+            Err(anyhow::anyhow!(
+                "Edited version saved to /tmp/recovery.json: editor failed"
+            )),
+        );
         let error = finish_terminal_return(
             Err(anyhow::anyhow!("raw mode unavailable")),
             Err(anyhow::anyhow!("socket closed")),
@@ -160,9 +183,12 @@ mod tests {
 
     #[test]
     fn restoration_failure_keeps_cancellation_recovery_path() {
-        let status = editor_status(Ok(editor::EditorOutcome::Cancelled {
-            recovery: Some("/tmp/recovery.json".into()),
-        }));
+        let status = editor_status(
+            EditedFile::Profiles,
+            Ok(editor::EditorOutcome::Cancelled {
+                recovery: Some("/tmp/recovery.json".into()),
+            }),
+        );
         let error = finish_terminal_return(
             Err(anyhow::anyhow!("terminal closed")),
             Ok(()),

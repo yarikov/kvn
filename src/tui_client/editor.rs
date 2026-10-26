@@ -15,8 +15,10 @@ use crate::config::profile::{
 };
 
 mod retry;
+mod routing;
 
 use retry::retry_edit;
+pub use routing::open_routing_editor;
 
 const OMARCHY_LAUNCHER: &str = "omarchy-launch-editor";
 const OMARCHY_FALLBACK_EDITOR: &str = "nvim";
@@ -157,11 +159,13 @@ fn editor_args(editor: &str, path: &Path, line: usize) -> Vec<String> {
 struct EditorSnapshot {
     path: PathBuf,
     remove_on_drop: bool,
+    recovery_kind: crate::config::recovery::RecoveryKind,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum EditorOutcome {
     Saved,
+    Unchanged,
     Cancelled { recovery: Option<PathBuf> },
 }
 
@@ -195,12 +199,7 @@ fn preserve_invalid_edit(snapshot: EditorSnapshot) -> Result<PathBuf> {
                 snapshot.path.display()
             )
         })
-        .and_then(|contents| {
-            crate::config::recovery::preserve(
-                crate::config::recovery::RecoveryKind::InvalidEdit,
-                &contents,
-            )
-        });
+        .and_then(|contents| crate::config::recovery::preserve(snapshot.recovery_kind, &contents));
     match result {
         Ok(path) => Ok(path),
         Err(error) => {
@@ -215,34 +214,38 @@ fn preserve_invalid_edit(snapshot: EditorSnapshot) -> Result<PathBuf> {
     }
 }
 
-pub fn open_profiles_editor(target: Option<EditorTarget>, base: Config) -> Result<EditorOutcome> {
-    let editor = detect_editor();
-    let editor = EditorCommand::parse(&editor)
+fn prepared_editor() -> Result<EditorCommand> {
+    Ok(EditorCommand::parse(&detect_editor())
         .bypass_omarchy_launcher()?
-        .wait_until_closed();
+        .wait_until_closed())
+}
+
+pub fn open_profiles_editor(target: Option<EditorTarget>, base: Config) -> Result<EditorOutcome> {
+    let editor = prepared_editor()?;
     let runtime_dir = crate::paths::ensure_runtime_dir()?;
     let path = runtime_dir.join(format!("profiles-edit-{}.json", std::process::id()));
-    let json_schema = write_editor_schema();
+    let json_schema = write_editor_schema("profiles.schema.json", &config_json_schema());
     crate::config::save_editor_snapshot_at(&path, &base, json_schema.clone())
         .context("Failed to create editor snapshot")?;
     let snapshot = EditorSnapshot {
         path: path.clone(),
         remove_on_drop: true,
+        recovery_kind: crate::config::recovery::RecoveryKind::InvalidEdit,
     };
     let mut original = fs::read(&path).context("Failed to read original editor snapshot")?;
     original.push(b'\n');
     crate::atomic_write::write(&path, &original).context("Failed to finish editor snapshot")?;
 
     let line = target.and_then(|target| find_target_line(&path, target));
-    let result = edit_until_saved(&path, base, json_schema.as_deref(), &editor, line);
+    let mut session = ProfilesEdit { base, json_schema };
+    let result = edit_until_saved(&path, &mut session, &editor, line, &original);
     finish_edit(snapshot, &original, result)
 }
 
-fn write_editor_schema() -> Option<String> {
+fn write_editor_schema(file_name: &str, schema: &serde_json::Value) -> Option<String> {
     let written = crate::paths::ensure_kvn_runtime_dir().and_then(|dir| {
-        let path = dir.join("profiles.schema.json");
-        let schema = serde_json::to_vec_pretty(&config_json_schema())?;
-        crate::atomic_write::write(&path, &schema)?;
+        let path = dir.join(file_name);
+        crate::atomic_write::write(&path, &serde_json::to_vec_pretty(schema)?)?;
         Ok(path)
     });
     match written {
@@ -264,9 +267,15 @@ fn finish_edit(
     {
         return result;
     }
+    let cancelled = match snapshot.recovery_kind {
+        crate::config::recovery::RecoveryKind::RoutingInvalidEdit => {
+            "Routing configuration edit cancelled"
+        }
+        _ => "Configuration edit cancelled",
+    };
     let recovery = preserve_invalid_edit(snapshot).with_context(|| match &result {
         Err(error) => format!("{error:#}"),
-        _ => "Configuration edit cancelled".into(),
+        _ => cancelled.into(),
     })?;
     match result {
         Ok(_) => Ok(EditorOutcome::Cancelled {
@@ -278,12 +287,43 @@ fn finish_edit(
     }
 }
 
-fn edit_until_saved(
+trait EditSession {
+    type Document;
+
+    fn check(&self, contents: &str, path: &Path) -> Result<Self::Document, EditIssue>;
+    fn submit(&self, edited: &Self::Document) -> Result<ConfigEditResult<Self::Document>>;
+    fn rebase(&mut self, current: Self::Document, edited: &Self::Document) -> String;
+}
+
+struct ProfilesEdit {
+    base: Config,
+    json_schema: Option<String>,
+}
+
+impl EditSession for ProfilesEdit {
+    type Document = Config;
+
+    fn check(&self, contents: &str, path: &Path) -> Result<Config, EditIssue> {
+        check_edit(contents, path)
+    }
+
+    fn submit(&self, edited: &Config) -> Result<ConfigEditResult> {
+        submit_edit(&self.base, edited)
+    }
+
+    fn rebase(&mut self, current: Config, edited: &Config) -> String {
+        let document = conflict_document(&self.base, &current, edited, self.json_schema.as_deref());
+        self.base = current;
+        document
+    }
+}
+
+fn edit_until_saved<S: EditSession>(
     path: &Path,
-    mut base: Config,
-    json_schema: Option<&str>,
+    session: &mut S,
     editor: &EditorCommand,
     mut line: Option<usize>,
+    opened: &[u8],
 ) -> Result<EditorOutcome> {
     loop {
         let args = match line {
@@ -297,7 +337,10 @@ fn edit_until_saved(
             .with_context(|| format!("Failed to launch editor: {}", editor.program))?;
         anyhow::ensure!(status.success(), "Editor exited with non-zero status");
         let contents = fs::read_to_string(path).context("Failed to read editor snapshot")?;
-        let edited = match check_edit(&contents, path) {
+        if contents.as_bytes() == opened {
+            return Ok(EditorOutcome::Unchanged);
+        }
+        let edited = match session.check(&contents, path) {
             Ok(edited) => edited,
             Err(issue) => {
                 line = issue.line;
@@ -307,13 +350,12 @@ fn edit_until_saved(
                 return Ok(EditorOutcome::Cancelled { recovery: None });
             }
         };
-        match submit_edit(&base, &edited)? {
+        match session.submit(&edited)? {
             ConfigEditResult::Saved => return Ok(EditorOutcome::Saved),
             ConfigEditResult::Conflict { current, paths } => {
-                let document = conflict_document(&base, &current, &edited, json_schema);
+                let document = session.rebase(*current, &edited);
                 crate::atomic_write::write(path, document.as_bytes())?;
                 line = crate::config::merge::resolution::first_marker_line(&document);
-                base = *current;
                 if !retry_edit(&format!(
                     "Conflicts at {}. Keep the desired values and remove the conflict markers.",
                     paths.join(", ")
@@ -349,17 +391,41 @@ struct EditIssue {
     line: Option<usize>,
 }
 
-fn check_edit(contents: &str, path: &Path) -> Result<Config, EditIssue> {
-    if let Some(line) = crate::config::merge::resolution::first_marker_line(contents) {
-        return Err(EditIssue {
+fn unresolved_conflicts(contents: &str) -> Result<(), EditIssue> {
+    match crate::config::merge::resolution::first_marker_line(contents) {
+        Some(line) => Err(EditIssue {
             message:
                 "Unresolved conflicts: keep the desired values and remove all conflict markers."
                     .into(),
             line: Some(line),
-        });
+        }),
+        None => Ok(()),
     }
+}
+
+fn add_unreported(
+    contents: &str,
+    mut diagnostics: Vec<ConfigDiagnostic>,
+    more: Vec<ConfigDiagnostic>,
+) -> Result<(), EditIssue> {
+    let reported: HashSet<String> = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.pointer.clone())
+        .collect();
+    diagnostics.extend(
+        more.into_iter()
+            .filter(|diagnostic| !reported.contains(&diagnostic.pointer)),
+    );
+    if diagnostics.is_empty() {
+        return Ok(());
+    }
+    Err(diagnostics_issue(contents, diagnostics))
+}
+
+fn check_edit(contents: &str, path: &Path) -> Result<Config, EditIssue> {
+    unresolved_conflicts(contents)?;
     let document = serde_json::from_str::<serde_json::Value>(contents).ok();
-    let mut diagnostics = document
+    let diagnostics = document
         .as_ref()
         .map(schema_diagnostics)
         .unwrap_or_default();
@@ -372,20 +438,9 @@ fn check_edit(contents: &str, path: &Path) -> Result<Config, EditIssue> {
         Err(_) => return Err(diagnostics_issue(contents, diagnostics)),
     };
     config.json_schema = None;
-    let reported: HashSet<String> = diagnostics
-        .iter()
-        .map(|diagnostic| diagnostic.pointer.clone())
-        .collect();
-    diagnostics.extend(
-        config
-            .diagnostics()
-            .into_iter()
-            .filter(|diagnostic| !reported.contains(&diagnostic.pointer)),
-    );
-    if diagnostics.is_empty() {
-        return Ok(config);
-    }
-    Err(diagnostics_issue(contents, diagnostics))
+    let more = config.diagnostics();
+    add_unreported(contents, diagnostics, more)?;
+    Ok(config)
 }
 
 fn has_current_schema_version(document: &serde_json::Value) -> bool {
@@ -615,6 +670,20 @@ mod tests {
     }
 
     #[test]
+    fn closing_the_editor_without_changes_saves_nothing() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
+        let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let _visual = crate::test_helpers::EnvVarGuard::set("VISUAL", "true");
+
+        assert_eq!(
+            open_profiles_editor(None, Config::default()).unwrap(),
+            EditorOutcome::Unchanged
+        );
+    }
+
+    #[test]
     fn editor_launch_failure_does_not_create_recovery() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = TempDir::new().unwrap();
@@ -636,6 +705,7 @@ mod tests {
             EditorSnapshot {
                 path: path.clone(),
                 remove_on_drop: true,
+                recovery_kind: crate::config::recovery::RecoveryKind::InvalidEdit,
             },
             b"original",
             Ok(EditorOutcome::Cancelled { recovery: None }),
@@ -662,6 +732,7 @@ mod tests {
             EditorSnapshot {
                 path,
                 remove_on_drop: true,
+                recovery_kind: crate::config::recovery::RecoveryKind::InvalidEdit,
             },
             &serde_json::to_vec_pretty(&base).unwrap(),
             Ok(EditorOutcome::Cancelled { recovery: None }),
@@ -687,6 +758,7 @@ mod tests {
             EditorSnapshot {
                 path,
                 remove_on_drop: true,
+                recovery_kind: crate::config::recovery::RecoveryKind::InvalidEdit,
             },
             b"original",
             Err(anyhow::anyhow!("Editor exited with non-zero status")),
@@ -712,6 +784,7 @@ mod tests {
         drop(EditorSnapshot {
             path: path.clone(),
             remove_on_drop: true,
+            recovery_kind: crate::config::recovery::RecoveryKind::InvalidEdit,
         });
         assert!(!path.exists());
     }
@@ -724,6 +797,7 @@ mod tests {
         let retained = EditorSnapshot {
             path: path.clone(),
             remove_on_drop: true,
+            recovery_kind: crate::config::recovery::RecoveryKind::InvalidEdit,
         }
         .retain();
         assert_eq!(retained, path);
@@ -744,6 +818,7 @@ mod tests {
         let error = preserve_invalid_edit(EditorSnapshot {
             path: path.clone(),
             remove_on_drop: true,
+            recovery_kind: crate::config::recovery::RecoveryKind::InvalidEdit,
         })
         .unwrap_err();
 

@@ -12,14 +12,18 @@ pub(crate) enum RecoveryKind {
     InvalidEdit,
     Archive,
     Migration,
+    RoutingInvalidEdit,
+    RoutingArchive,
 }
 
 impl RecoveryKind {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 6] = [
         Self::Conflict,
         Self::InvalidEdit,
         Self::Archive,
         Self::Migration,
+        Self::RoutingInvalidEdit,
+        Self::RoutingArchive,
     ];
 
     fn prefix(self) -> &'static str {
@@ -28,22 +32,23 @@ impl RecoveryKind {
             Self::InvalidEdit => "profiles.json.conflict-invalid-",
             Self::Archive => "profiles.json.invalid-",
             Self::Migration => "profiles.json.before-migration-",
+            Self::RoutingInvalidEdit => "routing.json.conflict-invalid-",
+            Self::RoutingArchive => "routing.json.invalid-",
         }
     }
 }
 
 fn classify(name: &str) -> Option<RecoveryKind> {
-    if has_generated_suffix(name, RecoveryKind::InvalidEdit.prefix()) {
-        Some(RecoveryKind::InvalidEdit)
-    } else if has_generated_suffix(name, RecoveryKind::Conflict.prefix()) {
-        Some(RecoveryKind::Conflict)
-    } else if has_generated_suffix(name, RecoveryKind::Archive.prefix()) {
-        Some(RecoveryKind::Archive)
-    } else if has_generated_suffix(name, RecoveryKind::Migration.prefix()) {
-        Some(RecoveryKind::Migration)
-    } else {
-        None
-    }
+    [
+        RecoveryKind::InvalidEdit,
+        RecoveryKind::Conflict,
+        RecoveryKind::Archive,
+        RecoveryKind::Migration,
+        RecoveryKind::RoutingInvalidEdit,
+        RecoveryKind::RoutingArchive,
+    ]
+    .into_iter()
+    .find(|kind| has_generated_suffix(name, kind.prefix()))
 }
 
 fn has_generated_suffix(name: &str, prefix: &str) -> bool {

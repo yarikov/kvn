@@ -301,7 +301,7 @@ their physical US key positions regardless of the active keyboard layout.
 
 Configuration is stored in `~/.config/kvn-tui/profiles.json`, rule-sets in
 `~/.config/kvn-tui/routing.json`. Press `e` to edit the configuration in `$VISUAL`
-or `$EDITOR`. Errors can be corrected in the same editing
+or `$EDITOR`, and `e` in Settings › Routing (`Space r e`) to edit `routing.json`. Errors can be corrected in the same editing
 session; concurrent changes are merged, with conflicts reopened in the editor.
 
 See the [configuration guide](docs/configuration.md) for the JSON structure,

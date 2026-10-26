@@ -287,7 +287,7 @@ pub(in crate::app::update) fn queue_connect(
             model,
             StatusKey::Connection,
             AppStatus::Error(format!(
-                "Connection blocked: routing.json is invalid: {error}"
+                "Connection blocked: routing.json is invalid (fix it with Space r e): {error}"
             )),
         );
         return false;
@@ -579,7 +579,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![app_log_error(
-                "Connection blocked: routing.json is invalid: bad url"
+                "Connection blocked: routing.json is invalid (fix it with Space r e): bad url"
             )]
         );
     }
@@ -734,7 +734,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![app_log_error(
-                "Connection blocked: routing.json is invalid: bad url"
+                "Connection blocked: routing.json is invalid (fix it with Space r e): bad url"
             )]
         );
     }

@@ -37,6 +37,10 @@ pub enum Effect {
         base: Box<Config>,
         edited: Box<Config>,
     },
+    CommitEditedRouting {
+        base: crate::config::routing::RoutingEditBase,
+        edited: Box<crate::config::routing::RoutingConfig>,
+    },
     UpdateSubscription {
         id: Uuid,
     },

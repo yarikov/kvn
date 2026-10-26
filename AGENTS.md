@@ -86,7 +86,7 @@ The rules behind each gate live in § Testing Patterns, § Coverage Policy, and 
 | `killswitch` | `src/services/killswitch.rs` | nftables helper integration: enable/disable systemd unit, flush handshake exceptions left by older daemons, reconcile state on startup |
 | `services` | `src/services.rs`, `src/services/log_tailer.rs`, `src/services/waybar.rs`, `src/services/suspend.rs` | Background services: waybar state I/O and the suspend watcher (daemon), the log tailer (TUI client), and the app-log writer |
 | `clipboard` | `src/tui_client/clipboard.rs` | System clipboard integration; auto-detects Wayland (`wl-paste` / `wl-copy`) or X11 (`xclip`, falls back to `xsel`); reads the clipboard for `p` and sends it to the daemon as `IpcCommand::Paste` (parsed in `update/paste.rs`), and writes it for `y` |
-| `editor` | `src/tui_client/editor.rs`, `src/tui_client/editor/retry.rs` | Launch `$EDITOR` / `$VISUAL` on a private snapshot (`$XDG_RUNTIME_DIR/kvn-tui/profiles-edit-<pid>.json`), temporarily restore the terminal; `retry` is the error screen that offers another pass or cancellation |
+| `editor` | `src/tui_client/editor.rs`, `src/tui_client/editor/{retry,routing}.rs` | Launch `$EDITOR` / `$VISUAL` on a private snapshot (`$XDG_RUNTIME_DIR/kvn-tui/profiles-edit-<pid>.json`, or `$XDG_RUNTIME_DIR/kvn/routing-edit-<pid>.json` for `routing.json` from Settings › Routing), temporarily restore the terminal; `editor/routing.rs` is the `routing.json` session; `retry` is the error screen that offers another pass or cancellation |
 | `input` | `src/tui_client/input.rs` | Terminal input: Kitty keyboard protocol for layout-independent shortcuts, mouse capture, unbuffered reads |
 | `browser` | `src/tui_client/browser.rs` | Opens the project support page with `xdg-open` |
 | `theme_watch` | `src/tui_client/theme_watch.rs` | Resolves `settings.theme` slug to a `Theme` (with `"omarchy"` sentinel falling back to `tokyo-night`); watches Omarchy's XDG state current-theme directory and emits `Msg::ThemeChanged`; no-op when Omarchy isn't installed |
@@ -284,12 +284,12 @@ The **TUI client** (`tui_client.rs`) additionally spawns:
 
 ### Daemon + TUI Client Architecture
 - **Daemon** (`kvn --daemon`) runs headless. It owns the canonical `Model`, the `mpsc` channel, the sing-box `process_slot`, the config, geo updates, suspend/resume handling, and the background services (§ Background Services). It binds a Unix domain socket for IPC.
-- **TUI Client** (`kvn`) connects to the daemon socket, requests a state snapshot (`Attach`), enters the alternate screen, and renders the UI. Keyboard input is forwarded to the daemon as `IpcCommand::Key`, except what needs the terminal, the clipboard or client-local state: `p` / `Ctrl+V` (paste), `y` (copy), `e` (editor), `gg` (sent as `GoFirst`), pane focus, `q` / `Esc` detach, `Ctrl+C`, the log-pane cursor and selection keys, and the onboarding cards' `y` / `p`. Bracketed paste (`\x1b[?2004h`) is enabled so a terminal paste arrives as a single `Msg::Paste` and is sent as `IpcCommand::Paste` instead of being decoded as shortcut keys.
+- **TUI Client** (`kvn`) connects to the daemon socket, requests a state snapshot (`Attach`), enters the alternate screen, and renders the UI. Keyboard input is forwarded to the daemon as `IpcCommand::Key`, except what needs the terminal, the clipboard or client-local state: `p` / `Ctrl+V` (paste), `y` (copy), `e` (editor; on Settings › Routing it edits `routing.json`), `gg` (sent as `GoFirst`), pane focus, `q` / `Esc` detach, `Ctrl+C`, the log-pane cursor and selection keys, and the onboarding cards' `y` / `p`. Bracketed paste (`\x1b[?2004h`) is enabled so a terminal paste arrives as a single `Msg::Paste` and is sent as `IpcCommand::Paste` instead of being decoded as shortcut keys.
 - Pressing `q` (or `Esc`) when no overlay is shown sends `Detach` to the daemon, leaves the alternate screen, disables raw mode, and **exits the TUI process**. The daemon and sing-box keep running. Shell regains the prompt immediately because the foreground TUI process actually exits. If an overlay is open (Help, SettingsMenu, ConfirmDelete, ConfirmDisable, RoutingMode, GeoRegions, DnsSettings), `q`/`Esc` is forwarded to the daemon as a normal key, which closes the overlay — except the region and mode pickers, which end only by choosing. `Overlay::Onboarding` is modal and ignores `q`/`Esc` (see `src/app/AGENTS.md` § First-Run Onboarding).
 - Pressing `Ctrl+C` sends `Quit` to the daemon. The daemon stops sing-box, cleans up the Unix socket, and exits. The TUI waits briefly (300 ms) for cleanup to complete before exiting.
 - Running `kvn` again connects to the same daemon and re-attaches, restoring the TUI instantly without restarting sing-box.
 - **IPC protocol** (`ipc.rs`; the `IpcCommand` enum lives in `app/msg.rs`) uses newline-delimited JSON over a Unix socket.
-  - Commands: `Attach`, `Detach`, `ClearErrorStatus`, `Key`, `SelectSource`, `MoveSourceSelection` (legacy relative selection), `ScrollViewport` (wheel navigation with a correlated viewport result), `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `Toggle`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `CheckOnboarding`, `CheckSupportPrompt`, `ResolveSupportPrompt`, `DismissSupportPrompt`, `Paste`, `Copied`, `ReloadConfig`, `ApplyEditedConfig` (correlated), `Quit`, `ClientError`.
+  - Commands: `Attach`, `Detach`, `ClearErrorStatus`, `Key`, `SelectSource`, `MoveSourceSelection` (legacy relative selection), `ScrollViewport` (wheel navigation with a correlated viewport result), `SetMainPaneFocus`, `GoFirst`, `ConnectProfile`, `Disconnect`, `Reconnect`, `Toggle`, `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`, `CheckOnboarding`, `CheckSupportPrompt`, `ResolveSupportPrompt`, `DismissSupportPrompt`, `Paste`, `Copied`, `ReloadConfig`, `ApplyEditedConfig` and `ApplyEditedRouting` (correlated), `Quit`, `ClientError`.
   - Responses: `StateSnapshot` pushed by the daemon after every state change.
   - The semantic commands (`ConnectProfile` through `SetAutoConnect`) exist for non-TUI clients — the Omarchy Quickshell module and the `kvn status/connect/disconnect/reconnect/toggle` CLI subcommands.
   - The routing-mode commit is shared between the mode picker and IPC `SetRoutingMode` via `commit_routing_mode` in `update/routing.rs` so both paths run identical logic. `SetGeoRegion` is accepted and ignored; only the tour's region picker commits a region (`commit_geo_region`).
@@ -342,14 +342,16 @@ Any added, removed, or changed CLI command, option, or output updates
 | Temp sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
 | Latency-test configs | `$XDG_RUNTIME_DIR/kvn-tui/test-<uuid>.json` |
 | Editor snapshot | `$XDG_RUNTIME_DIR/kvn-tui/profiles-edit-<pid>.json` |
+| Routing editor snapshot | `$XDG_RUNTIME_DIR/kvn/routing-edit-<pid>.json` |
 | IPC socket (daemon ↔ TUI) | `$XDG_RUNTIME_DIR/kvn-tui.sock` |
 | First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
 | sing-box cache (fake-IP map) | `$XDG_STATE_HOME/kvn/singbox-cache.db` |
-| Recovery copies (3 per kind) | `~/.config/kvn-tui/recovery/profiles.json.{before-migration,invalid,conflict,conflict-invalid}-*` |
+| Recovery copies (3 per kind) | `~/.config/kvn-tui/recovery/profiles.json.{before-migration,invalid,conflict,conflict-invalid}-*`, `routing.json.{invalid,conflict-invalid}-*` |
 | Daemon instance lock | `$XDG_RUNTIME_DIR/kvn/daemon.lock` |
 | Runtime state (waybar, crash recovery) | `$XDG_RUNTIME_DIR/kvn/state.json` |
 | Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
+| Routing editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/routing.schema.json` |
 | Integration stamps | `/var/lib/kvn/integrations/{polkit,killswitch-sudoers}.sha256` |
 
 ---

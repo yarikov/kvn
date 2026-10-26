@@ -416,7 +416,7 @@ mod tests {
         let mut model = model_with_profiles(vec![profile]);
         model.routing_error = Some("bad url".into());
         let blocked = vec![app_log_error(
-            "Connection blocked: routing.json is invalid: bad url",
+            "Connection blocked: routing.json is invalid (fix it with Space r e): bad url",
         )];
 
         let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Enter));
