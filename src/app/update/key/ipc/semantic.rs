@@ -15,13 +15,14 @@ pub(super) fn connect_profile(model: &mut Model, profile_id: Uuid) -> Vec<Effect
     let mut effects = vec![];
     match profile_name {
         Some(profile_name) => {
-            push_status(
-                &mut effects,
-                model,
-                StatusKey::Connection,
-                AppStatus::Info(format!("Connecting to {profile_name}…")),
-            );
-            queue_connect(model, profile_id);
+            if queue_connect(model, profile_id, &mut effects) {
+                push_status(
+                    &mut effects,
+                    model,
+                    StatusKey::Connection,
+                    AppStatus::Info(format!("Connecting to {profile_name}…")),
+                );
+            }
         }
         None => push_status(
             &mut effects,
@@ -103,13 +104,14 @@ fn connect_known_profile(
     let mut effects = vec![];
     match target {
         Some((profile_id, profile_name)) => {
-            push_status(
-                &mut effects,
-                model,
-                StatusKey::Connection,
-                AppStatus::Info(format!("{verb} {profile_name}…")),
-            );
-            queue_connect(model, profile_id);
+            if queue_connect(model, profile_id, &mut effects) {
+                push_status(
+                    &mut effects,
+                    model,
+                    StatusKey::Connection,
+                    AppStatus::Info(format!("{verb} {profile_name}…")),
+                );
+            }
         }
         None => push_status(
             &mut effects,
@@ -233,6 +235,29 @@ mod tests {
             effects,
             vec![app_log_info("Connecting to A…"), Effect::BroadcastState]
         );
+    }
+
+    #[test]
+    fn ipc_connect_and_toggle_report_an_invalid_routing_json() {
+        let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        let profile_id = profile.id;
+        let mut model = model_with_profiles(vec![profile]);
+        model.config.settings.last_connected_profile = Some(profile_id);
+        model.routing_error = Some("bad url".into());
+        let blocked = vec![
+            app_log_error("Connection blocked: routing.json is invalid: bad url"),
+            Effect::BroadcastState,
+        ];
+
+        for command in [
+            crate::app::msg::IpcCommand::ConnectProfile { profile_id },
+            crate::app::msg::IpcCommand::Toggle,
+        ] {
+            let effects = handle_ipc_command(&mut model, command);
+
+            assert_eq!(model.connection, ConnectionState::Idle);
+            assert_eq!(effects, blocked);
+        }
     }
 
     #[test]

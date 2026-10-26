@@ -538,8 +538,11 @@ are.
 
 kvn reads `routing.json` when the daemon starts and when the configuration is
 reloaded. A file that fails these checks is reported in the status line and
-left untouched: on a reload kvn keeps what it already loaded, at startup it
-uses the built-in rule-sets and modes until the file is fixed.
+left untouched, and kvn does not connect until the file is fixed: at startup it
+does not auto-connect, and `Enter`, `r`, `kvn connect`, `kvn reconnect` and
+`kvn toggle` fail with `Connection blocked: routing.json is invalid`. A file
+that breaks while the VPN is connected leaves that connection running; only new
+connections and reconnects are refused.
 
 ## Themes and logging
 

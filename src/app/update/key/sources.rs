@@ -97,16 +97,17 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
             }) {
                 let profile_id = profile.id;
                 let profile_name = profile.name.clone();
-                push_status(
-                    &mut effects,
-                    model,
-                    StatusKey::Connection,
-                    crate::app::model::AppStatus::Info(format!(
-                        "Reconnecting to {}…",
-                        profile_name
-                    )),
-                );
-                queue_connect(model, profile_id);
+                if queue_connect(model, profile_id, &mut effects) {
+                    push_status(
+                        &mut effects,
+                        model,
+                        StatusKey::Connection,
+                        crate::app::model::AppStatus::Info(format!(
+                            "Reconnecting to {}…",
+                            profile_name
+                        )),
+                    );
+                }
             }
         }
         KeyCode::Char('s') if model.connection != ConnectionState::Idle => {
@@ -165,7 +166,9 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
     if let Some(profile) = model.selected_profile() {
         let profile_id = profile.id;
         let profile_name = profile.name.clone();
-        if model.active_profile_id == Some(profile_id) {
+        if model.active_profile_id == Some(profile_id)
+            || !queue_connect(model, profile_id, &mut effects)
+        {
             return effects;
         }
         push_status(
@@ -174,7 +177,6 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
             StatusKey::Connection,
             crate::app::model::AppStatus::Info(format!("Connecting to {}…", profile_name)),
         );
-        queue_connect(model, profile_id);
     } else if let Some(sub) = model.selected_subscription() {
         let id = sub.id;
         let name = sub.name.clone();
@@ -405,6 +407,27 @@ mod tests {
                 |effect| matches!(effect, Effect::Connect { profile, .. } if profile.id == a_id)
             )
         );
+    }
+
+    #[test]
+    fn enter_and_reconnect_report_an_invalid_routing_json() {
+        let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        let profile_id = profile.id;
+        let mut model = model_with_profiles(vec![profile]);
+        model.routing_error = Some("bad url".into());
+        let blocked = vec![app_log_error(
+            "Connection blocked: routing.json is invalid: bad url",
+        )];
+
+        let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Enter));
+        assert_eq!(model.connection, ConnectionState::Idle);
+        assert_eq!(effects, blocked);
+
+        model.connection = ConnectionState::Connected;
+        model.active_profile_id = Some(profile_id);
+        let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Char('r')));
+        assert_eq!(model.connection, ConnectionState::Connected);
+        assert_eq!(effects, blocked);
     }
 
     #[test]

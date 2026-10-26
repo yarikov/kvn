@@ -97,7 +97,7 @@ fn commit_dns_drafts(model: &mut Model) -> Vec<Effect> {
         StatusKey::Dns,
         AppStatus::Info("DNS settings changed".into()),
     );
-    if reconnect_with_new_settings(model) {
+    if reconnect_with_new_settings(model, &mut effects) {
         push_status(
             &mut effects,
             model,

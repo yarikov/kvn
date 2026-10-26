@@ -331,6 +331,7 @@ pub struct Model {
     pub connection: ConnectionState,
     pub config: Config,
     pub routing: RoutingConfig,
+    pub routing_error: Option<String>,
     pub config_persistence_blocked: bool,
     pub unsaved_state_merge_base: Option<Config>,
     pub support_prompt: crate::support_prompt::SupportPromptState,
@@ -543,7 +544,7 @@ impl Model {
             }
         };
         let predates_mode_selection = config.settings.geo_routing.predates_mode_selection();
-        let mut routing_loaded = true;
+        let mut routing_error = None;
         let mut routing = match crate::config::load_routing(
             &config.settings.geo_routing,
             !config_persistence_blocked,
@@ -552,14 +553,16 @@ impl Model {
             Err(e) => {
                 note_startup_error(
                     &mut startup_error,
-                    format!("Routing configuration load failed; using defaults: {e:#}"),
+                    format!(
+                        "Routing configuration load failed; connecting is blocked until routing.json is fixed: {e:#}"
+                    ),
                 );
-                routing_loaded = false;
-                RoutingConfig::for_new_file(&config.settings.geo_routing)
+                routing_error = Some(format!("{e:#}"));
+                RoutingConfig::for_new_file(&Default::default())
             }
         };
         config.settings.geo_routing.forget_legacy_regions();
-        if routing_loaded && !config_persistence_blocked {
+        if routing_error.is_none() && !config_persistence_blocked {
             match crate::config::move_service_routes(&mut config, &mut routing) {
                 Ok(true) => {
                     tracing::info!("Moved the Steam and Telegram overrides into routing.json rules")
@@ -598,7 +601,7 @@ impl Model {
         let support_prompt = crate::support_prompt::load_for_daemon(onboarding.state.completed_at);
         let (mut connection, selected, status) =
             Self::resolve_startup_state(&config, default_selected);
-        if stale_cleanup_failed {
+        if stale_cleanup_failed || routing_error.is_some() {
             connection = ConnectionState::Idle;
         }
         let connecting_profile_id = (connection == ConnectionState::Connecting)
@@ -618,6 +621,7 @@ impl Model {
             connection,
             config,
             routing,
+            routing_error,
             config_persistence_blocked,
             unsaved_state_merge_base: None,
             support_prompt,
@@ -690,6 +694,7 @@ impl Model {
             connection: ConnectionState::Idle,
             config,
             routing: RoutingConfig::default(),
+            routing_error: None,
             config_persistence_blocked: false,
             unsaved_state_merge_base: None,
             support_prompt: crate::support_prompt::SupportPromptState::default(),
@@ -934,6 +939,7 @@ impl Model {
             connection: ConnectionState::Idle,
             config,
             routing: RoutingConfig::default(),
+            routing_error: None,
             config_persistence_blocked: false,
             unsaved_state_merge_base: None,
             support_prompt: crate::support_prompt::SupportPromptState::default(),
@@ -1355,6 +1361,46 @@ mod tests {
             on_disk.contains("Configuration load failed") && on_disk.contains("ERROR"),
             "app.log was: {on_disk:?}",
         );
+    }
+
+    #[test]
+    fn an_invalid_routing_json_blocks_auto_connect_instead_of_running_on_defaults() {
+        let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let _runtime = crate::test_helpers::EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
+        let state_dir = tempfile::tempdir().unwrap();
+        let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", state_dir.path());
+        crate::paths::ensure_config_dirs().unwrap();
+        let profile = crate::config::profile::Profile::new_vless(
+            "A".into(),
+            "1.1.1.1".into(),
+            443,
+            uuid::Uuid::new_v4().to_string(),
+        );
+        let mut config = Config::default();
+        config.settings.auto_connect = true;
+        config.settings.last_connected_profile = Some(profile.id);
+        config.settings.geo_routing.set_mode("bypass_ru");
+        config.profiles.push(profile);
+        crate::config::save_config_at(&crate::paths::profiles_path().unwrap(), &config).unwrap();
+        let routing = crate::paths::routing_path().unwrap();
+        std::fs::write(&routing, "{ not json").unwrap();
+
+        let model = Model::new().unwrap();
+
+        assert!(model.routing_error.is_some());
+        assert_eq!(model.connection, ConnectionState::Idle);
+        assert_eq!(model.connecting_profile_id, None);
+        assert_eq!(model.routing.mode_ids(), ["global"]);
+        assert!(
+            model
+                .status_text()
+                .contains("connecting is blocked until routing.json is fixed"),
+            "status was: {}",
+            model.status_text(),
+        );
+        assert_eq!(std::fs::read_to_string(routing).unwrap(), "{ not json");
     }
 
     #[test]
