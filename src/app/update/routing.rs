@@ -24,7 +24,7 @@ pub(in crate::app::update) fn commit_routing_mode(model: &mut Model, id: &str) -
     let mut effects =
         super::onboarding::outcome(model, super::onboarding::Trigger::RoutingCommitted);
     effects.push(Effect::SaveConfig);
-    let reconnecting = changed && reconnect_to_apply_mode(model);
+    let reconnecting = changed && reconnect_to_apply_mode(model, &mut effects);
     let name = model.routing.mode_name(id);
     let status = if reconnecting {
         format!("Routing mode changed: {name} — reconnecting")
@@ -63,7 +63,7 @@ pub(in crate::app::update) fn commit_routing_settings(model: &mut Model, id: &st
         StatusKey::Routing,
         AppStatus::Info("Routing settings changed".into()),
     );
-    reconnect_to_apply_mode(model);
+    reconnect_to_apply_mode(model, &mut effects);
     effects
 }
 
@@ -73,11 +73,11 @@ fn select_mode(model: &mut Model, id: &str) -> bool {
     changed
 }
 
-fn reconnect_to_apply_mode(model: &mut Model) -> bool {
+fn reconnect_to_apply_mode(model: &mut Model, effects: &mut Vec<Effect>) -> bool {
     model.connection == ConnectionState::Connected
         && model
             .active_profile_id
-            .is_some_and(|active_id| queue_connect(model, active_id))
+            .is_some_and(|active_id| queue_connect(model, active_id, effects))
 }
 
 pub(in crate::app::update) fn commit_geo_region(

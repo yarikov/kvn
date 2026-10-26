@@ -163,14 +163,14 @@ pub(in crate::app::update) fn on_singbox_exited(
 }
 
 pub(in crate::app::update) fn on_system_resumed(model: &mut Model) -> Vec<Effect> {
+    let mut effects = vec![];
     if model.connection != ConnectionState::Connected
         || !model
             .active_profile_id
-            .is_some_and(|id| queue_connect(model, id))
+            .is_some_and(|id| queue_connect(model, id, &mut effects))
     {
-        return vec![];
+        return effects;
     }
-    let mut effects = vec![];
     push_status(
         &mut effects,
         model,
@@ -268,29 +268,46 @@ pub(in crate::app::update) fn handle_auto_connect_polkit_checked(
     effects
 }
 
-pub(in crate::app::update) fn queue_connect(model: &mut Model, profile_id: Uuid) -> bool {
-    if model
+pub(in crate::app::update) fn queue_connect(
+    model: &mut Model,
+    profile_id: Uuid,
+    effects: &mut Vec<Effect>,
+) -> bool {
+    if !model
         .config
         .profiles
         .iter()
         .any(|profile| profile.id == profile_id)
     {
-        model.connecting_profile_id = Some(profile_id);
-        model.connect_attempt_id = model.connect_attempt_id.wrapping_add(1);
-        model.connection = ConnectionState::Connecting;
-        true
-    } else {
-        false
+        return false;
     }
+    if let Some(error) = model.routing_error.clone() {
+        push_status(
+            effects,
+            model,
+            StatusKey::Connection,
+            AppStatus::Error(format!(
+                "Connection blocked: routing.json is invalid: {error}"
+            )),
+        );
+        return false;
+    }
+    model.connecting_profile_id = Some(profile_id);
+    model.connect_attempt_id = model.connect_attempt_id.wrapping_add(1);
+    model.connection = ConnectionState::Connecting;
+    true
 }
 
-pub(in crate::app::update) fn reconnect_with_new_settings(model: &mut Model) -> bool {
+pub(in crate::app::update) fn reconnect_with_new_settings(
+    model: &mut Model,
+    effects: &mut Vec<Effect>,
+) -> bool {
     let profile_id = match model.connection {
         ConnectionState::Connected => model.active_profile_id,
         ConnectionState::ConnectPending => model.connecting_profile_id,
         ConnectionState::Connecting | ConnectionState::Idle => None,
     };
-    profile_id.is_some_and(|id| queue_connect(model, id))
+    profile_id.is_some_and(|id| queue_connect(model, id, effects))
 }
 
 #[cfg(test)]
@@ -323,7 +340,7 @@ mod tests {
             let attempt = model.connect_attempt_id;
 
             assert_eq!(
-                reconnect_with_new_settings(&mut model),
+                reconnect_with_new_settings(&mut model, &mut vec![]),
                 restarts,
                 "{state:?}"
             );
@@ -542,6 +559,32 @@ mod tests {
     }
 
     #[test]
+    fn an_invalid_routing_json_refuses_to_queue_a_connect() {
+        let mut model = model_with_profiles(vec![Profile::new_vless(
+            "A".into(),
+            "1.1.1.1".into(),
+            443,
+            "u1".into(),
+        )]);
+        let profile_id = model.config.profiles[0].id;
+        model.connection = ConnectionState::Connected;
+        model.active_profile_id = Some(profile_id);
+        model.routing_error = Some("bad url".into());
+
+        let mut effects = vec![];
+        assert!(!queue_connect(&mut model, profile_id, &mut effects));
+
+        assert_eq!(model.connection, ConnectionState::Connected);
+        assert_eq!(model.connect_attempt_id, 0);
+        assert_eq!(
+            effects,
+            vec![app_log_error(
+                "Connection blocked: routing.json is invalid: bad url"
+            )]
+        );
+    }
+
+    #[test]
     fn queued_connect_carries_new_attempt_id() {
         let mut model = model_with_profiles(vec![Profile::new_vless(
             "A".into(),
@@ -551,7 +594,7 @@ mod tests {
         )]);
         let profile_id = model.config.profiles[0].id;
 
-        assert!(queue_connect(&mut model, profile_id));
+        assert!(queue_connect(&mut model, profile_id, &mut vec![]));
         assert_eq!(model.connect_attempt_id, 1);
         let effects = handle_tick(&mut model);
 
@@ -673,6 +716,26 @@ mod tests {
             tick_effects.iter().any(
                 |effect| matches!(effect, Effect::Connect { profile, .. } if profile.id == a_id)
             )
+        );
+    }
+
+    #[test]
+    fn a_reconnect_after_resume_reports_an_invalid_routing_json() {
+        let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
+        let profile_id = profile.id;
+        let mut model = model_with_profiles(vec![profile]);
+        model.connection = ConnectionState::Connected;
+        model.active_profile_id = Some(profile_id);
+        model.routing_error = Some("bad url".into());
+
+        let effects = update(&mut model, Msg::SystemResumed);
+
+        assert_eq!(model.connection, ConnectionState::Connected);
+        assert_eq!(
+            effects,
+            vec![app_log_error(
+                "Connection blocked: routing.json is invalid: bad url"
+            )]
         );
     }
 

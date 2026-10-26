@@ -56,7 +56,7 @@ pub(crate) fn handle_config_reloaded(
                 if runtime_changed {
                     match model.connection {
                         ConnectionState::Connected | ConnectionState::ConnectPending => {
-                            reconnect_with_new_settings(model);
+                            reconnect_with_new_settings(model, &mut effects);
                         }
                         ConnectionState::Connecting | ConnectionState::Idle => {}
                     }
@@ -104,15 +104,19 @@ pub(crate) fn handle_routing_reloaded(
     let routing = match result {
         Ok(routing) => routing,
         Err(e) => {
+            model.routing_error = Some(e.to_string());
             push_status(
                 &mut effects,
                 model,
                 StatusKey::Config,
-                AppStatus::Error(format!("Routing configuration reload failed: {e}")),
+                AppStatus::Error(format!(
+                    "Routing configuration reload failed; new connections are blocked until routing.json is fixed: {e}"
+                )),
             );
             return effects;
         }
     };
+    model.routing_error = None;
     let old_plan = RoutePlan::for_settings(&model.config.settings, &model.routing);
     let old_selectable = model.selectable_rule_sets();
     model.routing = routing;
@@ -129,7 +133,8 @@ pub(crate) fn handle_routing_reloaded(
         .rule_sets()
         .filter(|rule_set| !old_plan.rule_sets().any(|old| old.url == rule_set.url))
         .any(|rule_set| downloads(&effects, rule_set));
-    if new_plan != old_plan && !awaits_download && reconnect_with_new_settings(model) {
+    if new_plan != old_plan && !awaits_download && reconnect_with_new_settings(model, &mut effects)
+    {
         model
             .logs
             .push_back("Routing configuration changed — reconnecting".into());
@@ -289,8 +294,16 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_routing_reload_keeps_the_loaded_rule_sets() {
-        let mut model = model_with_profiles(vec![]);
+    fn a_failed_routing_reload_keeps_the_connection_and_blocks_new_ones() {
+        let mut model = model_with_profiles(vec![Profile::new_vless(
+            "A".into(),
+            "1.1.1.1".into(),
+            443,
+            "u1".into(),
+        )]);
+        let profile_id = model.config.profiles[0].id;
+        model.connection = ConnectionState::Connected;
+        model.active_profile_id = Some(profile_id);
         model.routing.rule_sets.remove("geoip-ir");
         let before = model.routing.clone();
 
@@ -300,13 +313,28 @@ mod tests {
         );
 
         assert_eq!(model.routing, before);
+        assert_eq!(model.routing_error.as_deref(), Some("bad url"));
+        assert_eq!(model.connection, ConnectionState::Connected);
         assert_eq!(
             effects,
             vec![
                 Effect::BroadcastState,
-                app_log_error("Routing configuration reload failed: bad url"),
+                app_log_error(
+                    "Routing configuration reload failed; new connections are blocked until routing.json is fixed: bad url"
+                ),
             ]
         );
+    }
+
+    #[test]
+    fn a_routing_reload_that_loads_unblocks_connecting() {
+        let mut model = model_with_profiles(vec![]);
+        model.routing_error = Some("bad url".into());
+        let routing = model.routing.clone();
+
+        update(&mut model, Msg::RoutingReloaded(Box::new(Ok(routing))));
+
+        assert_eq!(model.routing_error, None);
     }
 
     #[test]
@@ -418,7 +446,7 @@ mod tests {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
-        assert!(queue_connect(&mut model, profile_id));
+        assert!(queue_connect(&mut model, profile_id, &mut vec![]));
         let mut config = model.config.clone();
         config.profiles.clear();
 
@@ -439,7 +467,7 @@ mod tests {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
-        assert!(queue_connect(&mut model, profile_id));
+        assert!(queue_connect(&mut model, profile_id, &mut vec![]));
         let connect_effects = handle_tick(&mut model);
         assert!(
             connect_effects
@@ -461,7 +489,7 @@ mod tests {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
-        assert!(queue_connect(&mut model, profile_id));
+        assert!(queue_connect(&mut model, profile_id, &mut vec![]));
         model.connection = ConnectionState::ConnectPending;
         let mut config = model.config.clone();
         config.profiles[0].name = "A renamed".into();
@@ -622,7 +650,7 @@ mod tests {
         let profile = Profile::new_vless("A".into(), "1.1.1.1".into(), 443, "u1".into());
         let profile_id = profile.id;
         let mut model = model_with_profiles(vec![profile]);
-        assert!(queue_connect(&mut model, profile_id));
+        assert!(queue_connect(&mut model, profile_id, &mut vec![]));
         model.connection = ConnectionState::ConnectPending;
         let old_attempt = model.connect_attempt_id;
         let mut config = model.config.clone();

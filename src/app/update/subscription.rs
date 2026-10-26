@@ -157,7 +157,7 @@ fn handle_subscription_result_at(
             _ => None,
         };
         if let Some(id) = reconnect_id
-            && queue_connect(model, id)
+            && queue_connect(model, id, &mut effects)
         {
             push_status(
                 &mut effects,
@@ -836,7 +836,7 @@ mod tests {
             send_hwid: false,
             hwid: None,
         });
-        assert!(queue_connect(&mut model, profile_id));
+        assert!(queue_connect(&mut model, profile_id, &mut vec![]));
         model.connection = ConnectionState::ConnectPending;
 
         let effects = handle_subscription_result(&mut model, sub_id, Ok(vec![]));

@@ -70,7 +70,7 @@ pub(in crate::app::update) fn handle_rule_sets_updated(
     if model.connection == ConnectionState::Connected {
         match model.routing_fallback {
             Some(fallback) => effects.extend(leave_routing_fallback(model, fallback, &reports)),
-            None => reconnect_for_updated_rule_sets(model, &updated),
+            None => reconnect_for_updated_rule_sets(model, &updated, &mut effects),
         }
     }
     effects.push(Effect::BroadcastState);
@@ -84,14 +84,18 @@ fn failure_text(report: &RuleSetReport) -> Option<String> {
     }
 }
 
-fn reconnect_for_updated_rule_sets(model: &mut Model, updated: &[&RuleSetReport]) {
+fn reconnect_for_updated_rule_sets(
+    model: &mut Model,
+    updated: &[&RuleSetReport],
+    effects: &mut Vec<Effect>,
+) {
     let required = model.active_rule_sets();
     let routed_update = updated
         .iter()
         .any(|report| required.iter().any(|rule_set| rule_set.key() == report.key));
     if routed_update
         && let Some(active_id) = model.active_profile_id
-        && queue_connect(model, active_id)
+        && queue_connect(model, active_id, effects)
     {
         model
             .logs
@@ -103,21 +107,21 @@ pub(in crate::app::update) fn fetch_skipped_rule_sets(
     model: &mut Model,
     skipped: Vec<RuleSet>,
 ) -> Vec<Effect> {
+    let mut effects = Vec::new();
     if skipped
         .iter()
         .any(|rule_set| model.rule_set_present(rule_set))
         && let Some(active_id) = model.active_profile_id
-        && queue_connect(model, active_id)
+        && queue_connect(model, active_id, &mut effects)
     {
         model
             .logs
             .push_back("Reconnecting to apply new geo databases".into());
-        return Vec::new();
+        return effects;
     }
     if skipped.is_empty() {
-        return Vec::new();
+        return effects;
     }
-    let mut effects = Vec::new();
     let tags: Vec<&str> = skipped.iter().map(|rule_set| &*rule_set.tag).collect();
     push_status(
         &mut effects,
@@ -184,10 +188,11 @@ fn leave_routing_fallback(
         .filter(|rule_set| !model.rule_set_present(rule_set))
         .collect();
     if missing.is_empty() {
+        let mut effects = Vec::new();
         if let Some(active_id) = model.active_profile_id {
-            queue_connect(model, active_id);
+            queue_connect(model, active_id, &mut effects);
         }
-        return Vec::new();
+        return effects;
     }
     let failures: Vec<String> = reports
         .iter()
