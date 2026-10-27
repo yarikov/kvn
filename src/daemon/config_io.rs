@@ -304,7 +304,7 @@ pub(super) fn commit_edited_routing(
         .and_then(|path| crate::config::routing::commit_edit_at(&path, &base, &edited));
     match commit {
         Ok(crate::config::routing::RoutingCommit::Saved(routing)) => {
-            for nested in crate::app::update::handle_routing_reloaded(model, Ok(routing)) {
+            for nested in crate::app::update::handle_routing_edit_saved(model, routing) {
                 execute_daemon_effect(nested, tx, model, shared, false);
             }
             RoutingEditResult::Saved

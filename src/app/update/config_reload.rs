@@ -96,6 +96,13 @@ pub(crate) fn handle_config_reloaded(
     }
 }
 
+pub(crate) fn handle_routing_edit_saved(model: &mut Model, routing: RoutingConfig) -> Vec<Effect> {
+    if let Some(draft) = &mut model.routing_settings_draft {
+        draft.rule_orders.clear();
+    }
+    handle_routing_reloaded(model, Ok(routing))
+}
+
 pub(crate) fn handle_routing_reloaded(
     model: &mut Model,
     result: Result<RoutingConfig, crate::app::msg::IpcError>,
@@ -105,6 +112,9 @@ pub(crate) fn handle_routing_reloaded(
         Ok(routing) => routing,
         Err(e) => {
             model.routing_error = Some(e.to_string());
+            if let Some(draft) = &mut model.routing_settings_draft {
+                draft.rule_orders.clear();
+            }
             push_status(
                 &mut effects,
                 model,
@@ -124,13 +134,17 @@ pub(crate) fn handle_routing_reloaded(
             AppStatus::Info("Routing configuration loaded; connecting is allowed again".into()),
         );
     }
-    if let Some(draft) = &mut model.routing_settings_draft
-        && draft
+    if let Some(draft) = &mut model.routing_settings_draft {
+        if draft
             .mode
             .as_deref()
             .is_some_and(|mode| !routing.declares(mode))
-    {
-        draft.mode = None;
+        {
+            draft.mode = None;
+        }
+        draft
+            .rule_orders
+            .retain(|mode, _| routing.mode(mode).is_some());
     }
     let old_plan = RoutePlan::for_settings(&model.config.settings, &model.routing);
     let old_selectable = model.selectable_rule_sets();
@@ -321,6 +335,17 @@ mod tests {
         model.active_profile_id = Some(profile_id);
         model.routing.rule_sets.remove("geoip-ir");
         let before = model.routing.clone();
+        model.routing_settings_draft = Some(crate::app::model::RoutingSettingsDraft {
+            mode: Some("global".into()),
+            rule_orders: [(
+                "global".to_string(),
+                crate::app::model::RuleOrderDraft {
+                    saved: vec![],
+                    rules: vec![],
+                },
+            )]
+            .into(),
+        });
 
         let effects = update(
             &mut model,
@@ -328,6 +353,13 @@ mod tests {
         );
 
         assert_eq!(model.routing, before);
+        assert_eq!(
+            model.routing_settings_draft,
+            Some(crate::app::model::RoutingSettingsDraft {
+                mode: Some("global".into()),
+                ..Default::default()
+            })
+        );
         assert_eq!(model.routing_error.as_deref(), Some("bad url"));
         assert_eq!(model.connection, ConnectionState::Connected);
         assert_eq!(
@@ -342,31 +374,75 @@ mod tests {
     }
 
     #[test]
-    fn a_routing_reload_drops_a_drafted_mode_the_file_no_longer_has() {
+    fn a_routing_reload_drops_the_drafts_of_a_mode_the_file_no_longer_has() {
         let mut model = model_with_profiles(vec![]);
         model.routing.add_region_modes(GeoRegion::Ir);
+        model.routing.add_region_modes(GeoRegion::Ru);
         let mut routing = model.routing.clone();
+        let order = |mode: &str| {
+            let rules = routing.mode(mode).unwrap().rules.clone();
+            let draft = crate::app::model::RuleOrderDraft {
+                saved: rules.clone(),
+                rules: rules.into_iter().rev().collect(),
+            };
+            (mode.to_string(), draft)
+        };
         model.routing_settings_draft = Some(crate::app::model::RoutingSettingsDraft {
             mode: Some("only_ir".into()),
+            rule_orders: [order("only_ir"), order("bypass_ru")].into(),
         });
+        let drafted_modes = |model: &Model| {
+            let draft = model.routing_settings_draft.as_ref().unwrap();
+            (
+                draft.mode.clone(),
+                draft.rule_orders.keys().cloned().collect::<Vec<_>>(),
+            )
+        };
 
         update(
             &mut model,
             Msg::RoutingReloaded(Box::new(Ok(routing.clone()))),
         );
         assert_eq!(
-            model
-                .routing_settings_draft
-                .as_ref()
-                .unwrap()
-                .mode
-                .as_deref(),
-            Some("only_ir")
+            drafted_modes(&model),
+            (
+                Some("only_ir".into()),
+                vec!["bypass_ru".into(), "only_ir".into()]
+            )
         );
 
         routing.modes.retain(|mode| mode.id != "only_ir");
         update(&mut model, Msg::RoutingReloaded(Box::new(Ok(routing))));
-        assert_eq!(model.routing_settings_draft.unwrap().mode, None);
+        assert_eq!(drafted_modes(&model), (None, vec!["bypass_ru".into()]));
+    }
+
+    #[test]
+    fn a_saved_routing_edit_drops_every_rule_order_draft_and_keeps_the_mode() {
+        let mut model = model_with_profiles(vec![]);
+        model.routing.add_region_modes(GeoRegion::Ru);
+        let routing = model.routing.clone();
+        let rules = routing.mode("bypass_ru").unwrap().rules.clone();
+        model.routing_settings_draft = Some(crate::app::model::RoutingSettingsDraft {
+            mode: Some("bypass_ru".into()),
+            rule_orders: [(
+                "bypass_ru".to_string(),
+                crate::app::model::RuleOrderDraft {
+                    saved: rules.clone(),
+                    rules: rules.into_iter().rev().collect(),
+                },
+            )]
+            .into(),
+        });
+
+        handle_routing_edit_saved(&mut model, routing);
+
+        assert_eq!(
+            model.routing_settings_draft,
+            Some(crate::app::model::RoutingSettingsDraft {
+                mode: Some("bypass_ru".into()),
+                ..Default::default()
+            })
+        );
     }
 
     #[test]

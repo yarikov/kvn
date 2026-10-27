@@ -7,34 +7,40 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 
-use crate::app::model::AppStatus;
+use crate::app::model::{AppStatus, RoutingRulesEdit};
+use crate::config::routing::RoutingConfig;
 use crate::tui_client::{OSC_POINTER_DEFAULT, editor, input};
 
 use super::super::ClientLoop;
 use super::super::pointer::PointerShape;
 use super::super::toast::ToastKey;
 
-#[derive(Clone, Copy)]
 pub(super) enum EditedFile {
     Profiles,
     Routing,
+    RoutingRulesConflict {
+        edit: RoutingRulesEdit,
+        current: Box<RoutingConfig>,
+        paths: Vec<String>,
+    },
 }
 
 impl EditedFile {
-    fn label(self) -> &'static str {
+    fn label(&self) -> &'static str {
         match self {
             Self::Profiles => "Configuration",
-            Self::Routing => "Routing configuration",
+            Self::Routing | Self::RoutingRulesConflict { .. } => "Routing configuration",
         }
     }
 }
 
-pub(super) fn open(state: &mut ClientLoop, file: EditedFile) -> Result<()> {
+pub(super) fn open(state: &mut ClientLoop, file: EditedFile) -> Result<bool> {
     state.clear_log_selection();
     if !state.event_reader_control.pause() {
         state.event_reader_control.resume();
         anyhow::bail!("Timed out while pausing terminal input for external editor");
     }
+    let label = file.label();
     let result = leave_terminal(state).and_then(|()| match file {
         EditedFile::Profiles => {
             let target = state.model.selected_row().map(editor::EditorTarget::from);
@@ -43,12 +49,19 @@ pub(super) fn open(state: &mut ClientLoop, file: EditedFile) -> Result<()> {
         EditedFile::Routing => editor::open_routing_editor(
             state.model.shown_routing_mode(),
             state.model.routing_settings_row(),
+            state.model.routing_rules_edit(),
         ),
+        EditedFile::RoutingRulesConflict {
+            edit,
+            current,
+            paths,
+        } => editor::resolve_routing_rules_conflict(edit, *current, &paths),
     });
     let restored = restore_terminal(state);
     input::discard_pending_input();
     state.event_reader_control.resume();
-    let status = editor_status(file, result);
+    let saved = matches!(result, Ok(editor::EditorOutcome::Saved));
+    let status = editor_status(label, result);
     let reported = if let Some(AppStatus::Error(message)) = &status {
         state.report_error(message.clone())
     } else {
@@ -63,11 +76,10 @@ pub(super) fn open(state: &mut ClientLoop, file: EditedFile) -> Result<()> {
     finish_terminal_return(restored, reported, status.as_ref())?;
     state.refresh_pointer_shape()?;
     state.needs_redraw = true;
-    Ok(())
+    Ok(saved)
 }
 
-fn editor_status(file: EditedFile, result: Result<editor::EditorOutcome>) -> Option<AppStatus> {
-    let label = file.label();
+fn editor_status(label: &str, result: Result<editor::EditorOutcome>) -> Option<AppStatus> {
     match result {
         Ok(editor::EditorOutcome::Saved | editor::EditorOutcome::Unchanged) => None,
         Ok(editor::EditorOutcome::Cancelled { recovery }) => {
@@ -150,7 +162,7 @@ mod tests {
         for recovery in [None, Some(std::path::PathBuf::from("/tmp/recovery.json"))] {
             let expected_path = recovery.clone();
             let status = editor_status(
-                EditedFile::Profiles,
+                "Configuration",
                 Ok(editor::EditorOutcome::Cancelled { recovery }),
             );
             let Some(AppStatus::Info(message)) = status else {
@@ -166,7 +178,7 @@ mod tests {
     #[test]
     fn restoration_and_reporting_failures_keep_the_editor_error_and_recovery_path() {
         let status = editor_status(
-            EditedFile::Profiles,
+            "Configuration",
             Err(anyhow::anyhow!(
                 "Edited version saved to /tmp/recovery.json: editor failed"
             )),
@@ -187,7 +199,7 @@ mod tests {
     #[test]
     fn restoration_failure_keeps_cancellation_recovery_path() {
         let status = editor_status(
-            EditedFile::Profiles,
+            "Configuration",
             Ok(editor::EditorOutcome::Cancelled {
                 recovery: Some("/tmp/recovery.json".into()),
             }),

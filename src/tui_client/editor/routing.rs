@@ -5,10 +5,11 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::{
-    EditIssue, EditSession, EditorOutcome, EditorSnapshot, diagnostics_issue, edit_until_saved,
-    finish_edit, load_issue, prepared_editor, unresolved_conflicts, write_editor_schema,
+    EditIssue, EditSession, EditorCommand, EditorOutcome, EditorSnapshot, conflict_message,
+    diagnostics_issue, edit_until_saved, finish_edit, load_issue, prepared_editor, retry_edit,
+    unresolved_conflicts, write_editor_schema,
 };
-use crate::app::model::RoutingSettingsRow;
+use crate::app::model::{RoutingRulesEdit, RoutingSettingsRow};
 use crate::app::msg::{IpcCommand, RoutingEditResult};
 use crate::config::json_pointer::JsonIndex;
 use crate::config::routing::{RoutingConfig, RoutingEditBase, RoutingProblem, routing_json_schema};
@@ -60,24 +61,73 @@ impl EditSession for RoutingEdit {
     }
 }
 
-pub fn open_routing_editor(mode: &str, row: RoutingSettingsRow) -> Result<EditorOutcome> {
+pub fn open_routing_editor(
+    mode: &str,
+    row: RoutingSettingsRow,
+    rules_edit: Option<RoutingRulesEdit>,
+) -> Result<EditorOutcome> {
     let editor = prepared_editor()?;
-    let routing_path = crate::paths::routing_path().context("Failed to determine routing path")?;
-    let on_disk = fs::read_to_string(&routing_path)
-        .with_context(|| format!("Failed to read {}", routing_path.display()))?;
     let json_schema = write_editor_schema("routing.schema.json", &routing_json_schema());
-    let (base, contents, line) = match check_routing_edit(&on_disk, &routing_path) {
-        Ok(routing) => {
-            let contents = snapshot_contents(&routing, json_schema.clone())?;
-            let line = routing
-                .modes
-                .iter()
-                .position(|candidate| candidate.id == mode)
-                .and_then(|index| JsonIndex::new(&contents).nearest_line(&row_pointer(index, row)));
-            (RoutingEditBase::Parsed(Box::new(routing)), contents, line)
+    let (base, contents, line) = match rules_edit {
+        Some(edit) => {
+            let contents = snapshot_contents(&edit.edited, json_schema.clone())?;
+            let line = row_line(&edit.edited, &contents, mode, row);
+            (RoutingEditBase::Parsed(Box::new(edit.base)), contents, line)
         }
-        Err(issue) => (RoutingEditBase::Raw(on_disk.clone()), on_disk, issue.line),
+        None => {
+            let routing_path =
+                crate::paths::routing_path().context("Failed to determine routing path")?;
+            let on_disk = fs::read_to_string(&routing_path)
+                .with_context(|| format!("Failed to read {}", routing_path.display()))?;
+            match check_routing_edit(&on_disk, &routing_path) {
+                Ok(routing) => {
+                    let contents = snapshot_contents(&routing, json_schema.clone())?;
+                    let line = row_line(&routing, &contents, mode, row);
+                    (RoutingEditBase::Parsed(Box::new(routing)), contents, line)
+                }
+                Err(issue) => (RoutingEditBase::Raw(on_disk.clone()), on_disk, issue.line),
+            }
+        }
     };
+    let mut session = RoutingEdit { base, json_schema };
+    edit_routing(&editor, &mut session, contents, line)
+}
+
+pub fn submit_routing_rules(edit: &RoutingRulesEdit) -> Result<RoutingEditResult> {
+    let session = RoutingEdit {
+        base: RoutingEditBase::Parsed(Box::new(edit.base.clone())),
+        json_schema: None,
+    };
+    session.submit(&edit.edited)
+}
+
+pub fn resolve_routing_rules_conflict(
+    edit: RoutingRulesEdit,
+    current: RoutingConfig,
+    paths: &[String],
+) -> Result<EditorOutcome> {
+    let editor = prepared_editor()?;
+    let mut session = RoutingEdit {
+        base: RoutingEditBase::Parsed(Box::new(edit.base)),
+        json_schema: write_editor_schema("routing.schema.json", &routing_json_schema()),
+    };
+    if !retry_edit(&format!(
+        "routing.json changed on disk after the rules were moved. {}",
+        conflict_message(paths)
+    ))? {
+        return Ok(EditorOutcome::Cancelled { recovery: None });
+    }
+    let document = session.rebase(current, &edit.edited);
+    let line = crate::config::merge::resolution::first_marker_line(&document);
+    edit_routing(&editor, &mut session, document, line)
+}
+
+fn edit_routing(
+    editor: &EditorCommand,
+    session: &mut RoutingEdit,
+    contents: String,
+    line: Option<usize>,
+) -> Result<EditorOutcome> {
     let path = crate::paths::ensure_kvn_runtime_dir()?
         .join(format!("routing-edit-{}.json", std::process::id()));
     crate::atomic_write::write(&path, contents.as_bytes())
@@ -87,9 +137,21 @@ pub fn open_routing_editor(mode: &str, row: RoutingSettingsRow) -> Result<Editor
         remove_on_drop: true,
         recovery_kind: crate::config::recovery::RecoveryKind::RoutingInvalidEdit,
     };
-    let mut session = RoutingEdit { base, json_schema };
-    let result = edit_until_saved(&path, &mut session, &editor, line, contents.as_bytes());
+    let result = edit_until_saved(&path, session, editor, line, contents.as_bytes());
     finish_edit(snapshot, contents.as_bytes(), result)
+}
+
+fn row_line(
+    routing: &RoutingConfig,
+    contents: &str,
+    mode: &str,
+    row: RoutingSettingsRow,
+) -> Option<usize> {
+    routing
+        .modes
+        .iter()
+        .position(|candidate| candidate.id == mode)
+        .and_then(|index| JsonIndex::new(contents).nearest_line(&row_pointer(index, row)))
 }
 
 fn row_pointer(mode: usize, row: RoutingSettingsRow) -> String {

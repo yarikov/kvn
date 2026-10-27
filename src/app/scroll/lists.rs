@@ -108,6 +108,7 @@ mod tests {
         let mut model = crate::test_helpers::model_with_subscription();
         model.routing_settings_draft = Some(RoutingSettingsDraft {
             mode: Some("bypass_ru".into()),
+            ..Default::default()
         });
         for overlay in [
             Overlay::None,

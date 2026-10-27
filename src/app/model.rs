@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::Instant;
 use uuid::Uuid;
 
 use crate::config::load_config;
 use crate::config::profile::{Config, Profile};
-use crate::config::routing::RoutingConfig;
+use crate::config::routing::{ModeRule, RoutingConfig};
 use crate::ui::styles::Theme;
 use chrono::{DateTime, Local};
 
@@ -111,6 +111,26 @@ pub enum RoutingSettingsRow {
 pub struct RoutingSettingsDraft {
     #[serde(default)]
     pub mode: Option<String>,
+    #[serde(default)]
+    pub rule_orders: BTreeMap<String, RuleOrderDraft>,
+}
+
+impl RoutingSettingsDraft {
+    pub fn is_empty(&self) -> bool {
+        self.mode.is_none() && self.rule_orders.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleOrderDraft {
+    pub saved: Vec<ModeRule>,
+    pub rules: Vec<ModeRule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoutingRulesEdit {
+    pub base: RoutingConfig,
+    pub edited: RoutingConfig,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -855,10 +875,52 @@ impl Model {
         }
     }
 
-    pub fn shown_mode_rules(&self) -> &[crate::config::routing::ModeRule] {
-        self.routing
-            .mode(self.shown_routing_mode())
-            .map_or(&[], |mode| mode.rules.as_slice())
+    pub fn shown_mode_rules(&self) -> &[ModeRule] {
+        let shown = self.shown_routing_mode();
+        match self.shown_rule_order_draft() {
+            Some(draft) => &draft.rules,
+            None => self
+                .routing
+                .mode(shown)
+                .map_or(&[], |mode| mode.rules.as_slice()),
+        }
+    }
+
+    pub fn shown_rule_order_draft(&self) -> Option<&RuleOrderDraft> {
+        self.routing_settings_draft
+            .as_ref()?
+            .rule_orders
+            .get(self.shown_routing_mode())
+    }
+
+    pub fn drop_empty_routing_settings_draft(&mut self) {
+        if self
+            .routing_settings_draft
+            .as_ref()
+            .is_some_and(RoutingSettingsDraft::is_empty)
+        {
+            self.routing_settings_draft = None;
+        }
+    }
+
+    pub fn routing_rules_edit(&self) -> Option<RoutingRulesEdit> {
+        let orders = &self.routing_settings_draft.as_ref()?.rule_orders;
+        if orders.is_empty() {
+            return None;
+        }
+        let with_rules = |rules: fn(&RuleOrderDraft) -> &Vec<ModeRule>| {
+            let mut routing = self.routing.clone();
+            for mode in &mut routing.modes {
+                if let Some(draft) = orders.get(&mode.id) {
+                    mode.rules = rules(draft).clone();
+                }
+            }
+            routing
+        };
+        Some(RoutingRulesEdit {
+            base: with_rules(|draft| &draft.saved),
+            edited: with_rules(|draft| &draft.rules),
+        })
     }
 
     pub fn routing_page_lines(&self) -> Vec<RoutingPageLine> {
@@ -1503,6 +1565,40 @@ mod tests {
         assert_eq!(model.status_text(), "oops");
         assert_eq!(model.logs.back().unwrap(), "oops");
         assert_eq!(model.status_revision, initial_revision + 2);
+    }
+
+    #[test]
+    fn a_routing_rules_edit_moves_rules_from_the_order_they_were_moved_from() {
+        let mut model = crate::test_helpers::model_with_profiles(vec![]);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        assert_eq!(model.routing_rules_edit(), None);
+        let rules = model.routing.mode("bypass_ru").unwrap().rules.clone();
+        let moved: Vec<ModeRule> = rules.iter().rev().cloned().collect();
+        let saved = rules[1..].to_vec();
+        model.routing_settings_draft = Some(RoutingSettingsDraft {
+            mode: None,
+            rule_orders: [(
+                "bypass_ru".to_string(),
+                RuleOrderDraft {
+                    saved: saved.clone(),
+                    rules: moved.clone(),
+                },
+            )]
+            .into(),
+        });
+
+        let edit = model.routing_rules_edit().unwrap();
+
+        let rules_of =
+            |routing: &RoutingConfig, mode: &str| routing.mode(mode).unwrap().rules.clone();
+        assert_eq!(rules_of(&edit.base, "bypass_ru"), saved);
+        assert_eq!(rules_of(&edit.edited, "bypass_ru"), moved);
+        assert_eq!(
+            rules_of(&edit.edited, "only_ru"),
+            rules_of(&model.routing, "only_ru")
+        );
     }
 
     #[test]

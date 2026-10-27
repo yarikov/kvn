@@ -416,6 +416,19 @@ list longer than the window scrolls, with a scrollbar on the right. `h`/`l`
 change the mode only on the Mode row, and `e` opens `routing.json` at the
 selected rule (or at the mode on the Mode row).
 
+`Alt+j` / `Alt+k` (or `Alt+↓` / `Alt+↑`) move the selected rule down or up
+within its mode; on the Mode row, on `final` and at either end of the list they
+do nothing. The new order is a draft, marked `*` next to the rules heading,
+kept for each mode until `Enter` writes them all to `routing.json` together
+with the Mode row; `q`, `Esc` and `Backspace` discard it. The saved file applies
+at once, and a changed active mode reconnects. When the rules of a moved mode
+were changed in the file in the meantime, kvn opens the editor with the
+`YOUR EDIT` / `CURRENT` conflict markers, as when saving from the editor (see
+[Rule-sets and modes](#rule-sets-and-modes)); the draft stays until the file
+is saved. `e` with moved rules opens the file with the new order. Rules cannot
+be moved while `routing.json` is invalid, and a reload that finds it invalid
+discards the moved order.
+
 The following snippet belongs inside `settings`:
 
 ```json
