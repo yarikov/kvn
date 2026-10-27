@@ -3,42 +3,42 @@ source: src/ui/layout/overlay/settings_menu.rs
 expression: "crate::test_helpers::snapshot_styles(&model,\ncrate::ui::layout::MIN_TERMINAL_WIDTH, crate::ui::layout::MIN_TERMINAL_HEIGHT)"
 ---
 ┌ Traffic ───────────────────────────────────────────────────────────┐
-│ ↑ 0.0┌──────────────────────────────────────────────────────┐ectio │
-└──────│                  Settings › Routing                  │──────┘
-┌ Profi│                                                      │──────┐
-│ No so│ domain    service-0.a-rather-long-corpora...  proxy  │om    │
-│clipbo│ domain    service-1.a-rather-long-corpora...  proxy  │      │
-│      │ domain    service-2.a-rather-long-corpora...  proxy  │      │
-│      │ domain    service-3.a-rather-long-corpora...  proxy  ┃      │
-│      │ domain    service-4.a-rather-long-corpora...  proxy  ┃      │
-│      │ domain    service-5.a-rather-long-corpora...  proxy  ┃      │
-│      │ domain    service-6.a-rather-long-corpora...  proxy  │      │
-│      │                                                      │      │
-│      │         󰌑 apply · e edit · q/󱊷 close · ⌫ back        │      │
-└──────└──────────────────────────────────────────────────────┘──────┘
+│ ↑ ┌────────────────────────────────────────────────────────────┐io │
+└───│                     Settings › Routing                     │───┘
+┌ Pr│                                                            │───┐
+│ No│ domain    service-0.a-rather-long-corpora...  ‹ proxy ›    │   │
+│cli│ domain    service-1.a-rather-long-corpora...  ‹ proxy ›    │   │
+│   │ domain    service-2.a-rather-long-corpora...  ‹ proxy ›    │   │
+│   │ domain    service-3.a-rather-long-corpora...  ‹ proxy ›    ┃   │
+│   │ domain    service-4.a-rather-long-corpora...  ‹ proxy ›    ┃   │
+│   │ domain    service-5.a-rather-long-corpora...  ‹ proxy ›    ┃   │
+│   │ domain    service-6.a-rather-long-corpora...  ‹ proxy ›    │   │
+│   │                                                            │   │
+│   │            󰌑 apply · e edit · q/󱊷 close · ⌫ back           │   │
+└───└────────────────────────────────────────────────────────────┘───┘
  DISCONNECTED                          DoH  Bypass RU    (off) never 
 [70x15]
 --- styles ---
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-abccdddeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedddddba
-aaaaaaaeddddddddddddddddddeeeeeeeeeeeeeeeeeeddddddddddddddddddeaaaaaaa
-aaaaaaaeddddddddddddddddddddddddddddddddddddddddddddddddddddddeaaaaaaa
-addddddeddddddddddddddddddddddddddddddddddddddddddddddddddddddeddbbbba
-addddddeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbba
-abbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbba
-abbbbbbeffffffffffffffffffffffffffffffffffffffffffffffffffffffebbbbbba
-abbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbba
-abbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbba
-abbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbba
-abbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbba
-abbbbbbeddddddddddddddddddddddddddddddddddddddddddddddddddddddebbbbbba
-aaaaaaaeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeaaaaaaa
+abccddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddeeba
+aaaadeeeeeeeeeeeeeeeeeeeeeddddddddddddddddddeeeeeeeeeeeeeeeeeeeeedaaaa
+aaaadeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedaaaa
+aeeedeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedbbba
+aeeedeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedbbba
+abbbdeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedbbba
+abbbdffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffdbbba
+abbbdeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedbbba
+abbbdeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedbbba
+abbbdeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedbbba
+abbbdeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedbbba
+abbbdeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedbbba
+aaaaddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddaaaa
 gggggggggggggghhhhhhhhhhhhhhhhhhhhhhhhhiiihhiiiiiiiiihhjjjjjjjjjjjjjjj
 a fg=DarkGray bg=Black
 b fg=Reset bg=Black
 c fg=Green bg=Black BOLD
-d fg=Gray bg=Black
-e fg=Cyan bg=Black BOLD
+d fg=Cyan bg=Black BOLD
+e fg=Gray bg=Black
 f fg=Cyan bg=Rgb(45, 45, 85) BOLD
 g fg=Gray bg=Rgb(43, 43, 43) BOLD
 h fg=Gray bg=Rgb(14, 14, 14)

@@ -266,14 +266,38 @@ mod tests {
         rules.swap(0, 1);
         model.routing_settings_draft = Some(crate::app::model::RoutingSettingsDraft {
             mode: None,
-            rule_orders: [(
+            mode_rules: [(
                 "bypass_ru".to_string(),
-                crate::app::model::RuleOrderDraft { saved, rules },
+                crate::app::model::ModeRulesDraft { saved, rules },
             )]
             .into(),
         });
         model.settings_menu_selected = 2;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
+    }
+
+    #[test]
+    fn draw_routing_menu_blocked_and_disabled_rules_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        let mode = model
+            .routing
+            .modes
+            .iter_mut()
+            .find(|mode| mode.id == "bypass_ru")
+            .unwrap();
+        mode.rules[1].route = crate::config::routing::RuleRoute::Block;
+        mode.rules[2].route = crate::config::routing::RuleRoute::Disabled;
+        model.config.settings.geo_routing.set_mode("bypass_ru");
+        model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
+        model.settings_menu_selected = 1;
+        insta::assert_snapshot!(crate::test_helpers::snapshot_styles(
+            &model,
+            crate::ui::layout::MIN_TERMINAL_WIDTH,
+            crate::ui::layout::MIN_TERMINAL_HEIGHT
+        ));
     }
 
     #[test]

@@ -5,6 +5,7 @@ pub(super) mod ipc;
 pub(super) mod onboarding;
 pub(super) mod regions;
 pub(super) mod reorder;
+pub(super) mod routing_rules;
 pub(super) mod settings_menu;
 pub(super) mod sources;
 

@@ -2,7 +2,7 @@ use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 
 use crate::app::model::{Model, RoutingPageLine};
-use crate::config::routing::{ModeRule, Outbound};
+use crate::config::routing::{ModeRule, Outbound, RuleRoute};
 use crate::ui::layout::scrollbar::ScrollWindow;
 use crate::ui::layout::text::{fit_to_visual_width, visual_width};
 
@@ -12,10 +12,11 @@ use super::popup::{
 use super::settings_row::{settings_full_width_line, settings_value_layout, settings_value_line};
 
 const RULES_HEADING: &str = "Rules (top wins)";
-const MOVED_RULES_HEADING: &str = "Rules (top wins) *";
+const EDITED_RULES_HEADING: &str = "Rules (top wins) *";
 const FINAL_KEY: &str = "final";
 const MAX_RULE_VALUE_WIDTH: usize = 34;
 const COLUMN_GAP: &str = "  ";
+const SWITCH_MARKS_WIDTH: usize = 4;
 
 pub(super) struct RoutingPage {
     pub(super) lines: Vec<Line<'static>>,
@@ -27,6 +28,8 @@ struct RuleRow {
     key: &'static str,
     value: String,
     route: &'static str,
+    switchable: bool,
+    disabled: bool,
 }
 
 struct RuleColumns {
@@ -41,19 +44,34 @@ impl RuleColumns {
         Self {
             key: widest(|row| visual_width(row.key)),
             value: widest(|row| visual_width(&row.value)).min(MAX_RULE_VALUE_WIDTH),
-            route: widest(|row| visual_width(row.route)),
+            route: [
+                RuleRoute::Proxy,
+                RuleRoute::Direct,
+                RuleRoute::Block,
+                RuleRoute::Disabled,
+            ]
+            .map(|route| visual_width(route.tag()))
+            .into_iter()
+            .chain(rows.iter().map(|row| visual_width(row.route)))
+            .max()
+            .unwrap_or(0),
         }
     }
 
     fn width(&self) -> usize {
-        self.key + self.value + self.route + COLUMN_GAP.len() * 2
+        self.key + self.value + self.route + SWITCH_MARKS_WIDTH + COLUMN_GAP.len() * 2
     }
 
     fn text(&self, row: &RuleRow) -> String {
+        let route = if row.switchable {
+            format!("‹ {} ›", row.route)
+        } else {
+            format!("  {}", row.route)
+        };
         [
             fit_to_visual_width(row.key, self.key),
             fit_to_visual_width(&row.value, self.value),
-            fit_to_visual_width(row.route, self.route),
+            fit_to_visual_width(&route, self.route + SWITCH_MARKS_WIDTH),
         ]
         .join(COLUMN_GAP)
     }
@@ -85,18 +103,20 @@ pub(super) fn routing_page(model: &Model, area: Rect, frame_widths: &[usize]) ->
             key: FINAL_KEY,
             value: String::new(),
             route: final_outbound.tag(),
+            switchable: false,
+            disabled: false,
         }))
         .collect();
     let columns = RuleColumns::of(&rule_rows);
-    let rules_heading = if model.shown_rule_order_draft().is_some() {
-        MOVED_RULES_HEADING
+    let rules_heading = if model.shown_mode_rules_draft().is_some() {
+        EDITED_RULES_HEADING
     } else {
         RULES_HEADING
     };
     let content_widths: Vec<usize> = frame_widths
         .iter()
         .copied()
-        .chain([columns.width(), visual_width(MOVED_RULES_HEADING)])
+        .chain([columns.width(), visual_width(EDITED_RULES_HEADING)])
         .collect();
     let layout = settings_value_layout(&settings, stable_value_width, area, &content_widths);
     let row_width = settings_row_width(layout.popup_width);
@@ -118,12 +138,21 @@ pub(super) fn routing_page(model: &Model, area: Rect, frame_widths: &[usize]) ->
                 let (name, value, dirty) = &settings[0];
                 settings_value_line(name, value, *dirty, selected == 0, layout, theme)
             }
-            RoutingPageLine::Row(row) => settings_full_width_line(
-                &format!("{indent}{}", columns.text(&rule_rows[row - 1])),
-                row_width,
-                row == selected,
-                theme,
-            ),
+            RoutingPageLine::Row(row) => {
+                let rule = &rule_rows[row - 1];
+                let mut line = settings_full_width_line(
+                    &format!("{indent}{}", columns.text(rule)),
+                    row_width,
+                    row == selected,
+                    theme,
+                );
+                if rule.disabled && row != selected {
+                    for span in &mut line.spans {
+                        span.style = theme.muted();
+                    }
+                }
+                line
+            }
             RoutingPageLine::Blank => Line::from(""),
             RoutingPageLine::RulesHeading => {
                 Line::from(Span::styled(rules_heading, theme.accent())).centered()
@@ -146,5 +175,7 @@ fn rule_row(rule: &ModeRule) -> RuleRow {
         key: rule.matches.key(),
         value: rule.matches.value().to_string(),
         route: rule.route.tag(),
+        switchable: true,
+        disabled: rule.route == RuleRoute::Disabled,
     }
 }

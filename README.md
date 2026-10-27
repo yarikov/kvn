@@ -274,6 +274,7 @@ detected problems.
 | `Space i` | Interface settings |
 | `Space r` | Routing settings |
 | `Alt+j` / `Alt+k`, `Alt+↓` / `Alt+↑` | In Routing settings, move the selected rule down / up |
+| `h` / `l`, `←` / `→` | In Routing settings, change the selected rule's route: proxy, direct, block, disabled |
 | `Backspace` | Return from a settings page to the menu, discarding its changes |
 
 **Dialogs**

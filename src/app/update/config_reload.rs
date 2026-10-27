@@ -98,7 +98,7 @@ pub(crate) fn handle_config_reloaded(
 
 pub(crate) fn handle_routing_edit_saved(model: &mut Model, routing: RoutingConfig) -> Vec<Effect> {
     if let Some(draft) = &mut model.routing_settings_draft {
-        draft.rule_orders.clear();
+        draft.mode_rules.clear();
     }
     handle_routing_reloaded(model, Ok(routing))
 }
@@ -113,7 +113,7 @@ pub(crate) fn handle_routing_reloaded(
         Err(e) => {
             model.routing_error = Some(e.to_string());
             if let Some(draft) = &mut model.routing_settings_draft {
-                draft.rule_orders.clear();
+                draft.mode_rules.clear();
             }
             push_status(
                 &mut effects,
@@ -143,7 +143,7 @@ pub(crate) fn handle_routing_reloaded(
             draft.mode = None;
         }
         draft
-            .rule_orders
+            .mode_rules
             .retain(|mode, _| routing.mode(mode).is_some());
     }
     let old_plan = RoutePlan::for_settings(&model.config.settings, &model.routing);
@@ -337,9 +337,9 @@ mod tests {
         let before = model.routing.clone();
         model.routing_settings_draft = Some(crate::app::model::RoutingSettingsDraft {
             mode: Some("global".into()),
-            rule_orders: [(
+            mode_rules: [(
                 "global".to_string(),
-                crate::app::model::RuleOrderDraft {
+                crate::app::model::ModeRulesDraft {
                     saved: vec![],
                     rules: vec![],
                 },
@@ -381,7 +381,7 @@ mod tests {
         let mut routing = model.routing.clone();
         let order = |mode: &str| {
             let rules = routing.mode(mode).unwrap().rules.clone();
-            let draft = crate::app::model::RuleOrderDraft {
+            let draft = crate::app::model::ModeRulesDraft {
                 saved: rules.clone(),
                 rules: rules.into_iter().rev().collect(),
             };
@@ -389,13 +389,13 @@ mod tests {
         };
         model.routing_settings_draft = Some(crate::app::model::RoutingSettingsDraft {
             mode: Some("only_ir".into()),
-            rule_orders: [order("only_ir"), order("bypass_ru")].into(),
+            mode_rules: [order("only_ir"), order("bypass_ru")].into(),
         });
         let drafted_modes = |model: &Model| {
             let draft = model.routing_settings_draft.as_ref().unwrap();
             (
                 draft.mode.clone(),
-                draft.rule_orders.keys().cloned().collect::<Vec<_>>(),
+                draft.mode_rules.keys().cloned().collect::<Vec<_>>(),
             )
         };
 
@@ -417,16 +417,16 @@ mod tests {
     }
 
     #[test]
-    fn a_saved_routing_edit_drops_every_rule_order_draft_and_keeps_the_mode() {
+    fn a_saved_routing_edit_drops_every_mode_rules_draft_and_keeps_the_mode() {
         let mut model = model_with_profiles(vec![]);
         model.routing.add_region_modes(GeoRegion::Ru);
         let routing = model.routing.clone();
         let rules = routing.mode("bypass_ru").unwrap().rules.clone();
         model.routing_settings_draft = Some(crate::app::model::RoutingSettingsDraft {
             mode: Some("bypass_ru".into()),
-            rule_orders: [(
+            mode_rules: [(
                 "bypass_ru".to_string(),
-                crate::app::model::RuleOrderDraft {
+                crate::app::model::ModeRulesDraft {
                     saved: rules.clone(),
                     rules: rules.into_iter().rev().collect(),
                 },

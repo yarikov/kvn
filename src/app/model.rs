@@ -112,17 +112,17 @@ pub struct RoutingSettingsDraft {
     #[serde(default)]
     pub mode: Option<String>,
     #[serde(default)]
-    pub rule_orders: BTreeMap<String, RuleOrderDraft>,
+    pub mode_rules: BTreeMap<String, ModeRulesDraft>,
 }
 
 impl RoutingSettingsDraft {
     pub fn is_empty(&self) -> bool {
-        self.mode.is_none() && self.rule_orders.is_empty()
+        self.mode.is_none() && self.mode_rules.is_empty()
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RuleOrderDraft {
+pub struct ModeRulesDraft {
     pub saved: Vec<ModeRule>,
     pub rules: Vec<ModeRule>,
 }
@@ -877,7 +877,7 @@ impl Model {
 
     pub fn shown_mode_rules(&self) -> &[ModeRule] {
         let shown = self.shown_routing_mode();
-        match self.shown_rule_order_draft() {
+        match self.shown_mode_rules_draft() {
             Some(draft) => &draft.rules,
             None => self
                 .routing
@@ -886,11 +886,32 @@ impl Model {
         }
     }
 
-    pub fn shown_rule_order_draft(&self) -> Option<&RuleOrderDraft> {
+    pub fn shown_mode_rules_draft(&self) -> Option<&ModeRulesDraft> {
         self.routing_settings_draft
             .as_ref()?
-            .rule_orders
+            .mode_rules
             .get(self.shown_routing_mode())
+    }
+
+    pub fn draft_shown_mode_rules(&mut self, rules: Vec<ModeRule>) {
+        let mode = self.shown_routing_mode().to_string();
+        let saved = match self.shown_mode_rules_draft() {
+            Some(draft) => draft.saved.clone(),
+            None => self
+                .routing
+                .mode(&mode)
+                .map_or_else(Vec::new, |definition| definition.rules.clone()),
+        };
+        let drafts = &mut self
+            .routing_settings_draft
+            .get_or_insert_default()
+            .mode_rules;
+        if rules == saved {
+            drafts.remove(&mode);
+        } else {
+            drafts.insert(mode, ModeRulesDraft { saved, rules });
+        }
+        self.drop_empty_routing_settings_draft();
     }
 
     pub fn drop_empty_routing_settings_draft(&mut self) {
@@ -904,11 +925,11 @@ impl Model {
     }
 
     pub fn routing_rules_edit(&self) -> Option<RoutingRulesEdit> {
-        let orders = &self.routing_settings_draft.as_ref()?.rule_orders;
+        let orders = &self.routing_settings_draft.as_ref()?.mode_rules;
         if orders.is_empty() {
             return None;
         }
-        let with_rules = |rules: fn(&RuleOrderDraft) -> &Vec<ModeRule>| {
+        let with_rules = |rules: fn(&ModeRulesDraft) -> &Vec<ModeRule>| {
             let mut routing = self.routing.clone();
             for mode in &mut routing.modes {
                 if let Some(draft) = orders.get(&mode.id) {
@@ -1579,9 +1600,9 @@ mod tests {
         let saved = rules[1..].to_vec();
         model.routing_settings_draft = Some(RoutingSettingsDraft {
             mode: None,
-            rule_orders: [(
+            mode_rules: [(
                 "bypass_ru".to_string(),
-                RuleOrderDraft {
+                ModeRulesDraft {
                     saved: saved.clone(),
                     rules: moved.clone(),
                 },

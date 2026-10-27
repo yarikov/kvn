@@ -1,0 +1,46 @@
+---
+source: src/ui/layout/overlay/settings_menu.rs
+expression: "crate::test_helpers::snapshot_styles(&model,\ncrate::ui::layout::MIN_TERMINAL_WIDTH, crate::ui::layout::MIN_TERMINAL_HEIGHT)"
+---
+┌ Traffic ───────────────────────────────────────────────────────────┐
+│ ↑ 0.0 KB/┌─────────────────────────────────────────────┐ connectio │
+└──────────│             Settings › Routing              │───────────┘
+┌ Profiles │                                             │───────────┐
+│ No source│            Mode ‹ Bypass RU ›               │RL from    │
+│clipboard.│                                             │           │
+│          │              Rules (top wins)               │           │
+│          │ ip        private              ‹ direct ›   │           │
+│          │ rule_set  geosite-category-ru  ‹ block ›    │           │
+│          │ rule_set  geoip-ru             ‹ disabled › │           │
+│          │ final                            proxy      │           │
+│          │                                             │           │
+│          │    󰌑 apply · e edit · q/󱊷 close · ⌫ back    │           │
+└──────────└─────────────────────────────────────────────┘───────────┘
+ DISCONNECTED                          DoH  Bypass RU    (off) never 
+[70x15]
+--- styles ---
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+abccdddddddeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeddddddddddba
+aaaaaaaaaaaedddddddddddddeeeeeeeeeeeeeeeeeeddddddddddddddeaaaaaaaaaaaa
+aaaaaaaaaaaedddddddddddddddddddddddddddddddddddddddddddddeaaaaaaaaaaaa
+addddddddddedddddddddddddddddddddddddddddddddddddddddddddedddddddbbbba
+addddddddddedddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbba
+abbbbbbbbbbeddddddddddddddeeeeeeeeeeeeeeeedddddddddddddddebbbbbbbbbbba
+abbbbbbbbbbefffffffffffffffffffffffffffffffffffffffffffffebbbbbbbbbbba
+abbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbba
+abbbbbbbbbbeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaebbbbbbbbbbba
+abbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbba
+abbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbba
+abbbbbbbbbbedddddddddddddddddddddddddddddddddddddddddddddebbbbbbbbbbba
+aaaaaaaaaaaeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeaaaaaaaaaaaa
+gggggggggggggghhhhhhhhhhhhhhhhhhhhhhhhhiiihhiiiiiiiiihhjjjjjjjjjjjjjjj
+a fg=DarkGray bg=Black
+b fg=Reset bg=Black
+c fg=Green bg=Black BOLD
+d fg=Gray bg=Black
+e fg=Cyan bg=Black BOLD
+f fg=Cyan bg=Rgb(45, 45, 85) BOLD
+g fg=Gray bg=Rgb(43, 43, 43) BOLD
+h fg=Gray bg=Rgb(14, 14, 14)
+i fg=Cyan bg=Rgb(14, 14, 14) BOLD
+j fg=Black bg=Red BOLD

@@ -108,6 +108,49 @@ impl Outbound {
     }
 }
 
+/// What a rule does with the traffic it matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RuleRoute {
+    /// Through the VPN tunnel.
+    Proxy,
+    /// Straight to the network, outside the tunnel.
+    Direct,
+    /// Refused: the connection is closed at once.
+    Block,
+    /// Switched off: the rule keeps its place and matches nothing.
+    Disabled,
+}
+
+impl RuleRoute {
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Proxy => "proxy",
+            Self::Direct => "direct",
+            Self::Block => "block",
+            Self::Disabled => "disabled",
+        }
+    }
+
+    pub fn cycled(self, forward: bool) -> Self {
+        match (self, forward) {
+            (Self::Proxy, true) | (Self::Block, false) => Self::Direct,
+            (Self::Direct, true) | (Self::Disabled, false) => Self::Block,
+            (Self::Block, true) | (Self::Proxy, false) => Self::Disabled,
+            (Self::Disabled, true) | (Self::Direct, false) => Self::Proxy,
+        }
+    }
+}
+
+impl From<Outbound> for RuleRoute {
+    fn from(outbound: Outbound) -> Self {
+        match outbound {
+            Outbound::Proxy => Self::Proxy,
+            Outbound::Direct => Self::Direct,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleMatch {
     RuleSet(String),
@@ -139,15 +182,15 @@ impl RuleMatch {
 #[serde(try_from = "ModeRuleFields", into = "ModeRuleFields")]
 pub struct ModeRule {
     pub matches: RuleMatch,
-    pub route: Outbound,
+    pub route: RuleRoute,
     pub required: bool,
 }
 
 impl ModeRule {
-    pub fn rule_set(tag: &str, route: Outbound, required: bool) -> Self {
+    pub fn rule_set(tag: &str, route: impl Into<RuleRoute>, required: bool) -> Self {
         Self {
             matches: RuleMatch::RuleSet(tag.to_string()),
-            route,
+            route: route.into(),
             required,
         }
     }
@@ -155,7 +198,7 @@ impl ModeRule {
     fn private_networks_direct() -> Self {
         Self {
             matches: RuleMatch::PrivateNetworks,
-            route: Outbound::Direct,
+            route: RuleRoute::Direct,
             required: false,
         }
     }
@@ -170,7 +213,7 @@ struct ModeRuleFields {
     domain: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ip: Option<String>,
-    route: Outbound,
+    route: RuleRoute,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     required: bool,
 }
@@ -221,7 +264,7 @@ impl JsonSchema for ModeRule {
     }
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        let route = generator.subschema_for::<Outbound>();
+        let route = generator.subschema_for::<RuleRoute>();
         let branch = |key: &str, description: &str, required: bool| {
             let mut properties = serde_json::json!({
                 key: { "type": "string", "minLength": 1, "description": description },
@@ -241,7 +284,7 @@ impl JsonSchema for ModeRule {
             })
         };
         schemars::json_schema!({
-            "description": "Sends what one condition matches to `route` (`proxy` or `direct`). Rules apply in order, first match wins.",
+            "description": "Sends what one condition matches to `route` (`proxy` or `direct`), refuses it (`block`), or does nothing (`disabled`). Rules apply in order, first match wins.",
             "oneOf": [
                 branch("rule_set", "Tag of a rule-set declared in `rule_sets`.", true),
                 branch("domain", "A domain and its subdomains.", false),
@@ -873,7 +916,7 @@ mod tests {
         );
         assert_eq!(
             config.mode("bypass_cn").unwrap().rules[1].route,
-            Outbound::Direct
+            RuleRoute::Direct
         );
     }
 
@@ -926,14 +969,14 @@ mod tests {
 
         assert!(config.adopt_service_routes(&legacy));
 
-        let expected: Vec<(&str, Outbound)> = vec![
-            ("geosite-steam", Outbound::Direct),
-            ("geosite-telegram", Outbound::Proxy),
-            ("geoip-steam", Outbound::Direct),
-            ("geoip-telegram", Outbound::Proxy),
+        let expected: Vec<(&str, RuleRoute)> = vec![
+            ("geosite-steam", RuleRoute::Direct),
+            ("geosite-telegram", RuleRoute::Proxy),
+            ("geoip-steam", RuleRoute::Direct),
+            ("geoip-telegram", RuleRoute::Proxy),
         ];
         for mode in &config.modes {
-            let leading: Vec<(&str, Outbound)> = mode.rules[..4]
+            let leading: Vec<(&str, RuleRoute)> = mode.rules[..4]
                 .iter()
                 .map(|rule| match &rule.matches {
                     RuleMatch::RuleSet(tag) => (tag.as_str(), rule.route),
