@@ -4,7 +4,8 @@ use crate::app::model::{
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::update::key::reorder::{Direction, move_selected_rule};
+use crate::app::update::key::reorder::Direction;
+use crate::app::update::key::routing_rules::{cycle_selected_rule_route, move_selected_rule};
 use crate::app::update::routing::commit_routing_settings;
 use crate::app::update::status::push_status;
 
@@ -58,6 +59,12 @@ pub(in crate::app::update) fn handle_settings_menu(
             if model.settings_menu_selected == 0 =>
         {
             cycle_routing_draft(model, false);
+        }
+        (SettingsMenuPage::Routing, KeyCode::Char('l') | KeyCode::Right) => {
+            return cycle_selected_rule_route(model, true);
+        }
+        (SettingsMenuPage::Routing, KeyCode::Char('h') | KeyCode::Left) => {
+            return cycle_selected_rule_route(model, false);
         }
         (SettingsMenuPage::Routing, KeyCode::Enter) => {
             let mode = model
@@ -645,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_routing_moves_through_the_rules_and_cycles_only_on_mode() {
+    fn settings_routing_moves_through_the_rules_and_changes_the_mode_only_on_mode() {
         let mut model = model_with_profiles(vec![]);
         model
             .routing
@@ -670,7 +677,11 @@ mod tests {
             crate::app::model::RoutingSettingsRow::Rule(rules - 1)
         );
         handle_key(&mut model, key('l'));
-        assert_eq!(model.routing_settings_draft, None);
+        assert_eq!(model.shown_routing_mode(), "bypass_ru");
+        assert_eq!(
+            model.routing_settings_draft.and_then(|draft| draft.mode),
+            None
+        );
     }
 
     #[test]
@@ -730,10 +741,31 @@ mod tests {
     }
 
     #[test]
+    fn a_horizontal_key_on_a_rule_cycles_its_route() {
+        for (code, forward) in [
+            (KeyCode::Char('l'), true),
+            (KeyCode::Right, true),
+            (KeyCode::Char('h'), false),
+            (KeyCode::Left, false),
+        ] {
+            let mut model = routing_page_on_second_rule();
+            let mut expected = routing_page_on_second_rule();
+
+            handle_key(&mut model, KeyEvent::from(code));
+            cycle_selected_rule_route(&mut expected, forward);
+
+            assert_eq!(
+                model.routing_settings_draft,
+                expected.routing_settings_draft
+            );
+        }
+    }
+
+    #[test]
     fn enter_applies_the_drafted_mode_and_keeps_the_moved_rules() {
         let mut model = routing_page_on_second_rule();
         move_selected_rule(&mut model, Direction::Down);
-        let moved = model.routing_settings_draft.clone().unwrap().rule_orders;
+        let moved = model.routing_settings_draft.clone().unwrap().mode_rules;
 
         assert!(handle_key(&mut model, KeyEvent::from(KeyCode::Enter)).is_empty());
         model.routing_settings_draft.as_mut().unwrap().mode = Some("only_ru".into());
@@ -744,7 +776,7 @@ mod tests {
             model.routing_settings_draft,
             Some(crate::app::model::RoutingSettingsDraft {
                 mode: None,
-                rule_orders: moved,
+                mode_rules: moved,
             })
         );
     }

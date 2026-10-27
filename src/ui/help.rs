@@ -80,6 +80,7 @@ const SETTINGS: &[(&str, &str)] = &[
     ("Space r e", "Open routing.json in $EDITOR"),
     ("Space r Alt+j/↓", "Move routing rule down"),
     ("Space r Alt+k/↑", "Move routing rule up"),
+    ("Space r h/l", "Change routing rule route"),
 ];
 
 const DIALOGS: &[(&str, &str)] = &[

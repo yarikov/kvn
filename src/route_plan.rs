@@ -1,6 +1,6 @@
 use crate::config::profile::{RoutingFallback, Settings};
 pub use crate::config::routing::Outbound;
-use crate::config::routing::{ModeDefinition, RoutingConfig, RuleMatch};
+use crate::config::routing::{ModeDefinition, RoutingConfig, RuleMatch, RuleRoute};
 use crate::geo::RuleSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,10 +11,27 @@ pub enum PlanMatch {
     PrivateNetworks,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteAction {
+    Outbound(Outbound),
+    Reject,
+}
+
+impl RouteAction {
+    fn of(route: RuleRoute) -> Option<Self> {
+        match route {
+            RuleRoute::Proxy => Some(Self::Outbound(Outbound::Proxy)),
+            RuleRoute::Direct => Some(Self::Outbound(Outbound::Direct)),
+            RuleRoute::Block => Some(Self::Reject),
+            RuleRoute::Disabled => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanEntry {
     pub matches: PlanMatch,
-    pub outbound: Outbound,
+    pub action: RouteAction,
     pub required: bool,
 }
 
@@ -53,6 +70,7 @@ impl RoutePlan {
                 .rules
                 .iter()
                 .filter_map(|rule| {
+                    let action = RouteAction::of(rule.route)?;
                     let matches = match &rule.matches {
                         RuleMatch::RuleSet(tag) => PlanMatch::RuleSet(routing.rule_set(tag)?),
                         RuleMatch::Domain(domain) => PlanMatch::Domain(domain.clone()),
@@ -61,7 +79,7 @@ impl RoutePlan {
                     };
                     Some(PlanEntry {
                         matches,
-                        outbound: rule.route,
+                        action,
                         required: rule.required,
                     })
                 })
@@ -122,7 +140,7 @@ mod tests {
     use super::*;
     use crate::config::profile::{GeoRegion, GeoRouting};
 
-    fn described(plan: &RoutePlan) -> Vec<(String, Outbound)> {
+    fn described(plan: &RoutePlan) -> Vec<(String, RouteAction)> {
         plan.entries
             .iter()
             .map(|entry| {
@@ -132,15 +150,15 @@ mod tests {
                     PlanMatch::Ip(ip) => format!("ip {ip}"),
                     PlanMatch::PrivateNetworks => "private".to_string(),
                 };
-                (label, entry.outbound)
+                (label, entry.action)
             })
             .collect()
     }
 
-    fn labelled<const N: usize>(entries: [(&str, Outbound); N]) -> Vec<(String, Outbound)> {
+    fn labelled<const N: usize>(entries: [(&str, Outbound); N]) -> Vec<(String, RouteAction)> {
         entries
             .into_iter()
-            .map(|(label, outbound)| (label.to_string(), outbound))
+            .map(|(label, outbound)| (label.to_string(), RouteAction::Outbound(outbound)))
             .collect()
     }
 
@@ -187,6 +205,35 @@ mod tests {
         );
         assert_eq!(plan.final_outbound, Outbound::Direct);
         assert_eq!(plan.fallback, RoutingFallback::Direct);
+    }
+
+    #[test]
+    fn a_disabled_rule_is_left_out_and_a_blocked_one_is_rejected() {
+        let mut routing = RoutingConfig::default();
+        let mode = routing
+            .modes
+            .iter_mut()
+            .find(|mode| mode.id == "bypass_ru")
+            .unwrap();
+        mode.rules[1].route = RuleRoute::Disabled;
+        mode.rules[2].route = RuleRoute::Block;
+
+        let plan = RoutePlan::for_mode("bypass_ru", &routing);
+
+        assert_eq!(
+            described(&plan),
+            [
+                (
+                    "private".to_string(),
+                    RouteAction::Outbound(Outbound::Direct)
+                ),
+                ("geoip-ru".to_string(), RouteAction::Reject),
+            ]
+        );
+        assert_eq!(
+            tags(plan.required_rule_sets().cloned().collect()),
+            ["geoip-ru"]
+        );
     }
 
     #[test]

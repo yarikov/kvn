@@ -112,7 +112,7 @@ pub fn resolve_routing_rules_conflict(
         json_schema: write_editor_schema("routing.schema.json", &routing_json_schema()),
     };
     if !retry_edit(&format!(
-        "routing.json changed on disk after the rules were moved. {}",
+        "routing.json changed on disk after the rules were edited. {}",
         conflict_message(paths)
     ))? {
         return Ok(EditorOutcome::Cancelled { recovery: None });

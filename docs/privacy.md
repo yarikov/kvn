@@ -59,7 +59,11 @@ send every private address directly, through their `{ "ip": "private" }` rule.
 
 Your own rules in `routing.json` — by domain, IP address or rule-set —
 change what each mode sends where; the first rule that matches wins (see
-[Rule-sets and modes](configuration.md#rule-sets-and-modes)).
+[Rule-sets and modes](configuration.md#rule-sets-and-modes)). A `block` rule
+refuses the connection, so nothing is sent to that site, though its name is
+still looked up the way a tunnelled name is; a `disabled` rule routes
+nothing, and DNS rules naming a rule-set only disabled rules use are left
+out.
 
 The tunnel carries IPv4 only; IPv6 is blocked in every mode, see
 [IPv4 only](#ipv4-only).

@@ -416,18 +416,22 @@ list longer than the window scrolls, with a scrollbar on the right. `h`/`l`
 change the mode only on the Mode row, and `e` opens `routing.json` at the
 selected rule (or at the mode on the Mode row).
 
-`Alt+j` / `Alt+k` (or `Alt+↓` / `Alt+↑`) move the selected rule down or up
-within its mode; on the Mode row, on `final` and at either end of the list they
-do nothing. The new order is a draft, marked `*` next to the rules heading,
-kept for each mode until `Enter` writes them all to `routing.json` together
-with the Mode row; `q`, `Esc` and `Backspace` discard it. The saved file applies
-at once, and a changed active mode reconnects. When the rules of a moved mode
+`h` / `l` (or `←` / `→`) on a rule change its route, shown between `‹ ›` like
+the Mode row, in the cycle `proxy` → `direct` → `block` → `disabled`; a
+disabled rule is dimmed. The route of `final` has no `‹ ›`: change it in the
+editor. `Alt+j` / `Alt+k`
+(or `Alt+↓` / `Alt+↑`) move the selected rule down or up within its mode; on
+the Mode row, on `final` and at either end of the list they do nothing. Both
+are a draft, marked `*` next to the rules heading, kept for each mode until
+`Enter` writes them all to `routing.json` together with the Mode row; `q`,
+`Esc` and `Backspace` discard it. The saved file applies
+at once, and a changed active mode reconnects. When the rules of an edited mode
 were changed in the file in the meantime, kvn opens the editor with the
 `YOUR EDIT` / `CURRENT` conflict markers, as when saving from the editor (see
 [Rule-sets and modes](#rule-sets-and-modes)); the draft stays until the file
-is saved. `e` with moved rules opens the file with the new order. Rules cannot
-be moved while `routing.json` is invalid, and a reload that finds it invalid
-discards the moved order.
+is saved. `e` with a draft opens the file with it. Rules cannot
+be changed while `routing.json` is invalid, and a reload that finds it invalid
+discards the draft.
 
 The following snippet belongs inside `settings`:
 
@@ -512,8 +516,12 @@ missing:
 - `final` is where traffic no rule matches goes: `proxy` (through the tunnel) or
   `direct`.
 - `rules` apply in the order of the file, and the first rule that matches a
-  connection decides its `route` (`proxy` or `direct`). Each rule names one
-  condition:
+  connection decides its `route`: `proxy` (through the tunnel), `direct`,
+  `block` (the connection is refused at once; its name is still looked up
+  like a `proxy` one) or `disabled` (the rule keeps its place and matches
+  nothing; a rule-set only disabled rules use is not downloaded, and DNS
+  rules that name it are left out, as for a rule-set the mode does not use). `final`
+  takes only `proxy` or `direct`. Each rule names one condition:
   - `rule_set` — the tag of a rule-set declared in `rule_sets`; every rule-set
     a mode uses is downloaded and kept up to date;
   - `domain` — a domain and all its subdomains: `example.com` matches
