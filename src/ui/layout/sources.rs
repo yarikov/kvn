@@ -21,6 +21,7 @@ pub(super) fn draw_sources(frame: &mut Frame, model: &Model, area: Rect, focused
     };
     let block = Block::default()
         .title(" Profiles ")
+        .title_style(theme.panel_title())
         .borders(Borders::ALL)
         .border_style(border_style);
 

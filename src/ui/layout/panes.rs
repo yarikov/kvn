@@ -175,6 +175,7 @@ pub(super) fn draw_main(
     };
     let log_block = Block::default()
         .title(" Logs ")
+        .title_style(theme.panel_title())
         .borders(Borders::ALL)
         .border_style(log_border_style);
 
@@ -237,9 +238,10 @@ pub(super) fn draw_traffic_panel(frame: &mut Frame, model: &Model, area: Rect) {
     ]);
     let block = Block::default()
         .title(" Traffic ")
+        .title_style(theme.panel_title())
         .borders(Borders::ALL)
         .padding(Padding::horizontal(1))
-        .border_style(theme.border());
+        .border_style(theme.traffic_border());
     let paragraph = Paragraph::new(line).block(block);
     frame.render_widget(paragraph, area);
 }

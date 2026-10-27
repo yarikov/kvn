@@ -128,6 +128,16 @@ impl Theme {
         Style::default().fg(self.palette.ansi[8])
     }
 
+    pub fn traffic_border(&self) -> Style {
+        Style::default().fg(self.palette.ansi[5])
+    }
+
+    pub fn panel_title(&self) -> Style {
+        Style::default()
+            .fg(self.palette.foreground)
+            .remove_modifier(Modifier::BOLD)
+    }
+
     pub fn selected(&self) -> Style {
         Style::default()
             .bg(self.palette.selection_background)
