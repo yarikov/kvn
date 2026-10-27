@@ -2,8 +2,9 @@ use crate::app::effect::Effect;
 use crate::app::model::{
     AppStatus, Model, Overlay, SettingsMenuEntry, SettingsMenuPage, StatusKey,
 };
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::app::update::key::reorder::{Direction, move_selected_rule};
 use crate::app::update::routing::commit_routing_settings;
 use crate::app::update::status::push_status;
 
@@ -24,6 +25,16 @@ pub(in crate::app::update) fn handle_settings_menu(
         return vec![];
     }
     match (page, key.code) {
+        (SettingsMenuPage::Routing, KeyCode::Char('j') | KeyCode::Down)
+            if key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            return move_selected_rule(model, Direction::Down);
+        }
+        (SettingsMenuPage::Routing, KeyCode::Char('k') | KeyCode::Up)
+            if key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            return move_selected_rule(model, Direction::Up);
+        }
         (_, KeyCode::Char('j') | KeyCode::Down) => {
             crate::ui::nav::select_next(&mut model.settings_menu_selected, len);
         }
@@ -49,11 +60,15 @@ pub(in crate::app::update) fn handle_settings_menu(
             cycle_routing_draft(model, false);
         }
         (SettingsMenuPage::Routing, KeyCode::Enter) => {
-            let mode = model.shown_routing_mode().to_string();
-            if model.routing_settings_draft.take().is_none() {
-                return vec![];
-            }
-            return commit_routing_settings(model, &mode);
+            let mode = model
+                .routing_settings_draft
+                .as_mut()
+                .and_then(|draft| draft.mode.take());
+            model.drop_empty_routing_settings_draft();
+            return match mode {
+                Some(mode) => commit_routing_settings(model, &mode),
+                None => vec![],
+            };
         }
         (SettingsMenuPage::Connection, KeyCode::Char('l') | KeyCode::Right) => {
             cycle_connection_draft(model);
@@ -676,6 +691,62 @@ mod tests {
         );
         handle_key(&mut model, key('k'));
         assert_eq!(model.settings_menu_selected, 0);
+    }
+
+    fn routing_page_on_second_rule() -> Model {
+        let mut model = model_with_profiles(vec![]);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
+        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
+        model.settings_menu_selected = 2;
+        model
+    }
+
+    #[test]
+    fn alt_with_a_vertical_key_moves_the_selected_rule() {
+        for (code, direction) in [
+            (KeyCode::Char('j'), Direction::Down),
+            (KeyCode::Down, Direction::Down),
+            (KeyCode::Char('k'), Direction::Up),
+            (KeyCode::Up, Direction::Up),
+        ] {
+            let mut model = routing_page_on_second_rule();
+            let mut expected = routing_page_on_second_rule();
+
+            handle_key(&mut model, KeyEvent::new(code, KeyModifiers::ALT));
+            move_selected_rule(&mut expected, direction);
+
+            assert_eq!(
+                model.routing_settings_draft,
+                expected.routing_settings_draft
+            );
+            assert_eq!(
+                model.settings_menu_selected,
+                expected.settings_menu_selected
+            );
+        }
+    }
+
+    #[test]
+    fn enter_applies_the_drafted_mode_and_keeps_the_moved_rules() {
+        let mut model = routing_page_on_second_rule();
+        move_selected_rule(&mut model, Direction::Down);
+        let moved = model.routing_settings_draft.clone().unwrap().rule_orders;
+
+        assert!(handle_key(&mut model, KeyEvent::from(KeyCode::Enter)).is_empty());
+        model.routing_settings_draft.as_mut().unwrap().mode = Some("only_ru".into());
+        assert!(!handle_key(&mut model, KeyEvent::from(KeyCode::Enter)).is_empty());
+
+        assert_eq!(model.config.settings.geo_routing.mode, "only_ru");
+        assert_eq!(
+            model.routing_settings_draft,
+            Some(crate::app::model::RoutingSettingsDraft {
+                mode: None,
+                rule_orders: moved,
+            })
+        );
     }
 
     #[test]

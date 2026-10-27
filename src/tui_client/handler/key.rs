@@ -3,6 +3,7 @@ mod editor;
 mod log_pane;
 mod onboarding;
 mod quit;
+mod routing_rules;
 mod support;
 
 use anyhow::Result;
@@ -68,11 +69,18 @@ fn overlay(state: &mut ClientLoop, key: KeyEvent, completes_go_first: bool) -> R
         state.needs_redraw = true;
         return Ok(Flow::Continue);
     }
-    if key.code == KeyCode::Char('e')
-        && state.model.overlay == Overlay::SettingsMenu(SettingsMenuPage::Routing)
-    {
-        editor::open(state, editor::EditedFile::Routing)?;
-        return Ok(Flow::Continue);
+    if state.model.overlay == Overlay::SettingsMenu(SettingsMenuPage::Routing) {
+        match key.code {
+            KeyCode::Char('e') => {
+                editor::open(state, editor::EditedFile::Routing)?;
+                return Ok(Flow::Continue);
+            }
+            KeyCode::Enter => {
+                routing_rules::apply(state, key)?;
+                return Ok(Flow::Continue);
+            }
+            _ => {}
+        }
     }
     state.forward_key(key)?;
     Ok(Flow::Continue)
@@ -89,7 +97,9 @@ fn sources(state: &mut ClientLoop, key: KeyEvent) -> Result<Flow> {
             clipboard::paste(state)?
         }
         KeyCode::Char('y') => clipboard::copy_selected(state)?,
-        KeyCode::Char('e') => editor::open(state, editor::EditedFile::Profiles)?,
+        KeyCode::Char('e') => {
+            editor::open(state, editor::EditedFile::Profiles)?;
+        }
         _ => state.forward_key(key)?,
     }
     Ok(Flow::Continue)

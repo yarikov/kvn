@@ -254,6 +254,29 @@ mod tests {
     }
 
     #[test]
+    fn draw_routing_menu_moved_rule_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model
+            .routing
+            .add_region_modes(crate::config::profile::GeoRegion::Ru);
+        model.config.settings.geo_routing.set_mode("bypass_ru");
+        model.overlay = Overlay::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
+        let saved = model.routing.mode("bypass_ru").unwrap().rules.clone();
+        let mut rules = saved.clone();
+        rules.swap(0, 1);
+        model.routing_settings_draft = Some(crate::app::model::RoutingSettingsDraft {
+            mode: None,
+            rule_orders: [(
+                "bypass_ru".to_string(),
+                crate::app::model::RuleOrderDraft { saved, rules },
+            )]
+            .into(),
+        });
+        model.settings_menu_selected = 2;
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
+    }
+
+    #[test]
     fn draw_routing_menu_long_rule_list_at_minimum_size_snapshot() {
         let mut model = model_with_profiles(vec![]);
         model

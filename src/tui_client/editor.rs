@@ -18,7 +18,7 @@ mod retry;
 mod routing;
 
 use retry::retry_edit;
-pub use routing::open_routing_editor;
+pub use routing::{open_routing_editor, resolve_routing_rules_conflict, submit_routing_rules};
 
 const OMARCHY_LAUNCHER: &str = "omarchy-launch-editor";
 const OMARCHY_FALLBACK_EDITOR: &str = "nvim";
@@ -356,16 +356,20 @@ fn edit_until_saved<S: EditSession>(
                 let document = session.rebase(*current, &edited);
                 crate::atomic_write::write(path, document.as_bytes())?;
                 line = crate::config::merge::resolution::first_marker_line(&document);
-                if !retry_edit(&format!(
-                    "Conflicts at {}. Keep the desired values and remove the conflict markers.",
-                    paths.join(", ")
-                ))? {
+                if !retry_edit(&conflict_message(&paths))? {
                     return Ok(EditorOutcome::Cancelled { recovery: None });
                 }
             }
             ConfigEditResult::Failed { message } => anyhow::bail!("{message}"),
         }
     }
+}
+
+fn conflict_message(paths: &[String]) -> String {
+    format!(
+        "Conflicts at {}. Keep the desired values and remove the conflict markers.",
+        paths.join(", ")
+    )
 }
 
 fn conflict_document(

@@ -12,6 +12,7 @@ use super::popup::{
 use super::settings_row::{settings_full_width_line, settings_value_layout, settings_value_line};
 
 const RULES_HEADING: &str = "Rules (top wins)";
+const MOVED_RULES_HEADING: &str = "Rules (top wins) *";
 const FINAL_KEY: &str = "final";
 const MAX_RULE_VALUE_WIDTH: usize = 34;
 const COLUMN_GAP: &str = "  ";
@@ -87,10 +88,15 @@ pub(super) fn routing_page(model: &Model, area: Rect, frame_widths: &[usize]) ->
         }))
         .collect();
     let columns = RuleColumns::of(&rule_rows);
+    let rules_heading = if model.shown_rule_order_draft().is_some() {
+        MOVED_RULES_HEADING
+    } else {
+        RULES_HEADING
+    };
     let content_widths: Vec<usize> = frame_widths
         .iter()
         .copied()
-        .chain([columns.width(), visual_width(RULES_HEADING)])
+        .chain([columns.width(), visual_width(MOVED_RULES_HEADING)])
         .collect();
     let layout = settings_value_layout(&settings, stable_value_width, area, &content_widths);
     let row_width = settings_row_width(layout.popup_width);
@@ -120,7 +126,7 @@ pub(super) fn routing_page(model: &Model, area: Rect, frame_widths: &[usize]) ->
             ),
             RoutingPageLine::Blank => Line::from(""),
             RoutingPageLine::RulesHeading => {
-                Line::from(Span::styled(RULES_HEADING, theme.accent())).centered()
+                Line::from(Span::styled(rules_heading, theme.accent())).centered()
             }
         })
         .collect();

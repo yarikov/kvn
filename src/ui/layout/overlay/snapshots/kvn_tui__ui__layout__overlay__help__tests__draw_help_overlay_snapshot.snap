@@ -19,7 +19,7 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                              │ d          Delete profile or subscription       ┃                              │
 │                              │ Alt+j/↓    Move profile or subscription down    ┃                              │
 │                              │ Alt+k/↑    Move profile or subscription up      ┃                              │
-│                              │ u/U        Update subscription / geo            ┃                              │
+│                              │ u/U        Update subscription / geo            │                              │
 │                              │ i/I        Cycle subscription / geo auto-update │                              │
 │                              │ t/T        Test selected / all profiles         │                              │
 │                              │                                                 │                              │
