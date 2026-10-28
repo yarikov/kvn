@@ -1,4 +1,4 @@
-use crate::app::model::HelpContext;
+use crate::app::model::{HelpContext, SettingsMenuPage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HelpLine {
@@ -23,6 +23,7 @@ enum HelpGroup {
     Logs,
     Connection,
     Settings,
+    RoutingSettings,
     Dialogs,
     General,
 }
@@ -77,10 +78,12 @@ const SETTINGS: &[(&str, &str)] = &[
     ("Space d", "DNS"),
     ("Space i", "Interface"),
     ("Space r", "Routing"),
-    ("Space r e", "Open routing.json in $EDITOR"),
-    ("Space r Alt+j/↓", "Move routing rule down"),
-    ("Space r Alt+k/↑", "Move routing rule up"),
-    ("Space r h/l", "Change routing rule route"),
+];
+
+const ROUTING_SETTINGS: &[(&str, &str)] = &[
+    ("e", "Open routing.json in $EDITOR"),
+    ("Alt+j/↓", "Move routing rule down"),
+    ("Alt+k/↑", "Move routing rule up"),
 ];
 
 const DIALOGS: &[(&str, &str)] = &[
@@ -104,6 +107,7 @@ impl HelpGroup {
             Self::Logs => "Logs",
             Self::Connection => "Connection",
             Self::Settings => "Settings",
+            Self::RoutingSettings => "Routing",
             Self::Dialogs => "Dialogs",
             Self::General => "General",
         }
@@ -116,6 +120,7 @@ impl HelpGroup {
             Self::Logs => LOGS,
             Self::Connection => CONNECTION,
             Self::Settings => SETTINGS,
+            Self::RoutingSettings => ROUTING_SETTINGS,
             Self::Dialogs => DIALOGS,
             Self::General => GENERAL,
         }
@@ -126,6 +131,11 @@ fn relevant_groups(context: HelpContext) -> &'static [HelpGroup] {
     match context {
         HelpContext::Sources => &[HelpGroup::Sources],
         HelpContext::Logs => &[HelpGroup::Logs],
+        HelpContext::SettingsMenu(SettingsMenuPage::Routing) => &[
+            HelpGroup::RoutingSettings,
+            HelpGroup::Dialogs,
+            HelpGroup::Settings,
+        ],
         HelpContext::SettingsMenu(_) => &[HelpGroup::Dialogs, HelpGroup::Settings],
         HelpContext::ConfirmDelete
         | HelpContext::ConfirmDisable(_)
@@ -261,6 +271,21 @@ mod tests {
                 "General",
             ]
         );
+        assert_eq!(
+            headings(HelpContext::SettingsMenu(
+                crate::app::model::SettingsMenuPage::Routing
+            )),
+            [
+                "Navigation",
+                "Routing",
+                "Dialogs",
+                "Settings",
+                "Profiles",
+                "Logs",
+                "Connection",
+                "General",
+            ]
+        );
     }
 
     #[test]
@@ -277,8 +302,10 @@ mod tests {
             HelpContext::DnsSettings,
             HelpContext::Support,
         ] {
+            let routing_settings =
+                context == HelpContext::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
             let headings = headings(context);
-            assert_eq!(headings.len(), 7);
+            assert_eq!(headings.len(), 7 + usize::from(routing_settings));
             for expected in [
                 "Navigation",
                 "Profiles",
