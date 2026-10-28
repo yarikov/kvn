@@ -82,6 +82,7 @@ const SETTINGS: &[(&str, &str)] = &[
 
 const ROUTING_SETTINGS: &[(&str, &str)] = &[
     ("e", "Open routing.json in $EDITOR"),
+    ("d", "Delete routing rule"),
     ("Alt+j/↓", "Move routing rule down"),
     ("Alt+k/↑", "Move routing rule up"),
 ];

@@ -419,18 +419,24 @@ selected rule (or at the mode on the Mode row).
 `h` / `l` (or `←` / `→`) on a rule change its route, shown between `‹ ›` like
 the Mode row, in the cycle `proxy` → `direct` → `block` → `disabled`; a
 disabled rule is dimmed. The route of `final` has no `‹ ›`: change it in the
-editor. `Alt+j` / `Alt+k`
-(or `Alt+↓` / `Alt+↑`) move the selected rule down or up within its mode; on
-the Mode row, on `final` and at either end of the list they do nothing. Both
-are a draft, marked `*` next to the rules heading, kept for each mode until
-`Enter` writes them all to `routing.json` together with the Mode row; `q`,
-`Esc` and `Backspace` discard it. The saved file applies
-at once, and a changed active mode reconnects. When the rules of an edited mode
-were changed in the file in the meantime, kvn opens the editor with the
-`YOUR EDIT` / `CURRENT` conflict markers, as when saving from the editor (see
-[Rule-sets and modes](#rule-sets-and-modes)); the draft stays until the file
-is saved. `e` with a draft opens the file with it. Rules cannot
-be changed while `routing.json` is invalid, and a reload that finds it invalid
+editor. `Alt+j` / `Alt+k` (or `Alt+↓` / `Alt+↑`) move the selected rule down
+or up within its mode; on the Mode row and on the first rule upwards they do
+nothing, and on `final`, which always stays last, or on the last rule
+downwards they show an error. `d` deletes the selected rule from its mode and
+selects the next row; the rule-set stays declared in `rule_sets` for other
+modes. `final` cannot be deleted, so `d` on it or on the Mode row shows an
+error; a mode may keep `final` alone. A deleted rule comes back only by
+discarding the draft or in the editor.
+
+Route changes, moves and deletions are a draft, marked `*` next to the rules
+heading, kept for each mode until `Enter` writes them all to `routing.json`
+together with the Mode row; `q`, `Esc` and `Backspace` discard it. The saved
+file applies at once, and a changed active mode reconnects. When the rules of
+an edited mode were changed in the file in the meantime, kvn opens the editor
+with the `YOUR EDIT` / `CURRENT` conflict markers, as when saving from the
+editor (see [Rule-sets and modes](#rule-sets-and-modes)); the draft stays until
+the file is saved. `e` with a draft opens the file with it. Rules cannot be
+changed while `routing.json` is invalid, and a reload that finds it invalid
 discards the draft.
 
 The following snippet belongs inside `settings`:
