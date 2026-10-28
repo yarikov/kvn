@@ -12,6 +12,7 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
+│                                                       ││                                                      │
 │                           ┌──────────────────────────────────────────────────────┐                            │
 │                           │                Getting started · 6/10                │                            │
 │                           │                                                      │                            │
@@ -26,7 +27,6 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                           │                                                      │                            │
 │                           │              󰌑 continue · y copy command             │                            │
 │                           └──────────────────────────────────────────────────────┘                            │
-│                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

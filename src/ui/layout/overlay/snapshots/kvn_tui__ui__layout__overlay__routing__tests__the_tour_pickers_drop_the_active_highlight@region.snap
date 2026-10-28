@@ -14,6 +14,7 @@ expression: "snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
+│                                                       ││                                                      │
 │                                       ┌───────────────────────────────┐                                       │
 │                                       │  Settings › Routing › Region  │                                       │
 │                                       │                               │                                       │
@@ -24,7 +25,6 @@ expression: "snapshot_styles(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                       │                               │                                       │
 │                                       │            󰌑 apply            │                                       │
 │                                       └───────────────────────────────┘                                       │
-│                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
@@ -51,6 +51,7 @@ fcccccccccccccccccccccccccccccccccccccccccccccccccccccccffcccccccccccccccccccccc
 fcccccccccccccccccccccccccccccccccccccccccccccccccccccccffccccccccccccccccccccccccccccccccccccccccccccccccccccccf
 fcccccccccccccccccccccccccccccccccccccccccccccccccccccccffccccccccccccccccccccccccccccccccccccccccccccccccccccccf
 fcccccccccccccccccccccccccccccccccccccccccccccccccccccccffccccccccccccccccccccccccccccccccccccccccccccccccccccccf
+fcccccccccccccccccccccccccccccccccccccccccccccccccccccccffccccccccccccccccccccccccccccccccccccccccccccccccccccccf
 fccccccccccccccccccccccccccccccccccccccceeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeecccccccccccccccccccccccccccccccccccccccf
 fcccccccccccccccccccccccccccccccccccccccebbeeeeeeeeeeeeeeeeeeeeeeeeeeebbecccccccccccccccccccccccccccccccccccccccf
 fcccccccccccccccccccccccccccccccccccccccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccccccccccccccccccccccccccccccccccccccf
@@ -61,7 +62,6 @@ fcccccccccccccccccccccccccccccccccccccccebbbbbbbbbbbbhbbbbbbbbbbbbbbbbbbeccccccc
 fcccccccccccccccccccccccccccccccccccccccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccccccccccccccccccccccccccccccccccccccf
 fcccccccccccccccccccccccccccccccccccccccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccccccccccccccccccccccccccccccccccccccf
 fccccccccccccccccccccccccccccccccccccccceeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeecccccccccccccccccccccccccccccccccccccccf
-fcccccccccccccccccccccccccccccccccccccccccccccccccccccccffccccccccccccccccccccccccccccccccccccccccccccccccccccccf
 fcccccccccccccccccccccccccccccccccccccccccccccccccccccccffccccccccccccccccccccccccccccccccccccccccccccccccccccccf
 fcccccccccccccccccccccccccccccccccccccccccccccccccccccccffccccccccccccccccccccccccccccccccccccccccccccccccccccccf
 fcccccccccccccccccccccccccccccccccccccccccccccccccccccccffccccccccccccccccccccccccccccccccccccccccccccccccccccccf

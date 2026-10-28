@@ -4,10 +4,12 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 ---
 ┌ Traffic ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections                                          │
-└───────────────────────────── ┌─────────────────────────────────────────────────┐ ─────────────────────────────┘
-┌ Profiles ─────────────────── │ Navigation                                      ┃ ─────────────────────────────┐
-│ No sources. Press p to paste │ Ctrl+h/←   Focus left pane                      ┃                              │
-│URL from clipboard.           │ Ctrl+l/→   Focus right pane                     ┃                              │
+└───────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Profiles ─────────────────────────────────────────────┐┌ Logs ────────────────────────────────────────────────┐
+│ No sources. Press p to paste ┌─────────────────────────────────────────────────┐                              │
+│URL from clipboard.           │ Navigation                                      ┃                              │
+│                              │ Ctrl+h/←   Focus left pane                      ┃                              │
+│                              │ Ctrl+l/→   Focus right pane                     ┃                              │
 │                              │ j/k, ↑/↓   Move or scroll                       ┃                              │
 │                              │ gg/G       Go to first / last                   ┃                              │
 │                              │                                                 ┃                              │
@@ -16,9 +18,9 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                              │ Shift+V    Select multiple logs                 ┃                              │
 │                              │ j/k        Extend selection by one log          ┃                              │
 │                              │ gg/G       Extend selection to first / last     ┃                              │
-│                              │ Esc        Cancel log selection                 ┃                              │
-│                              │                                                 ┃                              │
-│                              │ Profiles                                        ┃                              │
+│                              │ Esc        Cancel log selection                 │                              │
+│                              │                                                 │                              │
+│                              │ Profiles                                        │                              │
 │                              │ Enter      Connect selected profile             │                              │
 │                              │ e          Open profiles.json in $EDITOR        │                              │
 │                              │ y          Yank profile or subscription         │                              │
@@ -30,11 +32,9 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                              │ i/I        Cycle subscription / geo auto-update │                              │
 │                              │ t/T        Test selected / all profiles         │                              │
 │                              │                                                 │                              │
-│                              │ Connection                                      │                              │
-│                              │ r          Reconnect                            │                              │
-│                              │                                                 │                              │
 │                              │                    q/󱊷 close                    │                              │
 │                              └─────────────────────────────────────────────────┘                              │
+│                                                       ││                                                      │
 └───────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
  DISCONNECTED                                                                                         DoH  Global
 [113x35]

@@ -7,7 +7,9 @@ use crate::app::model::Model;
 use crate::ui::layout::text::{align_in_centered_column, visual_width};
 
 use super::onboarding::{ONBOARDING_POPUP_WIDTH, wrap_plain};
-use super::popup::{centered_fixed_width_rect, clear_popup};
+use super::popup::{
+    centered_fixed_width_rect, clear_popup, overlay_max_height, vertically_placed_rect,
+};
 use super::{CONFIRM_ACTION, overlay_footer};
 
 pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
@@ -62,7 +64,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
     };
     let mut lines = build_lines(false);
     let mut content_height = measure(&lines);
-    if content_height.saturating_add(2) > area.height {
+    if content_height.saturating_add(2) > overlay_max_height(area) {
         lines = build_lines(true);
         content_height = measure(&lines);
     }
@@ -70,13 +72,8 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         .style(model.theme.normal())
         .alignment(Alignment::Center)
         .wrap(Wrap { trim: false });
-    let popup_height = content_height.saturating_add(2).min(area.height);
-    let popup_area = Rect::new(
-        horizontal_area.x,
-        area.y + area.height.saturating_sub(popup_height) / 2,
-        horizontal_area.width,
-        popup_height,
-    );
+    let popup_area =
+        vertically_placed_rect(horizontal_area, area, content_height.saturating_add(2));
     clear_popup(frame, &model.theme, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)

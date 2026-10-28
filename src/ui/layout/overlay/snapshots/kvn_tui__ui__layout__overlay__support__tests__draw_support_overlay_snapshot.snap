@@ -13,6 +13,7 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
+│                                                       ││                                                      │
 │                           ┌──────────────────────────────────────────────────────┐                            │
 │                           │                     Enjoying kvn?                    │                            │
 │                           │                                                      │                            │
@@ -25,7 +26,6 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                           │                                                      │                            │
 │                           │                 󰌑 confirm · q/󱊷 close                │                            │
 │                           └──────────────────────────────────────────────────────┘                            │
-│                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
