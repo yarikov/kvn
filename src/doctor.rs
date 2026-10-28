@@ -615,7 +615,6 @@ pub(crate) fn integration_setup(root: &Path) -> IntegrationSetup {
             group,
             Some(crate::services::killswitch::IntegrationGroup::Active)
         ),
-        omarchy_plugin: crate::omarchy::omakvn_plugin_installed(),
     }
 }
 
@@ -745,15 +744,34 @@ fn check_omarchy() -> Check {
             format!("Omarchy {major} detected; kvn requires Omarchy 4 or newer"),
             "Upgrade Omarchy, then run `kvn setup --omarchy`.",
         ),
-        _ if !crate::omarchy::omakvn_plugin_installed() => Check::warning(
-            format!(
-                "Omarchy detected; {} plugin is not installed",
-                crate::omarchy::OMAKVN_PLUGIN_ID
-            ),
+        (theme, _) => check_omakvn(theme, crate::omarchy::installed_omakvn()),
+    }
+}
+
+fn check_omakvn(theme: Option<String>, plugin: Option<crate::omarchy::OmakvnPlugin>) -> Check {
+    use crate::omarchy::{OMAKVN_MIN_VERSION, OMAKVN_PLUGIN_ID, OMAKVN_UPDATE_COMMAND};
+
+    let Some(plugin) = plugin else {
+        return Check::warning(
+            format!("Omarchy detected; {OMAKVN_PLUGIN_ID} plugin is not installed"),
             "Run `kvn setup --omarchy` to install the Omarchy Shell plugin.",
-        ),
-        (Some(theme), _) => Check::pass(format!("Omarchy detected; active theme: {theme}")),
-        (None, _) => Check::pass("Omarchy detected"),
+        );
+    };
+    let plugin_version = match &plugin.version {
+        Some(version) => format!("{OMAKVN_PLUGIN_ID} {version}"),
+        None => format!("{OMAKVN_PLUGIN_ID} without a version"),
+    };
+    if plugin.state() == crate::omarchy::OmakvnState::Outdated {
+        return Check::warning(
+            format!("{plugin_version} is older than {OMAKVN_MIN_VERSION}, which this kvn requires"),
+            format!("Run `{OMAKVN_UPDATE_COMMAND}`."),
+        );
+    }
+    match theme {
+        Some(theme) => Check::pass(format!(
+            "Omarchy detected; active theme: {theme}; {plugin_version}"
+        )),
+        None => Check::pass(format!("Omarchy detected; {plugin_version}")),
     }
 }
 
@@ -1125,13 +1143,44 @@ mod tests {
         std::fs::create_dir_all(&plugin).unwrap();
         std::fs::write(
             plugin.join("manifest.json"),
-            format!(r#"{{"id":"{OMAKVN_PLUGIN_ID}"}}"#),
+            format!(
+                r#"{{"id":"{OMAKVN_PLUGIN_ID}","version":"{}"}}"#,
+                crate::omarchy::OMAKVN_MIN_VERSION
+            ),
         )
         .unwrap();
 
         let installed = check_omarchy();
         assert_eq!(installed.level, Level::Pass);
         assert!(installed.message.contains("active theme: tokyo-night"));
+    }
+
+    #[test]
+    fn an_outdated_omakvn_is_a_warning_with_the_update_command() {
+        let outdated = |version: Option<&str>| crate::omarchy::OmakvnPlugin {
+            version: version.map(|version| semver::Version::parse(version).unwrap()),
+        };
+        for (plugin, message) in [
+            (
+                outdated(Some("1.0.1")),
+                format!(
+                    "{OMAKVN_PLUGIN_ID} 1.0.1 is older than {}, which this kvn requires",
+                    crate::omarchy::OMAKVN_MIN_VERSION
+                ),
+            ),
+            (
+                outdated(None),
+                format!(
+                    "{OMAKVN_PLUGIN_ID} without a version is older than {}, which this kvn requires",
+                    crate::omarchy::OMAKVN_MIN_VERSION
+                ),
+            ),
+        ] {
+            assert_eq!(
+                check_omakvn(Some("tokyo-night".into()), Some(plugin)),
+                Check::warning(message, "Run `omarchy plugin update yarikov.omakvn`.")
+            );
+        }
     }
 
     #[test]
@@ -1176,10 +1225,19 @@ mod tests {
         std::fs::create_dir_all(&plugin).unwrap();
         std::fs::write(
             plugin.join("manifest.json"),
-            format!(r#"{{"id":"{OMAKVN_PLUGIN_ID}"}}"#),
+            format!(
+                r#"{{"id":"{OMAKVN_PLUGIN_ID}","version":"{}"}}"#,
+                crate::omarchy::OMAKVN_MIN_VERSION
+            ),
         )
         .unwrap();
-        assert_eq!(check_omarchy(), Check::pass("Omarchy detected"));
+        assert_eq!(
+            check_omarchy(),
+            Check::pass(format!(
+                "Omarchy detected; {OMAKVN_PLUGIN_ID} {}",
+                crate::omarchy::OMAKVN_MIN_VERSION
+            ))
+        );
     }
 
     fn current_polkit_root() -> tempfile::TempDir {

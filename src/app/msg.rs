@@ -116,6 +116,7 @@ pub enum Msg {
         error: Option<IpcError>,
     },
     IntegrationSetupChecked(crate::onboarding::IntegrationSetup),
+    OmakvnChanged,
     TrafficStatsUpdated {
         attempt_id: u64,
         request_id: u64,
@@ -415,6 +416,8 @@ pub struct StateSnapshot {
     pub onboarding_complete: bool,
     #[serde(default)]
     pub integration_setup: crate::onboarding::IntegrationSetup,
+    #[serde(default)]
+    pub omakvn: crate::omarchy::OmakvnStatus,
     #[serde(default)]
     pub settings_menu_selected: usize,
     #[serde(default)]

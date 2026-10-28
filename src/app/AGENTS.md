@@ -28,7 +28,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   — it says whether the card is in the sequence, not whether Omarchy is present,
   and an installed plugin makes it `false` — decided
   once per process by `model::show_omarchy_card()` —
-  `omarchy::detect_omarchy_theme().is_some() && !omarchy::omakvn_plugin_installed()`,
+  `omarchy::detect_omarchy_theme().is_some() && omarchy::installed_omakvn().is_none()`,
   two cheap file reads of the kind `theme_slugs` already does. It is an
   environment fact and never persisted, but it *is* sent over IPC as
   `StateSnapshot::onboarding_omarchy`: the card's own command installs the plugin
@@ -65,7 +65,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   `Profiles` card answers `p`, which imports from the clipboard exactly as the
   Profiles list does. Both are handled client-side in
   `tui_client/handler/key/onboarding.rs` because the clipboard is. The card
-  renders `OnboardingStep::command(model.integration_setup)`, which spells a
+  renders `OnboardingStep::command(model.integration_setup, model.omakvn.state)`, which spells a
   setup command exactly as the README does — with the `pacman -S --needed`
   install its package needs, over two lines on a `\` continuation, since a paste
   has to work on a machine that has neither `polkit` nor `nftables`. `y` copies
@@ -100,8 +100,9 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   `doctor::integration_setup` produces the whole struct from the existing signals
   (`polkit_status` + `integration_files::polkit_rule_state` for polkit, the
   installed helper + `outdated_killswitch_files` + `killswitch::integration_group_status`
-  for the kill switch and for `group_active`, `omarchy::omakvn_plugin_installed`
-  for the Omarchy card), with the pure `polkit_setup_state_from` /
+  for the kill switch and for `group_active`; the Omarchy card reads
+  `Model::omakvn`, the plugin state every snapshot carries, and is re-probed
+  with `Effect::CheckOmakvn` instead), with the pure `polkit_setup_state_from` /
   `killswitch_setup_state_from` mappings owning the rules: an unverifiable polkit
   answer reads as `Missing`, because re-running a setup command is harmless while
   claiming it is done is not, and a polkit denial reads as `PendingReboot` only

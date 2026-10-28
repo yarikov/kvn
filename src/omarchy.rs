@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, ensure};
 use semver::Version;
+use serde::{Deserialize, Serialize};
 
 pub fn detect_omarchy_theme() -> Option<String> {
     let current = omarchy_current_dir()?;
@@ -31,23 +32,81 @@ pub fn theme_colors_path() -> Option<PathBuf> {
 }
 
 pub const OMAKVN_PLUGIN_ID: &str = "yarikov.omakvn";
+pub const OMAKVN_MIN_VERSION: Version = Version::new(1, 1, 0);
+pub const OMAKVN_UPDATE_COMMAND: &str = "omarchy plugin update yarikov.omakvn";
 
-pub fn omakvn_plugin_installed() -> bool {
-    let Some(manifest) = dirs::config_dir().map(|config| {
-        config
-            .join("omarchy/plugins")
-            .join(OMAKVN_PLUGIN_ID)
-            .join("manifest.json")
-    }) else {
-        return false;
-    };
-    let Ok(raw) = std::fs::read_to_string(manifest) else {
-        return false;
-    };
-    serde_json::from_str::<serde_json::Value>(&raw)
-        .ok()
-        .and_then(|manifest| manifest.get("id")?.as_str().map(str::to_owned))
-        .is_some_and(|id| id == OMAKVN_PLUGIN_ID)
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OmakvnState {
+    #[default]
+    Missing,
+    Installed,
+    Outdated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OmakvnStatus {
+    pub state: OmakvnState,
+    pub required_version: String,
+}
+
+impl Default for OmakvnStatus {
+    fn default() -> Self {
+        Self::with_state(OmakvnState::Missing)
+    }
+}
+
+impl OmakvnStatus {
+    fn with_state(state: OmakvnState) -> Self {
+        Self {
+            state,
+            required_version: OMAKVN_MIN_VERSION.to_string(),
+        }
+    }
+
+    pub fn is_installed(&self) -> bool {
+        self.state != OmakvnState::Missing
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OmakvnPlugin {
+    pub version: Option<Version>,
+}
+
+impl OmakvnPlugin {
+    pub fn state(&self) -> OmakvnState {
+        match &self.version {
+            Some(version) if *version >= OMAKVN_MIN_VERSION => OmakvnState::Installed,
+            _ => OmakvnState::Outdated,
+        }
+    }
+}
+
+pub fn omakvn_status() -> OmakvnStatus {
+    OmakvnStatus::with_state(
+        installed_omakvn().map_or(OmakvnState::Missing, |plugin| plugin.state()),
+    )
+}
+
+pub fn installed_omakvn() -> Option<OmakvnPlugin> {
+    let manifest = dirs::config_dir()?
+        .join("omarchy/plugins")
+        .join(OMAKVN_PLUGIN_ID)
+        .join("manifest.json");
+    parse_omakvn_manifest(&std::fs::read_to_string(manifest).ok()?)
+}
+
+fn parse_omakvn_manifest(raw: &str) -> Option<OmakvnPlugin> {
+    let manifest: serde_json::Value = serde_json::from_str(raw).ok()?;
+    if manifest.get("id")?.as_str()? != OMAKVN_PLUGIN_ID {
+        return None;
+    }
+    let version = manifest
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|version| Version::parse(version.trim()).ok());
+    Some(OmakvnPlugin { version })
 }
 
 pub fn installed_major_version() -> Option<u64> {
@@ -260,5 +319,59 @@ mod tests {
         std::fs::create_dir_all(&current).unwrap();
         std::fs::write(current.join("theme.name"), "   \n").unwrap();
         assert!(detect_omarchy_theme().is_none());
+    }
+
+    fn manifest(version: Option<&str>) -> String {
+        match version {
+            Some(version) => format!(r#"{{"id":"{OMAKVN_PLUGIN_ID}","version":"{version}"}}"#),
+            None => format!(r#"{{"id":"{OMAKVN_PLUGIN_ID}"}}"#),
+        }
+    }
+
+    #[test]
+    fn the_omakvn_state_compares_the_manifest_version_with_the_required_one() {
+        for (version, expected) in [
+            (Some("1.1.0"), OmakvnState::Installed),
+            (Some("9.0.0"), OmakvnState::Installed),
+            (Some("1.0.1"), OmakvnState::Outdated),
+            (Some("not a version"), OmakvnState::Outdated),
+            (None, OmakvnState::Outdated),
+        ] {
+            let plugin = parse_omakvn_manifest(&manifest(version)).unwrap();
+
+            assert_eq!(plugin.state(), expected, "{version:?}");
+        }
+    }
+
+    #[test]
+    fn a_manifest_of_another_plugin_or_not_json_is_not_omakvn() {
+        for raw in [
+            r#"{"id":"someone.else","version":"9.0.0"}"#,
+            "{}",
+            "not json",
+        ] {
+            assert_eq!(parse_omakvn_manifest(raw), None, "{raw}");
+        }
+    }
+
+    #[test]
+    fn the_omakvn_status_reads_the_installed_manifest() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let _env = isolate_xdg(config.path(), state.path());
+        assert_eq!(omakvn_status(), OmakvnStatus::default());
+
+        let plugin = config.path().join("omarchy/plugins").join(OMAKVN_PLUGIN_ID);
+        std::fs::create_dir_all(&plugin).unwrap();
+        std::fs::write(plugin.join("manifest.json"), manifest(Some("1.0.1"))).unwrap();
+
+        assert_eq!(
+            omakvn_status(),
+            OmakvnStatus {
+                state: OmakvnState::Outdated,
+                required_version: "1.1.0".into(),
+            }
+        );
     }
 }

@@ -371,6 +371,7 @@ pub struct Model {
     pub support_prompt: crate::support_prompt::SupportPromptState,
     pub onboarding: crate::onboarding::OnboardingProgress,
     pub integration_setup: crate::onboarding::IntegrationSetup,
+    pub omakvn: crate::omarchy::OmakvnStatus,
     pub support_selected: usize,
     pub sources_scroll: usize,
     pub overlay_scroll: Option<usize>,
@@ -439,7 +440,7 @@ fn load_rule_set_states(
 }
 
 fn show_omarchy_card() -> bool {
-    crate::omarchy::detect_omarchy_theme().is_some() && !crate::omarchy::omakvn_plugin_installed()
+    crate::omarchy::detect_omarchy_theme().is_some() && crate::omarchy::installed_omakvn().is_none()
 }
 
 impl Model {
@@ -661,6 +662,7 @@ impl Model {
             support_prompt,
             onboarding,
             integration_setup: crate::onboarding::IntegrationSetup::default(),
+            omakvn: crate::omarchy::OmakvnStatus::default(),
             support_selected: 0,
             sources_scroll: 0,
             overlay_scroll: None,
@@ -737,6 +739,7 @@ impl Model {
                 show_omarchy_card(),
             ),
             integration_setup: crate::onboarding::IntegrationSetup::default(),
+            omakvn: crate::omarchy::OmakvnStatus::default(),
             support_selected: 0,
             sources_scroll: 0,
             overlay_scroll: None,
@@ -1074,6 +1077,7 @@ impl Model {
             support_prompt: crate::support_prompt::SupportPromptState::default(),
             onboarding: crate::onboarding::OnboardingProgress::default(),
             integration_setup: crate::onboarding::IntegrationSetup::default(),
+            omakvn: crate::omarchy::OmakvnStatus::default(),
             support_selected: 0,
             sources_scroll: 0,
             overlay_scroll: None,

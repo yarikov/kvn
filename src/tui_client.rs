@@ -338,6 +338,7 @@ fn apply_snapshot(model: &mut Model, snapshot: crate::app::msg::StateSnapshot) {
     model.onboarding.awaiting = snapshot.onboarding_awaiting;
     model.onboarding.include_omarchy_card = snapshot.onboarding_omarchy;
     model.integration_setup = snapshot.integration_setup;
+    model.omakvn = snapshot.omakvn;
     model.settings_menu_selected = snapshot.settings_menu_selected;
     model.routing_settings_draft = snapshot.routing_settings_draft;
     model.connection_settings_draft = snapshot.connection_settings_draft;

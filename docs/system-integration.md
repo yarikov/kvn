@@ -222,7 +222,11 @@ The launcher mode is `0755`.
   (`$XDG_RUNTIME_DIR/kvn-tui.sock`) and exchanges NDJSON: snapshots in,
   semantic commands (`ConnectProfile`, `Disconnect`, `SetRoutingMode`,
   `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect`) out. Existing embedded
-  copies and older `command` bar modules are migrated automatically. The
+  copies and older `command` bar modules are migrated automatically. Each kvn
+  release requires a minimum plugin version; when the installed plugin is
+  older, the TUI shows a toast and `kvn doctor` a warning, both with
+  `omarchy plugin update yarikov.omakvn`, and the snapshot's `omakvn.state` is
+  `outdated`. kvn never updates the plugin itself. The
   plugin is mandatory: when the shell plugin registry is unavailable or the
   install fails, setup aborts and rolls back instead of installing a reduced
   integration;

@@ -30,6 +30,7 @@ pub(super) fn execute_daemon_effect(
         Effect::ApplyKillSwitch { enabled } => connection::apply_kill_switch(tx, enabled),
         Effect::CheckAutoConnectPolkit => connection::check_auto_connect_polkit(tx),
         Effect::CheckIntegrationSetup => connection::check_integration_setup(tx),
+        Effect::CheckOmakvn => connection::check_omakvn(tx, model),
         Effect::DownloadRuleSets {
             rule_sets,
             only_missing,

@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::app::model::{AppStatus, StatusEvent, StatusKey};
+use crate::omarchy::{OMAKVN_UPDATE_COMMAND, OmakvnState, OmakvnStatus};
 
 const TOAST_INFO_DURATION: Duration = Duration::from_secs(3);
 const TOAST_ERROR_DURATION: Duration = Duration::from_secs(7);
@@ -11,6 +12,7 @@ pub(super) enum ToastKey {
     Daemon(StatusKey),
     Editor,
     Scroll,
+    Omakvn,
 }
 
 struct Toast {
@@ -22,6 +24,7 @@ struct Toast {
 pub(super) struct ToastState {
     last_revision: u64,
     newest_first: Vec<Toast>,
+    outdated_omakvn_shown: bool,
 }
 
 impl ToastState {
@@ -29,6 +32,7 @@ impl ToastState {
         Self {
             last_revision,
             newest_first: Vec::new(),
+            outdated_omakvn_shown: false,
         }
     }
 
@@ -38,6 +42,26 @@ impl ToastState {
 
     pub(super) fn show_info(&mut self, key: ToastKey, message: impl Into<String>, now: Instant) {
         self.show(key, AppStatus::Info(message.into()), now);
+    }
+
+    pub(super) fn observe_omakvn(&mut self, omakvn: &OmakvnStatus, now: Instant) {
+        if omakvn.state != OmakvnState::Outdated {
+            self.newest_first
+                .retain(|toast| toast.key != ToastKey::Omakvn);
+            return;
+        }
+        if self.outdated_omakvn_shown {
+            return;
+        }
+        self.outdated_omakvn_shown = true;
+        self.show(
+            ToastKey::Omakvn,
+            AppStatus::Error(format!(
+                "omakvn {} is required; run: {OMAKVN_UPDATE_COMMAND}",
+                omakvn.required_version
+            )),
+            now,
+        );
     }
 
     pub(super) fn observe(
@@ -332,5 +356,36 @@ mod tests {
         assert!(toast.statuses().is_empty());
         assert_eq!(toast.observe(5, &[error(5, "New failure")], start), Some(5));
         assert_eq!(texts(&toast), ["New failure"]);
+    }
+
+    #[test]
+    fn an_outdated_omakvn_is_reported_once_per_attach() {
+        let now = Instant::now();
+        let outdated = OmakvnStatus {
+            state: OmakvnState::Outdated,
+            ..OmakvnStatus::default()
+        };
+        let mut toasts = ToastState::new(0);
+
+        toasts.observe_omakvn(&OmakvnStatus::default(), now);
+        assert!(toasts.statuses().is_empty());
+
+        toasts.observe_omakvn(&outdated, now);
+        toasts.observe_omakvn(&outdated, now);
+        assert_eq!(
+            toasts.statuses(),
+            [&AppStatus::Error(
+                "omakvn 1.1.0 is required; run: omarchy plugin update yarikov.omakvn".into()
+            )]
+        );
+
+        toasts.observe_omakvn(&OmakvnStatus::default(), now);
+        assert!(toasts.statuses().is_empty());
+        toasts.observe_omakvn(&outdated, now);
+        assert!(toasts.statuses().is_empty());
+
+        toasts.reattach(0);
+        toasts.observe_omakvn(&outdated, now);
+        assert_eq!(toasts.statuses().len(), 1);
     }
 }

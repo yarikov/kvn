@@ -26,7 +26,8 @@ pub(in crate::app::update) fn handle_ipc_command(
         _ => {}
     }
     let effects = match cmd {
-        IpcCommand::Attach | IpcCommand::Detach => vec![],
+        IpcCommand::Attach => vec![Effect::CheckOmakvn],
+        IpcCommand::Detach => vec![],
         IpcCommand::CheckOnboarding => onboarding::resume(model),
         IpcCommand::CheckSupportPrompt => support::check_prompt(model),
         IpcCommand::ResolveSupportPrompt { resolution } => {
@@ -196,10 +197,10 @@ mod tests {
     use crate::test_helpers::*;
 
     #[test]
-    fn ipc_command_attach_broadcasts_state() {
+    fn ipc_command_attach_checks_omakvn_and_broadcasts_state() {
         let mut model = model_with_profiles(vec![]);
         let effects = handle_ipc_command(&mut model, crate::app::msg::IpcCommand::Attach);
-        assert_eq!(effects, vec![Effect::BroadcastState]);
+        assert_eq!(effects, vec![Effect::CheckOmakvn, Effect::BroadcastState]);
     }
 
     #[test]
