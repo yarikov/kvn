@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::model::{Model, SettingsMenuEntry};
 use crate::config::profile::IconSet;
@@ -10,7 +10,8 @@ use crate::ui::icons::icons;
 use crate::ui::layout::text::visual_width;
 
 use super::popup::{
-    settings_content_sized_rect, settings_content_width, settings_popup_width, settings_row_width,
+    clear_popup, settings_content_sized_rect, settings_content_width, settings_popup_width,
+    settings_row_width,
 };
 use super::settings_row::{settings_full_width_line, settings_value_layout, settings_value_line};
 use super::{
@@ -163,7 +164,7 @@ pub(super) fn draw(
     lines.push(Line::from(footer).centered());
 
     let popup_area = settings_content_sized_rect(area, popup_width, &lines);
-    frame.render_widget(Clear, popup_area);
+    clear_popup(frame, &model.theme, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(model.theme.accent())

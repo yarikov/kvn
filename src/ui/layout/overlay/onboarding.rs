@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::app::model::Model;
 use crate::config::profile::GeoRegion;
@@ -10,7 +10,7 @@ use crate::onboarding::{OnboardingStep, SetupState};
 use crate::ui::layout::text::visual_width;
 
 use super::overlay_footer;
-use super::popup::centered_fixed_width_rect;
+use super::popup::{centered_fixed_width_rect, clear_popup};
 
 pub(super) const ONBOARDING_POPUP_WIDTH: u16 = 56;
 const TEXT_MARGIN: usize = 1;
@@ -68,7 +68,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, step: OnboardingStep, area:
         horizontal_area.width,
         popup_height,
     );
-    frame.render_widget(Clear, popup_area);
+    clear_popup(frame, &model.theme, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(model.theme.accent())

@@ -5,8 +5,8 @@ expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ┌ Traffic ───────────────────────────────────────────────────────────┐
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connectio │
 └────────────────────────────────────────────────────────────────────┘
-┌ Profiles ───────┌───────────────────────────────┐──────────────────┐
-│ └ Alpha         │   Settings › Routing › Mode   │less  1.1.1.1:443 │
+┌ Profiles ────── ┌───────────────────────────────┐ ─────────────────┐
+│ └ Alpha         │   Settings › Routing › Mode   │ ess  1.1.1.1:443 │
 │                 │                               │                  │
 │                 │           Global              │                  │
 │                 │           Bypass RU           │                  │
