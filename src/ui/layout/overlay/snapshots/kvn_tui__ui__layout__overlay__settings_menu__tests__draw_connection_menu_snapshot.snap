@@ -15,6 +15,7 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
+│                                                       ││                                                      │
 │                                       ┌───────────────────────────────┐                                       │
 │                                       │     Settings › Connection     │                                       │
 │                                       │                               │                                       │
@@ -23,7 +24,6 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                       │                               │                                       │
 │                                       │ 󰌑 apply · q/󱊷 close · ⌫ back  │                                       │
 │                                       └───────────────────────────────┘                                       │
-│                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

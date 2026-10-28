@@ -2,13 +2,13 @@
 source: src/ui/layout/overlay/settings_menu.rs
 expression: "crate::test_helpers::snapshot_styles(&model,\ncrate::ui::layout::MIN_TERMINAL_WIDTH, crate::ui::layout::MIN_TERMINAL_HEIGHT)"
 ---
-┌ Traffic ───────────────────────────────────────────────────────────┐
-│ ↑ ┌────────────────────────────────────────────────────────────┐ o │
-└── │                     Settings › Routing                     │ ──┘
-┌ P │                                                            │ ──┐
+┌ T ┌────────────────────────────────────────────────────────────┐ ──┐
+│ ↑ │                     Settings › Routing                     │ o │
+└── │                                                            │ ──┘
+┌ P │ rule_set  geoip-ru                            ‹ direct ›   │ ──┐
 │ N │ domain    service-0.a-rather-long-corpora...  ‹ proxy ›    │   │
 │cl │ domain    service-1.a-rather-long-corpora...  ‹ proxy ›    │   │
-│   │ domain    service-2.a-rather-long-corpora...  ‹ proxy ›    │   │
+│   │ domain    service-2.a-rather-long-corpora...  ‹ proxy ›    ┃   │
 │   │ domain    service-3.a-rather-long-corpora...  ‹ proxy ›    ┃   │
 │   │ domain    service-4.a-rather-long-corpora...  ‹ proxy ›    ┃   │
 │   │ domain    service-5.a-rather-long-corpora...  ‹ proxy ›    ┃   │
@@ -19,26 +19,26 @@ expression: "crate::test_helpers::snapshot_styles(&model,\ncrate::ui::layout::MI
  DISCONNECTED                          DoH  Bypass RU    (off) never 
 [70x15]
 --- styles ---
-abbbbbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-acdceeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeecbca
-aaacebbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbecaaa
-fbbcebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecfff
-fbbcebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
-fbbcebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
-fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
-fccceggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggecccf
-fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
-fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
-fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
-fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
-fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
-fffceeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeecfff
+abbcddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddcaaa
+acecdbbbbbbbbbbbbbbbbbbbbbddddddddddddddddddbbbbbbbbbbbbbbbbbbbbbdcbca
+aaacdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcaaa
+fbbcdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcfff
+fbbcdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccf
+fbbcdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccf
+fcccdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccf
+fcccdggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggdcccf
+fcccdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccf
+fcccdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccf
+fcccdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccf
+fcccdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccf
+fcccdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccf
+fffcddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddcfff
 hhhhhhhhhhhhhhiiiiiiiiiiiiiiiiiiiiiiiiijjjiijjjjjjjjjiikkkkkkkkkkkkkkk
 a fg=Magenta bg=Black
 b fg=Gray bg=Black
 c fg=Reset bg=Black
-d fg=Green bg=Black BOLD
-e fg=Cyan bg=Black BOLD
+d fg=Cyan bg=Black BOLD
+e fg=Green bg=Black BOLD
 f fg=DarkGray bg=Black
 g fg=Cyan bg=Rgb(45, 45, 85) BOLD
 h fg=Gray bg=Rgb(43, 43, 43) BOLD

@@ -2,17 +2,17 @@
 source: src/ui/layout/overlay/help.rs
 expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ---
-┌ Traffic ───────────────────────────────────────────────────────────┐
-│ ↑ 0.0  ┌─────────────────────────────────────────────────┐ nnectio │
-└─────── │ Navigation                                      ┃ ────────┘
-┌ Profil │ Ctrl+h/←   Focus left pane                      ┃ ────────┐
-│ No sou │ Ctrl+l/→   Focus right pane                     │ from    │
-│clipboa │ j/k, ↑/↓   Move or scroll                       │         │
-│        │ gg/G       Go to first / last                   │         │
+┌ Traffi ┌─────────────────────────────────────────────────┐ ────────┐
+│ ↑ 0.0  │ Navigation                                      ┃ nnectio │
+└─────── │ Ctrl+h/←   Focus left pane                      ┃ ────────┘
+┌ Profil │ Ctrl+l/→   Focus right pane                     │ ────────┐
+│ No sou │ j/k, ↑/↓   Move or scroll                       │ from    │
+│clipboa │ gg/G       Go to first / last                   │         │
 │        │                                                 │         │
 │        │ Profiles                                        │         │
 │        │ Enter      Connect selected profile             │         │
 │        │ e          Open profiles.json in $EDITOR        │         │
+│        │ y          Yank profile or subscription         │         │
 │        │                                                 │         │
 │        │                    q/󱊷 close                    │         │
 └─────── └─────────────────────────────────────────────────┘ ────────┘

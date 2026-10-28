@@ -20,15 +20,18 @@ use super::{TRAFFIC_PANEL_HEIGHT, terminal_size_supported};
 pub(super) const TWO_PANE_MIN_WIDTH: u16 = 90;
 
 pub(super) fn main_panes(terminal_area: Rect) -> (Rect, Rect) {
-    let main_area = Layout::default()
+    split_main_panes(main_area(terminal_area))
+}
+
+pub(super) fn main_area(terminal_area: Rect) -> Rect {
+    Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(TRAFFIC_PANEL_HEIGHT),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
-        .split(terminal_area)[1];
-    split_main_panes(main_area)
+        .split(terminal_area)[1]
 }
 
 pub(super) fn split_main_panes(area: Rect) -> (Rect, Rect) {

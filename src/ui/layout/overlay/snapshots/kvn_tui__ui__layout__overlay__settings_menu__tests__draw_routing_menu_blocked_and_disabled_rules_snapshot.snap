@@ -2,43 +2,43 @@
 source: src/ui/layout/overlay/settings_menu.rs
 expression: "crate::test_helpers::snapshot_styles(&model,\ncrate::ui::layout::MIN_TERMINAL_WIDTH, crate::ui::layout::MIN_TERMINAL_HEIGHT)"
 ---
-┌ Traffic ───────────────────────────────────────────────────────────┐
-│ ↑ 0.0 KB ┌─────────────────────────────────────────────┐ connectio │
-└───────── │             Settings › Routing              │ ──────────┘
-┌ Profiles │                                             │ ──────────┐
-│ No sourc │            Mode ‹ Bypass RU ›               │ L from    │
-│clipboard │                                             │           │
-│          │              Rules (top wins)               │           │
+┌ Traffic  ┌─────────────────────────────────────────────┐ ──────────┐
+│ ↑ 0.0 KB │             Settings › Routing              │ connectio │
+└───────── │                                             │ ──────────┘
+┌ Profiles │            Mode ‹ Bypass RU ›               │ ──────────┐
+│ No sourc │                                             │ L from    │
+│clipboard │              Rules (top wins)               │           │
 │          │ ip        private              ‹ direct ›   │           │
 │          │ rule_set  geosite-category-ru  ‹ block ›    │           │
 │          │ rule_set  geoip-ru             ‹ disabled › │           │
 │          │ final                            proxy      │           │
 │          │                                             │           │
 │          │    󰌑 apply · e edit · q/󱊷 close · ⌫ back    │           │
-└───────── └─────────────────────────────────────────────┘ ──────────┘
+│          └─────────────────────────────────────────────┘           │
+└────────────────────────────────────────────────────────────────────┘
  DISCONNECTED                          DoH  Bypass RU    (off) never 
 [70x15]
 --- styles ---
-abbbbbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-acddbbbbbbceeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeecbbbbbbbbbca
-aaaaaaaaaacebbbbbbbbbbbbbeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbecaaaaaaaaaaa
-fbbbbbbbbbcebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecfffffffffff
-fbbbbbbbbbcebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecbbbbbbccccf
-fbbbbbbbbbcebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccccccccccf
-fccccccccccebbbbbbbbbbbbbbeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbecccccccccccf
-fccccccccccegggggggggggggggggggggggggggggggggggggggggggggecccccccccccf
-fccccccccccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccccccccccf
-fccccccccccefffffffffffffffffffffffffffffffffffffffffffffecccccccccccf
-fccccccccccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccccccccccf
-fccccccccccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccccccccccf
-fccccccccccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccccccccccf
-ffffffffffceeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeecfffffffffff
+abbbbbbbbbcdddddddddddddddddddddddddddddddddddddddddddddddcaaaaaaaaaaa
+aceebbbbbbcdbbbbbbbbbbbbbddddddddddddddddddbbbbbbbbbbbbbbdcbbbbbbbbbca
+aaaaaaaaaacdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcaaaaaaaaaaa
+fbbbbbbbbbcdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcfffffffffff
+fbbbbbbbbbcdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcbbbbbbccccf
+fbbbbbbbbbcdbbbbbbbbbbbbbbddddddddddddddddbbbbbbbbbbbbbbbdcccccccccccf
+fccccccccccdgggggggggggggggggggggggggggggggggggggggggggggdcccccccccccf
+fccccccccccdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccccccccccf
+fccccccccccdfffffffffffffffffffffffffffffffffffffffffffffdcccccccccccf
+fccccccccccdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccccccccccf
+fccccccccccdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccccccccccf
+fccccccccccdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdcccccccccccf
+fccccccccccdddddddddddddddddddddddddddddddddddddddddddddddcccccccccccf
+ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 hhhhhhhhhhhhhhiiiiiiiiiiiiiiiiiiiiiiiiijjjiijjjjjjjjjiikkkkkkkkkkkkkkk
 a fg=Magenta bg=Black
 b fg=Gray bg=Black
 c fg=Reset bg=Black
-d fg=Green bg=Black BOLD
-e fg=Cyan bg=Black BOLD
+d fg=Cyan bg=Black BOLD
+e fg=Green bg=Black BOLD
 f fg=DarkGray bg=Black
 g fg=Cyan bg=Rgb(45, 45, 85) BOLD
 h fg=Gray bg=Rgb(43, 43, 43) BOLD

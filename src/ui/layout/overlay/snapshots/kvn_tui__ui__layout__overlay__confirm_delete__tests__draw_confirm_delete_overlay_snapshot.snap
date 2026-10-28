@@ -17,12 +17,12 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
+│                                                       ││                                                      │
 │                               ┌──────────────────────────────────────────────┐                                │
 │                               │           Delete selected profile?           │                                │
 │                               │                                              │                                │
 │                               │             󰌑 confirm · q/󱊷 close            │                                │
 │                               └──────────────────────────────────────────────┘                                │
-│                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

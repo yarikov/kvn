@@ -4,17 +4,17 @@ expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ---
 ┌ Traffic ───────────────────────────────────────────────────────────┐
 │ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connectio │
-└──────────────── ┌───────────────────────────────┐ ─────────────────┘
-┌ Profiles ────── │  Settings › Routing › Region  │ ─────────────────┐
-│ No sources. Pre │                               │ tion URL from    │
-│clipboard.       │           🇷🇺  Russia           │                  │
+└────────────────────────────────────────────────────────────────────┘
+┌ Profiles ────── ┌───────────────────────────────┐ ─────────────────┐
+│ No sources. Pre │  Settings › Routing › Region  │ tion URL from    │
+│clipboard.       │                               │                  │
+│                 │           🇷🇺  Russia           │                  │
 │                 │           🇨🇳  China            │                  │
 │                 │           🇮🇷  Iran             │                  │
 │                 │           🌍  Global           │                  │
 │                 │                               │                  │
 │                 │            󰌑 apply            │                  │
 │                 └───────────────────────────────┘                  │
-│                                                                    │
 └────────────────────────────────────────────────────────────────────┘
  DISCONNECTED                                              DoH  Global
 [70x15]

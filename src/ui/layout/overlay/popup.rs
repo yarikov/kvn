@@ -1,8 +1,9 @@
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
+use ratatui::layout::{Alignment, Margin, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
+use crate::ui::layout::panes::main_area;
 use crate::ui::layout::scrollbar::{ScrollWindow, draw_scrollbar};
 use crate::ui::layout::text::{align_in_centered_column, fit_to_visual_width, visual_width};
 use crate::ui::styles::Theme;
@@ -10,9 +11,38 @@ use crate::ui::styles::Theme;
 pub(super) const DIALOG_POPUP_WIDTH: u16 = 48;
 pub(super) const SETTINGS_POPUP_MIN_WIDTH: u16 = 33;
 pub(super) const SETTINGS_TEXT_MARGIN: usize = 1;
-pub(super) const SELECTION_POPUP_MAX_HEIGHT_PERCENT: u16 = 90;
 
 const POPUP_SIDE_GUTTER: u16 = 1;
+const OVERLAY_MAX_HEIGHT: u16 = 28;
+
+fn above_status_bar(area: Rect) -> Rect {
+    Rect::new(
+        area.x,
+        area.y,
+        area.width,
+        main_area(area).bottom() - area.y,
+    )
+}
+
+pub(super) fn overlay_max_height(area: Rect) -> u16 {
+    OVERLAY_MAX_HEIGHT.min(above_status_bar(area).height)
+}
+
+pub(super) fn vertically_placed_rect(horizontal_area: Rect, area: Rect, height: u16) -> Rect {
+    let height = height.min(overlay_max_height(area));
+    let panes = main_area(area);
+    let column = if height <= panes.height {
+        panes
+    } else {
+        above_status_bar(area)
+    };
+    Rect::new(
+        horizontal_area.x,
+        column.y + (column.height - height) / 2,
+        horizontal_area.width,
+        height,
+    )
+}
 
 pub(super) fn clear_popup(frame: &mut Frame, theme: &Theme, popup_area: Rect) {
     let gutter_area = popup_area
@@ -77,13 +107,7 @@ pub(super) fn content_sized_rect_in(
             u16::try_from(line.width().max(1).div_ceil(content_width)).unwrap_or(u16::MAX);
         height.saturating_add(line_height)
     });
-    let popup_height = content_height.saturating_add(2).min(area.height);
-    Rect::new(
-        horizontal_area.x,
-        area.y + area.height.saturating_sub(popup_height) / 2,
-        horizontal_area.width,
-        popup_height,
-    )
+    vertically_placed_rect(horizontal_area, area, content_height.saturating_add(2))
 }
 
 pub(super) fn draw_modal(frame: &mut Frame, theme: &Theme, area: Rect, lines: Vec<Line>) {
@@ -149,14 +173,7 @@ pub(super) fn draw_selection_modal(
             .into_iter()
             .chain(items.iter().map(|item| visual_width(item))),
     );
-    let height_area = centered_rect(100, SELECTION_POPUP_MAX_HEIGHT_PERCENT, area);
-    let popup_area = Rect::new(
-        area.x + area.width.saturating_sub(popup_width) / 2,
-        height_area.y,
-        popup_width,
-        height_area.height,
-    );
-    let row_width = popup_area.width.saturating_sub(2) as usize;
+    let row_width = popup_width.saturating_sub(2) as usize;
     let content_width = row_width.saturating_sub(SETTINGS_TEXT_MARGIN * 2);
     let column_width = items
         .iter()
@@ -209,29 +226,8 @@ pub(super) fn draw_selection_modal(
     );
 }
 
-pub(super) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
-}
-
 pub(in crate::ui::layout) fn selection_visible(area: Rect, total: usize) -> usize {
-    let height = centered_rect(100, SELECTION_POPUP_MAX_HEIGHT_PERCENT, area).height;
-    total.min(height.saturating_sub(6) as usize)
+    total.min(overlay_max_height(area).saturating_sub(6) as usize)
 }
 
 pub(in crate::ui::layout) fn row_window_start(

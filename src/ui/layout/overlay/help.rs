@@ -8,7 +8,7 @@ use crate::app::model::Model;
 
 use super::super::scrollbar::{ScrollWindow, draw_scrollbar, right_border_track};
 use super::overlay_footer;
-use super::popup::{centered_fixed_width_rect, centered_rect, clear_popup};
+use super::popup::{centered_fixed_width_rect, clear_popup, vertically_placed_rect};
 
 pub(super) const HELP_POPUP_WIDTH: u16 = 51;
 
@@ -94,13 +94,12 @@ pub(in crate::ui::layout) fn window_start(
 }
 
 pub(in crate::ui::layout) fn popup_area(area: Rect, total: usize) -> Rect {
-    let needed = total as u16 + 2 + 2;
-    let percent = needed
-        .saturating_mul(100)
-        .checked_div(area.height)
-        .unwrap_or(90)
-        .clamp(50, 90);
-    centered_fixed_width_rect(HELP_POPUP_WIDTH, centered_rect(100, percent, area))
+    let height = (total as u16).saturating_add(2 + 2);
+    vertically_placed_rect(
+        centered_fixed_width_rect(HELP_POPUP_WIDTH, area),
+        area,
+        height,
+    )
 }
 
 #[cfg(test)]
