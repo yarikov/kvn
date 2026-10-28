@@ -8,9 +8,16 @@ pub(in crate::app::update) fn move_selected_rule(
     model: &mut Model,
     direction: Direction,
 ) -> Vec<Effect> {
-    let RoutingSettingsRow::Rule(index) = model.routing_settings_row() else {
-        return vec![];
+    let index = match model.routing_settings_row() {
+        RoutingSettingsRow::Rule(index) => index,
+        RoutingSettingsRow::Mode => return vec![],
+        RoutingSettingsRow::Final => {
+            return routing_error(model, "final is always last and cannot be moved");
+        }
     };
+    if direction == Direction::Down && index + 1 == model.shown_mode_rules().len() {
+        return routing_error(model, "final is always last; no rule can move below it");
+    }
     if model.routing_error.is_some() {
         return invalid_routing_error(model);
     }
@@ -45,15 +52,37 @@ pub(in crate::app::update) fn cycle_selected_rule_route(
     vec![]
 }
 
+pub(in crate::app::update) fn delete_selected_rule(model: &mut Model) -> Vec<Effect> {
+    let index = match model.routing_settings_row() {
+        RoutingSettingsRow::Rule(index) => index,
+        RoutingSettingsRow::Mode => return routing_error(model, "Select a rule to delete"),
+        RoutingSettingsRow::Final => {
+            return routing_error(model, "final is required and cannot be deleted");
+        }
+    };
+    if model.routing_error.is_some() {
+        return invalid_routing_error(model);
+    }
+    let mut rules = model.shown_mode_rules().to_vec();
+    rules.remove(index);
+    model.draft_shown_mode_rules(rules);
+    vec![]
+}
+
 fn invalid_routing_error(model: &mut Model) -> Vec<Effect> {
+    routing_error(
+        model,
+        "Rules cannot be changed while routing.json is invalid; fix it with e",
+    )
+}
+
+fn routing_error(model: &mut Model, message: &str) -> Vec<Effect> {
     let mut effects = vec![];
     push_status(
         &mut effects,
         model,
         StatusKey::Routing,
-        AppStatus::Error(
-            "Rules cannot be changed while routing.json is invalid; fix it with e".into(),
-        ),
+        AppStatus::Error(message.into()),
     );
     effects
 }
@@ -100,21 +129,35 @@ mod tests {
     }
 
     #[test]
-    fn nothing_moves_from_the_mode_row_final_or_past_an_edge() {
+    fn nothing_moves_from_the_mode_row_or_above_the_first_rule() {
         let mut model = routing_page("bypass_ru");
-        let rules = model.shown_mode_rules().len();
-        for (selected, direction) in [
-            (0, Direction::Down),
-            (1, Direction::Up),
-            (rules, Direction::Down),
-            (rules + 1, Direction::Up),
-        ] {
+        for (selected, direction) in [(0, Direction::Down), (1, Direction::Up)] {
             model.settings_menu_selected = selected;
 
-            move_selected_rule(&mut model, direction);
+            assert!(move_selected_rule(&mut model, direction).is_empty());
 
             assert_eq!(model.routing_settings_draft, None);
             assert_eq!(model.settings_menu_selected, selected);
+        }
+    }
+
+    #[test]
+    fn final_does_not_move_and_no_rule_moves_below_it() {
+        let mut model = routing_page("bypass_ru");
+        let rules = model.shown_mode_rules().len();
+        for (selected, direction) in [
+            (rules + 1, Direction::Up),
+            (rules + 1, Direction::Down),
+            (rules, Direction::Down),
+        ] {
+            model.settings_menu_selected = selected;
+
+            let effects = move_selected_rule(&mut model, direction);
+
+            assert_eq!(model.routing_settings_draft, None);
+            assert_eq!(model.settings_menu_selected, selected);
+            assert!(model.status_is_error());
+            assert!(!effects.is_empty());
         }
     }
 
@@ -192,10 +235,55 @@ mod tests {
     }
 
     #[test]
+    fn a_deleted_rule_leaves_the_draft_and_the_selection_on_the_next_row() {
+        let mut model = routing_page("bypass_ru");
+        let saved = saved_rules(&model, "bypass_ru");
+        model.settings_menu_selected = 1;
+
+        assert!(delete_selected_rule(&mut model).is_empty());
+
+        assert_eq!(model.shown_mode_rules(), &saved[1..]);
+        assert_eq!(model.settings_menu_selected, 1);
+        assert_eq!(saved_rules(&model, "bypass_ru"), saved);
+        let draft = model.shown_mode_rules_draft().unwrap();
+        assert_eq!(draft.saved, saved);
+    }
+
+    #[test]
+    fn deleting_every_rule_leaves_final_selected() {
+        let mut model = routing_page("bypass_ru");
+        let rules = model.shown_mode_rules().len();
+        model.settings_menu_selected = 1;
+
+        for _ in 0..rules {
+            delete_selected_rule(&mut model);
+        }
+
+        assert!(model.shown_mode_rules().is_empty());
+        assert_eq!(model.routing_settings_row(), RoutingSettingsRow::Final);
+    }
+
+    #[test]
+    fn the_mode_row_and_final_are_not_deleted_and_report_an_error() {
+        let mut model = routing_page("bypass_ru");
+        let rules = model.shown_mode_rules().len();
+        for selected in [0, rules + 1] {
+            model.settings_menu_selected = selected;
+
+            let effects = delete_selected_rule(&mut model);
+
+            assert_eq!(model.routing_settings_draft, None);
+            assert!(model.status_is_error());
+            assert!(!effects.is_empty());
+        }
+    }
+
+    #[test]
     fn rules_of_an_invalid_routing_json_do_not_change() {
         for change in [
             |model: &mut Model| move_selected_rule(model, Direction::Down),
             |model: &mut Model| cycle_selected_rule_route(model, true),
+            delete_selected_rule,
         ] {
             let mut model = routing_page("bypass_ru");
             model.routing_error = Some("broken".into());

@@ -5,7 +5,9 @@ use crate::app::model::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::update::key::reorder::Direction;
-use crate::app::update::key::routing_rules::{cycle_selected_rule_route, move_selected_rule};
+use crate::app::update::key::routing_rules::{
+    cycle_selected_rule_route, delete_selected_rule, move_selected_rule,
+};
 use crate::app::update::routing::commit_routing_settings;
 use crate::app::update::status::push_status;
 
@@ -65,6 +67,9 @@ pub(in crate::app::update) fn handle_settings_menu(
         }
         (SettingsMenuPage::Routing, KeyCode::Char('h') | KeyCode::Left) => {
             return cycle_selected_rule_route(model, false);
+        }
+        (SettingsMenuPage::Routing, KeyCode::Char('d')) => {
+            return delete_selected_rule(model);
         }
         (SettingsMenuPage::Routing, KeyCode::Enter) => {
             let mode = model
@@ -759,6 +764,20 @@ mod tests {
                 expected.routing_settings_draft
             );
         }
+    }
+
+    #[test]
+    fn d_deletes_the_selected_rule() {
+        let mut model = routing_page_on_second_rule();
+        let mut expected = routing_page_on_second_rule();
+
+        handle_key(&mut model, key('d'));
+        delete_selected_rule(&mut expected);
+
+        assert_eq!(
+            model.routing_settings_draft,
+            expected.routing_settings_draft
+        );
     }
 
     #[test]
