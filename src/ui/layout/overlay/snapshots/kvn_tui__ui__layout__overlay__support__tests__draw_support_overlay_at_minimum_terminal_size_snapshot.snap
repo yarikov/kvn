@@ -3,11 +3,11 @@ source: src/ui/layout/overlay/support.rs
 expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ---
 ┌ Traffic ───────────────────────────────────────────────────────────┐
-│ ↑ 0.0┌──────────────────────────────────────────────────────┐ectio │
-└──────│                     Enjoying kvn?                    │──────┘
-┌ Profi│                                                      │──────┐
-│ No so│ If it saves you time, you can say thanks with a      │om    │
-│clipbo│ coffee.                                              │      │
+│ ↑ 0. ┌──────────────────────────────────────────────────────┐ ctio │
+└───── │                     Enjoying kvn?                    │ ─────┘
+┌ Prof │                                                      │ ─────┐
+│ No s │ If it saves you time, you can say thanks with a      │ m    │
+│clipb │ coffee.                                              │      │
 │      │                                                      │      │
 │      │                  Buy me a coffee ☕                   │      │
 │      │                  Maybe later                         │      │

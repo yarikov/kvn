@@ -3,11 +3,11 @@ source: src/ui/layout/overlay/onboarding.rs
 expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ---
 ┌ Traffic ───────────────────────────────────────────────────────────┐
-│ ↑ 0.0┌──────────────────────────────────────────────────────┐ectio │
-└──────│                Getting started · 1/10                │──────┘
-┌ Profi│                                                      │──────┐
-│ No so│                    Welcome to kvn                    │om    │
-│clipbo│                                                      │      │
+│ ↑ 0. ┌──────────────────────────────────────────────────────┐ ctio │
+└───── │                Getting started · 1/10                │ ─────┘
+┌ Prof │                                                      │ ─────┐
+│ No s │                    Welcome to kvn                    │ m    │
+│clipb │                                                      │      │
 │      │ This quick tour will help you get kvn set up and     │      │
 │      │ ready to use by guiding you through routing, your    │      │
 │      │ first VPN profile, auto-connect, and the kill        │      │

@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
@@ -11,6 +11,16 @@ pub(super) const DIALOG_POPUP_WIDTH: u16 = 48;
 pub(super) const SETTINGS_POPUP_MIN_WIDTH: u16 = 33;
 pub(super) const SETTINGS_TEXT_MARGIN: usize = 1;
 pub(super) const SELECTION_POPUP_MAX_HEIGHT_PERCENT: u16 = 90;
+
+const POPUP_SIDE_GUTTER: u16 = 1;
+
+pub(super) fn clear_popup(frame: &mut Frame, theme: &Theme, popup_area: Rect) {
+    let gutter_area = popup_area
+        .outer(Margin::new(POPUP_SIDE_GUTTER, 0))
+        .intersection(frame.area());
+    frame.render_widget(Clear, gutter_area);
+    frame.render_widget(Block::default().style(theme.background()), gutter_area);
+}
 
 pub(super) fn centered_fixed_width_rect(width: u16, area: Rect) -> Rect {
     let width = width.min(area.width);
@@ -79,7 +89,7 @@ pub(super) fn content_sized_rect_in(
 pub(super) fn draw_modal(frame: &mut Frame, theme: &Theme, area: Rect, lines: Vec<Line>) {
     let popup_area = content_sized_rect(DIALOG_POPUP_WIDTH, area, &lines);
 
-    frame.render_widget(Clear, popup_area);
+    clear_popup(frame, theme, popup_area);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -104,7 +114,7 @@ pub(super) fn draw_settings_modal(
 ) -> Rect {
     let popup_area = settings_content_sized_rect(area, popup_width, &lines);
 
-    frame.render_widget(Clear, popup_area);
+    clear_popup(frame, theme, popup_area);
 
     let block = Block::default()
         .borders(Borders::ALL)

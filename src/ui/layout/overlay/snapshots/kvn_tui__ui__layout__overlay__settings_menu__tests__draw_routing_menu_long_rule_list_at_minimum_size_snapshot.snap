@@ -3,11 +3,11 @@ source: src/ui/layout/overlay/settings_menu.rs
 expression: "crate::test_helpers::snapshot_styles(&model,\ncrate::ui::layout::MIN_TERMINAL_WIDTH, crate::ui::layout::MIN_TERMINAL_HEIGHT)"
 ---
 ┌ Traffic ───────────────────────────────────────────────────────────┐
-│ ↑ ┌────────────────────────────────────────────────────────────┐io │
-└───│                     Settings › Routing                     │───┘
-┌ Pr│                                                            │───┐
-│ No│ domain    service-0.a-rather-long-corpora...  ‹ proxy ›    │   │
-│cli│ domain    service-1.a-rather-long-corpora...  ‹ proxy ›    │   │
+│ ↑ ┌────────────────────────────────────────────────────────────┐ o │
+└── │                     Settings › Routing                     │ ──┘
+┌ P │                                                            │ ──┐
+│ N │ domain    service-0.a-rather-long-corpora...  ‹ proxy ›    │   │
+│cl │ domain    service-1.a-rather-long-corpora...  ‹ proxy ›    │   │
 │   │ domain    service-2.a-rather-long-corpora...  ‹ proxy ›    │   │
 │   │ domain    service-3.a-rather-long-corpora...  ‹ proxy ›    ┃   │
 │   │ domain    service-4.a-rather-long-corpora...  ‹ proxy ›    ┃   │
@@ -15,16 +15,16 @@ expression: "crate::test_helpers::snapshot_styles(&model,\ncrate::ui::layout::MI
 │   │ domain    service-6.a-rather-long-corpora...  ‹ proxy ›    │   │
 │   │                                                            │   │
 │   │            󰌑 apply · e edit · q/󱊷 close · ⌫ back           │   │
-└───└────────────────────────────────────────────────────────────┘───┘
+└── └────────────────────────────────────────────────────────────┘ ──┘
  DISCONNECTED                          DoH  Bypass RU    (off) never 
 [70x15]
 --- styles ---
 abbbbbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-acddeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebbca
-aaaaebbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbeaaaa
-fbbbebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbeffff
-fbbbebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
-fbbbebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
+acdceeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeecbca
+aaacebbbbbbbbbbbbbbbbbbbbbeeeeeeeeeeeeeeeeeebbbbbbbbbbbbbbbbbbbbbecaaa
+fbbcebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecfff
+fbbcebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
+fbbcebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
 fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
 fccceggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggecccf
 fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
@@ -32,7 +32,7 @@ fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
 fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
 fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
 fcccebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbecccf
-ffffeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeffff
+fffceeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeecfff
 hhhhhhhhhhhhhhiiiiiiiiiiiiiiiiiiiiiiiiijjjiijjjjjjjjjiikkkkkkkkkkkkkkk
 a fg=Magenta bg=Black
 b fg=Gray bg=Black

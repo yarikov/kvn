@@ -1,13 +1,13 @@
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::app::model::Model;
 use crate::ui::layout::text::{align_in_centered_column, visual_width};
 
 use super::onboarding::{ONBOARDING_POPUP_WIDTH, wrap_plain};
-use super::popup::centered_fixed_width_rect;
+use super::popup::{centered_fixed_width_rect, clear_popup};
 use super::{CONFIRM_ACTION, overlay_footer};
 
 pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
@@ -77,7 +77,7 @@ pub(super) fn draw(frame: &mut Frame, model: &Model, area: Rect) {
         horizontal_area.width,
         popup_height,
     );
-    frame.render_widget(Clear, popup_area);
+    clear_popup(frame, &model.theme, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(model.theme.accent())

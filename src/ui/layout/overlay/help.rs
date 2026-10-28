@@ -2,13 +2,13 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Block, Borders, Paragraph, Row, Table, TableState};
 
 use crate::app::model::Model;
 
 use super::super::scrollbar::{ScrollWindow, draw_scrollbar, right_border_track};
 use super::overlay_footer;
-use super::popup::{centered_fixed_width_rect, centered_rect};
+use super::popup::{centered_fixed_width_rect, centered_rect, clear_popup};
 
 pub(super) const HELP_POPUP_WIDTH: u16 = 51;
 
@@ -22,7 +22,7 @@ pub(super) fn draw(
     let help_rows = crate::ui::help::rows(help_state.context);
     let popup_area = popup_area(area, help_rows.len());
 
-    frame.render_widget(Clear, popup_area);
+    clear_popup(frame, theme, popup_area);
 
     let block = Block::default()
         .borders(Borders::ALL)

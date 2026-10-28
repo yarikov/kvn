@@ -3,11 +3,11 @@ source: src/ui/layout/overlay/help.rs
 expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 ---
 ┌ Traffic ───────────────────────────────────────────────────────────┐
-│ ↑ 0.0 K┌─────────────────────────────────────────────────┐onnectio │
-└────────│ Navigation                                      ┃─────────┘
-┌ Profile│ Ctrl+h/←   Focus left pane                      ┃─────────┐
-│ No sour│ Ctrl+l/→   Focus right pane                     │ from    │
-│clipboar│ j/k, ↑/↓   Move or scroll                       │         │
+│ ↑ 0.0  ┌─────────────────────────────────────────────────┐ nnectio │
+└─────── │ Navigation                                      ┃ ────────┘
+┌ Profil │ Ctrl+h/←   Focus left pane                      ┃ ────────┐
+│ No sou │ Ctrl+l/→   Focus right pane                     │ from    │
+│clipboa │ j/k, ↑/↓   Move or scroll                       │         │
 │        │ gg/G       Go to first / last                   │         │
 │        │                                                 │         │
 │        │ Profiles                                        │         │
@@ -15,6 +15,6 @@ expression: "snapshot_terminal(&model, MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT)"
 │        │ e          Open profiles.json in $EDITOR        │         │
 │        │                                                 │         │
 │        │                    q/󱊷 close                    │         │
-└────────└─────────────────────────────────────────────────┘─────────┘
+└─────── └─────────────────────────────────────────────────┘ ────────┘
  DISCONNECTED                                              DoH  Global
 [70x15]
