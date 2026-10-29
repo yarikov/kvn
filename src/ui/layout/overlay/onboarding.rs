@@ -230,7 +230,7 @@ fn footer(model: &Model, step: OnboardingStep) -> String {
 }
 
 fn command(model: &Model, step: OnboardingStep) -> Option<&'static str> {
-    step.command(model.integration_setup)
+    step.command(model.integration_setup, model.omakvn.state)
 }
 
 fn command_block(model: &Model, step: OnboardingStep) -> Passage {
@@ -294,7 +294,7 @@ fn body(model: &Model, step: OnboardingStep) -> Vec<Passage> {
                  instructions on how to fix them.",
             ),
         ],
-        OnboardingStep::Omarchy => match model.integration_setup.omarchy_plugin {
+        OnboardingStep::Omarchy => match model.omakvn.is_installed() {
             true => vec![text(
                 "kvn is integrated with your Omarchy desktop: the widget is on your bar.",
             )],
@@ -489,7 +489,6 @@ mod tests {
                     polkit: state,
                     kill_switch: state,
                     group_active,
-                    omarchy_plugin: false,
                 };
                 let label = format!("{step:?}-{name}").to_lowercase();
                 insta::with_settings!({snapshot_suffix => label}, {
@@ -506,7 +505,7 @@ mod tests {
     #[test]
     fn the_omarchy_card_confirms_an_installed_plugin_snapshot() {
         let mut model = card(OnboardingStep::Omarchy);
-        model.integration_setup.omarchy_plugin = true;
+        model.omakvn.state = crate::omarchy::OmakvnState::Installed;
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
 

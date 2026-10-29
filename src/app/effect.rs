@@ -59,6 +59,7 @@ pub enum Effect {
     },
     CheckAutoConnectPolkit,
     CheckIntegrationSetup,
+    CheckOmakvn,
     FetchTrafficStats {
         attempt_id: u64,
         request_id: u64,

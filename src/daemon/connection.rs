@@ -277,6 +277,14 @@ pub(super) fn check_integration_setup(tx: &Sender<Msg>) {
     });
 }
 
+pub(super) fn check_omakvn(tx: &Sender<Msg>, model: &mut Model) {
+    let status = crate::omarchy::omakvn_status();
+    if model.omakvn != status {
+        model.omakvn = status;
+        let _ = tx.send(Msg::OmakvnChanged);
+    }
+}
+
 pub(super) fn check_auto_connect_polkit(tx: &Sender<Msg>) {
     let tx = tx.clone();
     thread::spawn(move || {

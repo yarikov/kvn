@@ -14,7 +14,8 @@ pub(super) fn handle(
     completes_go_first: bool,
 ) -> Result<Flow> {
     if key.code == KeyCode::Char('y')
-        && let Some(command) = step.clipboard_command(state.model.integration_setup)
+        && let Some(command) =
+            step.clipboard_command(state.model.integration_setup, state.model.omakvn.state)
     {
         copy_command(state, &command)?;
         return Ok(Flow::Continue);

@@ -66,18 +66,24 @@ pub(in crate::app::update) fn resume(model: &mut Model) -> Vec<Effect> {
 
 const PROBE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
-fn card_reports_integration(step: OnboardingStep) -> bool {
-    matches!(
-        step,
-        OnboardingStep::Omarchy | OnboardingStep::AutoConnect | OnboardingStep::KillSwitch
-    )
+fn card_probe(step: OnboardingStep) -> Option<Effect> {
+    match step {
+        OnboardingStep::Omarchy => Some(Effect::CheckOmakvn),
+        OnboardingStep::AutoConnect | OnboardingStep::KillSwitch => {
+            Some(Effect::CheckIntegrationSetup)
+        }
+        _ => None,
+    }
 }
 
 pub(in crate::app::update) fn probe_visible_card(model: &mut Model) -> Vec<Effect> {
     let Overlay::Onboarding(step) = model.overlay else {
         return vec![];
     };
-    if !card_reports_integration(step) || model.integration_check_pending {
+    let Some(probe) = card_probe(step) else {
+        return vec![];
+    };
+    if model.integration_check_pending {
         return vec![];
     }
     let now = std::time::Instant::now();
@@ -89,8 +95,8 @@ pub(in crate::app::update) fn probe_visible_card(model: &mut Model) -> Vec<Effec
         return vec![];
     }
     model.last_integration_check_at = Some(now);
-    model.integration_check_pending = true;
-    vec![Effect::CheckIntegrationSetup]
+    model.integration_check_pending = probe == Effect::CheckIntegrationSetup;
+    vec![probe]
 }
 
 pub(in crate::app::update) fn integration_setup_checked(
@@ -102,6 +108,10 @@ pub(in crate::app::update) fn integration_setup_checked(
         return vec![];
     }
     model.integration_setup = setup;
+    vec![Effect::BroadcastState]
+}
+
+pub(in crate::app::update) fn omakvn_changed() -> Vec<Effect> {
     vec![Effect::BroadcastState]
 }
 
@@ -194,7 +204,10 @@ mod tests {
 
         let mut model = tour_at(OnboardingStep::Omarchy);
         model.overlay = Overlay::None;
-        assert!(resume(&mut model).contains(&Effect::CheckIntegrationSetup));
+        let effects = resume(&mut model);
+        assert!(effects.contains(&Effect::CheckOmakvn));
+        assert!(!effects.contains(&Effect::CheckIntegrationSetup));
+        assert!(!model.integration_check_pending);
     }
 
     #[test]
@@ -254,6 +267,11 @@ mod tests {
         );
         assert_eq!(model.integration_setup, setup);
         assert!(integration_setup_checked(&mut model, setup).is_empty());
+    }
+
+    #[test]
+    fn a_changed_omakvn_state_is_broadcast() {
+        assert_eq!(omakvn_changed(), vec![Effect::BroadcastState]);
     }
 
     #[test]

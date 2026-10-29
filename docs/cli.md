@@ -154,6 +154,10 @@ Runs a read-only check of sing-box, the configuration (`profiles.json`,
 problem. It exits with a non-zero status when a
 required check fails; warnings alone do not change the exit status.
 
+On Omarchy it also reports the version of the `yarikov.omakvn` bar plugin. A
+plugin older than this kvn requires is a warning with the command that updates
+it: `omarchy plugin update yarikov.omakvn`.
+
 ## config
 
 ```bash

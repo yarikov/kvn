@@ -402,6 +402,7 @@ mod tests {
             onboarding_omarchy: false,
             onboarding_complete: true,
             integration_setup: crate::onboarding::IntegrationSetup::default(),
+            omakvn: crate::omarchy::OmakvnStatus::default(),
             settings_menu_selected: 0,
             routing_settings_draft: None,
             connection_settings_draft: None,

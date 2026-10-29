@@ -94,6 +94,9 @@ impl<'a> ClientLoop<'a> {
             unreported_error: None,
             needs_redraw: false,
         };
+        state
+            .toast
+            .observe_omakvn(&state.model.omakvn, Instant::now());
         if !crate::ui::layout::logs_visible(state.terminal_area()?)
             && state.pane_focus == MainPaneFocus::Logs
         {
@@ -167,6 +170,8 @@ impl<'a> ClientLoop<'a> {
         let response_to = snapshot.response_to;
         let scroll_result = snapshot.scroll_result;
         apply_snapshot(self.model, snapshot);
+        self.toast
+            .observe_omakvn(&self.model.omakvn, Instant::now());
         if old_context != crate::app::scroll::context(self.model.overlay) {
             self.scroll_queue.cancel();
             self.model.overlay_scroll = None;

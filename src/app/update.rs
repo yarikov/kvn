@@ -88,6 +88,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         }
         Msg::AutoConnectPolkitChecked { error } => handle_auto_connect_polkit_checked(model, error),
         Msg::IntegrationSetupChecked(setup) => onboarding::integration_setup_checked(model, setup),
+        Msg::OmakvnChanged => onboarding::omakvn_changed(),
         Msg::TrafficStatsUpdated {
             attempt_id,
             request_id,

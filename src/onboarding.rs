@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::config::routing::RoutingConfig;
+use crate::omarchy::OmakvnState;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -40,8 +41,6 @@ pub struct IntegrationSetup {
     pub kill_switch: SetupState,
     #[serde(default)]
     pub group_active: bool,
-    #[serde(default)]
-    pub omarchy_plugin: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,10 +97,10 @@ impl OnboardingStep {
             .unwrap_or(Self::Finish)
     }
 
-    pub fn command(self, setup: IntegrationSetup) -> Option<&'static str> {
+    pub fn command(self, setup: IntegrationSetup, omakvn: OmakvnState) -> Option<&'static str> {
         match self {
             Self::Doctor => Some("kvn doctor"),
-            Self::Omarchy => (!setup.omarchy_plugin).then_some("kvn setup --omarchy"),
+            Self::Omarchy => (omakvn == OmakvnState::Missing).then_some("kvn setup --omarchy"),
             Self::AutoConnect => (setup.polkit == SetupState::Missing)
                 .then_some("sudo pacman -S --needed polkit \\\n  && sudo kvn setup --polkit"),
             Self::KillSwitch => (setup.kill_switch == SetupState::Missing)
@@ -115,8 +114,8 @@ impl OnboardingStep {
         }
     }
 
-    pub fn clipboard_command(self, setup: IntegrationSetup) -> Option<String> {
-        Some(self.command(setup)?.replace(" \\\n  ", " "))
+    pub fn clipboard_command(self, setup: IntegrationSetup, omakvn: OmakvnState) -> Option<String> {
+        Some(self.command(setup, omakvn)?.replace(" \\\n  ", " "))
     }
 
     pub fn handoff_screen(self, routing: &RoutingConfig) -> Option<HandoffScreen> {
@@ -315,7 +314,10 @@ mod tests {
         let with_commands = |setup| -> Vec<_> {
             OnboardingStep::ORDER
                 .into_iter()
-                .filter_map(|step| step.command(setup).map(|command| (step, command)))
+                .filter_map(|step| {
+                    step.command(setup, OmakvnState::Missing)
+                        .map(|command| (step, command))
+                })
                 .collect()
         };
         assert_eq!(
@@ -338,7 +340,7 @@ mod tests {
     #[test]
     fn a_setup_command_is_copied_with_the_package_it_needs() {
         let setup = IntegrationSetup::default();
-        let copied = |step: OnboardingStep| step.clipboard_command(setup);
+        let copied = |step: OnboardingStep| step.clipboard_command(setup, OmakvnState::Missing);
         assert_eq!(
             copied(OnboardingStep::AutoConnect).as_deref(),
             Some("sudo pacman -S --needed polkit && sudo kvn setup --polkit")
@@ -361,17 +363,24 @@ mod tests {
             kill_switch: SetupState::Ready,
             ..IntegrationSetup::default()
         };
-        assert_eq!(OnboardingStep::AutoConnect.clipboard_command(setup), None);
-        assert_eq!(OnboardingStep::KillSwitch.clipboard_command(setup), None);
+        assert_eq!(
+            OnboardingStep::AutoConnect.clipboard_command(setup, OmakvnState::Missing),
+            None
+        );
+        assert_eq!(
+            OnboardingStep::KillSwitch.clipboard_command(setup, OmakvnState::Missing),
+            None
+        );
     }
 
     #[test]
     fn the_omarchy_card_drops_its_command_once_the_plugin_is_installed() {
-        let setup = IntegrationSetup {
-            omarchy_plugin: true,
-            ..IntegrationSetup::default()
-        };
-        assert_eq!(OnboardingStep::Omarchy.command(setup), None);
+        for omakvn in [OmakvnState::Installed, OmakvnState::Outdated] {
+            assert_eq!(
+                OnboardingStep::Omarchy.command(IntegrationSetup::default(), omakvn),
+                None
+            );
+        }
     }
 
     #[test]
@@ -383,13 +392,17 @@ mod tests {
                 ..IntegrationSetup::default()
             };
             assert_eq!(
-                OnboardingStep::AutoConnect.command(setup),
+                OnboardingStep::AutoConnect.command(setup, OmakvnState::Missing),
                 None,
                 "{state:?}"
             );
-            assert_eq!(OnboardingStep::KillSwitch.command(setup), None, "{state:?}");
             assert_eq!(
-                OnboardingStep::Doctor.command(setup),
+                OnboardingStep::KillSwitch.command(setup, OmakvnState::Missing),
+                None,
+                "{state:?}"
+            );
+            assert_eq!(
+                OnboardingStep::Doctor.command(setup, OmakvnState::Missing),
                 Some("kvn doctor"),
                 "{state:?}"
             );

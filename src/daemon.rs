@@ -88,6 +88,7 @@ fn run(mut model: Model) -> Result<()> {
     reconcile_kill_switch_state(&mut model);
     reconcile_auto_connect_state(&mut model);
     probe_integration_setup(&mut model);
+    model.omakvn = crate::omarchy::omakvn_status();
 
     let shared = DaemonShared {
         process_slot: Arc::new(Mutex::new(ProcessSlot::new(model.connect_attempt_id))),
@@ -317,6 +318,7 @@ pub(crate) fn build_snapshot(
         onboarding_omarchy: model.onboarding.include_omarchy_card,
         onboarding_complete: model.onboarding.is_complete(),
         integration_setup: model.integration_setup,
+        omakvn: model.omakvn.clone(),
         settings_menu_selected: model.settings_menu_selected,
         routing_settings_draft: model.routing_settings_draft.clone(),
         connection_settings_draft: model.connection_settings_draft,

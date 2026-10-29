@@ -191,7 +191,9 @@ Clients talk to the daemon in newline-delimited JSON over
 `$XDG_RUNTIME_DIR/kvn-tui.sock` (mode `0600`). The protocol is in `src/ipc.rs`.
 
 - **Attach**: asks for the current `StateSnapshot`. The CLI does this too,
-  for example in `kvn status`.
+  for example in `kvn status`. Each `Attach` also makes the daemon read the
+  installed omakvn manifest again, so a plugin that reconnects after
+  `omarchy plugin update` sees its new state.
 - **Detach**: sent by a TUI when it exits with `q`.
 - **Key**: the TUI forwards key presses. The daemon interprets them with the
   same `update` code the TUI would, so behavior does not depend on the client.
@@ -210,7 +212,11 @@ Clients talk to the daemon in newline-delimited JSON over
   200 ms, for example a TUI process stopped with `SIGSTOP`, is disconnected.
   `onboarding_complete` tells clients
   without a keyboard model whether the first-run tour is finished: the Omarchy
-  plugin sends no commands until it is.
+  plugin sends no commands until it is. `omakvn` reports the Omarchy plugin as
+  `{ "state": "missing" | "installed" | "outdated", "required_version": … }`:
+  `outdated` means the `version` in its `manifest.json` is older than (or
+  missing from) what this kvn requires, and the TUI then shows a toast with
+  `omarchy plugin update yarikov.omakvn` once per attach.
 - **Reattaching**: a TUI that loses its connection, because the daemon was
   restarted (`systemctl --user restart kvn-tui.service`) or disconnected it,
   reattaches on its own and shows the current state. When the
