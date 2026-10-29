@@ -130,7 +130,7 @@ order when kvn loads or saves it, so the Omarchy bar widget, which lists
 subscription among subscriptions. An update keeps the order of the servers a
 subscription already had and adds new servers at its end.
 
-Every subscription request carries `User-Agent: kvn-tui/<version>`. With
+Every subscription request carries `User-Agent: kvn/<version>`. With
 `send_hwid: true` it also carries `X-Hwid` (the subscription's `hwid`, or
 `settings.hwid`), `X-Device-Os: Linux`, `X-Ver-Os` (the kernel version),
 `X-Device-Model: Desktop`, and `X-Device-Locale` (for example `ru-RU`). Some

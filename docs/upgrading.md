@@ -66,6 +66,10 @@ it, so scripts that call either name keep working. The package built from
 targets are now named `kvn::…`, so a `RUST_LOG` filter written for `kvn_tui`
 no longer matches; rename it to `kvn`.
 
+Subscription requests now carry `User-Agent: kvn/<version>` instead of
+`kvn-tui/<version>`. If your provider allows apps by their `User-Agent` and
+answers `403` after the upgrade, ask it to allow `kvn`.
+
 ## v0.35.0
 
 The AUR package is renamed from `kvn-tui-bin` to `kvn-bin`. `kvn-tui-bin` still
