@@ -199,7 +199,7 @@ Alternatively, install only the binary from the repository root:
 
 ```bash
 cargo build --release --locked \
-  && sudo install -Dm755 target/release/kvn-tui /usr/local/bin/kvn \
+  && sudo install -Dm755 target/release/kvn /usr/local/bin/kvn \
   && sudo setcap cap_net_admin,cap_net_raw+ep "$(command -v sing-box)"
 ```
 

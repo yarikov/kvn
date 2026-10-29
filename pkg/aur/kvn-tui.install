@@ -44,7 +44,7 @@ print_aur_package_rename_notice() {
 }
 
 print_daemon_restart_notice() {
-    pgrep -f '^/usr/bin/kvn-tui --daemon$' >/dev/null || return 0
+    pgrep -f '^/usr/bin/kvn(-tui)? --daemon$' >/dev/null || return 0
     echo
     echo "The running kvn daemon still uses the previous version. Open kvn, which"
     echo "restarts it and reconnects, or run as your regular user (without sudo):"
@@ -63,6 +63,7 @@ post_install() {
         print_service_enable_notice
     else
         refresh_system_integrations
+        print_daemon_restart_notice
     fi
 }
 

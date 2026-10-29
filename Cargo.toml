@@ -1,5 +1,5 @@
 [package]
-name = "kvn-tui"
+name = "kvn"
 version = "0.35.1"
 edition = "2024"
 authors = ["Dmitry Yarikov <dmitry@yarikov.com>"]

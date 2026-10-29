@@ -1,7 +1,7 @@
 # System integration
 
-This document describes every system or desktop change made by kvn, the
-`kvn-tui` package, and its optional setup commands. Review it before running
+This document describes every system or desktop change made by kvn, its
+package, and its optional setup commands. Review it before running
 commands with `sudo`.
 
 ## Package installation
@@ -10,12 +10,12 @@ The Arch package installs:
 
 | Path | Mode | Purpose |
 |------|------|---------|
-| `/usr/bin/kvn-tui` | `0755` | Application binary |
-| `/usr/bin/kvn` | symlink | Canonical command pointing to `kvn-tui` |
+| `/usr/bin/kvn` | `0755` | Application binary |
+| `/usr/bin/kvn-tui` | symlink | Legacy command pointing to `kvn` |
 | `/usr/lib/systemd/user/kvn-tui.service` | `0644` | Per-user daemon service |
 | `/var/lib/kvn/` | `0755` | Created by the install scriptlet; marks an earlier installation and holds the integration stamps |
 | `/usr/share/libalpm/hooks/kvn-tui-sing-box-capabilities.hook` | `0644` | Restores sing-box capabilities after package updates |
-| `/usr/share/licenses/kvn-tui/LICENSE` | `0644` | MIT license for the source package |
+| `/usr/share/licenses/kvn/LICENSE` | `0644` | MIT license for the source package |
 | `/usr/share/licenses/kvn-bin/LICENSE` | `0644` | MIT license for the binary package |
 | `/usr/share/licenses/kvn-tui-bin/LICENSE` | `0644` | MIT license for the legacy binary package |
 
@@ -44,7 +44,7 @@ Before removing the package, stop and disable the service:
 systemctl --user disable --now kvn-tui.service
 ```
 
-Removing the `kvn-tui` package removes the ALPM hook but does not remove
+Removing the package removes the ALPM hook but does not remove
 capabilities already set on sing-box. If no other software needs them, they can
 be revoked explicitly:
 
@@ -333,5 +333,5 @@ uninstall, disable the service before removing the package:
 
 ```bash
 systemctl --user disable --now kvn-tui.service
-sudo pacman -R kvn-tui
+sudo pacman -R kvn-bin   # or kvn, the package built from pkg/arch
 ```

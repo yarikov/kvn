@@ -112,7 +112,7 @@ pub(crate) fn start_daemon() -> Result<()> {
 
 pub(crate) fn start_current_daemon() -> Result<()> {
     let current = std::env::current_exe().context("Failed to determine current executable path")?;
-    if paths_refer_to_same_file(&current, std::path::Path::new("/usr/bin/kvn-tui")) {
+    if paths_refer_to_same_file(&current, std::path::Path::new("/usr/bin/kvn")) {
         start_daemon()
     } else {
         spawn_daemon_process()

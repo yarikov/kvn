@@ -167,7 +167,7 @@ launch_preview() {
   local theme=$1 address= dimensions=
   preview_address=
   hyprctl clients -j | jq -r '.[].address' >"$tmp_dir/addresses-before-preview"
-  env -u NO_COLOR omarchy-launch-tui --app-id=org.omarchy.kvn-tui "$repo_dir/target/release/kvn-tui" docs-preview --theme "$theme" >/dev/null 2>&1 &
+  env -u NO_COLOR omarchy-launch-tui --app-id=org.omarchy.kvn-tui "$repo_dir/target/release/kvn" docs-preview --theme "$theme" >/dev/null 2>&1 &
   for _ in {1..100}; do
     while IFS= read -r address; do
       if ! rg -Fxq "$address" "$tmp_dir/addresses-before-preview"; then preview_address=$address; break 2; fi
