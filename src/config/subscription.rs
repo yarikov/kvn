@@ -9,7 +9,7 @@ use crate::config::profile::{
     Subscription, decode_b64_lenient, parse_share_link,
 };
 
-const KVN_TUI_USER_AGENT: &str = concat!("kvn-tui/", env!("CARGO_PKG_VERSION"));
+const KVN_USER_AGENT: &str = concat!("kvn/", env!("CARGO_PKG_VERSION"));
 const MAX_SUBSCRIPTION_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
@@ -95,7 +95,7 @@ fn build_request_headers(
     env: &DeviceEnv,
 ) -> HashMap<String, String> {
     let mut headers = HashMap::new();
-    headers.insert("User-Agent".to_string(), KVN_TUI_USER_AGENT.to_string());
+    headers.insert("User-Agent".to_string(), KVN_USER_AGENT.to_string());
     if let Some(hwid) = sub.effective_hwid(settings) {
         headers.insert("X-Hwid".to_string(), hwid.to_string());
         headers.insert("X-Device-Os".to_string(), "Linux".to_string());
@@ -291,7 +291,7 @@ fn now_unix() -> u64 {
 fn http_status_error(status: u16, redacted_url: &str) -> String {
     match status {
         403 => format!(
-            "HTTP 403 for {redacted_url}: the subscription server refuses this client ({KVN_TUI_USER_AGENT}); the provider may serve the subscription only to the apps it recommends, so ask the provider to allow kvn"
+            "HTTP 403 for {redacted_url}: the subscription server refuses this client ({KVN_USER_AGENT}); the provider may serve the subscription only to the apps it recommends, so ask the provider to allow kvn"
         ),
         _ => format!("HTTP {status} for {redacted_url}"),
     }
@@ -856,9 +856,9 @@ mod tests {
             let headers = build_request_headers(&sub, &settings_with_hwid(), &env);
             assert_eq!(
                 headers.get("User-Agent").map(String::as_str),
-                Some(KVN_TUI_USER_AGENT),
+                Some(KVN_USER_AGENT),
             );
-            assert!(KVN_TUI_USER_AGENT.starts_with("kvn-tui/"));
+            assert!(KVN_USER_AGENT.starts_with("kvn/"));
         }
     }
 
@@ -990,7 +990,7 @@ mod tests {
     #[test]
     fn http_status_error_explains_a_refused_client() {
         let message = http_status_error(403, "https://sub.example/<redacted>");
-        assert!(message.starts_with("HTTP 403 for https://sub.example/<redacted>: the subscription server refuses this client (kvn-tui/"));
+        assert!(message.starts_with("HTTP 403 for https://sub.example/<redacted>: the subscription server refuses this client (kvn/"));
         assert_eq!(
             http_status_error(404, "https://sub.example/<redacted>"),
             "HTTP 404 for https://sub.example/<redacted>"
@@ -1219,7 +1219,7 @@ mod tests {
     }
 
     #[test]
-    fn fetch_always_sends_kvntui_user_agent() {
+    fn fetch_always_sends_kvn_user_agent() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let (url, rx) = spawn_http_server("HTTP/1.1 200 OK", &[], sample_vless());
         let sub = sub_with(url, false, None);
@@ -1229,7 +1229,7 @@ mod tests {
         let req = captured_request(rx);
         assert_eq!(
             req.get("user-agent").map(String::as_str),
-            Some(KVN_TUI_USER_AGENT),
+            Some(KVN_USER_AGENT),
         );
     }
 

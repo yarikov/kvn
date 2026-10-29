@@ -243,7 +243,7 @@ is up.
   `url` — for the built-in ones `raw.githubusercontent.com` (SagerNet
   repositories) — on first use and on the `geo_routing.auto_update` schedule.
 - **Subscriptions** are fetched from their URL with
-  `User-Agent: kvn-tui/<version>`. A subscription with `send_hwid` also sends
+  `User-Agent: kvn/<version>`. A subscription with `send_hwid` also sends
   an installation identifier, the kernel version, and the system locale; see
   [Subscriptions](configuration.md#subscriptions).
 - **Latency tests** request `settings.connectivity_probe.url`

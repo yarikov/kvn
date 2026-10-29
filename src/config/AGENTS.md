@@ -23,7 +23,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 
 ## Subscription Fetch
 
-- Every request sends `User-Agent: kvn-tui/<version>`. The HWID and Linux device headers are added only when the subscription has `send_hwid: true` (default `false`, so raw identifiers never reach unrelated hosts); a per-subscription `hwid` overrides `settings.hwid` but never enables sending by itself. `settings.hwid` (`lnx-` + UUID v4) is generated once and never derived from the URL, so a rotated token or a new domain does not look like a new device.
+- Every request sends `User-Agent: kvn/<version>`. The HWID and Linux device headers are added only when the subscription has `send_hwid: true` (default `false`, so raw identifiers never reach unrelated hosts); a per-subscription `hwid` overrides `settings.hwid` but never enables sending by itself. `settings.hwid` (`lnx-` + UUID v4) is generated once and never derived from the URL, so a rotated token or a new domain does not look like a new device.
 - HWID response headers are read before the body and on non-200 responses too, since Remnawave reports HWID problems there. `X-Hwid-Not-Supported` and `X-Hwid-Max-Devices-Reached` reject the fetch; `X-Hwid-Active` and `X-Hwid-Limit` never decide alone, because 3x-ui sends `X-Hwid-Limit` on the success that takes the last device slot. `Announce: base64:<text>` is decoded and appended to a rejection, and is advisory otherwise.
 - The fetch error never keeps ureq's error as a source: its `Display` may contain the whole URL with its credentials. The body is read up to `MAX_SUBSCRIPTION_BYTES + 1`, so a body of exactly the limit is accepted and anything larger is rejected.
 
