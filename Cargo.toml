@@ -1,6 +1,6 @@
 [package]
 name = "kvn"
-version = "0.35.1"
+version = "0.36.0"
 edition = "2024"
 authors = ["Dmitry Yarikov <dmitry@yarikov.com>"]
 description = "kvn — keyboard-first TUI for managing VPN connections"
