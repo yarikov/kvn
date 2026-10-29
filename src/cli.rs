@@ -12,6 +12,9 @@ use crate::ipc::IpcClient;
 use crate::services::waybar;
 
 mod clean_all;
+mod config;
+
+use config::ConfigCommand;
 
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -135,7 +138,7 @@ enum Command {
         support_prompt: bool,
     },
 
-    /// Recover or reset profiles.json while the daemon is stopped.
+    /// Reset or recover profiles.json and routing.json while the daemon is stopped.
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
@@ -217,51 +220,6 @@ enum Command {
     },
 }
 
-#[derive(Debug, Subcommand)]
-enum ConfigCommand {
-    /// Archive the current file and create a default configuration.
-    Reset {
-        /// Confirm the reset (the old file is preserved, not deleted).
-        #[arg(long)]
-        yes: bool,
-    },
-    /// Validate a saved configuration and install it as profiles.json.
-    Recover {
-        /// Configuration or conflict file to restore.
-        file: PathBuf,
-    },
-}
-
-fn require_daemon_stopped() -> Result<()> {
-    anyhow::ensure!(
-        !crate::ipc::is_daemon_running(),
-        "stop the kvn daemon before changing profiles.json"
-    );
-    Ok(())
-}
-
-fn archive_current(path: &Path) -> Result<Option<PathBuf>> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let contents = std::fs::read(path).context("failed to read profiles.json before archiving")?;
-    let archive = crate::config::recovery::preserve_at(
-        path,
-        crate::config::recovery::RecoveryKind::Archive,
-        &contents,
-    )
-    .context("failed to archive profiles.json")?;
-    Ok(Some(archive))
-}
-
-fn confirm_config_reset<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> Result<bool> {
-    confirm(
-        input,
-        output,
-        "Archive the current configuration and create a default one?",
-    )
-}
-
 fn confirm<R: BufRead, W: Write>(input: &mut R, output: &mut W, question: &str) -> Result<bool> {
     write!(output, "{question} [y/N] ")?;
     output.flush()?;
@@ -271,58 +229,6 @@ fn confirm<R: BufRead, W: Write>(input: &mut R, output: &mut W, question: &str) 
         answer.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
     ))
-}
-
-fn run_config_reset(yes: bool) -> Result<()> {
-    require_daemon_stopped()?;
-    if !yes {
-        let stdin = std::io::stdin();
-        let stdout = std::io::stdout();
-        if !confirm_config_reset(&mut stdin.lock(), &mut stdout.lock())? {
-            println!("Config reset cancelled");
-            return Ok(());
-        }
-    }
-    let path = crate::paths::profiles_path().context("Failed to determine profiles path")?;
-    let archived = archive_current(&path)?;
-    crate::config::save_config_at(&path, &crate::config::profile::Config::for_first_run())
-        .context("failed to create default config")?;
-    match archived {
-        Some(path) => println!(
-            "Created default config; previous file archived at {}",
-            path.display()
-        ),
-        None => println!("Created default config at {}", path.display()),
-    }
-    Ok(())
-}
-
-fn run_config_recover(file: &Path) -> Result<()> {
-    require_daemon_stopped()?;
-    anyhow::ensure!(
-        file.is_file(),
-        "recovery file does not exist or is not a regular file"
-    );
-    let path = crate::paths::profiles_path().context("Failed to determine profiles path")?;
-    if path.exists() && file.exists() {
-        let source = std::fs::canonicalize(file)?;
-        let destination = std::fs::canonicalize(&path)?;
-        anyhow::ensure!(
-            source != destination,
-            "recovery file is already profiles.json"
-        );
-    }
-    let recovered = crate::config::load_config_for_recovery(file)
-        .with_context(|| format!("failed to load recovery file {}", file.display()))?;
-    recovered.validate().context("recovery config is invalid")?;
-    let archived = archive_current(&path)?;
-    crate::config::save_config_at(&path, &recovered)
-        .context("failed to install recovery config")?;
-    println!("Recovered config from {}", file.display());
-    if let Some(path) = archived {
-        println!("Previous file archived at {}", path.display());
-    }
-    Ok(())
 }
 
 fn run_embedded_script(name: &str, script: &str, args: &[&str]) -> Result<()> {
@@ -920,10 +826,7 @@ pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
             }
         }
         Some(Command::Config { command }) => {
-            return Some(match command {
-                ConfigCommand::Reset { yes } => run_config_reset(*yes),
-                ConfigCommand::Recover { file } => run_config_recover(file),
-            });
+            return Some(config::run(command));
         }
         Some(Command::Refresh {
             polkit,
@@ -1139,40 +1042,15 @@ esac
     }
 
     #[test]
-    fn parses_config_recovery_commands() {
-        assert!(matches!(
-            Cli::parse_from(["kvn-tui", "config", "reset", "--yes"]).command,
-            Some(Command::Config {
-                command: ConfigCommand::Reset { yes: true }
-            })
-        ));
-        assert!(matches!(
-            Cli::parse_from(["kvn-tui", "config", "recover", "saved.json"]).command,
-            Some(Command::Config { command: ConfigCommand::Recover { file } })
-                if file == Path::new("saved.json")
-        ));
-    }
-
-    #[test]
-    fn config_reset_confirmation_accepts_only_explicit_yes() {
+    fn confirmation_accepts_only_explicit_yes() {
         for answer in ["y\n", "Y\n", "yes\n", " YES \n"] {
             let mut output = Vec::new();
-            assert!(confirm_config_reset(&mut answer.as_bytes(), &mut output).unwrap());
-            assert!(String::from_utf8(output).unwrap().ends_with("[y/N] "));
+            assert!(confirm(&mut answer.as_bytes(), &mut output, "Go?").unwrap());
+            assert_eq!(String::from_utf8(output).unwrap(), "Go? [y/N] ");
         }
         for answer in ["\n", "n\n", "no\n", "anything\n", ""] {
-            assert!(!confirm_config_reset(&mut answer.as_bytes(), &mut Vec::new()).unwrap());
+            assert!(!confirm(&mut answer.as_bytes(), &mut Vec::new(), "Go?").unwrap());
         }
-    }
-
-    #[test]
-    fn recovery_archive_keeps_live_file_in_place() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles.json");
-        fs::write(&path, b"secret config").unwrap();
-        let archive = archive_current(&path).unwrap().unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"secret config");
-        assert_eq!(fs::read(archive).unwrap(), b"secret config");
     }
 
     fn backup_files(path: &Path) -> Vec<PathBuf> {

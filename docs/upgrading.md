@@ -38,6 +38,27 @@ Telegram by the mode, like any other traffic. If `routing.json` cannot be read,
 kvn reports it and moves the overrides the next time the daemon starts after
 the file is fixed (`systemctl --user restart kvn-tui.service`).
 
+To keep only the modes of one country — for example, Global and the RU modes
+after `routing.json` received the modes of every region you have used — reset
+the file with the daemon stopped:
+
+```bash
+systemctl --user stop kvn-tui.service \
+  && kvn config reset --routing ru \
+  && systemctl --user start kvn-tui.service
+```
+
+The reset rebuilds `routing.json` as a fresh install creates it, so it
+**removes the Steam and Telegram rules and rule-sets**, together with your own
+modes, rules and rule-sets and the modes of other countries. Overrides that
+have not moved into `routing.json` yet are dropped from `profiles.json` too, so
+they do not come back. A selected mode of another country switches to Global.
+The previous file is archived in `~/.config/kvn-tui/recovery/`, and
+`kvn config recover --routing <file>` brings it back. To route Steam or Telegram
+again afterwards, add their rule-sets and rules to `routing.json` (`Space r e`).
+`kvn config reset` and `kvn config recover` now take `--profiles` and
+`--routing`; see [CLI](cli.md#config).
+
 ## v0.35.0
 
 The AUR package is renamed from `kvn-tui-bin` to `kvn-bin`. `kvn-tui-bin` still

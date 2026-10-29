@@ -467,10 +467,10 @@ even when the server reports it unchanged.
 
 Rule-sets and routing modes are declared in `~/.config/kvn-tui/routing.json`,
 next to — not inside — `profiles.json`. kvn creates the file the first time it
-starts, with the rule-sets of every region and the Global mode plus the modes
-of the regions you have used; from then on the file is yours, and kvn adds to
-it only the modes of the region you choose in the first-run tour, when they are
-missing:
+starts, with the Global mode plus the modes of the regions you have used and
+only the rule-sets those modes use; from then on the file is yours, and kvn
+adds to it only the modes and rule-sets of the region you choose in the
+first-run tour, when they are missing:
 
 ```json
 {
@@ -599,6 +599,15 @@ problem. Fixing it lifts the block on connecting; kvn saves it only if nobody
 changed the file in the meantime, and keeps the broken version in
 `~/.config/kvn-tui/recovery/`.
 
+To start over, `kvn config reset --routing ru` (any list of `ru`, `cn`, `ir`,
+`global`) rebuilds `routing.json` the way a fresh install creates it: Global,
+the modes of the listed countries, and only the rule-sets those modes use. Custom modes,
+rules and rule-sets go, and so do the modes of other countries and Steam and
+Telegram overrides not moved into the file yet; a broken file is replaced the
+same way. A selected mode the new file lacks switches to Global. The previous
+file is archived in `~/.config/kvn-tui/recovery/` and comes back with
+`kvn config recover --routing <file>`; see [CLI](cli.md#config).
+
 ## Themes and logging
 
 Open **Settings › Interface** (`Space i`) and change **Theme** to choose one of
@@ -654,7 +663,7 @@ cannot read it.
 | Geo rule-sets | `~/.config/kvn-tui/geo/` |
 | Application log | `~/.config/kvn-tui/logs/app.log` |
 | sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |
-| Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved); `routing.json.invalid-*` (a broken `routing.json` replaced from the editor) and `routing.json.conflict-invalid-*` (unfinished `routing.json` edits), three each |
+| Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved); `routing.json.invalid-*` (a broken `routing.json` replaced from the editor, or the file archived by `kvn config reset`/`recover`) and `routing.json.conflict-invalid-*` (unfinished `routing.json` edits), three each |
 | First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
 | sing-box cache (fake-IP map) | `$XDG_STATE_HOME/kvn/singbox-cache.db` |
