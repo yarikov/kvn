@@ -59,6 +59,13 @@ again afterwards, add their rule-sets and rules to `routing.json` (`Space r e`).
 `kvn config reset` and `kvn config recover` now take `--profiles` and
 `--routing`; see [CLI](cli.md#config).
 
+`/usr/bin/kvn` is now the program itself and `/usr/bin/kvn-tui` a symlink to
+it, so scripts that call either name keep working. The package built from
+`pkg/arch` is now called `kvn`: on its first install pacman offers to remove
+`kvn-tui`, which keeps your configuration and the daemon autostart. Log
+targets are now named `kvn::…`, so a `RUST_LOG` filter written for `kvn_tui`
+no longer matches; rename it to `kvn`.
+
 ## v0.35.0
 
 The AUR package is renamed from `kvn-tui-bin` to `kvn-bin`. `kvn-tui-bin` still

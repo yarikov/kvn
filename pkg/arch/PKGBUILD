@@ -1,5 +1,5 @@
 # Maintainer: Dmitry Yarikov <dmitry@yarikov.com>
-pkgname=kvn-tui
+pkgname=kvn
 pkgver=0.35.1
 pkgrel=1
 pkgdesc="Terminal VPN client for Arch Linux with vim navigation"
@@ -15,6 +15,8 @@ optdepends=(
     'xsel: clipboard integration on X11 (alternative)'
 )
 makedepends=('cargo' 'rust')
+provides=('kvn-tui')
+conflicts=('kvn-tui')
 # sing-box >= 1.14 required for valid config generation
 source=()
 options=('!lto' '!debug')
@@ -28,7 +30,7 @@ build() {
 package() {
     cd "$startdir/../../"
     install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
-    ln -s kvn-tui "$pkgdir/usr/bin/kvn"
+    ln -s kvn "$pkgdir/usr/bin/kvn-tui"
     install -Dm644 contrib/kvn-tui.service "$pkgdir/usr/lib/systemd/user/kvn-tui.service"
     install -Dm644 contrib/kvn-tui-sing-box-capabilities.hook \
         "$pkgdir/usr/share/libalpm/hooks/kvn-tui-sing-box-capabilities.hook"

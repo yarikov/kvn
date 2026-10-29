@@ -1,10 +1,10 @@
 [Unit]
-Description=kvn-tui VPN daemon
+Description=kvn VPN daemon
 Documentation=https://github.com/yarikov/kvn
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/kvn-tui --daemon
+ExecStart=/usr/bin/kvn --daemon
 Restart=on-failure
 RestartSec=3s
 

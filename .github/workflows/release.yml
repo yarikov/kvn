@@ -28,14 +28,14 @@ jobs:
         run: |
           VERSION=${{ github.event.workflow_run.head_branch }}
           VERSION=${VERSION#v}
-          mkdir -p "kvn-tui-${VERSION}-x86_64-linux"
-          cp target/release/kvn-tui "kvn-tui-${VERSION}-x86_64-linux/"
-          ln -s kvn-tui "kvn-tui-${VERSION}-x86_64-linux/kvn"
-          cp contrib/kvn-tui.service "kvn-tui-${VERSION}-x86_64-linux/"
-          cp contrib/kvn-tui-sing-box-capabilities.hook "kvn-tui-${VERSION}-x86_64-linux/"
-          cp LICENSE "kvn-tui-${VERSION}-x86_64-linux/"
-          tar czf "kvn-tui-${VERSION}-x86_64-linux.tar.gz" "kvn-tui-${VERSION}-x86_64-linux"
-          cp "kvn-tui-${VERSION}-x86_64-linux.tar.gz" "kvn-${VERSION}-x86_64-linux.tar.gz"
+          mkdir -p "kvn-${VERSION}-x86_64-linux"
+          cp target/release/kvn "kvn-${VERSION}-x86_64-linux/"
+          ln -s kvn "kvn-${VERSION}-x86_64-linux/kvn-tui"
+          cp contrib/kvn-tui.service "kvn-${VERSION}-x86_64-linux/"
+          cp contrib/kvn-tui-sing-box-capabilities.hook "kvn-${VERSION}-x86_64-linux/"
+          cp LICENSE "kvn-${VERSION}-x86_64-linux/"
+          tar czf "kvn-${VERSION}-x86_64-linux.tar.gz" "kvn-${VERSION}-x86_64-linux"
+          cp "kvn-${VERSION}-x86_64-linux.tar.gz" "kvn-tui-${VERSION}-x86_64-linux.tar.gz"
 
       - name: Generate checksums
         run: |

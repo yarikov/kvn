@@ -1035,7 +1035,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kvn-tui"
+name = "kvn"
 version = "0.35.1"
 dependencies = [
  "anyhow",

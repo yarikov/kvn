@@ -6,7 +6,7 @@ const LEGACY_WARNING: &str = "Warning: `kvn-tui` is a legacy command and will be
 fn invoke_through_symlink(name: &str, argument: &str) -> Output {
     let root = tempfile::tempdir().unwrap();
     let executable = root.path().join(name);
-    symlink(env!("CARGO_BIN_EXE_kvn-tui"), &executable).unwrap();
+    symlink(env!("CARGO_BIN_EXE_kvn"), &executable).unwrap();
     Command::new(&executable).arg(argument).output().unwrap()
 }
 

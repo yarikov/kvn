@@ -116,12 +116,12 @@ The Omarchy bar widget is not in this repository: it is the standalone [omakvn](
 - **Key crates**: `ratatui` + `crossterm` (TUI), `serde` + `serde_json` (config), `schemars` (config JSON Schema), `zbus` (D-Bus), `ureq` (HTTP), `tracing` (logs), `anyhow` (errors)
 
 Run a release build (no root required when sing-box has capabilities). The
-binary is `kvn-tui`; the package installs `kvn` as a symlink to it, and
+binary is `kvn`; the package also installs `kvn-tui` as a symlink to it, and
 `kvn-tui <command>` prints a deprecation warning, so prefer `kvn` in docs:
 
 ```bash
-./target/release/kvn-tui
-sudo ./target/release/kvn-tui setup --polkit   # avoids authentication dialogs on connect
+./target/release/kvn
+sudo ./target/release/kvn setup --polkit   # avoids authentication dialogs on connect
 ```
 
 ---
@@ -213,7 +213,7 @@ Rules of thumb:
 
 ### Naming
 - Modules are snake_case (`singbox`, not `sing_box`).
-- The binary name is `kvn-tui`; the crate name is `kvn-tui`. The package installs `/usr/bin/kvn` as a symlink to it, so user-facing docs and commands say `kvn`.
+- The binary and crate name is `kvn`. The package also installs `/usr/bin/kvn-tui` as a legacy symlink to it; the systemd unit, the AUR package `kvn-tui-bin` and the paths in § Configuration Paths keep the `kvn-tui` name until the rebrand moves them.
 
 ### Module Files
 - Use the **new Rust module style**: a module `foo` with submodules lives in `src/foo.rs` (parent) and `src/foo/bar.rs` (children). Do **not** create `src/foo/mod.rs`; that is the old style and is not used in this project.
