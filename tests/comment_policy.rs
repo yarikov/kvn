@@ -205,6 +205,18 @@ fn skip_whitespace(code: &[u8], mut at: usize) -> usize {
     at
 }
 
+fn skip_visibility(code: &[u8], at: usize) -> usize {
+    let Some(rest) = code[at..].strip_prefix(b"pub") else {
+        return at;
+    };
+    let restriction = skip_whitespace(code, code.len() - rest.len());
+    if code.get(restriction) == Some(&b'(') {
+        matching_close(code, restriction) + 1
+    } else {
+        at
+    }
+}
+
 fn consumes_docs(attribute: &str) -> bool {
     let attribute: String = attribute.split_whitespace().collect();
     attribute.starts_with("#[derive(")
@@ -234,6 +246,7 @@ fn doc_consuming_items(code: &[u8]) -> Vec<(usize, usize)> {
         if !consumes {
             continue;
         }
+        body = skip_visibility(code, body);
         while body < code.len() && !matches!(code[body], b'{' | b'(' | b';') {
             body += 1;
         }
@@ -368,6 +381,12 @@ fn doc_comments_survive_only_where_clap_or_schemars_read_them() {
             (12, "/// Rejected too.".into())
         ]
     );
+}
+
+#[test]
+fn restricted_visibility_does_not_hide_the_item_body() {
+    let src = "#[derive(Debug, Subcommand)]\npub(super) enum A {\n    /// Kept.\n    B,\n}\n\n#[derive(JsonSchema)]\npub(in crate::x) struct C {\n    /// Kept too.\n    d: u8,\n}\n";
+    assert!(violations(src).is_empty());
 }
 
 #[test]

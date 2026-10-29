@@ -338,14 +338,13 @@ impl Default for RoutingConfig {
 }
 
 impl RoutingConfig {
-    fn with_region_modes(regions: &[GeoRegion]) -> Self {
+    pub(crate) fn with_region_modes(regions: &[GeoRegion]) -> Self {
         let mut config = Self {
             json_schema: None,
             schema_version: ROUTING_SCHEMA_VERSION,
             rule_sets: BTreeMap::new(),
             modes: vec![global_mode()],
         };
-        config.insert_all(crate::geo::RULE_SETS);
         for region in regions {
             config.add_region_modes(*region);
         }
@@ -739,8 +738,7 @@ pub(crate) fn update_routing_at(
     path: &Path,
     change: impl FnOnce(&mut RoutingConfig) -> bool,
 ) -> Result<RoutingConfig> {
-    let contents = fs::read_to_string(path).with_context(|| format!("Failed to read {path:?}"))?;
-    let mut config = parse_routing(&contents, path)?;
+    let (contents, mut config) = read_routing(path)?;
     if change(&mut config) {
         let json = serde_json::to_string_pretty(&config)?;
         crate::atomic_write::write_if_unchanged(path, json.as_bytes(), Some(contents.as_bytes()))
@@ -810,12 +808,35 @@ pub(crate) fn commit_edit_at(
     Ok(RoutingCommit::Saved(saved))
 }
 
+fn read_routing(path: &Path) -> Result<(String, RoutingConfig)> {
+    let contents = fs::read_to_string(path).with_context(|| format!("Failed to read {path:?}"))?;
+    let config = parse_routing(&contents, path)?;
+    Ok((contents, config))
+}
+
+pub(crate) fn load_routing_for_recovery(path: &Path) -> Result<RoutingConfig> {
+    read_routing(path).map(|(_, config)| config)
+}
+
+pub(crate) fn replace_routing_at(path: &Path, config: &RoutingConfig) -> Result<()> {
+    write_routing_at(path, config, |json| crate::atomic_write::write(path, json))
+}
+
 fn create_routing_at(path: &Path, config: &RoutingConfig) -> Result<()> {
+    write_routing_at(path, config, |json| {
+        crate::atomic_write::write_if_unchanged(path, json, None)
+    })
+}
+
+fn write_routing_at(
+    path: &Path,
+    config: &RoutingConfig,
+    write: impl FnOnce(&[u8]) -> Result<()>,
+) -> Result<()> {
     let dir = path.parent().context("Invalid routing config path")?;
     fs::create_dir_all(dir).with_context(|| format!("Failed to create {dir:?}"))?;
     let json = serde_json::to_string_pretty(config)?;
-    crate::atomic_write::write_if_unchanged(path, json.as_bytes(), None)
-        .with_context(|| format!("Failed to create {path:?}"))
+    write(json.as_bytes()).with_context(|| format!("Failed to write {path:?}"))
 }
 
 #[cfg(test)]
@@ -855,16 +876,17 @@ mod tests {
     }
 
     #[test]
-    fn a_new_file_holds_the_builtin_rule_sets_and_passes_its_own_checks() {
-        let config = RoutingConfig::for_new_file(&GeoRouting::default());
+    fn a_new_file_declares_only_the_rule_sets_its_modes_use_and_passes_its_own_checks() {
+        assert!(
+            RoutingConfig::for_new_file(&GeoRouting::default())
+                .rule_sets
+                .is_empty()
+        );
+
+        let config = RoutingConfig::for_new_file(&geo_routing(&[GeoRegion::Ru], None));
 
         let tags: Vec<&str> = config.rule_sets.keys().map(String::as_str).collect();
-        let mut builtin: Vec<&str> = crate::geo::RULE_SETS
-            .iter()
-            .map(|rule_set| &*rule_set.tag)
-            .collect();
-        builtin.sort_unstable();
-        assert_eq!(tags, builtin);
+        assert_eq!(tags, ["geoip-ru", "geosite-category-ru"]);
         assert_eq!(
             config.rule_set("geoip-ru"),
             crate::geo::RULE_SETS
@@ -1200,7 +1222,6 @@ mod tests {
     #[test]
     fn region_modes_are_added_once_with_their_rule_sets() {
         let mut config = RoutingConfig::for_new_file(&GeoRouting::default());
-        config.rule_sets.remove("geoip-cn");
 
         assert!(config.add_region_modes(GeoRegion::Cn));
         assert_eq!(mode_ids(&config), ["global", "bypass_cn", "only_cn"]);

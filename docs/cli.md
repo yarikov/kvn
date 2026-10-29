@@ -161,23 +161,46 @@ it: `omarchy plugin update yarikov.omakvn`.
 ## config
 
 ```bash
-kvn config reset [--yes]
-kvn config recover <file>
+kvn config reset
+kvn config reset [--profiles] [--routing <region>[,<region>…]] [--yes]
+kvn config recover [--profiles <file>] [--routing <file>]
 ```
 
-Both commands replace `~/.config/kvn-tui/profiles.json` and refuse to run while
-the daemon is running; stop it first with
-`systemctl --user stop kvn-tui.service`. The previous file is archived under
-`~/.config/kvn-tui/recovery/` as `profiles.json.invalid-*`, and the archive
-path is printed. kvn keeps only the three newest archives and deletes older
-ones as new archives are created; copy an archive elsewhere if you need to keep
-it.
+Both commands replace `~/.config/kvn-tui/profiles.json`,
+`~/.config/kvn-tui/routing.json`, or both, and refuse to run while the daemon
+is running; stop it first with `systemctl --user stop kvn-tui.service`. The
+previous file is archived under `~/.config/kvn-tui/recovery/` as
+`profiles.json.invalid-*` or `routing.json.invalid-*`, and the archive path is
+printed. kvn keeps only the three newest archives of each file and deletes
+older ones as new archives are created; copy an archive elsewhere if you need
+to keep it.
 
-- `reset` creates the configuration a fresh install starts with. It asks for
-  confirmation unless `--yes` is given.
-- `recover` installs `<file>` — for example an editor copy that kvn preserved
-  in the recovery directory — after checking that it loads and is valid.
-  Those copies are rotated the same way, three of each kind.
+- `reset` creates the chosen files as a fresh install does.
+  - `--profiles` resets `profiles.json`: every profile, subscription and
+    setting.
+  - `--routing` resets `routing.json` to Global, the modes of the listed
+    countries — `ru`, `cn`, `ir`, or `global` for Global alone — and only the
+    rule-sets those modes use, as a comma-separated list or a repeated flag. Custom modes, rules
+    and rule-sets and the modes of other countries are removed, and a broken
+    file is reset the same way. Steam and Telegram overrides from kvn 0.35 that
+    have not moved into `routing.json` yet are dropped from `profiles.json`.
+    A country outside the list is an error.
+  - Without either flag, `reset` asks which files to reset and, for
+    `routing.json`, which countries to keep (a comma-separated list; an empty
+    answer cancels). It needs a terminal for that; in a script, pass the flags.
+  - Before it asks for confirmation, `reset` lists what goes, where the
+    archives land and how to restore them. `--yes` skips the confirmation and
+    requires `--profiles` or `--routing`.
+- `recover` installs a saved file — for example an archive or an editor copy
+  that kvn preserved in the recovery directory — after checking that it loads
+  and is valid: `--profiles <file>` as `profiles.json`, `--routing <file>` as
+  `routing.json`, or both at once. Those copies are rotated the same way, three
+  of each kind.
+
+When the routing mode selected in `profiles.json` is not in the resulting
+`routing.json`, both commands switch it to Global, archive the previous
+`profiles.json` the same way, and say so; changing only `routing.json`
+therefore needs a `profiles.json` that loads, and is refused otherwise.
 
 ## Integrations
 

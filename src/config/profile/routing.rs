@@ -7,12 +7,18 @@ use super::GeoAutoUpdate;
 use crate::config::routing::{GLOBAL_MODE_ID, RoutingConfig};
 
 /// Country whose default routing modes the first-run tour adds to `routing.json`.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema, clap::ValueEnum,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum GeoRegion {
+    /// Only the Global mode, which sends everything through the tunnel.
     Global,
+    /// Russia: the Bypass RU and Only RU modes.
     Ru,
+    /// China: the Bypass CN and Only CN modes.
     Cn,
+    /// Iran: the Bypass IR and Only IR modes.
     Ir,
 }
 
