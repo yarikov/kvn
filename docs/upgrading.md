@@ -70,6 +70,14 @@ Subscription requests now carry `User-Agent: kvn/<version>` instead of
 `kvn-tui/<version>`. If your provider allows apps by their `User-Agent` and
 answers `403` after the upgrade, ask it to allow `kvn`.
 
+With the Omarchy integration, kvn now requires omakvn 1.1.0 or later. An
+older plugin gets a toast in the TUI and a warning in `kvn doctor`; kvn does
+not update the plugin itself, so update it after upgrading:
+
+```bash
+omarchy plugin update yarikov.omakvn
+```
+
 ## v0.35.0
 
 The AUR package is renamed from `kvn-tui-bin` to `kvn-bin`. `kvn-tui-bin` still
