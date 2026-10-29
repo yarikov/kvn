@@ -180,7 +180,7 @@ fn build_docs_preview_state_at(
     };
     config.subscriptions.push(Subscription {
         id: finland_subscription_id,
-        name: "🇫🇮 Finland VLESS".into(),
+        name: "🇫🇮 Finland VLESS sub".into(),
         url: "http://finland-subscription.demo.example/list".into(),
         auto_update: SubscriptionAutoUpdate::Every1d,
         last_updated: None,
@@ -191,7 +191,7 @@ fn build_docs_preview_state_at(
     });
     config.subscriptions.push(Subscription {
         id: france_subscription_id,
-        name: "🇫🇷 France Hysteria2".into(),
+        name: "🇫🇷 France Hysteria2 sub".into(),
         url: "https://france-subscription.demo.example/list".into(),
         auto_update: SubscriptionAutoUpdate::Every7d,
         last_updated: None,
@@ -238,6 +238,9 @@ fn build_docs_preview_state_at(
         down_total: 822 * 1024 * 1024,
         conn_count: 25,
     };
+    for index in 0..EARLIER_LOG_LINES {
+        model.push_log(earlier_log_line(index));
+    }
     let log_time = |second: u8| format!("15:30:{second:02}");
     for line in [
         format!("[app] {} INFO Connected to 🇺🇸 United States", log_time(1)),
@@ -299,6 +302,32 @@ fn build_docs_preview_state_at(
     })
 }
 
+const EARLIER_LOG_LINES: u32 = 200;
+
+fn earlier_log_line(index: u32) -> String {
+    let seconds_before_shown = EARLIER_LOG_LINES - index;
+    let time_of_day = 15 * 3600 + 30 * 60 - seconds_before_shown;
+    let time = format!(
+        "{:02}:{:02}:{:02}",
+        time_of_day / 3600,
+        time_of_day / 60 % 60,
+        time_of_day % 60
+    );
+    let host = 10 + index % 90;
+    match index % 3 {
+        0 => format!(
+            "[sb] {time} INFO inbound/tun[tun-in]: inbound connection from 10.222.0.1:{}",
+            40_000 + index * 97
+        ),
+        1 => format!(
+            "[sb] {time} INFO inbound/tun[tun-in]: inbound connection to 198.51.100.{host}:443"
+        ),
+        _ => format!(
+            "[sb] {time} INFO outbound/trojan[proxy]: outbound connection to 198.51.100.{host}:443"
+        ),
+    }
+}
+
 fn preview_profile(
     id: u128,
     name: &str,
@@ -334,6 +363,7 @@ mod tests {
             .unwrap();
         let state = build_docs_preview_state_at("tokyo-night", preview_now).unwrap();
         let logs: Vec<_> = state.model.logs.iter().map(String::as_str).collect();
+        let shown_logs = &logs[EARLIER_LOG_LINES as usize..];
         let endpoints: Vec<_> = state
             .model
             .config
@@ -349,13 +379,13 @@ mod tests {
         );
         assert_eq!(endpoints[0].len(), 21);
         assert_eq!(
-            logs.first().copied(),
+            shown_logs.first().copied(),
             Some("[app] 15:30:01 INFO Connected to 🇺🇸 United States")
         );
-        assert!(logs[1].starts_with(
-            "[app] 15:30:01 WARN HTTP subscription '🇫🇮 Finland VLESS' uses deprecated"
+        assert!(shown_logs[1].starts_with(
+            "[app] 15:30:01 WARN HTTP subscription '🇫🇮 Finland VLESS sub' uses deprecated"
         ));
-        assert!(!logs[1].contains(&state.model.config.subscriptions[0].url));
+        assert!(!shown_logs[1].contains(&state.model.config.subscriptions[0].url));
         assert_eq!(
             logs.last().copied(),
             Some("[app] 15:30:07 INFO Kill switch enabled")
