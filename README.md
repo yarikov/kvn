@@ -273,10 +273,6 @@ detected problems.
 | `Space d` | DNS settings |
 | `Space i` | Interface settings |
 | `Space r` | Routing settings |
-| `Alt+j` / `Alt+k`, `Alt+↓` / `Alt+↑` | In Routing settings, move the selected rule down / up |
-| `h` / `l`, `←` / `→` | In Routing settings, change the selected rule's route: proxy, direct, block, disabled |
-| `d` | In Routing settings, delete the selected rule |
-| `Backspace` | Return from a settings page to the menu, discarding its changes |
 
 **Dialogs**
 
@@ -302,10 +298,9 @@ their physical US key positions regardless of the active keyboard layout.
 
 ## Configuration
 
-Configuration is stored in `~/.config/kvn-tui/profiles.json`, rule-sets in
-`~/.config/kvn-tui/routing.json`. Press `e` to edit the configuration in `$VISUAL`
-or `$EDITOR`, and `e` in Settings › Routing (`Space r e`) to edit `routing.json`. Errors can be corrected in the same editing
-session; concurrent changes are merged, with conflicts reopened in the editor.
+Configuration is stored in `~/.config/kvn-tui/profiles.json` and
+`routing.json` next to it. Press `e` to edit it in the editor
+(`Space r e` for `routing.json`).
 
 See the [configuration guide](docs/configuration.md) for the JSON structure,
 advanced DNS and routing, validation, migrations, and runtime file locations.
