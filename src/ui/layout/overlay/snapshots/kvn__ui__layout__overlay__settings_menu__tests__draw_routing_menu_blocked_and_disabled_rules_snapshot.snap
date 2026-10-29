@@ -13,7 +13,7 @@ expression: "crate::test_helpers::snapshot_styles(&model,\ncrate::ui::layout::MI
 │          │ rule_set  geoip-ru             ‹ disabled › │           │
 │          │ final                            proxy      │           │
 │          │                                             │           │
-│          │    󰌑 apply · e edit · q/󱊷 close · ⌫ back    │           │
+│          │        󰌑 apply · q/󱊷 close · ⌫ back         │           │
 │          └─────────────────────────────────────────────┘           │
 └────────────────────────────────────────────────────────────────────┘
  DISCONNECTED                          DoH  Bypass RU    (off) never 

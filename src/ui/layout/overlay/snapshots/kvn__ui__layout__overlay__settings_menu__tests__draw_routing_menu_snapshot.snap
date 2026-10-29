@@ -15,16 +15,16 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
-│                                   ┌───────────────────────────────────────┐                                   │
-│                                   │          Settings › Routing           │                                   │
-│                                   │                                       │                                   │
-│                                   │           Mode ‹ Global ›             │                                   │
-│                                   │                                       │                                   │
-│                                   │           Rules (top wins)            │                                   │
-│                                   │         final      proxy              │                                   │
-│                                   │                                       │                                   │
-│                                   │ 󰌑 apply · e edit · q/󱊷 close · ⌫ back │                                   │
-│                                   └───────────────────────────────────────┘                                   │
+│                                       ┌───────────────────────────────┐                                       │
+│                                       │      Settings › Routing       │                                       │
+│                                       │                               │                                       │
+│                                       │       Mode ‹ Global ›         │                                       │
+│                                       │                               │                                       │
+│                                       │       Rules (top wins)        │                                       │
+│                                       │     final      proxy          │                                       │
+│                                       │                               │                                       │
+│                                       │ 󰌑 apply · q/󱊷 close · ⌫ back  │                                       │
+│                                       └───────────────────────────────┘                                       │
 │                                                       ││                                                      │
 │                                                       ││                                                      │
 │                                                       ││                                                      │

@@ -14,7 +14,7 @@ expression: "crate::test_helpers::snapshot_styles(&model,\ncrate::ui::layout::MI
 │   │ domain    service-5.a-rather-long-corpora...  ‹ proxy ›    ┃   │
 │   │ domain    service-6.a-rather-long-corpora...  ‹ proxy ›    │   │
 │   │                                                            │   │
-│   │            󰌑 apply · e edit · q/󱊷 close · ⌫ back           │   │
+│   │                󰌑 apply · q/󱊷 close · ⌫ back                │   │
 └── └────────────────────────────────────────────────────────────┘ ──┘
  DISCONNECTED                          DoH  Bypass RU    (off) never 
 [70x15]

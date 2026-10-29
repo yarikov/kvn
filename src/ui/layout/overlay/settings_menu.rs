@@ -14,9 +14,7 @@ use super::popup::{
     settings_row_width,
 };
 use super::settings_row::{settings_full_width_line, settings_value_layout, settings_value_line};
-use super::{
-    APPLY_ACTION, EDIT_ROUTING_ACTION, SETTINGS_HEADING, overlay_footer_with_key, settings_heading,
-};
+use super::{APPLY_ACTION, SETTINGS_HEADING, overlay_footer, settings_heading};
 
 pub(super) fn draw(
     frame: &mut Frame,
@@ -28,10 +26,9 @@ pub(super) fn draw(
     let heading = page
         .entry()
         .map_or_else(|| SETTINGS_HEADING.to_string(), settings_heading);
-    let footer = overlay_footer_with_key(
+    let footer = overlay_footer(
         model,
         (page != SettingsMenuPage::Root).then_some(APPLY_ACTION),
-        (page == SettingsMenuPage::Routing).then_some(EDIT_ROUTING_ACTION),
         true,
         page != SettingsMenuPage::Root,
     );
