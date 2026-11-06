@@ -169,22 +169,6 @@ impl GeoRouting {
             })
             .collect()
     }
-
-    // TODO: drop once the omakvn plugin selects modes by id (TASK-26); it
-    // still reads current_region and selected_region_modes from the snapshot.
-    pub(crate) fn plugin_region_fields(&self) -> serde_json::Map<String, serde_json::Value> {
-        let mut fields = serde_json::Map::new();
-        let Some(region) = GeoRegion::of_default_mode(&self.mode) else {
-            return fields;
-        };
-        fields.insert("current_region".into(), region.as_str().into());
-        let mut selected = serde_json::Map::new();
-        if region != GeoRegion::Global {
-            selected.insert(region.as_str().into(), self.mode.clone().into());
-        }
-        fields.insert("selected_region_modes".into(), selected.into());
-        fields
-    }
 }
 
 #[cfg(test)]
@@ -266,27 +250,6 @@ mod tests {
         routing.select_legacy_region_mode();
         assert_eq!(routing.mode, "global");
         assert_eq!(routing.used_regions(), [GeoRegion::Cn]);
-    }
-
-    #[test]
-    fn plugin_region_fields_follow_the_selected_mode() {
-        let fields = |mode: &str| {
-            let mut routing = GeoRouting::default();
-            routing.set_mode(mode);
-            serde_json::Value::Object(routing.plugin_region_fields())
-        };
-        assert_eq!(
-            fields("only_ru"),
-            serde_json::json!({
-                "current_region": "ru",
-                "selected_region_modes": { "ru": "only_ru" }
-            })
-        );
-        assert_eq!(
-            fields("global"),
-            serde_json::json!({ "current_region": "global", "selected_region_modes": {} })
-        );
-        assert_eq!(fields("work"), serde_json::json!({}));
     }
 
     #[test]

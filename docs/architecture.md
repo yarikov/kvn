@@ -198,14 +198,10 @@ Clients talk to the daemon in newline-delimited JSON over
 - **Key**: the TUI forwards key presses. The daemon interprets them with the
   same `update` code the TUI would, so behavior does not depend on the client.
 - **Semantic commands**: `ConnectProfile`, `Disconnect`, `Reconnect`,
-  `SetRoutingMode`, `SetGeoRegion`, `SetKillSwitch`, `SetAutoConnect` and
-  others are for clients without a keyboard model: the CLI and the Omarchy
-  plugin. They share the commit helpers with the key handlers, so both paths
-  run the same logic. `SetRoutingMode` selects a mode of `routing.json` by
-  `id`. `SetGeoRegion` is accepted and changes nothing: the region is no longer
-  a setting. For Omarchy plugins that predate mode ids, the snapshot's
-  `settings.geo_routing` also carries `current_region` and
-  `selected_region_modes`, derived from the selected mode.
+  `SetRoutingMode`, `SetKillSwitch`, `SetAutoConnect` and others are for
+  clients without a keyboard model: the CLI and the Omarchy plugin. They share
+  the commit helpers with the key handlers, so both paths run the same logic.
+  `SetRoutingMode` selects a mode of `routing.json` by `id`.
 - **StateSnapshot**: after every state change the daemon pushes a full
   snapshot, including the complete config, to every attached client. There are
   no diffs to get out of sync. A client that cannot take a snapshot within

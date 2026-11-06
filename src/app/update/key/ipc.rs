@@ -86,7 +86,6 @@ pub(in crate::app::update) fn handle_ipc_command(
         IpcCommand::Reconnect => semantic::reconnect(model),
         IpcCommand::Toggle => semantic::toggle(model),
         IpcCommand::SetRoutingMode { mode } => commit_routing_mode(model, &mode),
-        IpcCommand::SetGeoRegion { .. } => vec![],
         IpcCommand::SetKillSwitch { enabled } => set_kill_switch(model, enabled),
         IpcCommand::SetAutoConnect { enabled } => set_auto_connect(model, enabled),
         IpcCommand::Paste { text } => handle_clipboard_text(model, &text),
@@ -193,7 +192,7 @@ mod tests {
     use crate::app::model::DnsSettingsItem;
     use crate::app::msg::Msg;
     use crate::app::update::update;
-    use crate::config::profile::{GeoRegion, Profile};
+    use crate::config::profile::Profile;
     use crate::test_helpers::*;
 
     #[test]
@@ -390,24 +389,6 @@ mod tests {
                 Effect::BroadcastState,
             ]
         );
-    }
-
-    #[test]
-    fn ipc_command_set_geo_region_is_accepted_and_changes_nothing() {
-        let mut model = model_with_profiles(vec![]);
-        model.config.settings.geo_routing.set_mode("only_ru");
-        let routing = model.routing.clone();
-
-        let effects = handle_ipc_command(
-            &mut model,
-            crate::app::msg::IpcCommand::SetGeoRegion {
-                region: GeoRegion::Cn,
-            },
-        );
-
-        assert_eq!(effects, vec![Effect::BroadcastState]);
-        assert_eq!(model.config.settings.geo_routing.mode, "only_ru");
-        assert_eq!(model.routing, routing);
     }
 
     #[test]
