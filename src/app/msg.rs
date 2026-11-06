@@ -174,9 +174,6 @@ pub enum IpcCommand {
     SetRoutingMode {
         mode: String,
     },
-    SetGeoRegion {
-        region: GeoRegion,
-    },
     SetKillSwitch {
         enabled: bool,
     },
@@ -293,9 +290,6 @@ mod tests {
             IpcCommand::SetRoutingMode {
                 mode: "bypass_ru".into(),
             },
-            IpcCommand::SetGeoRegion {
-                region: GeoRegion::Cn,
-            },
             IpcCommand::SetKillSwitch { enabled: true },
             IpcCommand::SetAutoConnect { enabled: false },
             IpcCommand::ResolveSupportPrompt {
@@ -357,21 +351,6 @@ pub enum ConfigEditResult<T = crate::config::profile::Config> {
 }
 
 pub type RoutingEditResult = ConfigEditResult<crate::config::routing::RoutingConfig>;
-
-fn serialize_settings_with_plugin_region<S: serde::Serializer>(
-    settings: &Settings,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    use serde::Serialize;
-    let mut value = serde_json::to_value(settings).map_err(serde::ser::Error::custom)?;
-    if let Some(geo_routing) = value
-        .get_mut("geo_routing")
-        .and_then(serde_json::Value::as_object_mut)
-    {
-        geo_routing.extend(settings.geo_routing.plugin_region_fields());
-    }
-    value.serialize(serializer)
-}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StateSnapshot {
@@ -442,7 +421,6 @@ pub struct StateSnapshot {
     pub main_pane_focus: MainPaneFocus,
     pub profiles: Vec<Profile>,
     pub subscriptions: Vec<Subscription>,
-    #[serde(serialize_with = "serialize_settings_with_plugin_region")]
     pub settings: Settings,
     #[serde(default)]
     pub routing: crate::config::routing::RoutingConfig,
