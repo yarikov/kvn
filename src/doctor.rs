@@ -11,6 +11,7 @@ use crate::config::routing::RoutingConfig;
 use crate::onboarding::{IntegrationSetup, SetupState};
 
 const MIN_SINGBOX_VERSION: (u64, u64, u64) = (1, 14, 0);
+const LEGACY_AUR_PACKAGE_LICENSE: &str = "usr/share/licenses/kvn-tui-bin/LICENSE";
 const POLKIT_DNS_ACTIONS: [&str; 3] = [
     "org.freedesktop.resolve1.set-dns-servers",
     "org.freedesktop.resolve1.set-domains",
@@ -77,6 +78,7 @@ fn run_at(root: &Path) -> Result<()> {
 
 fn collect(root: &Path) -> Vec<Check> {
     let mut checks = vec![Check::pass(format!("kvn {}", env!("CARGO_PKG_VERSION")))];
+    checks.extend(check_legacy_aur_package(root));
 
     match find_singbox() {
         Some(path) => {
@@ -134,6 +136,15 @@ fn write_report(mut writer: impl Write, checks: &[Check], use_color: bool) -> io
         }
     }
     Ok(())
+}
+
+fn check_legacy_aur_package(root: &Path) -> Option<Check> {
+    root.join(LEGACY_AUR_PACKAGE_LICENSE).exists().then(|| {
+        Check::warning(
+            "Installed from kvn-tui-bin, which is renamed to kvn-bin and will stop receiving updates",
+            "Run `yay -S kvn-bin` and confirm the removal of kvn-tui-bin; profiles, settings and daemon autostart are kept.",
+        )
+    })
 }
 
 fn find_singbox() -> Option<PathBuf> {
@@ -780,6 +791,19 @@ mod tests {
     use super::*;
     use crate::omarchy::OMAKVN_PLUGIN_ID;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn legacy_aur_package_check_warns_only_for_kvn_tui_bin() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(check_legacy_aur_package(root.path()), None);
+
+        let license = root.path().join(LEGACY_AUR_PACKAGE_LICENSE);
+        std::fs::create_dir_all(license.parent().unwrap()).unwrap();
+        std::fs::write(&license, "MIT").unwrap();
+        let check = check_legacy_aur_package(root.path()).unwrap();
+        assert_eq!(check.level, Level::Warning);
+        assert!(check.remedy.unwrap().contains("yay -S kvn-bin"));
+    }
 
     #[test]
     fn stale_autostart_units_reports_a_dangling_enable_symlink() {
