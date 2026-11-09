@@ -6,7 +6,7 @@ use std::process::{Command, Output};
 
 use anyhow::Result;
 
-use crate::config::profile::Config;
+use crate::config::profile::{Config, ConfigFile};
 use crate::config::routing::RoutingConfig;
 use crate::onboarding::{IntegrationSetup, SetupState};
 
@@ -268,27 +268,36 @@ fn unresolved_config_directory() -> Check {
 }
 
 fn check_config() -> (Check, Option<Config>) {
-    let Some(path) = crate::paths::profiles_path() else {
+    let Ok(paths) = crate::config::ConfigPaths::current() else {
         return (unresolved_config_directory(), None);
     };
-    if !path.exists() {
+    if !paths.profiles.exists() && !paths.settings.exists() {
         let check = Check::pass(format!(
             "configuration will be created on first launch: {}",
-            path.display()
+            paths.profiles.display()
         ));
         return (check, None);
     }
-    match crate::config::load_config_at_read_only(&path)
-        .and_then(|config| config.validate().map(|()| config))
-    {
-        Ok(config) => (
-            Check::pass(format!("configuration is valid: {}", path.display())),
-            Some(config),
+    let load = crate::config::load_config_read_only_at(&paths);
+    let failed = [ConfigFile::Profiles, ConfigFile::Settings]
+        .into_iter()
+        .find_map(|file| load.error(file).map(|error| (file, format!("{error:#}"))));
+    match failed {
+        None => (
+            Check::pass(format!(
+                "configuration is valid: {} and {}",
+                paths.profiles.display(),
+                paths.settings.display()
+            )),
+            Some(load.config),
         ),
-        Err(error) => (
+        Some((file, error)) => (
             Check::failure(
-                format!("configuration is invalid: {error:#}"),
-                format!("Correct {} or restore its backup.", path.display()),
+                format!("configuration is invalid: {error}"),
+                format!(
+                    "Correct {} or restore its backup.",
+                    paths.of(file).display()
+                ),
             ),
             None,
         ),
@@ -1000,15 +1009,17 @@ mod tests {
         let _xdg = EnvGuard::set("XDG_CONFIG_HOME", dir.path());
 
         assert_eq!(check_config().0.level, Level::Pass);
-        let path = crate::paths::profiles_path().unwrap();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &path,
-            serde_json::to_vec(&crate::config::profile::Config::default()).unwrap(),
-        )
-        .unwrap();
+        crate::config::save_config(&crate::test_helpers::saved_config()).unwrap();
         assert_eq!(check_config().0.level, Level::Pass);
-        std::fs::write(path, "not json").unwrap();
+        let settings = crate::paths::settings_path().unwrap();
+        std::fs::write(&settings, r#"{ "schema_version": 1, "theme": "missing" }"#).unwrap();
+        let (check, _) = check_config();
+        assert_eq!(check.level, Level::Failure);
+        assert!(
+            check.remedy.as_deref().unwrap().contains("settings.json"),
+            "{check:?}"
+        );
+        std::fs::write(crate::paths::profiles_path().unwrap(), "not json").unwrap();
         assert_eq!(check_config().0.level, Level::Failure);
     }
 
@@ -1042,7 +1053,7 @@ mod tests {
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let _xdg = EnvGuard::set("XDG_CONFIG_HOME", dir.path());
-        let mut config = crate::config::profile::Config::default();
+        let mut config = crate::test_helpers::saved_config();
         config
             .profiles
             .push(crate::config::profile::Profile::new_vless(

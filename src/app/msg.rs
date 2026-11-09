@@ -191,9 +191,13 @@ pub enum IpcCommand {
         target: CopiedTarget,
     },
     ReloadConfig,
-    ApplyEditedConfig {
-        base: Box<crate::config::profile::Config>,
-        edited: Box<crate::config::profile::Config>,
+    ApplyEditedProfiles {
+        base: Box<crate::config::profile::ProfilesDocument>,
+        edited: Box<crate::config::profile::ProfilesDocument>,
+    },
+    ApplyEditedSettings {
+        base: Box<crate::config::profile::SettingsDocument>,
+        edited: Box<crate::config::profile::SettingsDocument>,
     },
     ApplyEditedRouting {
         base: crate::config::routing::RoutingEditBase,
@@ -314,9 +318,13 @@ mod tests {
                 target: CopiedTarget::Command,
             },
             IpcCommand::ReloadConfig,
-            IpcCommand::ApplyEditedConfig {
-                base: Box::new(crate::config::profile::Config::default()),
-                edited: Box::new(crate::config::profile::Config::default()),
+            IpcCommand::ApplyEditedProfiles {
+                base: Box::default(),
+                edited: Box::default(),
+            },
+            IpcCommand::ApplyEditedSettings {
+                base: Box::default(),
+                edited: Box::default(),
             },
             IpcCommand::ApplyEditedRouting {
                 base: crate::config::routing::RoutingEditBase::Raw("{".into()),
@@ -344,12 +352,27 @@ mod tests {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub enum ConfigEditResult<T = crate::config::profile::Config> {
+pub enum ConfigEditResult<T> {
     Saved,
     Conflict { current: Box<T>, paths: Vec<String> },
     Failed { message: String },
 }
 
+impl<T> ConfigEditResult<T> {
+    pub fn map_current<U>(self, document: impl FnOnce(T) -> U) -> ConfigEditResult<U> {
+        match self {
+            Self::Saved => ConfigEditResult::Saved,
+            Self::Conflict { current, paths } => ConfigEditResult::Conflict {
+                current: Box::new(document(*current)),
+                paths,
+            },
+            Self::Failed { message } => ConfigEditResult::Failed { message },
+        }
+    }
+}
+
+pub type ProfilesEditResult = ConfigEditResult<crate::config::profile::ProfilesDocument>;
+pub type SettingsEditResult = ConfigEditResult<crate::config::profile::SettingsDocument>;
 pub type RoutingEditResult = ConfigEditResult<crate::config::routing::RoutingConfig>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -363,7 +386,9 @@ pub struct StateSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_to: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_edit_result: Option<ConfigEditResult>,
+    pub profiles_edit_result: Option<ProfilesEditResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings_edit_result: Option<SettingsEditResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing_edit_result: Option<RoutingEditResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -298,9 +298,10 @@ their physical US key positions regardless of the active keyboard layout.
 
 ## Configuration
 
-Configuration is stored in `~/.config/kvn-tui/profiles.json` and
-`routing.json` next to it. Press `e` to edit it in the editor
-(`Space r e` for `routing.json`).
+Configuration is stored in `~/.config/kvn-tui/`: profiles and subscriptions in
+`profiles.json`, settings in `settings.json`, rule-sets and modes in
+`routing.json`. Press `e` in the Profiles list to edit `profiles.json`, `e` on
+a Settings page for `settings.json`, and `Space r e` for `routing.json`.
 
 See the [configuration guide](docs/configuration.md) for the JSON structure,
 advanced DNS and routing, validation, migrations, and runtime file locations.

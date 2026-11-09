@@ -1,6 +1,6 @@
 # kvn documentation
 
-- [Configuration](configuration.md) — `profiles.json`, DNS presets, routing, validation, and runtime files
+- [Configuration](configuration.md) — `profiles.json`, `settings.json`, DNS presets, routing, validation, and runtime files
 - [Command-line interface](cli.md) — every `kvn` command and option
 - [Theme gallery](themes.md) — the bundled color palettes
 - [What kvn protects](privacy.md) — which traffic and DNS goes through the tunnel, and what the kill switch blocks

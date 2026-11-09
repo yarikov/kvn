@@ -69,6 +69,9 @@ impl Config {
             self.migrate_v7_to_v8();
             self.schema_version = 8;
         }
+        if self.schema_version == 8 && target_version >= 9 {
+            self.schema_version = 9;
+        }
         debug_assert_eq!(self.schema_version, target_version);
         Ok(())
     }

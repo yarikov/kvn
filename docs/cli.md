@@ -24,7 +24,7 @@ kvn --version
 | [`kvn toggle`](#toggle) | Connect the last profile, or disconnect |
 | [`kvn enable` / `kvn disable`](#enable-and-disable) | Turn the kill switch on or off, or hide the support prompt |
 | [`kvn doctor`](#doctor) | Check that kvn is ready to use |
-| [`kvn config`](#config) | Reset or recover `profiles.json` |
+| [`kvn config`](#config) | Reset or recover `profiles.json`, `settings.json` or `routing.json` |
 | [`kvn setup`](#setup) | Install optional integrations |
 | [`kvn refresh`](#refresh) | Update installed polkit and kill-switch files |
 | [`kvn clean`](#clean) | Remove optional integrations or everything kvn created |
@@ -150,7 +150,7 @@ kvn doctor
 ```
 
 Runs a read-only check of sing-box, the configuration (`profiles.json`,
-`routing.json`, and a rule order that sends names past the VPN), the daemon, the clipboard, and the optional integrations, with a remediation hint for each
+`settings.json`, `routing.json`, and a rule order that sends names past the VPN), the daemon, the clipboard, and the optional integrations, with a remediation hint for each
 problem. It exits with a non-zero status when a
 required check fails; warnings alone do not change the exit status.
 
@@ -166,45 +166,60 @@ it: `omarchy plugin update yarikov.omakvn`.
 
 ```bash
 kvn config reset
-kvn config reset [--profiles] [--routing <region>[,<region>…]] [--yes]
-kvn config recover [--profiles <file>] [--routing <file>]
+kvn config reset [--profiles] [--settings] [--hwid] [--routing <region>[,<region>…]] [--yes]
+kvn config recover [--profiles <file>] [--settings <file>] [--routing <file>]
 ```
 
-Both commands replace `~/.config/kvn-tui/profiles.json`,
-`~/.config/kvn-tui/routing.json`, or both, and refuse to run while the daemon
-is running; stop it first with `systemctl --user stop kvn-tui.service`. The
-previous file is archived under `~/.config/kvn-tui/recovery/` as
-`profiles.json.invalid-*` or `routing.json.invalid-*`, and the archive path is
+Both commands replace any of `~/.config/kvn-tui/profiles.json`,
+`~/.config/kvn-tui/settings.json` and `~/.config/kvn-tui/routing.json`, and
+refuse to run while the daemon is running; stop it first with
+`systemctl --user stop kvn-tui.service`. A `profiles.json` from kvn 0.36 or
+older is first split into `profiles.json` and `settings.json`, as the daemon
+does on start, and the command says so; when that file is invalid, the command
+prints why and that the settings it holds cannot be used. The previous file is archived under
+`~/.config/kvn-tui/recovery/` as `profiles.json.invalid-*`,
+`settings.json.invalid-*` or `routing.json.invalid-*`, and the archive path is
 printed. kvn keeps only the three newest archives of each file and deletes
 older ones as new archives are created; copy an archive elsewhere if you need
 to keep it.
 
 - `reset` creates the chosen files as a fresh install does.
-  - `--profiles` resets `profiles.json`: every profile, subscription and
-    setting.
+  - `--profiles` resets `profiles.json`: every profile and subscription.
+    Settings stay.
+  - `--settings` resets `settings.json`: theme, DNS, kill switch, routing
+    mode, update schedules, and the HWID, so subscriptions that send it see a
+    new device.
+  - `--hwid` replaces only the HWID in `settings.json` with a new one and keeps
+    every other setting; it is the fix kvn suggests when `settings.json` has
+    no `hwid`. Subscriptions that send the HWID see a new device. On a
+    `profiles.json` from kvn 0.36 or older without a HWID, it moves the
+    settings to `settings.json` with the new HWID.
   - `--routing` resets `routing.json` to Global, the modes of the listed
     countries — `ru`, `cn`, `ir`, or `global` for Global alone — and only the
     rule-sets those modes use, as a comma-separated list or a repeated flag. Custom modes, rules
     and rule-sets and the modes of other countries are removed, and a broken
     file is reset the same way. Steam and Telegram overrides from kvn 0.35 that
-    have not moved into `routing.json` yet are dropped from `profiles.json`.
+    have not moved into `routing.json` yet are dropped from `settings.json`.
     A country outside the list is an error.
-  - Without either flag, `reset` asks which files to reset and, for
+  - Without a flag, `reset` asks which files to reset and, for
     `routing.json`, which countries to keep (a comma-separated list; an empty
     answer cancels). It needs a terminal for that; in a script, pass the flags.
   - Before it asks for confirmation, `reset` lists what goes, where the
     archives land and how to restore them. `--yes` skips the confirmation and
-    requires `--profiles` or `--routing`.
+    requires `--profiles`, `--settings`, `--hwid` or `--routing`.
 - `recover` installs a saved file — for example an archive or an editor copy
   that kvn preserved in the recovery directory — after checking that it loads
-  and is valid: `--profiles <file>` as `profiles.json`, `--routing <file>` as
-  `routing.json`, or both at once. Those copies are rotated the same way, three
-  of each kind.
+  and is valid: `--profiles <file>` as `profiles.json`, `--settings <file>` as
+  `settings.json`, `--routing <file>` as `routing.json`, or several at once.
+  A `profiles.json` saved by kvn 0.36 or older holds both parts: `--profiles`
+  takes its profiles and subscriptions, `--settings` its settings, and the same
+  file can be passed to both. Those copies are rotated the same way, three of
+  each kind.
 
-When the routing mode selected in `profiles.json` is not in the resulting
+When the routing mode selected in `settings.json` is not in the resulting
 `routing.json`, both commands switch it to Global, archive the previous
-`profiles.json` the same way, and say so; changing only `routing.json`
-therefore needs a `profiles.json` that loads, and is refused otherwise.
+`settings.json` the same way, and say so; changing `routing.json` alone
+therefore needs a `settings.json` that loads, and is refused otherwise.
 
 ## Integrations
 

@@ -191,14 +191,14 @@ fn commit_interface_settings(model: &mut Model) -> Vec<Effect> {
         && icons != model.config.settings.icons
     {
         model.config.settings.icons = icons;
-        effects.push(Effect::SaveConfig);
+        effects.push(Effect::SaveSettings);
     }
     if let Some(slug) = model.theme_draft.take()
         && slug != model.config.settings.theme
     {
         model.config.settings.theme = slug.clone();
         if effects.is_empty() {
-            effects.push(Effect::SaveConfig);
+            effects.push(Effect::SaveSettings);
         }
         push_status(
             &mut effects,
@@ -278,7 +278,7 @@ pub(in crate::app::update) fn set_auto_connect(model: &mut Model, enabled: bool)
         StatusKey::AutoConnect,
         AppStatus::Info("Auto-connect disabled".into()),
     );
-    effects.push(Effect::SaveConfig);
+    effects.push(Effect::SaveSettings);
     effects
 }
 
@@ -340,7 +340,7 @@ mod tests {
         assert!(model.status_text().contains("disabled"));
         assert_eq!(
             effects,
-            vec![app_log_info("Auto-connect disabled"), Effect::SaveConfig]
+            vec![app_log_info("Auto-connect disabled"), Effect::SaveSettings]
         );
     }
 
@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(
             effects
                 .iter()
-                .filter(|effect| matches!(effect, Effect::SaveConfig))
+                .filter(|effect| matches!(effect, Effect::SaveSettings))
                 .count(),
             1
         );
@@ -500,7 +500,7 @@ mod tests {
         handle_key(&mut model, key('h'));
         let effects = handle_key(&mut model, KeyEvent::from(KeyCode::Enter));
 
-        assert_eq!(effects, vec![Effect::SaveConfig]);
+        assert_eq!(effects, vec![Effect::SaveSettings]);
         assert_eq!(model.config.settings.icons, IconSet::Unicode);
     }
 
@@ -910,7 +910,7 @@ mod tests {
         assert_eq!(
             effects
                 .iter()
-                .filter(|effect| matches!(effect, Effect::SaveConfig))
+                .filter(|effect| matches!(effect, Effect::SaveSettings))
                 .count(),
             1
         );
@@ -923,7 +923,7 @@ mod tests {
         let effects = handle_key(&mut dns, KeyEvent::from(KeyCode::Enter));
         assert_eq!(dns.overlay, Overlay::DnsSettings);
         assert_eq!(dns.config.settings.dns.current_preset, "google_dot");
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert!(effects.contains(&Effect::SaveSettings));
 
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let mut theme = model_with_profiles(vec![]);

@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashMap};
 use anyhow::Context;
 use serde_json::Value;
 
-use super::profile::Config;
+use super::profile::{Config, ConfigFile};
 use super::routing::RoutingConfig;
 
 pub(crate) mod resolution;
@@ -25,26 +25,27 @@ impl std::fmt::Display for MergeError {
 
 impl std::error::Error for MergeError {}
 
-pub(crate) fn merge_configs(
+pub(crate) fn merge_file(
+    file: ConfigFile,
     base: &Config,
     current: &Config,
     edited: &Config,
 ) -> Result<Config, MergeError> {
     for (label, config) in [("base", base), ("current", current), ("edited", edited)] {
-        if let Err(error) = config.validate() {
+        if let Err(error) = config.validate_file(file) {
             return Err(MergeError::Invalid(format!(
-                "{label} config is invalid: {error}"
+                "{label} {} is invalid: {error}",
+                file.name()
             )));
         }
     }
-    let base = serde_json::to_value(base).expect("Config serialization cannot fail");
-    let current = serde_json::to_value(current).expect("Config serialization cannot fail");
-    let edited = serde_json::to_value(edited).expect("Config serialization cannot fail");
+    let [base, current, edited_value] =
+        [base, current, edited].map(|config| file_value(file, config));
     let mut conflicts = Vec::new();
     let merged = merge_value(
         Some(&base),
         Some(&current),
-        Some(&edited),
+        Some(&edited_value),
         "",
         &mut conflicts,
         false,
@@ -52,10 +53,18 @@ pub(crate) fn merge_configs(
     if !conflicts.is_empty() {
         return Err(MergeError::Conflicts(conflicts));
     }
-    let config: Config = serde_json::from_value(merged.expect("root config cannot be deleted"))
-        .context("merged config is invalid")
-        .map_err(|error| MergeError::Invalid(error.to_string()))?;
-    let mut config = config;
+    let merged = merged.expect("root config cannot be deleted");
+    let invalid = |error: serde_json::Error| {
+        MergeError::Invalid(format!("merged {} is invalid: {error}", file.name()))
+    };
+    let mut config = match file {
+        ConfigFile::Profiles => {
+            edited.with_profiles(serde_json::from_value(merged).map_err(invalid)?)
+        }
+        ConfigFile::Settings => {
+            edited.with_settings(serde_json::from_value(merged).map_err(invalid)?)
+        }
+    };
     if config
         .settings
         .last_connected_profile
@@ -64,10 +73,18 @@ pub(crate) fn merge_configs(
         config.settings.last_connected_profile = None;
     }
     config
-        .validate()
-        .context("merged config failed validation")
-        .map_err(|error| MergeError::Invalid(error.to_string()))?;
+        .validate_file(file)
+        .with_context(|| format!("merged {} failed validation", file.name()))
+        .map_err(|error| MergeError::Invalid(format!("{error:#}")))?;
     Ok(config)
+}
+
+fn file_value(file: ConfigFile, config: &Config) -> Value {
+    match file {
+        ConfigFile::Profiles => serde_json::to_value(config.profiles_document()),
+        ConfigFile::Settings => serde_json::to_value(config.settings_document()),
+    }
+    .expect("Config serialization cannot fail")
 }
 
 pub(crate) fn merge_routing(
@@ -248,39 +265,33 @@ mod tests {
     use crate::config::profile::Profile;
 
     #[test]
-    fn merges_disjoint_profile_and_setting_changes() {
-        let mut base = Config::default();
-        base.profiles.push(Profile::new_vless(
-            "A".into(),
-            "1.1.1.1".into(),
-            443,
-            uuid::Uuid::new_v4().to_string(),
-        ));
+    fn merges_disjoint_setting_changes() {
+        let base = crate::test_helpers::saved_config();
         let mut current = base.clone();
         current.settings.auto_connect = true;
         let mut edited = base.clone();
-        edited.profiles[0].name = "Edited".into();
-        let merged = merge_configs(&base, &current, &edited).unwrap();
+        edited.settings.theme = "nord".into();
+        let merged = merge_file(ConfigFile::Settings, &base, &current, &edited).unwrap();
         assert!(merged.settings.auto_connect);
-        assert_eq!(merged.profiles[0].name, "Edited");
+        assert_eq!(merged.settings.theme, "nord");
     }
 
     #[test]
     fn reports_same_field_conflict() {
-        let base = Config::default();
+        let base = crate::test_helpers::saved_config();
         let mut current = base.clone();
         current.settings.theme = "nord".into();
         let mut edited = base.clone();
         edited.settings.theme = "catppuccin".into();
         assert_eq!(
-            merge_configs(&base, &current, &edited).unwrap_err(),
-            MergeError::Conflicts(vec!["settings.theme".into()])
+            merge_file(ConfigFile::Settings, &base, &current, &edited).unwrap_err(),
+            MergeError::Conflicts(vec!["theme".into()])
         );
     }
 
     #[test]
     fn merges_independent_additions_and_deletions_by_uuid() {
-        let mut base = Config::default();
+        let mut base = crate::test_helpers::saved_config();
         let removed = Profile::new_vless(
             "Removed".into(),
             "1.1.1.1".into(),
@@ -304,7 +315,7 @@ mod tests {
             uuid::Uuid::new_v4().to_string(),
         ));
 
-        let merged = merge_configs(&base, &current, &edited).unwrap();
+        let merged = merge_file(ConfigFile::Profiles, &base, &current, &edited).unwrap();
         let names: Vec<_> = merged
             .profiles
             .iter()
@@ -315,7 +326,7 @@ mod tests {
 
     #[test]
     fn modification_conflicts_with_concurrent_deletion() {
-        let mut base = Config::default();
+        let mut base = crate::test_helpers::saved_config();
         base.profiles.push(Profile::new_vless(
             "A".into(),
             "1.1.1.1".into(),
@@ -327,7 +338,7 @@ mod tests {
         let mut edited = base.clone();
         edited.profiles[0].name = "Edited".into();
 
-        let conflicts = merge_configs(&base, &current, &edited).unwrap_err();
+        let conflicts = merge_file(ConfigFile::Profiles, &base, &current, &edited).unwrap_err();
         assert!(
             matches!(conflicts, MergeError::Conflicts(paths) if paths[0].starts_with("profiles["))
         );
@@ -335,7 +346,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_ids_before_indexing() {
-        let mut base = Config::default();
+        let mut base = crate::test_helpers::saved_config();
         let profile = Profile::new_vless(
             "A".into(),
             "1.1.1.1".into(),
@@ -344,18 +355,22 @@ mod tests {
         );
         base.profiles = vec![profile.clone(), profile];
 
-        let MergeError::Invalid(message) =
-            merge_configs(&base, &Config::default(), &Config::default()).unwrap_err()
-        else {
+        let MergeError::Invalid(message) = merge_file(
+            ConfigFile::Profiles,
+            &base,
+            &crate::test_helpers::saved_config(),
+            &crate::test_helpers::saved_config(),
+        )
+        .unwrap_err() else {
             panic!("expected validation error")
         };
-        assert!(message.contains("base config is invalid"));
+        assert!(message.contains("base profiles.json is invalid"));
         assert!(message.contains("duplicate id"));
     }
 
     #[test]
     fn preserves_editor_reorder_during_concurrent_field_change() {
-        let mut base = Config::default();
+        let mut base = crate::test_helpers::saved_config();
         let a = Profile::new_vless(
             "A".into(),
             "1.1.1.1".into(),
@@ -370,17 +385,17 @@ mod tests {
         );
         base.profiles = vec![a, b];
         let mut current = base.clone();
-        current.settings.auto_connect = true;
+        current.profiles[0].address = "3.3.3.3".into();
         let mut edited = base.clone();
         edited.profiles.reverse();
-        let merged = merge_configs(&base, &current, &edited).unwrap();
+        let merged = merge_file(ConfigFile::Profiles, &base, &current, &edited).unwrap();
         assert_eq!(merged.profiles[0].name, "B");
-        assert!(merged.settings.auto_connect);
+        assert_eq!(merged.profiles[1].address, "3.3.3.3");
     }
 
     #[test]
     fn conflicting_reorders_are_reported() {
-        let mut base = Config::default();
+        let mut base = crate::test_helpers::saved_config();
         for name in ["A", "B", "C"] {
             base.profiles.push(Profile::new_vless(
                 name.into(),
@@ -394,13 +409,13 @@ mod tests {
         let mut edited = base.clone();
         edited.profiles.swap(1, 2);
         assert!(
-            matches!(merge_configs(&base, &current, &edited), Err(MergeError::Conflicts(paths)) if paths.contains(&"profiles order".into()))
+            matches!(merge_file(ConfigFile::Profiles, &base, &current, &edited), Err(MergeError::Conflicts(paths)) if paths.contains(&"profiles order".into()))
         );
     }
 
     #[test]
     fn clears_dangling_last_connected_profile_after_merge() {
-        let mut base = Config::default();
+        let mut base = crate::test_helpers::saved_config();
         let profile = Profile::new_vless(
             "A".into(),
             "1.1.1.1".into(),
@@ -411,7 +426,7 @@ mod tests {
         base.profiles.push(profile);
         let mut edited = base.clone();
         edited.profiles.clear();
-        let merged = merge_configs(&base, &base, &edited).unwrap();
+        let merged = merge_file(ConfigFile::Profiles, &base, &base, &edited).unwrap();
         assert_eq!(merged.settings.last_connected_profile, None);
     }
 

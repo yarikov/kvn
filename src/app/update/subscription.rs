@@ -85,7 +85,7 @@ fn handle_subscription_result_at(
                 }
             }
 
-            let mut effects = vec![Effect::SaveConfig];
+            let mut effects = vec![Effect::SaveProfiles];
             if imported > 0 {
                 push_status(
                     &mut effects,
@@ -110,7 +110,7 @@ fn handle_subscription_result_at(
             let sub = &mut model.config.subscriptions[sub_idx];
             if automatic && sub.auto_update != SubscriptionAutoUpdate::Off {
                 sub.record_fetch_failure(now);
-                effects.push(Effect::SaveConfig);
+                effects.push(Effect::SaveProfiles);
             }
             push_status(
                 &mut effects,
@@ -316,7 +316,7 @@ mod tests {
         assert_eq!(model.config.profiles.len(), 2);
         assert_eq!(
             effects,
-            vec![Effect::SaveConfig, app_log_info("Profiles imported: 2")]
+            vec![Effect::SaveProfiles, app_log_info("Profiles imported: 2")]
         );
     }
 
@@ -370,7 +370,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                Effect::SaveConfig,
+                Effect::SaveProfiles,
                 app_log_info("Subscription unchanged: no new profiles")
             ]
         );
@@ -415,7 +415,7 @@ mod tests {
         assert_eq!(model.config.profiles[0].subscription_id, Some(sub_id));
         assert_eq!(
             effects,
-            vec![Effect::SaveConfig, app_log_info("Profiles imported: 1")]
+            vec![Effect::SaveProfiles, app_log_info("Profiles imported: 1")]
         );
     }
 
@@ -451,7 +451,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                Effect::SaveConfig,
+                Effect::SaveProfiles,
                 app_log_info("Subscription unchanged: no new profiles")
             ]
         );
@@ -510,7 +510,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                Effect::SaveConfig,
+                Effect::SaveProfiles,
                 app_log_error("Subscription update failed: network down"),
                 Effect::AppendAppLog {
                     level: "WARN".into(),
@@ -652,7 +652,7 @@ mod tests {
         assert!(model.config.subscriptions[0].retry_state.is_none());
         assert_eq!(
             effects,
-            vec![Effect::SaveConfig, app_log_info("Profiles imported: 1")]
+            vec![Effect::SaveProfiles, app_log_info("Profiles imported: 1")]
         );
     }
 

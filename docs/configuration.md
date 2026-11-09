@@ -1,16 +1,22 @@
 # Configuration
 
-`kvn` stores profiles, subscriptions, and application settings in:
+`kvn` keeps its configuration in three files:
 
 ```text
-~/.config/kvn-tui/profiles.json
+~/.config/kvn-tui/profiles.json   # profiles and subscriptions
+~/.config/kvn-tui/settings.json   # application settings
+~/.config/kvn-tui/routing.json    # rule-sets and routing modes
 ```
 
 This is the default location; `XDG_CONFIG_HOME` is respected when set.
-Rule-sets live in their own file, `~/.config/kvn-tui/routing.json` (see
-[Rule-sets and modes](#rule-sets-and-modes)).
+Subscription updates, imports and profile edits write only `profiles.json`;
+changes from Settings, the CLI, waybar and the Omarchy bar write only
+`settings.json`. `routing.json` is described in
+[Rule-sets and modes](#rule-sets-and-modes).
 
-Press `e` in the TUI to edit a private copy with `$VISUAL` or `$EDITOR`.
+Press `e` in the Profiles list to edit a private copy of `profiles.json`, or on
+a Settings page (`Space`, `Space c`, `Space d`, `Space i`) to edit a copy of
+`settings.json`, with `$VISUAL` or `$EDITOR`.
 VS Code, VSCodium, Cursor, Zed and Sublime Text get `--wait` unless the
 command already has `--wait` or `-w`, so kvn waits until the editor is closed.
 When the command is Omarchy's `omarchy-launch-editor`, kvn runs the editor
@@ -28,10 +34,13 @@ messages with `j`/`k`, Up/Down, or `g`/`G` (start/end). The action
 keys remain visible while scrolling.
 
 The copy starts with a `"$schema"` reference to
-`$XDG_RUNTIME_DIR/kvn/profiles.schema.json`, which kvn writes each time the
-editor opens. Editors with a JSON language server (VS Code, Zed, Helix, Neovim
-with `jsonls`) use it to complete fields and values and to flag mistakes while
-you type. The reference is not saved into `profiles.json`. Leave
+`$XDG_RUNTIME_DIR/kvn/profiles.schema.json` (or `settings.schema.json`), which
+kvn writes each time the editor opens. Editors with a JSON language server (VS
+Code, Zed, Helix, Neovim with `jsonls`) use it to complete fields and values
+and to flag mistakes while you type. The reference is not saved into the file.
+A problem is reported in the file that holds the wrong value: an invalid
+`hwid` in `settings.json` is reported there, even when a subscription in
+`profiles.json` is the one that sends it. Leave
 `schema_version` as it is: kvn manages it, and an edit that removes or changes
 it is rejected.
 
@@ -58,16 +67,25 @@ replace a valid configuration with a partial file.
 
 ## File structure
 
-The current schema version is 7. A minimal configuration is:
+Each file has its own schema version: `profiles.json` is at 9 and
+`settings.json` at 1. Minimal files are:
 
 ```json
 {
-  "schema_version": 7,
+  "schema_version": 9,
   "profiles": [],
-  "subscriptions": [],
-  "settings": {}
+  "subscriptions": []
 }
 ```
+
+```json
+{
+  "schema_version": 1
+}
+```
+
+`profiles.json` also keeps `last_connected_profile`, the profile `auto_connect`
+starts with; kvn maintains it.
 
 VLESS `security` and VMess `stream_security` take `tls`, `reality` or `none`;
 `none` connects without TLS, and a profile without the field keeps using TLS.
@@ -113,7 +131,7 @@ types and share-link schemes.
 | `next_auto_update` | Date of the next scheduled update; maintained by kvn |
 | `retry_state` | Retry bookkeeping after a failed update; maintained by kvn |
 | `send_hwid` | Send device identification headers with this subscription's requests; `false` when absent |
-| `hwid` | Identifier sent instead of `settings.hwid`; used only with `send_hwid` |
+| `hwid` | Identifier sent instead of `hwid` from `settings.json`; used only with `send_hwid` |
 
 Valid update schedules are `off`, `every_1d`, `every_3d`, and `every_7d`. An
 imported subscription starts at `every_1d`; existing subscriptions keep whatever
@@ -132,7 +150,7 @@ subscription already had and adds new servers at its end.
 
 Every subscription request carries `User-Agent: kvn/<version>`. With
 `send_hwid: true` it also carries `X-Hwid` (the subscription's `hwid`, or
-`settings.hwid`), `X-Device-Os: Linux`, `X-Ver-Os` (the kernel version),
+`hwid` from `settings.json`), `X-Device-Os: Linux`, `X-Ver-Os` (the kernel version),
 `X-Device-Model: Desktop`, and `X-Device-Locale` (for example `ru-RU`). Some
 providers require these headers to count devices; leave `send_hwid` off
 otherwise. The HWID must be 10 to 64 Latin letters, digits, `-` and `=` — the
@@ -170,17 +188,26 @@ otherwise the notice is skipped and logged. kvn recognises:
 
 ## Settings
 
+These fields live in `settings.json`, next to its `schema_version`.
+
+kvn writes `settings.json` with a new `hwid` on the first launch, and again
+when the file is missing next to an existing `profiles.json`. A `settings.json`
+without `hwid` is refused rather than given a new one, because a provider that
+counts devices would see another device: stop the daemon and run
+`kvn config reset --hwid` to create a new HWID while keeping the other
+settings. A `profiles.json` from kvn 0.26 or older, written before the HWID
+existed, gets one when its settings move to `settings.json`.
+
 | Field | Default | Description |
 |-------|---------|-------------|
 | `tun_interface` | `kvn0` | Name of the sing-box TUN interface; must start with `kvn` |
 | `dns` | Cloudflare DoH | DNS presets, the active preset, and fake-IP state |
 | `geo_routing` | `mode` `global`; `auto_update` every 7 days on a new installation, `off` when the field or section is absent (`I` changes it at any time) | Selected routing mode and rule-set updates |
-| `auto_connect` | `false` | Connect to `last_connected_profile` at startup |
+| `auto_connect` | `false` | Connect to `last_connected_profile` from `profiles.json` at startup |
 | `kill_switch` | `false` | Persisted kill-switch state |
-| `last_connected_profile` | `null` | Last connected profile; maintained by the application |
 | `theme` | `omarchy` on a first launch under Omarchy, `tokyo-night` otherwise | Bundled palette slug or `omarchy` |
 | `icons` | `nerd` on Omarchy, `unicode` elsewhere | `nerd` for Nerd Font glyphs, or `unicode` for terminals without a Nerd Font |
-| `hwid` | generated on first launch (`lnx-` + UUID) | Installation identifier sent only by subscriptions with `send_hwid` |
+| `hwid` | generated on first launch (`lnx-` + UUID) | Installation identifier sent only by subscriptions with `send_hwid`; required |
 | `allow_insecure_http_subscriptions` | `false` (`true` after migration from v4) | Temporarily allow deprecated HTTP subscription URLs for backward compatibility |
 | `connectivity_probe.enabled` | `true` | Enable the HTTP(S) endpoint used only by manual `t` / `T` latency tests |
 | `connectivity_probe.url` | `https://connectivitycheck.gstatic.com/generate_204` | Probe endpoint; required and validated only when the probe is enabled |
@@ -234,8 +261,9 @@ that answers everything else. One preset is active at a time; choose it in
 
 kvn ships four built-in presets: `cloudflare_doh` (the default), `google_dot`,
 `quad9_doh`, and `system_local`. Write your own under `custom_presets`; they
-appear in Settings › DNS by name after the built-in ones. The following
-snippet belongs inside `settings`:
+appear in Settings › DNS by name after the built-in ones; `e` on that page
+opens `settings.json` at `dns`. The following snippet belongs in
+`settings.json`:
 
 ```json
 {
@@ -439,7 +467,7 @@ the file is saved. `e` with a draft opens the file with it. Rules cannot be
 changed while `routing.json` is invalid, and a reload that finds it invalid
 discards the draft.
 
-The following snippet belongs inside `settings`:
+The following snippet belongs in `settings.json`:
 
 ```json
 {
@@ -568,7 +596,7 @@ Steam and Telegram overrides set in an earlier release become rules: when the
 daemon starts, every mode in the file gets `geosite-steam` / `geoip-steam`
 (and `geosite-telegram` / `geoip-telegram`) with the override's route ahead of
 its own rules, the rule-sets keep their sources and downloaded files, and the
-old `service_routes` setting leaves `profiles.json`. While `routing.json` fails
+old `service_routes` setting leaves `settings.json`. While `routing.json` fails
 its checks the move waits for the next start, and the overrides stay where they
 are.
 
@@ -581,7 +609,7 @@ that breaks while the VPN is connected leaves that connection running; only new
 connections and reconnects are refused.
 
 Press `e` in **Settings › Routing** (`Space r e`) to edit `routing.json` the
-same way as `profiles.json`: kvn opens a copy of the file in `$VISUAL` or
+same way as `profiles.json` and `settings.json`: kvn opens a copy of the file in `$VISUAL` or
 `$EDITOR` at the mode shown in the Mode row, or at the rule selected below it,
 checks it when the editor exits, lists every problem with its line, and offers
 to reopen it. The copy carries a
@@ -617,8 +645,8 @@ The special `omarchy` value follows the active Omarchy theme. Fresh non-Omarchy
 installations use `tokyo-night`.
 
 The **Icons** row on the same screen switches between Nerd Font glyphs and
-plain Unicode symbols. A new installation, or a config without the `icons`
-field or the whole `settings` section, uses `nerd` on Omarchy, which ships a
+plain Unicode symbols. A new installation, or a `settings.json` without the
+`icons` field, uses `nerd` on Omarchy, which ships a
 Nerd Font, and `unicode` elsewhere.
 
 `logs.level` controls both application and generated sing-box logging. Accepted
@@ -649,21 +677,36 @@ reported at once. Validation checks:
 The TUN interface must contain only ASCII letters, digits, `-`, or `_`, and be
 at most 15 characters.
 
-A configuration with an older `schema_version` is migrated automatically when
+Each file is checked on its own. A file that fails is reported in the status
+line with the line of every problem and left untouched; kvn runs with the
+defaults for that file and saves nothing into it until it is fixed, while the
+other file keeps working. A `profiles.json` that cannot be read at all also
+blocks settings while `settings.json` does not exist yet, because an older
+`profiles.json` may still hold them.
+
+Both files need `schema_version`; a file without it is reported as invalid and
+left untouched. A configuration with an older `schema_version` is migrated automatically when
 kvn loads it, after a copy is saved to `~/.config/kvn-tui/recovery/`. A
-configuration with a newer `schema_version` is refused: older `kvn` releases
-cannot read it.
+`profiles.json` written by kvn 0.36 or older still holds the settings: kvn
+writes them to `settings.json` first and only then rewrites `profiles.json`
+without them, so a crash in between repeats the move from the old file on the
+next start instead of losing settings. A `settings.json` that kvn replaces in
+that move is kept in `recovery/` when it differs. A file with a newer
+`schema_version` is refused: older `kvn` releases cannot read it, and kvn 0.36
+or older reports the split `profiles.json` as newer than it supports instead
+of starting with empty settings.
 
 ## Runtime files
 
 | Resource | Location |
 |----------|----------|
-| Profiles and settings | `~/.config/kvn-tui/profiles.json` |
+| Profiles and subscriptions | `~/.config/kvn-tui/profiles.json` |
+| Settings | `~/.config/kvn-tui/settings.json` |
 | Rule-sets | `~/.config/kvn-tui/routing.json` |
 | Geo rule-sets | `~/.config/kvn-tui/geo/` |
 | Application log | `~/.config/kvn-tui/logs/app.log` |
 | sing-box log | `~/.config/kvn-tui/logs/sing-box.log` |
-| Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved); `routing.json.invalid-*` (a broken `routing.json` replaced from the editor, or the file archived by `kvn config reset`/`recover`) and `routing.json.conflict-invalid-*` (unfinished `routing.json` edits), three each |
+| Recovery copies | `~/.config/kvn-tui/recovery/profiles.json.<kind>-*`, three per kind: `before-migration` (schema migration), `invalid` (archived by `kvn config reset`/`recover`), `conflict` and `conflict-invalid` (editor copies kvn preserved); `settings.json.<kind>-*` with `invalid` (archived by `kvn config reset`/`recover`, or replaced when settings move out of an older `profiles.json`), `conflict` and `conflict-invalid`; `routing.json.invalid-*` (a broken `routing.json` replaced from the editor, or the file archived by `kvn config reset`/`recover`) and `routing.json.conflict-invalid-*` (unfinished `routing.json` edits), three each |
 | First-run tour progress | `$XDG_STATE_HOME/kvn/onboarding.json` |
 | Support prompt schedule | `$XDG_STATE_HOME/kvn/support-prompt.json` |
 | sing-box cache (fake-IP map) | `$XDG_STATE_HOME/kvn/singbox-cache.db` |
@@ -671,10 +714,12 @@ cannot read it.
 | Generated sing-box config | `$XDG_RUNTIME_DIR/kvn-tui/singbox.json` |
 | Latency-test configs | `$XDG_RUNTIME_DIR/kvn-tui/test-<uuid>.json` |
 | Private editor copy | `$XDG_RUNTIME_DIR/kvn-tui/profiles-edit-<pid>.json` |
+| Private settings editor copy | `$XDG_RUNTIME_DIR/kvn/settings-edit-<pid>.json` |
 | Private routing editor copy | `$XDG_RUNTIME_DIR/kvn/routing-edit-<pid>.json` |
 | Daemon instance lock | `$XDG_RUNTIME_DIR/kvn/daemon.lock` |
 | Waybar and recovery state | `$XDG_RUNTIME_DIR/kvn/state.json` |
 | Editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/profiles.schema.json` |
+| Settings editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/settings.schema.json` |
 | Routing editor JSON Schema | `$XDG_RUNTIME_DIR/kvn/routing.schema.json` |
 
 The application-owned runtime directory is created with mode `0700`; generated

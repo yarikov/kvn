@@ -6,7 +6,7 @@ use anyhow::Context;
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, Model, Overlay, StatusKey};
 use crate::app::msg::{ConfigEditResult, IpcError, Msg, RoutingEditResult};
-use crate::config::profile::Config;
+use crate::config::profile::{Config, ConfigFile};
 use crate::onboarding::{OnboardingProgress, OnboardingRecovery};
 use crate::support_prompt::SupportPromptState;
 
@@ -43,61 +43,114 @@ impl UpdateBaseline {
     }
 }
 
+const COMMIT_ORDER: [ConfigFile; 2] = [ConfigFile::Settings, ConfigFile::Profiles];
+
+fn save_effect(file: ConfigFile) -> Effect {
+    match file {
+        ConfigFile::Profiles => Effect::SaveProfiles,
+        ConfigFile::Settings => Effect::SaveSettings,
+    }
+}
+
+fn confirmed_state_effect(file: ConfigFile) -> Effect {
+    match file {
+        ConfigFile::Profiles => Effect::PersistConfirmedProfiles,
+        ConfigFile::Settings => Effect::PersistConfirmedSettings,
+    }
+}
+
 pub(super) fn persist_config_changes(
     model: &mut Model,
     before: UpdateBaseline,
     effects: &mut Vec<Effect>,
 ) {
-    if effects.contains(&Effect::SaveConfig) {
-        persist_requested_change(model, before, effects);
-    } else if effects.contains(&Effect::PersistConfirmedState) {
-        persist_confirmed_state(model, before.config, effects);
+    let requested: Vec<ConfigFile> = COMMIT_ORDER
+        .into_iter()
+        .filter(|file| effects.contains(&save_effect(*file)))
+        .collect();
+    let confirmed: Vec<ConfigFile> = COMMIT_ORDER
+        .into_iter()
+        .filter(|file| effects.contains(&confirmed_state_effect(*file)))
+        .filter(|file| !requested.contains(file))
+        .collect();
+    effects.retain(|effect| {
+        !COMMIT_ORDER
+            .into_iter()
+            .any(|file| *effect == confirmed_state_effect(file))
+    });
+    for file in confirmed {
+        persist_confirmed_state(model, &before.config, file, effects);
+    }
+    if !requested.is_empty() {
+        persist_requested_change(model, before, &requested, effects);
     }
 }
 
-fn persist_requested_change(model: &mut Model, before: UpdateBaseline, effects: &mut Vec<Effect>) {
+fn persist_requested_change(
+    model: &mut Model,
+    before: UpdateBaseline,
+    files: &[ConfigFile],
+    effects: &mut Vec<Effect>,
+) {
     let onboarding_transition = onboarding_transition(effects);
     let edited = model.config.clone();
-    match commit_model_config(model, &before.config) {
-        Ok(()) => effects.retain(|effect| *effect != Effect::SaveConfig),
-        Err(error) => {
-            model.replace_config_preserving_selection(before.config);
+    effects.retain(|effect| !files.iter().any(|file| *effect == save_effect(*file)));
+    let mut committed = before.config.clone();
+    for (index, file) in files.iter().enumerate() {
+        if let Err(error) = commit_model_file(model, &before.config, *file) {
+            model.replace_config_preserving_selection(committed);
             model.support_prompt = before.support_prompt;
             if let Some(recovery) = onboarding_transition {
                 restore_onboarding_after_failure(model, before.onboarding, recovery);
             }
-            let message = match crate::config::save_conflict_config(&edited) {
-                Ok(path) => format!(
-                    "Configuration save failed: {error:#}; unsaved version preserved at {}",
-                    path.display()
-                ),
-                Err(save_error) => format!(
-                    "Configuration save failed: {error:#}; unsaved version preservation failed: {save_error:#}"
-                ),
-            };
-            report_save_failure(model, &message);
+            let preserved = preserve_unsaved_files(&files[index..], &edited);
+            report_save_failure(
+                model,
+                &format!("Configuration save failed: {error:#}; {preserved}"),
+            );
             effects.retain(|effect| {
                 matches!(effect, Effect::BroadcastState | Effect::AppendAppLog { .. })
             });
             ensure_broadcast(effects);
+            return;
         }
+        committed = committed.with_file_of(*file, &model.config);
     }
 }
 
-fn persist_confirmed_state(model: &mut Model, before: Config, effects: &mut Vec<Effect>) {
-    if let Err(error) = commit_model_config(model, &before) {
-        model.unsaved_state_merge_base.get_or_insert(before);
+fn preserve_unsaved_files(files: &[ConfigFile], edited: &Config) -> String {
+    files
+        .iter()
+        .map(
+            |file| match crate::config::save_conflict_file(*file, edited) {
+                Ok(path) => format!("unsaved {} preserved at {}", file.name(), path.display()),
+                Err(error) => format!("unsaved {} preservation failed: {error:#}", file.name()),
+            },
+        )
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn persist_confirmed_state(
+    model: &mut Model,
+    before: &Config,
+    file: ConfigFile,
+    effects: &mut Vec<Effect>,
+) {
+    if let Err(error) = commit_model_file(model, before, file) {
+        model
+            .unsaved_merge_base_mut(file)
+            .get_or_insert_with(|| before.clone());
         report_save_failure(model, &format!("Configuration save failed: {error:#}"));
         ensure_broadcast(effects);
     }
-    effects.retain(|effect| *effect != Effect::PersistConfirmedState);
 }
 
-fn commit_model_config(model: &mut Model, before: &Config) -> anyhow::Result<()> {
-    let base = model.unsaved_state_merge_base.as_ref().unwrap_or(before);
-    let config = commit_config_change(model, base, &model.config)?;
+fn commit_model_file(model: &mut Model, before: &Config, file: ConfigFile) -> anyhow::Result<()> {
+    let base = model.unsaved_merge_base(file).unwrap_or(before).clone();
+    let config = commit_file_change(model, file, &base, &model.config)?;
     model.replace_config_preserving_selection(config);
-    model.unsaved_state_merge_base = None;
+    *model.unsaved_merge_base_mut(file) = None;
     Ok(())
 }
 
@@ -112,26 +165,44 @@ fn ensure_broadcast(effects: &mut Vec<Effect>) {
     }
 }
 
-pub(super) fn commit_config_change(
+fn with_file_on_disk(
+    config: &Config,
+    base: &Config,
+    file: ConfigFile,
+    contents: Option<&[u8]>,
+    path: &std::path::Path,
+) -> anyhow::Result<Config> {
+    Ok(match (file, contents) {
+        (ConfigFile::Profiles, Some(bytes)) => {
+            config.with_profiles(crate::config::read_profiles_document(bytes, path)?)
+        }
+        (ConfigFile::Profiles, None) => config.with_profiles(Default::default()),
+        (ConfigFile::Settings, Some(bytes)) => {
+            config.with_settings(crate::config::read_settings_document(bytes, path)?)
+        }
+        (ConfigFile::Settings, None) => config.with_settings(base.settings_document()),
+    })
+}
+
+pub(super) fn commit_file_change(
     model: &Model,
+    file: ConfigFile,
     base: &Config,
     edited: &Config,
 ) -> anyhow::Result<Config> {
     anyhow::ensure!(
-        !model.config_persistence_blocked,
-        "persisted config previously failed to load"
+        !model.persistence_blocked(file),
+        "{} previously failed to load",
+        file.name()
     );
-    let path = crate::paths::profiles_path().context("Failed to determine profiles path")?;
+    let path = crate::config::config_file_path(file)?;
     let expected = match std::fs::read(&path) {
         Ok(bytes) => Some(bytes),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error).context("Failed to read config revision"),
     };
-    let current = match expected.as_deref() {
-        Some(bytes) => crate::config::load_config_bytes_read_only(bytes, &path)?,
-        None => Config::default(),
-    };
-    let mut merged = crate::config::merge::merge_configs(base, &current, edited).map_err(
+    let current = with_file_on_disk(edited, base, file, expected.as_deref(), &path)?;
+    let mut merged = crate::config::merge::merge_file(file, base, &current, edited).map_err(
         |error| match error {
             crate::config::merge::MergeError::Conflicts(paths) => {
                 anyhow::Error::new(ConfigConflict {
@@ -144,14 +215,14 @@ pub(super) fn commit_config_change(
     )?;
     merged.settings.kill_switch = edited.settings.kill_switch;
     merged.normalize();
-    crate::config::save_config_at_revision(&path, &merged, expected.as_deref())?;
+    crate::config::save_file_at_revision(file, &path, &merged, expected.as_deref())?;
     Ok(merged)
 }
 
 pub(super) fn report_uncommitted_save(model: &mut Model) {
     model.set_status(
         StatusKey::Config,
-        AppStatus::Error("Configuration save failed: uncommitted SaveConfig effect".into()),
+        AppStatus::Error("Configuration save failed: uncommitted save effect".into()),
     );
 }
 
@@ -226,8 +297,13 @@ fn arm_support_prompt_after_onboarding(model: &mut Model) {
     }
 }
 
-pub(super) fn save_conflict(model: &mut Model, edited: Box<Config>, conflicts: Vec<String>) {
-    match crate::config::save_conflict_config(&edited) {
+pub(super) fn save_conflict(
+    model: &mut Model,
+    file: ConfigFile,
+    edited: Box<Config>,
+    conflicts: Vec<String>,
+) {
+    match crate::config::save_conflict_file(file, &edited) {
         Ok(path) => model.set_status(
             StatusKey::Config,
             AppStatus::Error(format!(
@@ -250,16 +326,17 @@ pub(super) fn commit_edited(
     tx: &Sender<Msg>,
     model: &mut Model,
     shared: &DaemonShared,
+    file: ConfigFile,
     base: Box<Config>,
     edited: Box<Config>,
     reply_requested: bool,
-) -> ConfigEditResult {
+) -> ConfigEditResult<Config> {
     let mut edited_for_commit = (*edited).clone();
     edited_for_commit.settings.kill_switch = model.config.settings.kill_switch;
-    let result = commit_config_change(model, &base, &edited_for_commit);
+    let result = commit_file_change(model, file, &base, &edited_for_commit);
     match result {
         Ok(config) => {
-            for nested in crate::app::update::handle_config_reloaded(model, Ok(config)) {
+            for nested in crate::app::update::handle_config_edit_saved(model, file, config) {
                 execute_daemon_effect(nested, tx, model, shared, false);
             }
             ConfigEditResult::Saved
@@ -276,7 +353,7 @@ pub(super) fn commit_edited(
                     },
                 };
             }
-            let message = match crate::config::save_conflict_config(&edited) {
+            let message = match crate::config::save_conflict_file(file, &edited) {
                 Ok(path) => format!(
                     "Configuration edit failed: {error:#}; edited version saved to {}",
                     path.display()
@@ -339,7 +416,9 @@ pub(super) fn add_region_modes(tx: &Sender<Msg>, region: crate::config::profile:
 pub(super) fn reload(tx: &Sender<Msg>) {
     let tx = tx.clone();
     thread::spawn(move || {
-        let mut result = crate::config::load_config().and_then(|c| c.validate().map(|_| c));
+        let mut result = crate::config::load_config()
+            .into_result()
+            .and_then(|c| c.validate().map(|_| c));
         let routing = match &result {
             Ok(config) => crate::config::load_routing(&config.settings.geo_routing, true),
             Err(_) => crate::config::load_routing(&Default::default(), false),
@@ -362,7 +441,7 @@ mod tests {
     use crate::app::model::{Model, Overlay, SettingsMenuPage};
     use crate::app::msg::Msg;
     use crate::app::update::update;
-    use crate::config::profile::{Config, GeoRegion};
+    use crate::config::profile::GeoRegion;
     use crate::onboarding::{
         OnboardingProgress, OnboardingRecovery, OnboardingState, OnboardingStep,
     };
@@ -486,10 +565,10 @@ mod tests {
 
     #[test]
     fn only_a_tour_transition_may_revert_tour_progress() {
-        assert_eq!(onboarding_transition(&[Effect::SaveConfig]), None);
+        assert_eq!(onboarding_transition(&[Effect::SaveSettings]), None);
         assert_eq!(
             onboarding_transition(&[
-                Effect::SaveConfig,
+                Effect::SaveSettings,
                 Effect::PersistOnboarding {
                     previous: OnboardingProgress::default(),
                     recovery: OnboardingRecovery::RestoreCard,
@@ -526,14 +605,14 @@ mod tests {
         assert!(model.onboarding.card_pending);
     }
 
-    use super::commit_config_change;
+    use super::commit_file_change;
 
     #[test]
     fn config_commit_merges_external_and_model_changes() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
-        let base = Config::default();
+        let base = crate::test_helpers::saved_config();
         crate::config::save_config(&base).unwrap();
         let mut external = base.clone();
         external.settings.theme = "nord".into();
@@ -542,11 +621,12 @@ mod tests {
         edited.settings.auto_connect = true;
         let model = crate::app::model::Model::test_new(edited.clone());
 
-        let merged = commit_config_change(&model, &base, &edited).unwrap();
+        let merged = commit_file_change(&model, ConfigFile::Settings, &base, &edited).unwrap();
         assert_eq!(merged.settings.theme, "nord");
         assert!(merged.settings.auto_connect);
         assert_eq!(
-            crate::config::load_config_at_read_only(&crate::paths::profiles_path().unwrap())
+            crate::config::load_config_read_only()
+                .into_result()
                 .unwrap(),
             merged
         );
@@ -557,7 +637,7 @@ mod tests {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let _config_home = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
-        let base = Config::default();
+        let base = crate::test_helpers::saved_config();
         crate::config::save_config(&base).unwrap();
         let subscription = crate::test_helpers::subscription_with_hwid(false, None);
         let profile = |name: &str| {
@@ -576,14 +656,15 @@ mod tests {
         edited.profiles = vec![owned, standalone];
         let model = crate::app::model::Model::test_new(edited.clone());
 
-        let merged = commit_config_change(&model, &base, &edited).unwrap();
+        let merged = commit_file_change(&model, ConfigFile::Profiles, &base, &edited).unwrap();
 
         let names: Vec<&str> = merged.profiles.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Standalone", "Owned"]);
     }
 
     fn update_with_unwritable_config(model: &mut Model, msg: Msg) -> Vec<Effect> {
-        model.config_persistence_blocked = true;
+        model.profiles_persistence.blocked = true;
+        model.settings_persistence.blocked = true;
         let before = UpdateBaseline::capture(model);
         let mut effects = update(model, msg);
         persist_config_changes(model, before, &mut effects);
@@ -612,7 +693,7 @@ mod tests {
             assert_eq!(model.config.settings.kill_switch, enabled);
             assert!(model.status_text().contains("Configuration save failed"));
             assert!(effects.contains(&Effect::BroadcastState));
-            assert!(!effects.contains(&Effect::PersistConfirmedState));
+            assert!(!effects.contains(&Effect::PersistConfirmedSettings));
         }
     }
 
@@ -662,18 +743,44 @@ mod tests {
             },
         );
 
-        model.config_persistence_blocked = false;
+        model.profiles_persistence.blocked = false;
         let before = UpdateBaseline::capture(&model);
-        model.config.settings.theme = "nord".into();
-        let mut effects = vec![Effect::SaveConfig];
+        model.config.profiles[0].name = "Renamed".into();
+        let mut effects = vec![Effect::SaveProfiles];
         persist_config_changes(&mut model, before, &mut effects);
 
-        let saved =
-            crate::config::load_config_at_read_only(&crate::paths::profiles_path().unwrap())
-                .unwrap();
-        assert_eq!(saved.settings.theme, "nord");
+        let saved = crate::config::load_config_read_only()
+            .into_result()
+            .unwrap();
+        assert_eq!(saved.profiles[0].name, "Renamed");
         assert_eq!(saved.settings.last_connected_profile, Some(profile_id));
-        assert_eq!(model.unsaved_state_merge_base, None);
+        assert_eq!(model.profiles_persistence.unsaved_merge_base, None);
+    }
+
+    #[test]
+    fn a_failed_save_preserves_every_file_it_did_not_write() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _config_home = EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
+        let mut model = model_with_profiles(crate::test_helpers::sample_profiles());
+        model.settings_persistence.blocked = true;
+        let before = UpdateBaseline::capture(&model);
+        model.config.settings.theme = "nord".into();
+        model.config.profiles[0].name = "Renamed".into();
+        let mut effects = vec![Effect::SaveSettings, Effect::SaveProfiles];
+
+        persist_config_changes(&mut model, before, &mut effects);
+
+        let status = model.status_text();
+        assert!(
+            status.contains("unsaved settings.json preserved"),
+            "{status}"
+        );
+        assert!(
+            status.contains("unsaved profiles.json preserved"),
+            "{status}"
+        );
+        assert_eq!(model.config.profiles[0].name, "A");
     }
 
     #[test]
@@ -694,9 +801,10 @@ mod tests {
         );
         persist_config_changes(&mut model, before, &mut effects);
 
-        assert!(!effects.contains(&Effect::PersistConfirmedState));
+        assert!(!effects.contains(&Effect::PersistConfirmedSettings));
         assert!(
-            crate::config::load_config_at_read_only(&crate::paths::profiles_path().unwrap())
+            crate::config::load_config_read_only()
+                .into_result()
                 .unwrap()
                 .settings
                 .kill_switch

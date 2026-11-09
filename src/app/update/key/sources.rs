@@ -44,7 +44,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
         KeyCode::Char('I') => {
             let schedule = model.config.settings.geo_routing.auto_update.next();
             model.config.settings.geo_routing.auto_update = schedule;
-            let mut effects = vec![Effect::SaveConfig, Effect::ResetGeoUpdateSchedules];
+            let mut effects = vec![Effect::SaveSettings, Effect::ResetGeoUpdateSchedules];
             push_status(
                 &mut effects,
                 model,
@@ -69,7 +69,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                 } else {
                     return effects;
                 };
-                let mut effects = vec![Effect::SaveConfig];
+                let mut effects = vec![Effect::SaveProfiles];
                 push_status(
                     &mut effects,
                     model,
@@ -190,12 +190,12 @@ fn handle_enter_on_sources(model: &mut Model) -> Vec<Effect> {
                 return subscription_already_updating(model, id, &name);
             }
             if !download_allowed(model) {
-                let mut result = vec![Effect::SaveConfig];
+                let mut result = vec![Effect::SaveProfiles];
                 push_download_blocked(&mut result, model, DownloadKind::Subscription(id));
                 return result;
             }
             model.subscription_updates.insert(id, UpdateTrigger::Manual);
-            let mut result = vec![Effect::SaveConfig, Effect::UpdateSubscription { id }];
+            let mut result = vec![Effect::SaveProfiles, Effect::UpdateSubscription { id }];
             push_status(
                 &mut result,
                 model,
@@ -232,7 +232,7 @@ fn update_selected_subscription(model: &mut Model) -> Vec<Effect> {
             return effects;
         }
         model.subscription_updates.insert(id, UpdateTrigger::Manual);
-        let mut result = vec![Effect::SaveConfig, Effect::UpdateSubscription { id }];
+        let mut result = vec![Effect::SaveProfiles, Effect::UpdateSubscription { id }];
         push_status(
             &mut result,
             model,
@@ -355,8 +355,8 @@ mod tests {
             let moved_down = handle_sources(&mut model, KeyEvent::new(down, KeyModifiers::ALT));
             let moved_up = handle_sources(&mut model, KeyEvent::new(up, KeyModifiers::ALT));
 
-            assert_eq!(moved_down, vec![Effect::SaveConfig]);
-            assert_eq!(moved_up, vec![Effect::SaveConfig]);
+            assert_eq!(moved_down, vec![Effect::SaveProfiles]);
+            assert_eq!(moved_up, vec![Effect::SaveProfiles]);
         }
     }
 
@@ -497,7 +497,7 @@ mod tests {
             Some(&UpdateTrigger::Manual)
         );
         assert!(effects.contains(&Effect::UpdateSubscription { id: sub_id }));
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert!(effects.contains(&Effect::SaveProfiles));
     }
 
     #[test]
@@ -562,7 +562,7 @@ mod tests {
         ] {
             let effects = handle_sources(&mut model, key('I'));
             assert_eq!(model.config.settings.geo_routing.auto_update, expected);
-            assert!(effects.contains(&Effect::SaveConfig));
+            assert!(effects.contains(&Effect::SaveSettings));
             assert_eq!(
                 model.status_text(),
                 format!(
@@ -718,7 +718,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                Effect::SaveConfig,
+                Effect::SaveProfiles,
                 Effect::UpdateSubscription { id: sub_id },
                 app_log_info("Updating subscription Sub…"),
             ]
@@ -778,7 +778,7 @@ mod tests {
             model.config.subscriptions[0].auto_update,
             SubscriptionAutoUpdate::Every3d
         );
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert!(effects.contains(&Effect::SaveProfiles));
         assert!(effects.contains(&app_log_info(
             "Subscription update interval changed: 3d (Sub)"
         )));
@@ -961,7 +961,7 @@ mod tests {
         assert_eq!(model.overlay, Overlay::None);
         assert!(model.status_is_error());
         assert_eq!(model.status_text(), "Delete failed: disconnect first");
-        assert!(!effects.iter().any(|e| matches!(e, Effect::SaveConfig)));
+        assert!(!effects.iter().any(|e| matches!(e, Effect::SaveProfiles)));
     }
 
     #[test]
@@ -1004,7 +1004,7 @@ mod tests {
 
         assert_eq!(model.overlay, Overlay::None);
         assert_eq!(model.status_text(), "Delete failed: disconnect first");
-        assert!(!effects.contains(&Effect::SaveConfig));
+        assert!(!effects.contains(&Effect::SaveProfiles));
     }
 
     #[test]

@@ -1,31 +1,59 @@
 use std::collections::{HashMap, HashSet};
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::subscription::validate_hwid;
 use super::{
-    ConfigDiagnostic, GeoAutoUpdate, OMARCHY_THEME_SENTINEL, Profile, Settings, Subscription,
-    into_result,
+    ConfigDiagnostic, GeoAutoUpdate, OMARCHY_THEME_SENTINEL, Profile, ProfilesDocument, Settings,
+    SettingsDocument, Subscription, into_result,
 };
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 8;
+pub const CURRENT_SCHEMA_VERSION: u32 = 9;
+const SETTINGS_POINTER: &str = "/settings";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigFile {
+    Profiles,
+    Settings,
+}
+
+impl ConfigFile {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Profiles => "profiles.json",
+            Self::Settings => "settings.json",
+        }
+    }
+
+    fn holds(self, pointer: &str) -> bool {
+        let in_settings = pointer == SETTINGS_POINTER
+            || pointer
+                .strip_prefix(SETTINGS_POINTER)
+                .is_some_and(|rest| rest.starts_with('/'));
+        in_settings == (self == Self::Settings)
+    }
+
+    fn file_pointer(self, pointer: String) -> String {
+        match self {
+            Self::Profiles => pointer,
+            Self::Settings => pointer
+                .strip_prefix(SETTINGS_POINTER)
+                .map(String::from)
+                .unwrap_or(pointer),
+        }
+    }
+}
 
 fn default_schema_version() -> u32 {
     0
 }
 
-/// Root configuration file structure.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-#[schemars(transform = super::json_schema::pin_current_schema_version)]
 pub struct Config {
     #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
     pub json_schema: Option<String>,
-    /// Schema version of the persisted file. See [`CURRENT_SCHEMA_VERSION`].
-    /// Absent in pre-versioned files; defaults to 0 for the schema migration
-    /// path.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     #[serde(default)]
@@ -33,7 +61,6 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subscriptions: Vec<Subscription>,
     #[serde(default = "Settings::for_this_desktop")]
-    #[schemars(transform = super::json_schema::without_default)]
     pub settings: Settings,
 }
 
@@ -56,10 +83,67 @@ impl Config {
             ..Self::default()
         };
         config.settings.geo_routing.auto_update = GeoAutoUpdate::Every7d;
+        config.settings.hwid = crate::config::subscription::generate_hwid();
         if crate::omarchy::detect_omarchy_theme().is_some() {
             config.settings.theme = OMARCHY_THEME_SENTINEL.to_string();
         }
         config
+    }
+
+    pub fn from_documents(profiles: ProfilesDocument, settings: SettingsDocument) -> Self {
+        let mut settings = settings.settings;
+        settings.last_connected_profile = profiles.last_connected_profile;
+        Self {
+            json_schema: None,
+            schema_version: CURRENT_SCHEMA_VERSION,
+            profiles: profiles.profiles,
+            subscriptions: profiles.subscriptions,
+            settings,
+        }
+    }
+
+    pub fn profiles_document(&self) -> ProfilesDocument {
+        ProfilesDocument {
+            json_schema: None,
+            schema_version: CURRENT_SCHEMA_VERSION,
+            profiles: self.profiles.clone(),
+            subscriptions: self.subscriptions.clone(),
+            last_connected_profile: self.settings.last_connected_profile,
+        }
+    }
+
+    pub fn settings_document(&self) -> SettingsDocument {
+        SettingsDocument::new(self.settings.clone())
+    }
+
+    pub fn with_profiles(&self, profiles: ProfilesDocument) -> Self {
+        Self::from_documents(profiles, self.settings_document())
+    }
+
+    pub fn with_settings(&self, settings: SettingsDocument) -> Self {
+        Self::from_documents(self.profiles_document(), settings)
+    }
+
+    pub fn with_file_of(&self, file: ConfigFile, source: &Config) -> Self {
+        match file {
+            ConfigFile::Profiles => self.with_profiles(source.profiles_document()),
+            ConfigFile::Settings => self.with_settings(source.settings_document()),
+        }
+    }
+
+    pub fn file_diagnostics(&self, file: ConfigFile) -> Vec<ConfigDiagnostic> {
+        self.diagnostics()
+            .into_iter()
+            .filter(|diagnostic| file.holds(&diagnostic.pointer))
+            .map(|diagnostic| ConfigDiagnostic {
+                pointer: file.file_pointer(diagnostic.pointer),
+                message: diagnostic.message,
+            })
+            .collect()
+    }
+
+    pub fn validate_file(&self, file: ConfigFile) -> anyhow::Result<()> {
+        into_result(self.file_diagnostics(file))
     }
 
     pub(crate) fn normalize(&mut self) -> bool {
@@ -135,6 +219,9 @@ impl Config {
             let hwid = subscription
                 .effective_hwid(&self.settings)
                 .unwrap_or_default();
+            if hwid.is_empty() && subscription.hwid.is_none() {
+                continue;
+            }
             if let Err(error) = validate_hwid(hwid) {
                 let hwid_pointer = match subscription.hwid {
                     Some(_) => format!("{pointer}/hwid"),
@@ -209,7 +296,7 @@ mod tests {
                 profile("B", None),
             ],
             subscriptions: vec![first, second],
-            ..Config::default()
+            ..crate::test_helpers::saved_config()
         };
 
         assert!(config.normalize());
@@ -279,14 +366,14 @@ mod tests {
 
     #[test]
     fn config_default() {
-        let c = Config::default();
+        let c = crate::test_helpers::saved_config();
         assert!(c.profiles.is_empty());
         assert_eq!(c.settings.tun_interface, "kvn0");
     }
 
     #[test]
     fn config_serde_roundtrip() {
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         let mut profile = Profile::new_vless(
             "Example".to_string(),
             "203.0.113.1".to_string(),
@@ -328,7 +415,7 @@ mod tests {
 
     #[test]
     fn config_diagnostics_collects_every_problem_under_its_document_pointer() {
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         let mut profile = Profile::new_vless(
             "".into(),
             "1.2.3.4".into(),
@@ -360,7 +447,7 @@ mod tests {
 
     #[test]
     fn config_validate_accepts_valid_config() {
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         config.profiles.push(Profile::new_vless(
             "Valid".to_string(),
             "1.2.3.4".to_string(),
@@ -372,7 +459,7 @@ mod tests {
 
     #[test]
     fn config_validate_rejects_empty_profile_name() {
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         config.profiles.push(Profile::new_vless(
             "   ".to_string(),
             "1.2.3.4".to_string(),
@@ -385,7 +472,7 @@ mod tests {
 
     #[test]
     fn config_validate_rejects_empty_profile_address() {
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         config.profiles.push(Profile::new_vless(
             "Name".to_string(),
             "".to_string(),
@@ -402,7 +489,7 @@ mod tests {
 
     #[test]
     fn config_validate_rejects_empty_profile_uuid() {
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         config.profiles.push(Profile::new_vless(
             "Name".to_string(),
             "1.2.3.4".to_string(),
@@ -419,7 +506,7 @@ mod tests {
 
     #[test]
     fn config_validate_rejects_reality_plus_ech() {
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         let mut profile = Profile::new_vless(
             "RealityEch".to_string(),
             "1.2.3.4".to_string(),
@@ -445,16 +532,18 @@ mod tests {
     #[test]
     fn save_config_at_rejects_invalid_config() {
         let file = tempfile::NamedTempFile::new().unwrap();
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         config.profiles.push(Profile::new_vless(
             "Broken".to_string(),
             "1.2.3.4".to_string(),
             443,
             "not-a-uuid".to_string(),
         ));
-        let err = crate::config::save_config_at(file.path(), &config).unwrap_err();
+        let err =
+            crate::config::save_file_at(ConfigFile::Profiles, file.path(), &config).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("Refusing to save"), "Error was: {}", msg);
+        crate::config::save_file_at(ConfigFile::Settings, file.path(), &config).unwrap();
     }
 
     #[test]
@@ -467,7 +556,7 @@ mod tests {
         );
         let config = Config {
             profiles: vec![profile.clone(), profile],
-            ..Config::default()
+            ..crate::test_helpers::saved_config()
         };
 
         assert!(
@@ -484,7 +573,7 @@ mod tests {
         let subscription = subscription_with_hwid(false, None);
         let config = Config {
             subscriptions: vec![subscription.clone(), subscription],
-            ..Config::default()
+            ..crate::test_helpers::saved_config()
         };
 
         assert!(
@@ -507,7 +596,7 @@ mod tests {
         profile.subscription_id = Some(Uuid::new_v4());
         let config = Config {
             profiles: vec![profile],
-            ..Config::default()
+            ..crate::test_helpers::saved_config()
         };
         assert!(
             config

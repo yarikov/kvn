@@ -77,7 +77,7 @@ pub(in crate::app::update) fn on_connected(
     }
     if model.config.settings.last_connected_profile != Some(profile_id) {
         model.config.settings.last_connected_profile = Some(profile_id);
-        effects.push(Effect::PersistConfirmedState);
+        effects.push(Effect::PersistConfirmedProfiles);
     }
     effects
 }
@@ -219,7 +219,7 @@ pub(in crate::app::update) fn handle_kill_switch_applied(
                     if enabled { "enabled" } else { "disabled" }
                 )),
             );
-            effects.push(Effect::PersistConfirmedState);
+            effects.push(Effect::PersistConfirmedSettings);
             effects.push(Effect::BroadcastState);
         }
         Some(err) => {
@@ -253,7 +253,7 @@ pub(in crate::app::update) fn handle_auto_connect_polkit_checked(
                 StatusKey::AutoConnect,
                 AppStatus::Info("Auto-connect enabled".into()),
             );
-            effects.push(Effect::SaveConfig);
+            effects.push(Effect::SaveSettings);
         }
         Some(err) => {
             push_status(
@@ -628,7 +628,7 @@ mod tests {
             vec![
                 Effect::WriteState,
                 app_log_info("Connected"),
-                Effect::PersistConfirmedState
+                Effect::PersistConfirmedProfiles
             ]
         );
     }
@@ -785,7 +785,7 @@ mod tests {
             vec![
                 Effect::WriteState,
                 app_log_info("Connected to A"),
-                Effect::PersistConfirmedState
+                Effect::PersistConfirmedProfiles
             ]
         );
     }
@@ -943,7 +943,7 @@ mod tests {
             effects,
             vec![
                 app_log_info("Kill switch enabled"),
-                Effect::PersistConfirmedState,
+                Effect::PersistConfirmedSettings,
                 Effect::BroadcastState,
             ]
         );
@@ -963,7 +963,7 @@ mod tests {
         assert!(!model.config.settings.kill_switch);
         assert_eq!(model.kill_switch_pending, None);
         assert!(model.status_text().contains("helper missing"));
-        assert!(!effects.contains(&Effect::PersistConfirmedState));
+        assert!(!effects.contains(&Effect::PersistConfirmedSettings));
     }
 
     #[test]

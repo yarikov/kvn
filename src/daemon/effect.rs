@@ -3,12 +3,16 @@ use std::sync::mpsc::Sender;
 use crate::app::effect::Effect;
 use crate::app::model::Model;
 use crate::app::msg::{ConfigEditResult, Msg, RoutingEditResult};
+use crate::config::profile::{Config, ConfigFile};
 
 use super::process_slot::lock_process_slot;
 use super::{DaemonShared, config_io, connection, geo, profile_test, subscription, traffic};
 
 pub(super) enum EditReply {
-    Config(ConfigEditResult),
+    Config {
+        file: ConfigFile,
+        result: ConfigEditResult<Config>,
+    },
     Routing(RoutingEditResult),
 }
 
@@ -38,9 +42,10 @@ pub(super) fn execute_daemon_effect(
         } => geo::download_rule_sets(tx, model, rule_sets, only_missing, record_schedule),
         Effect::RefreshRuleSetStates => geo::refresh_rule_set_states(tx, model),
         Effect::ResetGeoUpdateSchedules => geo::reset_update_schedules(model),
-        Effect::SaveConfig | Effect::PersistConfirmedState => {
-            config_io::report_uncommitted_save(model)
-        }
+        Effect::SaveProfiles
+        | Effect::SaveSettings
+        | Effect::PersistConfirmedProfiles
+        | Effect::PersistConfirmedSettings => config_io::report_uncommitted_save(model),
         Effect::PersistSupportPrompt {
             previous,
             reopen_prompt,
@@ -48,23 +53,25 @@ pub(super) fn execute_daemon_effect(
         Effect::PersistOnboarding { previous, recovery } => {
             config_io::persist_onboarding(model, previous, recovery)
         }
-        Effect::SaveConfigConflict { edited, conflicts } => {
+        Effect::SaveConfigConflict {
+            file,
+            edited,
+            conflicts,
+        } => {
             if reply_requested {
-                return Some(EditReply::Config(ConfigEditResult::Failed {
-                    message: conflicts.join(", "),
-                }));
+                return Some(EditReply::Config {
+                    file,
+                    result: ConfigEditResult::Failed {
+                        message: conflicts.join(", "),
+                    },
+                });
             }
-            config_io::save_conflict(model, edited, conflicts)
+            config_io::save_conflict(model, file, edited, conflicts)
         }
-        Effect::CommitEditedConfig { base, edited } => {
-            return Some(EditReply::Config(config_io::commit_edited(
-                tx,
-                model,
-                shared,
-                base,
-                edited,
-                reply_requested,
-            )));
+        Effect::CommitEditedConfig { file, base, edited } => {
+            let result =
+                config_io::commit_edited(tx, model, shared, file, base, edited, reply_requested);
+            return Some(EditReply::Config { file, result });
         }
         Effect::CommitEditedRouting { base, edited } => {
             return Some(EditReply::Routing(config_io::commit_edited_routing(

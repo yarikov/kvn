@@ -8,10 +8,12 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use crate::app::model::SourceRow;
-use crate::app::msg::{ConfigEditResult, IpcCommand};
+use crate::app::msg::{ConfigEditResult, IpcCommand, StateSnapshot};
 use crate::config::json_pointer::JsonIndex;
 use crate::config::profile::{
-    CURRENT_SCHEMA_VERSION, Config, ConfigDiagnostic, config_json_schema, schema_diagnostics,
+    CURRENT_SCHEMA_VERSION, Config, ConfigDiagnostic, ConfigFile, ProfilesDocument,
+    SETTINGS_SCHEMA_VERSION, SettingsDocument, profiles_json_schema, profiles_schema_diagnostics,
+    settings_json_schema, settings_schema_diagnostics,
 };
 
 mod retry;
@@ -138,13 +140,18 @@ fn program_name(program: &str) -> &str {
         .unwrap_or(program)
 }
 
-fn find_target_line(path: &Path, target: EditorTarget) -> Option<usize> {
+impl EditorTarget {
+    pub(super) fn pointer(self) -> String {
+        match self {
+            Self::Profile(idx) => format!("/profiles/{idx}"),
+            Self::Subscription(idx) => format!("/subscriptions/{idx}"),
+        }
+    }
+}
+
+fn find_target_line(path: &Path, pointer: &str) -> Option<usize> {
     let content = fs::read_to_string(path).ok()?;
-    let pointer = match target {
-        EditorTarget::Profile(idx) => format!("/profiles/{idx}"),
-        EditorTarget::Subscription(idx) => format!("/subscriptions/{idx}"),
-    };
-    JsonIndex::new(&content).line(&pointer)
+    JsonIndex::new(&content).line(pointer)
 }
 
 fn editor_args(editor: &str, path: &Path, line: usize) -> Vec<String> {
@@ -220,24 +227,41 @@ fn prepared_editor() -> Result<EditorCommand> {
         .wait_until_closed())
 }
 
-pub fn open_profiles_editor(target: Option<EditorTarget>, base: Config) -> Result<EditorOutcome> {
+pub fn open_config_editor(
+    file: ConfigFile,
+    target: Option<String>,
+    config: Config,
+) -> Result<EditorOutcome> {
+    match file {
+        ConfigFile::Profiles => edit_config_file::<ProfilesDocument>(target, config),
+        ConfigFile::Settings => edit_config_file::<SettingsDocument>(target, config),
+    }
+}
+
+fn edit_config_file<D: ConfigDocument>(
+    target: Option<String>,
+    config: Config,
+) -> Result<EditorOutcome> {
     let editor = prepared_editor()?;
-    let runtime_dir = crate::paths::ensure_runtime_dir()?;
-    let path = runtime_dir.join(format!("profiles-edit-{}.json", std::process::id()));
-    let json_schema = write_editor_schema("profiles.schema.json", &config_json_schema());
-    crate::config::save_editor_snapshot_at(&path, &base, json_schema.clone())
+    let path = D::snapshot_path()?;
+    let json_schema = write_editor_schema(D::SCHEMA_FILE_NAME, &D::json_schema());
+    crate::config::save_editor_snapshot_at(D::FILE, &path, &config, json_schema.clone())
         .context("Failed to create editor snapshot")?;
     let snapshot = EditorSnapshot {
         path: path.clone(),
         remove_on_drop: true,
-        recovery_kind: crate::config::recovery::RecoveryKind::InvalidEdit,
+        recovery_kind: crate::config::recovery::RecoveryKind::invalid_edit(D::FILE),
     };
     let mut original = fs::read(&path).context("Failed to read original editor snapshot")?;
     original.push(b'\n');
     crate::atomic_write::write(&path, &original).context("Failed to finish editor snapshot")?;
 
-    let line = target.and_then(|target| find_target_line(&path, target));
-    let mut session = ProfilesEdit { base, json_schema };
+    let line = target.and_then(|pointer| find_target_line(&path, &pointer));
+    let mut session = ConfigEdit {
+        base: D::of(&config),
+        context: config,
+        json_schema,
+    };
     let result = edit_until_saved(&path, &mut session, &editor, line, &original);
     finish_edit(snapshot, &original, result)
 }
@@ -295,23 +319,123 @@ trait EditSession {
     fn rebase(&mut self, current: Self::Document, edited: &Self::Document) -> String;
 }
 
-struct ProfilesEdit {
-    base: Config,
+trait ConfigDocument: Clone + serde::Serialize + serde::de::DeserializeOwned {
+    const FILE: ConfigFile;
+    const SCHEMA_FILE_NAME: &'static str;
+    const SCHEMA_VERSION: u32;
+
+    fn snapshot_path() -> Result<PathBuf>;
+    fn json_schema() -> serde_json::Value;
+    fn schema_diagnostics(document: &serde_json::Value) -> Vec<ConfigDiagnostic>;
+    fn of(config: &Config) -> Self;
+    fn into_config(self, context: &Config) -> Config;
+    fn set_json_schema(&mut self, json_schema: Option<String>);
+    fn edit_command(base: &Self, edited: &Self) -> IpcCommand;
+    fn edit_result(snapshot: StateSnapshot) -> Option<ConfigEditResult<Self>>;
+}
+
+impl ConfigDocument for ProfilesDocument {
+    const FILE: ConfigFile = ConfigFile::Profiles;
+    const SCHEMA_FILE_NAME: &'static str = "profiles.schema.json";
+    const SCHEMA_VERSION: u32 = CURRENT_SCHEMA_VERSION;
+
+    fn snapshot_path() -> Result<PathBuf> {
+        Ok(crate::paths::ensure_runtime_dir()?
+            .join(format!("profiles-edit-{}.json", std::process::id())))
+    }
+
+    fn json_schema() -> serde_json::Value {
+        profiles_json_schema()
+    }
+
+    fn schema_diagnostics(document: &serde_json::Value) -> Vec<ConfigDiagnostic> {
+        profiles_schema_diagnostics(document)
+    }
+
+    fn of(config: &Config) -> Self {
+        config.profiles_document()
+    }
+
+    fn into_config(self, context: &Config) -> Config {
+        context.with_profiles(self)
+    }
+
+    fn set_json_schema(&mut self, json_schema: Option<String>) {
+        self.json_schema = json_schema;
+    }
+
+    fn edit_command(base: &Self, edited: &Self) -> IpcCommand {
+        IpcCommand::ApplyEditedProfiles {
+            base: Box::new(base.clone()),
+            edited: Box::new(edited.clone()),
+        }
+    }
+
+    fn edit_result(snapshot: StateSnapshot) -> Option<ConfigEditResult<Self>> {
+        snapshot.profiles_edit_result
+    }
+}
+
+impl ConfigDocument for SettingsDocument {
+    const FILE: ConfigFile = ConfigFile::Settings;
+    const SCHEMA_FILE_NAME: &'static str = "settings.schema.json";
+    const SCHEMA_VERSION: u32 = SETTINGS_SCHEMA_VERSION;
+
+    fn snapshot_path() -> Result<PathBuf> {
+        Ok(crate::paths::ensure_kvn_runtime_dir()?
+            .join(format!("settings-edit-{}.json", std::process::id())))
+    }
+
+    fn json_schema() -> serde_json::Value {
+        settings_json_schema()
+    }
+
+    fn schema_diagnostics(document: &serde_json::Value) -> Vec<ConfigDiagnostic> {
+        settings_schema_diagnostics(document)
+    }
+
+    fn of(config: &Config) -> Self {
+        config.settings_document()
+    }
+
+    fn into_config(self, context: &Config) -> Config {
+        context.with_settings(self)
+    }
+
+    fn set_json_schema(&mut self, json_schema: Option<String>) {
+        self.json_schema = json_schema;
+    }
+
+    fn edit_command(base: &Self, edited: &Self) -> IpcCommand {
+        IpcCommand::ApplyEditedSettings {
+            base: Box::new(base.clone()),
+            edited: Box::new(edited.clone()),
+        }
+    }
+
+    fn edit_result(snapshot: StateSnapshot) -> Option<ConfigEditResult<Self>> {
+        snapshot.settings_edit_result
+    }
+}
+
+struct ConfigEdit<D> {
+    base: D,
+    context: Config,
     json_schema: Option<String>,
 }
 
-impl EditSession for ProfilesEdit {
-    type Document = Config;
+impl<D: ConfigDocument> EditSession for ConfigEdit<D> {
+    type Document = D;
 
-    fn check(&self, contents: &str, path: &Path) -> Result<Config, EditIssue> {
-        check_edit(contents, path)
+    fn check(&self, contents: &str, _path: &Path) -> Result<D, EditIssue> {
+        check_edit(contents, &self.context)
     }
 
-    fn submit(&self, edited: &Config) -> Result<ConfigEditResult> {
+    fn submit(&self, edited: &D) -> Result<ConfigEditResult<D>> {
         submit_edit(&self.base, edited)
     }
 
-    fn rebase(&mut self, current: Config, edited: &Config) -> String {
+    fn rebase(&mut self, current: D, edited: &D) -> String {
         let document = conflict_document(&self.base, &current, edited, self.json_schema.as_deref());
         self.base = current;
         document
@@ -372,15 +496,16 @@ fn conflict_message(paths: &[String]) -> String {
     )
 }
 
-fn conflict_document(
-    base: &Config,
-    current: &Config,
-    edited: &Config,
+fn conflict_document<D: ConfigDocument>(
+    base: &D,
+    current: &D,
+    edited: &D,
     json_schema: Option<&str>,
 ) -> String {
-    let with_schema = |config: &Config| Config {
-        json_schema: json_schema.map(String::from),
-        ..config.clone()
+    let with_schema = |document: &D| {
+        let mut document = document.clone();
+        document.set_json_schema(json_schema.map(String::from));
+        document
     };
     crate::config::merge::resolution::document(
         &with_schema(base),
@@ -426,29 +551,32 @@ fn add_unreported(
     Err(diagnostics_issue(contents, diagnostics))
 }
 
-fn check_edit(contents: &str, path: &Path) -> Result<Config, EditIssue> {
+fn check_edit<D: ConfigDocument>(contents: &str, context: &Config) -> Result<D, EditIssue> {
     unresolved_conflicts(contents)?;
     let document = serde_json::from_str::<serde_json::Value>(contents).ok();
     let diagnostics = document
         .as_ref()
-        .map(schema_diagnostics)
+        .map(D::schema_diagnostics)
         .unwrap_or_default();
-    if document.is_some_and(|document| !has_current_schema_version(&document)) {
+    if document.is_some_and(|document| !has_schema_version::<D>(&document)) {
         return Err(diagnostics_issue(contents, diagnostics));
     }
-    let mut config = match crate::config::load_config_bytes_read_only(contents.as_bytes(), path) {
-        Ok(config) => config,
-        Err(error) if diagnostics.is_empty() => return Err(load_issue(error)),
+    let mut edited: D = match serde_json::from_str(contents) {
+        Ok(edited) => edited,
+        Err(error) if diagnostics.is_empty() => return Err(load_issue(error.into())),
         Err(_) => return Err(diagnostics_issue(contents, diagnostics)),
     };
-    config.json_schema = None;
-    let more = config.diagnostics();
+    edited.set_json_schema(None);
+    let more = edited
+        .clone()
+        .into_config(context)
+        .file_diagnostics(D::FILE);
     add_unreported(contents, diagnostics, more)?;
-    Ok(config)
+    Ok(edited)
 }
 
-fn has_current_schema_version(document: &serde_json::Value) -> bool {
-    document.get("schema_version") == Some(&CURRENT_SCHEMA_VERSION.into())
+fn has_schema_version<D: ConfigDocument>(document: &serde_json::Value) -> bool {
+    document.get("schema_version") == Some(&D::SCHEMA_VERSION.into())
 }
 
 fn load_issue(error: anyhow::Error) -> EditIssue {
@@ -486,15 +614,12 @@ fn diagnostics_issue(contents: &str, diagnostics: Vec<ConfigDiagnostic>) -> Edit
     }
 }
 
-fn submit_edit(base: &Config, edited: &Config) -> Result<ConfigEditResult> {
+fn submit_edit<D: ConfigDocument>(base: &D, edited: &D) -> Result<ConfigEditResult<D>> {
     let mut client = crate::ipc::IpcClient::connect()?;
-    let request = client.send_request(&IpcCommand::ApplyEditedConfig {
-        base: Box::new(base.clone()),
-        edited: Box::new(edited.clone()),
-    })?;
+    let request = client.send_request(&D::edit_command(base, edited))?;
     let snapshot = client.read_response(request, Duration::from_secs(10))
         .context("Could not confirm whether the configuration was saved; check the current configuration before retrying")?;
-    snapshot.config_edit_result.context(
+    D::edit_result(snapshot).context(
         "The daemon did not return an editor save result; restart kvn before editing again",
     )
 }
@@ -502,17 +627,19 @@ fn submit_edit(base: &Config, edited: &Config) -> Result<ConfigEditResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::profile::Settings;
     use tempfile::TempDir;
+
+    fn check_profiles(contents: &str) -> Result<ProfilesDocument, EditIssue> {
+        check_edit(contents, &Config::default())
+    }
 
     #[test]
     fn invalid_json_reports_its_line_and_accepts_correction() {
-        let path = Path::new("snapshot.json");
-        let issue = check_edit("{\n invalid\n}", path).unwrap_err();
+        let issue = check_profiles("{\n invalid\n}").unwrap_err();
         assert_eq!(issue.line, Some(2));
         assert!(issue.message.contains("line 2"));
-        let fixed = serde_json::to_string(&Config::default()).unwrap();
-        assert!(check_edit(&fixed, path).is_ok());
+        let fixed = serde_json::to_string(&ProfilesDocument::default()).unwrap();
+        assert!(check_profiles(&fixed).is_ok());
     }
 
     #[test]
@@ -525,15 +652,15 @@ mod tests {
             uuid::Uuid::new_v4().to_string(),
         );
         config.profiles = vec![profile.clone(), profile];
-        config.settings.theme = "missing-theme".into();
         config.profiles[0].port = 0;
-        let path = Path::new("snapshot.json");
-        let contents = serde_json::to_string_pretty(&config).unwrap();
+        let contents = serde_json::to_string_pretty(&config.profiles_document()).unwrap();
         let lines: Vec<_> = contents.lines().collect();
-        let issue = check_edit(&contents, path).unwrap_err();
-        let line_of = |key: &str| lines.iter().position(|line| line.contains(key)).unwrap() + 1;
-        let port_line = line_of("\"port\": 0");
-        let theme_line = line_of("\"theme\"");
+        let issue = check_profiles(&contents).unwrap_err();
+        let port_line = lines
+            .iter()
+            .position(|line| line.contains("\"port\": 0"))
+            .unwrap()
+            + 1;
         let duplicate_line = lines
             .iter()
             .enumerate()
@@ -543,25 +670,63 @@ mod tests {
             .0
             + 1;
         assert_eq!(issue.line, Some(port_line));
-        let theme_problem = schema_diagnostics(&serde_json::from_str(&contents).unwrap())
-            .into_iter()
-            .find(|diagnostic| diagnostic.pointer == "/settings/theme")
-            .unwrap()
-            .message;
         assert_eq!(
             issue.message,
             format!(
-                "The configuration has 3 problems:\n\n\
+                "The configuration has 2 problems:\n\n\
                  • line {port_line}: /profiles/0/port: value is less than the minimum of 1\n\
-                 • line {duplicate_line}: Profile 2: duplicate id {}\n\
-                 • line {theme_line}: {theme_problem}",
+                 • line {duplicate_line}: Profile 2: duplicate id {}",
                 config.profiles[0].id,
             )
         );
         config.profiles.pop();
-        config.settings.theme = Settings::default().theme;
         config.profiles[0].port = 443;
-        assert!(check_edit(&serde_json::to_string(&config).unwrap(), path).is_ok());
+        assert!(
+            check_profiles(&serde_json::to_string(&config.profiles_document()).unwrap()).is_ok()
+        );
+    }
+
+    #[test]
+    fn settings_edits_report_problems_of_settings_json_only() {
+        let mut context = Config::default();
+        context
+            .subscriptions
+            .push(crate::test_helpers::subscription_with_hwid(true, None));
+        let mut edited = context.clone();
+        edited.settings.theme = "missing-theme".into();
+        edited.settings.hwid = "abc".into();
+        let contents = serde_json::to_string_pretty(&edited.settings_document()).unwrap();
+        let line_of = |key: &str| {
+            contents
+                .lines()
+                .position(|line| line.contains(key))
+                .unwrap()
+                + 1
+        };
+
+        let issue = check_edit::<SettingsDocument>(&contents, &context).unwrap_err();
+
+        assert!(
+            issue
+                .message
+                .starts_with("The configuration has 2 problems")
+        );
+        assert!(issue.message.contains(&format!(
+            "• line {}: /theme: must be one of",
+            line_of("\"theme\"")
+        )));
+        assert!(
+            issue
+                .message
+                .contains(&format!("• line {}: Subscription 1", line_of("\"hwid\"")))
+        );
+        assert!(
+            check_edit::<ProfilesDocument>(
+                &serde_json::to_string(&context.profiles_document()).unwrap(),
+                &edited
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -576,31 +741,29 @@ mod tests {
       "port": "443",
       "password": "p"
     }
-  ],
-  "settings": { "theme": 7 }
+  ]
 }"#
         .replace("CURRENT", &CURRENT_SCHEMA_VERSION.to_string());
-        let issue = check_edit(&contents, Path::new("snapshot.json")).unwrap_err();
+        let issue = check_profiles(&contents).unwrap_err();
         assert_eq!(issue.line, Some(5));
         assert_eq!(
             issue.message,
-            "The configuration has 3 problems:\n\n\
+            "The configuration has 2 problems:\n\n\
              • line 5: /profiles/0: \"name\" is a required property\n\
-             • line 8: /profiles/0/port: value is not of type \"integer\"\n\
-             • line 12: /settings/theme: value is not of type \"string\""
+             • line 8: /profiles/0/port: value is not of type \"integer\""
         );
     }
 
     #[test]
     fn removing_schema_version_is_rejected_instead_of_rerunning_migrations() {
-        let contents = serde_json::to_string_pretty(&Config::default()).unwrap();
+        let contents = serde_json::to_string_pretty(&ProfilesDocument::default()).unwrap();
         let removed = contents.replacen(
             &format!("  \"schema_version\": {CURRENT_SCHEMA_VERSION},\n"),
             "",
             1,
         );
         assert_ne!(removed, contents);
-        let issue = check_edit(&removed, Path::new("snapshot.json")).unwrap_err();
+        let issue = check_profiles(&removed).unwrap_err();
         assert_eq!(issue.line, Some(1));
         assert!(
             issue
@@ -611,12 +774,12 @@ mod tests {
 
     #[test]
     fn conflict_document_keeps_the_schema_reference() {
-        let base = Config::default();
+        let base = SettingsDocument::default();
         let mut current = base.clone();
         current.settings.theme = "nord".into();
         let mut edited = base.clone();
         edited.settings.theme = "catppuccin".into();
-        let schema = "file:///run/user/1000/kvn/profiles.schema.json";
+        let schema = "file:///run/user/1000/kvn/settings.schema.json";
         let document = conflict_document(&base, &current, &edited, Some(schema));
         assert!(
             document.starts_with(&format!("{{\n  \"$schema\": \"{schema}\",")),
@@ -627,21 +790,18 @@ mod tests {
 
     #[test]
     fn schema_reference_is_accepted_and_not_submitted() {
-        let mut config = Config {
+        let mut document = ProfilesDocument {
             json_schema: Some("file:///run/user/1000/kvn/profiles.schema.json".into()),
-            ..Config::default()
+            ..ProfilesDocument::default()
         };
-        let contents = serde_json::to_string_pretty(&config).unwrap();
-        config.json_schema = None;
-        assert_eq!(
-            check_edit(&contents, Path::new("snapshot.json")).unwrap(),
-            config
-        );
+        let contents = serde_json::to_string_pretty(&document).unwrap();
+        document.json_schema = None;
+        assert_eq!(check_profiles(&contents).unwrap(), document);
     }
 
     #[test]
     fn unresolved_conflicts_explain_how_to_continue() {
-        let issue = check_edit("{\n<<<<<<< YOUR EDIT\n", Path::new("snapshot.json")).unwrap_err();
+        let issue = check_profiles("{\n<<<<<<< YOUR EDIT\n").unwrap_err();
         assert_eq!(issue.line, Some(2));
         assert!(issue.message.contains("remove all conflict markers"));
     }
@@ -666,7 +826,8 @@ mod tests {
             fs::write(&script, format!(
                 "contents=$(cat -- \"$1\")\n{interim_edit}\nprintf '%s\\n' \"$contents\" > \"$1\"\nexit 1\n"
             )).unwrap();
-            let error = open_profiles_editor(None, Config::default()).unwrap_err();
+            let error =
+                open_config_editor(ConfigFile::Profiles, None, Config::default()).unwrap_err();
             assert!(format!("{error:#}").contains("non-zero status"));
             assert!(!recovery.exists());
             assert!(!format!("{error:#}").contains("Edited version saved"));
@@ -682,7 +843,7 @@ mod tests {
         let _visual = crate::test_helpers::EnvVarGuard::set("VISUAL", "true");
 
         assert_eq!(
-            open_profiles_editor(None, Config::default()).unwrap(),
+            open_config_editor(ConfigFile::Profiles, None, Config::default()).unwrap(),
             EditorOutcome::Unchanged
         );
     }
@@ -695,7 +856,7 @@ mod tests {
         let _config = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
         let _visual =
             crate::test_helpers::EnvVarGuard::set("VISUAL", dir.path().join("missing-editor"));
-        let error = open_profiles_editor(None, Config::default()).unwrap_err();
+        let error = open_config_editor(ConfigFile::Profiles, None, Config::default()).unwrap_err();
         assert!(format!("{error:#}").contains("Failed to launch editor"));
         assert!(!dir.path().join("kvn-tui/recovery").exists());
     }
@@ -847,7 +1008,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&config).unwrap();
         fs::write(&path, json).unwrap();
 
-        let line = find_target_line(&path, EditorTarget::Profile(0));
+        let line = find_target_line(&path, &EditorTarget::Profile(0).pointer());
         assert!(line.is_some());
 
         let content = fs::read_to_string(&path).unwrap();
@@ -879,8 +1040,8 @@ mod tests {
         let json = serde_json::to_string_pretty(&config).unwrap();
         fs::write(&path, json).unwrap();
 
-        let line0 = find_target_line(&path, EditorTarget::Profile(0)).unwrap();
-        let line1 = find_target_line(&path, EditorTarget::Profile(1)).unwrap();
+        let line0 = find_target_line(&path, &EditorTarget::Profile(0).pointer()).unwrap();
+        let line1 = find_target_line(&path, &EditorTarget::Profile(1).pointer()).unwrap();
         assert!(line1 > line0);
 
         let content = fs::read_to_string(&path).unwrap();
@@ -906,7 +1067,10 @@ mod tests {
         let json = serde_json::to_string_pretty(&config).unwrap();
         fs::write(&path, json).unwrap();
 
-        assert_eq!(find_target_line(&path, EditorTarget::Profile(5)), None);
+        assert_eq!(
+            find_target_line(&path, &EditorTarget::Profile(5).pointer()),
+            None
+        );
     }
 
     #[test]
@@ -918,7 +1082,10 @@ mod tests {
         let json = serde_json::to_string_pretty(&config).unwrap();
         fs::write(&path, json).unwrap();
 
-        assert_eq!(find_target_line(&path, EditorTarget::Profile(0)), None);
+        assert_eq!(
+            find_target_line(&path, &EditorTarget::Profile(0).pointer()),
+            None
+        );
     }
 
     #[test]
@@ -957,8 +1124,8 @@ mod tests {
         };
         fs::write(&path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
 
-        let line0 = find_target_line(&path, EditorTarget::Subscription(0)).unwrap();
-        let line1 = find_target_line(&path, EditorTarget::Subscription(1)).unwrap();
+        let line0 = find_target_line(&path, &EditorTarget::Subscription(0).pointer()).unwrap();
+        let line1 = find_target_line(&path, &EditorTarget::Subscription(1).pointer()).unwrap();
         let content = fs::read_to_string(&path).unwrap();
         let lines: Vec<_> = content.lines().collect();
 

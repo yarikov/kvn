@@ -90,7 +90,7 @@ fn commit_dns_drafts(model: &mut Model) -> Vec<Effect> {
     if model.config.settings.dns == previous {
         return vec![];
     }
-    let mut effects = vec![Effect::SaveConfig, Effect::BroadcastState];
+    let mut effects = vec![Effect::SaveSettings, Effect::BroadcastState];
     push_status(
         &mut effects,
         model,
@@ -215,7 +215,7 @@ mod tests {
         let effects = handle_dns_settings(&mut model, enter());
         assert_eq!(model.config.settings.dns.current_preset, "google_dot");
         assert!(model.config.settings.dns.fakeip_enabled);
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert!(effects.contains(&Effect::SaveSettings));
         assert!(effects.contains(&Effect::BroadcastState));
         assert!(model.dns_preset_draft.is_none());
         assert!(model.dns_fakeip_draft.is_none());
@@ -231,7 +231,7 @@ mod tests {
 
         let effects = handle_dns_settings(&mut model, enter());
 
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert!(effects.contains(&Effect::SaveSettings));
         assert_eq!(model.config.settings.dns.current_preset, "home");
         assert_eq!(model.config.settings.dns.custom_presets, [home]);
         assert_eq!(model.overlay, Overlay::DnsSettings);
@@ -337,7 +337,7 @@ mod tests {
 
         let effects = handle_dns_settings(&mut model, enter());
 
-        assert!(!effects.contains(&Effect::SaveConfig));
+        assert!(!effects.contains(&Effect::SaveSettings));
         assert_eq!(model.config.settings.dns, before);
         assert_eq!(model.connection, ConnectionState::Connected);
         assert_eq!(model.overlay, Overlay::DnsSettings);

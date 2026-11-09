@@ -74,7 +74,9 @@ impl Default for ConnectivityProbeConfig {
     }
 }
 
-/// Application settings stored alongside profiles.
+const MISSING_HWID: &str = "settings.hwid is missing; stop the daemon (systemctl --user stop kvn-tui.service) and run `kvn config reset --hwid` to create a new one";
+
+/// Application settings stored in settings.json.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
@@ -248,6 +250,9 @@ impl Settings {
 
     pub fn diagnostics(&self) -> Vec<ConfigDiagnostic> {
         let mut diagnostics = Vec::new();
+        if self.hwid.is_empty() {
+            diagnostics.push(ConfigDiagnostic::new("/hwid", MISSING_HWID));
+        }
         diagnostics.extend(
             self.tun_interface_problem()
                 .map(|message| ConfigDiagnostic::new("/tun_interface", message)),
@@ -360,7 +365,7 @@ mod tests {
 
     #[test]
     fn settings_default() {
-        let s = Settings::default();
+        let s = crate::test_helpers::saved_settings();
         assert_eq!(s.tun_interface, "kvn0");
         assert!(!s.auto_connect);
         assert!(!s.kill_switch);
@@ -378,7 +383,7 @@ mod tests {
 
     #[test]
     fn settings_log_level_round_trips_through_json() {
-        let mut s = Settings::default();
+        let mut s = crate::test_helpers::saved_settings();
         s.logs.level = "debug".to_string();
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains("\"logs\":{\"level\":\"debug\""));
@@ -454,7 +459,7 @@ mod tests {
     fn settings_serde_roundtrip_with_kill_switch() {
         let s = Settings {
             kill_switch: true,
-            ..Settings::default()
+            ..crate::test_helpers::saved_settings()
         };
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains("\"kill_switch\":true"));
@@ -477,12 +482,12 @@ mod tests {
 
     #[test]
     fn settings_diagnostics_default_ok() {
-        assert_eq!(Settings::default().diagnostics(), []);
+        assert_eq!(crate::test_helpers::saved_settings().diagnostics(), []);
     }
 
     #[test]
     fn connectivity_probe_defaults_to_https_and_missing_field_is_backward_compatible() {
-        let default = Settings::default();
+        let default = crate::test_helpers::saved_settings();
         assert!(default.connectivity_probe.enabled);
         assert_eq!(
             default.connectivity_probe.url.as_deref(),
@@ -495,7 +500,7 @@ mod tests {
 
     #[test]
     fn new_settings_disable_http_subscriptions_by_default() {
-        let default = Settings::default();
+        let default = crate::test_helpers::saved_settings();
         let restored: Settings = serde_json::from_str("{}").unwrap();
 
         assert!(!default.allow_insecure_http_subscriptions);
@@ -505,7 +510,7 @@ mod tests {
     #[test]
     fn connectivity_probe_disabled_preserves_url_without_validating_it() {
         let settings: Settings =
-            serde_json::from_str(r#"{"connectivity_probe":{"enabled":false,"url":"not a URL"}}"#)
+            serde_json::from_str(r#"{"hwid":"lnx-d415f1264a264924aa76e7f55380b0c7","connectivity_probe":{"enabled":false,"url":"not a URL"}}"#)
                 .unwrap();
         assert!(!settings.connectivity_probe.enabled);
         assert_eq!(
@@ -540,7 +545,7 @@ mod tests {
     #[test]
     fn connectivity_probe_enabled_requires_url() {
         let settings: Settings =
-            serde_json::from_str(r#"{"connectivity_probe":{"enabled":true,"url":null}}"#).unwrap();
+            serde_json::from_str(r#"{"hwid":"lnx-d415f1264a264924aa76e7f55380b0c7","connectivity_probe":{"enabled":true,"url":null}}"#).unwrap();
         let error = crate::test_helpers::single_diagnostic(settings.diagnostics()).message;
         assert!(error.contains("url is required"), "got: {error}");
     }
@@ -575,7 +580,7 @@ mod tests {
     fn settings_diagnostics_rejects_empty_tun_interface() {
         let s = Settings {
             tun_interface: "   ".into(),
-            ..Settings::default()
+            ..crate::test_helpers::saved_settings()
         };
         let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("tun_interface"), "Error was: {}", err);
@@ -585,7 +590,7 @@ mod tests {
     fn settings_diagnostics_rejects_overlong_tun_interface() {
         let s = Settings {
             tun_interface: "a".repeat(16),
-            ..Settings::default()
+            ..crate::test_helpers::saved_settings()
         };
         let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("IFNAMSIZ"), "Error was: {}", err);
@@ -595,7 +600,7 @@ mod tests {
     fn settings_diagnostics_rejects_tun_interface_with_bad_chars() {
         let s = Settings {
             tun_interface: "tun 0".into(),
-            ..Settings::default()
+            ..crate::test_helpers::saved_settings()
         };
         let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("disallowed"), "Error was: {}", err);
@@ -606,7 +611,7 @@ mod tests {
         for tun_interface in ["kvn", "kvn0", "kvn-work"] {
             let s = Settings {
                 tun_interface: tun_interface.into(),
-                ..Settings::default()
+                ..crate::test_helpers::saved_settings()
             };
             assert_eq!(s.diagnostics(), []);
         }
@@ -616,7 +621,7 @@ mod tests {
     fn settings_diagnostics_rejects_tun_interface_without_kvn_prefix() {
         let s = Settings {
             tun_interface: "tun0".into(),
-            ..Settings::default()
+            ..crate::test_helpers::saved_settings()
         };
         let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("must start with \"kvn\""), "Error was: {err}");
@@ -626,7 +631,7 @@ mod tests {
     fn settings_diagnostics_accepts_omarchy_sentinel() {
         let s = Settings {
             theme: OMARCHY_THEME_SENTINEL.into(),
-            ..Settings::default()
+            ..crate::test_helpers::saved_settings()
         };
         assert_eq!(s.diagnostics(), []);
     }
@@ -635,7 +640,7 @@ mod tests {
     fn settings_diagnostics_accepts_bundled_theme() {
         let s = Settings {
             theme: "tokyo-night".into(),
-            ..Settings::default()
+            ..crate::test_helpers::saved_settings()
         };
         assert_eq!(s.diagnostics(), []);
     }
@@ -644,7 +649,7 @@ mod tests {
     fn settings_diagnostics_rejects_unknown_theme() {
         let s = Settings {
             theme: "not-a-bundled-slug".into(),
-            ..Settings::default()
+            ..crate::test_helpers::saved_settings()
         };
         let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("theme"), "Error was: {}", err);
@@ -654,7 +659,7 @@ mod tests {
     fn settings_diagnostics_rejects_empty_theme() {
         let s = Settings {
             theme: String::new(),
-            ..Settings::default()
+            ..crate::test_helpers::saved_settings()
         };
         assert_eq!(
             crate::test_helpers::single_diagnostic(s.diagnostics()).pointer,
@@ -665,7 +670,7 @@ mod tests {
     #[test]
     fn settings_diagnostics_accepts_every_canonical_log_level() {
         for level in LOG_LEVELS {
-            let mut s = Settings::default();
+            let mut s = crate::test_helpers::saved_settings();
             s.logs.level = (*level).to_string();
             assert_eq!(s.diagnostics(), []);
         }
@@ -673,7 +678,7 @@ mod tests {
 
     #[test]
     fn settings_diagnostics_rejects_unknown_log_level() {
-        let mut s = Settings::default();
+        let mut s = crate::test_helpers::saved_settings();
         s.logs.level = "verbose".into();
         let err = crate::test_helpers::single_diagnostic(s.diagnostics()).message;
         assert!(err.contains("logs.level"), "Error was: {}", err);
@@ -682,14 +687,14 @@ mod tests {
     #[test]
     fn settings_diagnostics_rejects_log_line_limits_below_minimum() {
         for value in [0, 1, 999] {
-            let mut app = Settings::default();
+            let mut app = crate::test_helpers::saved_settings();
             app.logs.line_retention.app = value;
             assert_eq!(
                 crate::test_helpers::single_diagnostic(app.diagnostics()).pointer,
                 "/logs/line_retention/app"
             );
 
-            let mut singbox = Settings::default();
+            let mut singbox = crate::test_helpers::saved_settings();
             singbox.logs.line_retention.singbox = value;
             assert_eq!(
                 crate::test_helpers::single_diagnostic(singbox.diagnostics()).pointer,
@@ -700,7 +705,7 @@ mod tests {
 
     #[test]
     fn settings_diagnostics_accepts_minimum_log_line_limits() {
-        let mut settings = Settings::default();
+        let mut settings = crate::test_helpers::saved_settings();
         settings.logs.line_retention.app = MIN_LOG_LINES;
         settings.logs.line_retention.singbox = MIN_LOG_LINES;
         assert_eq!(settings.diagnostics(), []);
@@ -708,7 +713,7 @@ mod tests {
 
     #[test]
     fn settings_diagnostics_rejects_uppercased_log_level() {
-        let mut s = Settings::default();
+        let mut s = crate::test_helpers::saved_settings();
         s.logs.level = "INFO".into();
         assert_eq!(
             crate::test_helpers::single_diagnostic(s.diagnostics()).pointer,

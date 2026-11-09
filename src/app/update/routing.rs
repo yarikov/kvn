@@ -23,7 +23,7 @@ pub(in crate::app::update) fn commit_routing_mode(model: &mut Model, id: &str) -
     let changed = select_mode(model, id);
     let mut effects =
         super::onboarding::outcome(model, super::onboarding::Trigger::RoutingCommitted);
-    effects.push(Effect::SaveConfig);
+    effects.push(Effect::SaveSettings);
     let reconnecting = changed && reconnect_to_apply_mode(model, &mut effects);
     let name = model.routing.mode_name(id);
     let status = if reconnecting {
@@ -56,7 +56,7 @@ pub(in crate::app::update) fn commit_routing_settings(model: &mut Model, id: &st
     if !select_mode(model, id) {
         return vec![];
     }
-    let mut effects = vec![Effect::SaveConfig, Effect::BroadcastState];
+    let mut effects = vec![Effect::SaveSettings, Effect::BroadcastState];
     push_status(
         &mut effects,
         model,

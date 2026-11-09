@@ -3,6 +3,7 @@ mod dns;
 mod entry;
 mod json_schema;
 mod migrate;
+mod profiles_document;
 mod protocol;
 mod protocol_config;
 mod protocol_options;
@@ -10,6 +11,7 @@ mod routing;
 mod schedule;
 mod schema;
 mod settings;
+mod settings_document;
 mod share_link;
 mod subscription;
 mod tls;
@@ -22,7 +24,11 @@ pub(crate) use dns::is_ip_prefix;
 pub use dns::{ActiveDns, DnsConfig, DnsPreset, DnsRule, DnsServer, FakeIpServer};
 pub use entry::Profile;
 pub(crate) use json_schema::schema_diagnostics_against;
-pub use json_schema::{config_json_schema, schema_diagnostics};
+pub use json_schema::{
+    profiles_json_schema, profiles_schema_diagnostics, settings_json_schema,
+    settings_schema_diagnostics,
+};
+pub use profiles_document::ProfilesDocument;
 pub use protocol::Protocol;
 pub use protocol_config::{
     AnytlsConfig, HttpConfig, Hysteria2Config, NaiveConfig, ProtocolConfig, ShadowsocksConfig,
@@ -36,11 +42,12 @@ pub use routing::{GeoRegion, GeoRouting, RoutingFallback};
 pub use schedule::{
     GeoAutoUpdate, RetryState, SubscriptionAutoUpdate, next_update_window_date, update_window_open,
 };
-pub use schema::{CURRENT_SCHEMA_VERSION, Config};
+pub use schema::{CURRENT_SCHEMA_VERSION, Config, ConfigFile};
 pub use settings::{
     ConnectivityProbeConfig, IconSet, OMARCHY_THEME_SENTINEL, Settings, normalized_log_level,
     parse_connectivity_probe_url,
 };
+pub use settings_document::{SETTINGS_SCHEMA_VERSION, SettingsDocument};
 pub(crate) use share_link::{
     FINALMASK_PARAM, decode_b64_lenient, read_hysteria2_finalmask, read_stream_finalmask,
 };

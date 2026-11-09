@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
 
+use super::profile::ConfigFile;
+
 const RETENTION_PER_KIND: usize = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -14,17 +16,44 @@ pub(crate) enum RecoveryKind {
     Migration,
     RoutingInvalidEdit,
     RoutingArchive,
+    SettingsConflict,
+    SettingsInvalidEdit,
+    SettingsArchive,
 }
 
 impl RecoveryKind {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 9] = [
         Self::Conflict,
         Self::InvalidEdit,
         Self::Archive,
         Self::Migration,
         Self::RoutingInvalidEdit,
         Self::RoutingArchive,
+        Self::SettingsConflict,
+        Self::SettingsInvalidEdit,
+        Self::SettingsArchive,
     ];
+
+    pub(crate) fn conflict(file: ConfigFile) -> Self {
+        match file {
+            ConfigFile::Profiles => Self::Conflict,
+            ConfigFile::Settings => Self::SettingsConflict,
+        }
+    }
+
+    pub(crate) fn invalid_edit(file: ConfigFile) -> Self {
+        match file {
+            ConfigFile::Profiles => Self::InvalidEdit,
+            ConfigFile::Settings => Self::SettingsInvalidEdit,
+        }
+    }
+
+    pub(crate) fn archive(file: ConfigFile) -> Self {
+        match file {
+            ConfigFile::Profiles => Self::Archive,
+            ConfigFile::Settings => Self::SettingsArchive,
+        }
+    }
 
     fn prefix(self) -> &'static str {
         match self {
@@ -34,6 +63,9 @@ impl RecoveryKind {
             Self::Migration => "profiles.json.before-migration-",
             Self::RoutingInvalidEdit => "routing.json.conflict-invalid-",
             Self::RoutingArchive => "routing.json.invalid-",
+            Self::SettingsConflict => "settings.json.conflict-",
+            Self::SettingsInvalidEdit => "settings.json.conflict-invalid-",
+            Self::SettingsArchive => "settings.json.invalid-",
         }
     }
 }
@@ -46,6 +78,9 @@ fn classify(name: &str) -> Option<RecoveryKind> {
         RecoveryKind::Migration,
         RecoveryKind::RoutingInvalidEdit,
         RecoveryKind::RoutingArchive,
+        RecoveryKind::SettingsInvalidEdit,
+        RecoveryKind::SettingsConflict,
+        RecoveryKind::SettingsArchive,
     ]
     .into_iter()
     .find(|kind| has_generated_suffix(name, kind.prefix()))

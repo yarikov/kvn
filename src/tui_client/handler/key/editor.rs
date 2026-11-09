@@ -8,6 +8,7 @@ use crossterm::terminal::{
 };
 
 use crate::app::model::{AppStatus, RoutingRulesEdit};
+use crate::config::profile::ConfigFile;
 use crate::config::routing::RoutingConfig;
 use crate::tui_client::{OSC_POINTER_DEFAULT, editor, input};
 
@@ -17,6 +18,9 @@ use super::super::toast::ToastKey;
 
 pub(super) enum EditedFile {
     Profiles,
+    Settings {
+        pointer: Option<&'static str>,
+    },
     Routing,
     RoutingRulesConflict {
         edit: RoutingRulesEdit,
@@ -29,6 +33,7 @@ impl EditedFile {
     fn label(&self) -> &'static str {
         match self {
             Self::Profiles => "Configuration",
+            Self::Settings { .. } => "Settings",
             Self::Routing | Self::RoutingRulesConflict { .. } => "Routing configuration",
         }
     }
@@ -43,9 +48,17 @@ pub(super) fn open(state: &mut ClientLoop, file: EditedFile) -> Result<bool> {
     let label = file.label();
     let result = leave_terminal(state).and_then(|()| match file {
         EditedFile::Profiles => {
-            let target = state.model.selected_row().map(editor::EditorTarget::from);
-            editor::open_profiles_editor(target, state.model.config.clone())
+            let target = state
+                .model
+                .selected_row()
+                .map(|row| editor::EditorTarget::from(row).pointer());
+            editor::open_config_editor(ConfigFile::Profiles, target, state.model.config.clone())
         }
+        EditedFile::Settings { pointer } => editor::open_config_editor(
+            ConfigFile::Settings,
+            pointer.map(String::from),
+            state.model.config.clone(),
+        ),
         EditedFile::Routing => editor::open_routing_editor(
             state.model.shown_routing_mode(),
             state.model.routing_settings_row(),

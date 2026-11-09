@@ -381,7 +381,8 @@ mod tests {
             ipc_version: IPC_VERSION,
             supports_viewport_scroll: true,
             response_to: None,
-            config_edit_result: None,
+            profiles_edit_result: None,
+            settings_edit_result: None,
             routing_edit_result: None,
             scroll_result: None,
             connection: ConnectionState::Idle,
@@ -502,9 +503,11 @@ mod tests {
     #[test]
     fn snapshots_without_editor_results_remain_compatible() {
         let value = serde_json::to_value(sample_snapshot()).unwrap();
-        assert!(value.get("config_edit_result").is_none());
+        assert!(value.get("profiles_edit_result").is_none());
+        assert!(value.get("settings_edit_result").is_none());
         let snapshot: StateSnapshot = serde_json::from_value(value).unwrap();
-        assert!(snapshot.config_edit_result.is_none());
+        assert!(snapshot.profiles_edit_result.is_none());
+        assert!(snapshot.settings_edit_result.is_none());
     }
 
     #[test]
