@@ -156,6 +156,22 @@ pub const RULE_SET_BYTES: &[u8] = b"SRS\x01rules";
 
 pub const TEST_UUID: &str = "11111111-1111-1111-1111-111111111111";
 
+pub const TEST_HWID: &str = "lnx-d415f1264a264924aa76e7f55380b0c7";
+
+pub fn saved_settings() -> crate::config::profile::Settings {
+    crate::config::profile::Settings {
+        hwid: TEST_HWID.into(),
+        ..Default::default()
+    }
+}
+
+pub fn saved_config() -> Config {
+    Config {
+        settings: saved_settings(),
+        ..Default::default()
+    }
+}
+
 pub fn sample_profiles() -> Vec<Profile> {
     vec![
         Profile::new_vless(
@@ -182,7 +198,7 @@ pub fn sample_profiles() -> Vec<Profile> {
 pub fn model_with_profiles(profiles: Vec<Profile>) -> Model {
     let config = Config {
         profiles,
-        ..Default::default()
+        ..saved_config()
     };
     Model::test_new(config)
 }

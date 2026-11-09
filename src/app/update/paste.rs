@@ -46,7 +46,7 @@ pub(in crate::app::update) fn handle_clipboard_text(model: &mut Model, text: &st
             }
             let name = profile.name.clone();
             model.add_profile(profile);
-            let mut effects = vec![Effect::SaveConfig];
+            let mut effects = vec![Effect::SaveProfiles];
             push_status(
                 &mut effects,
                 model,
@@ -103,7 +103,7 @@ fn add_and_fetch_subscription(model: &mut Model, url: &str) -> Vec<Effect> {
         &model.config,
         model.config.subscriptions.len().saturating_sub(1),
     );
-    let mut effects = vec![Effect::SaveConfig];
+    let mut effects = vec![Effect::SaveProfiles];
     if !download_allowed(model) {
         push_download_blocked(&mut effects, model, DownloadKind::Subscription(id));
         return effects;
@@ -144,7 +144,7 @@ mod tests {
         assert_eq!(model.config.profiles.len(), 1);
         assert_eq!(
             effects,
-            vec![Effect::SaveConfig, app_log_info("Profile imported: Test")]
+            vec![Effect::SaveProfiles, app_log_info("Profile imported: Test")]
         );
         assert!(model.status_text().contains("Profile imported"));
 
@@ -174,7 +174,10 @@ mod tests {
         ));
         assert_eq!(
             effects,
-            vec![Effect::SaveConfig, app_log_info("Profile imported: Office")]
+            vec![
+                Effect::SaveProfiles,
+                app_log_info("Profile imported: Office")
+            ]
         );
     }
 
@@ -200,7 +203,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                Effect::SaveConfig,
+                Effect::SaveProfiles,
                 Effect::UpdateSubscription {
                     id: model.config.subscriptions[0].id
                 },
@@ -227,7 +230,7 @@ mod tests {
         let effects = handle_clipboard_text(&mut model, "http://example.com/secret-token");
 
         assert_eq!(model.config.subscriptions.len(), 1);
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert!(effects.contains(&Effect::SaveProfiles));
         assert!(effects.iter().any(|effect| matches!(
             effect,
             Effect::UpdateSubscription { id }
@@ -255,7 +258,7 @@ mod tests {
     fn paste_plain_text_shows_error_without_side_effects() {
         let mut model = model_with_profiles(vec![]);
         let effects = handle_clipboard_text(&mut model, "m");
-        assert!(!effects.contains(&Effect::SaveConfig));
+        assert!(!effects.contains(&Effect::SaveProfiles));
         assert_eq!(model.overlay, crate::app::model::Overlay::None);
         assert!(model.config.profiles.is_empty());
         assert!(model.status_is_error());
@@ -299,7 +302,7 @@ mod tests {
         ));
         assert_eq!(
             effects,
-            vec![Effect::SaveConfig, app_log_info("Profile imported: Test")]
+            vec![Effect::SaveProfiles, app_log_info("Profile imported: Test")]
         );
     }
 
@@ -311,7 +314,7 @@ mod tests {
 
         assert_eq!(model.config.subscriptions.len(), 1);
         assert!(model.subscription_updates.is_empty());
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert!(effects.contains(&Effect::SaveProfiles));
         assert!(
             !effects
                 .iter()

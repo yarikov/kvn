@@ -39,7 +39,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   recorded as `Omarchy` but resumed without that card.
 - Progress lives in `$XDG_STATE_HOME/kvn/onboarding.json` as
   `OnboardingState { step, completed_at }` — deliberately outside the versioned
-  `profiles.json` schema, like the support prompt. `Model.onboarding` wraps it in
+  `profiles.json` and `settings.json` schemas, like the support prompt. `Model.onboarding` wraps it in
   `OnboardingProgress`, adding the session-local `awaiting` (a handoff is in
   flight) and `card_pending` (a result arrived; show the card when the screen is
   free). The client reads the active card from `Overlay::Onboarding(step)`;
@@ -200,9 +200,9 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   `config_io::restore_onboarding_after_failure` reverts `state`, clears
   `awaiting` (the handed-off screen is gone and will never report again) and
   either restores the card directly or sets `card_pending`;
-  `config_io::onboarding_transition` hands the same value to the `SaveConfig`
-  error path. Settings the same update already
-  committed are never rolled back. On the `SaveConfig` error path in
+  `config_io::onboarding_transition` hands the same value to the
+  `SaveProfiles` / `SaveSettings` error path. Settings the same update already
+  committed are never rolled back. On that error path in
   `daemon/config_io.rs`, the revert is gated on `config_io::onboarding_transition`, read
   before the effect list is filtered — an unrelated failed save must not reopen
   a finished tour.
@@ -211,7 +211,8 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   `onboarding.is_complete()`. `support_prompt::load_for_daemon` keeps a
   start-time path only as crash recovery between the two writes.
 - **First-install defaults.** `Config::for_first_run` (used when
-  `profiles.json` does not exist and by `kvn config reset`) sets
+  neither `profiles.json` nor `settings.json` exists, its settings when only
+  `settings.json` is missing, and by `kvn config reset --settings`) sets
   `geo_routing.auto_update` to `Every7d`, picks the icon set for the desktop and,
   under Omarchy, the `omarchy` theme sentinel; a pasted subscription gets
   `Every1d`. Every `Default`/`#[serde(default)]`
@@ -231,8 +232,8 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
 - Every other path bypasses the dialog and calls the `set_*` reducers directly: the Connection settings screen (`Space c`, already an explicit two-step edit), IPC `SetAutoConnect` / `SetKillSwitch` (the Omarchy plugin, `kvn disable --killswitch`, `sudo kvn clean --polkit/--killswitch`), and startup reconciliation — headless callers must never block on a TUI dialog.
 
 ## Auto-Connect
-- `settings.auto_connect` (persisted in `profiles.json`) controls whether the app reconnects to the last used profile on startup.
-- `settings.last_connected_profile` stores the UUID of the most recently connected profile. It is updated in `update/connection.rs` on `Msg::Connected` and saved via `Effect::PersistConfirmedState`.
+- `settings.auto_connect` (persisted in `settings.json`) controls whether the app reconnects to the last used profile on startup.
+- `settings.last_connected_profile` stores the UUID of the most recently connected profile. It is persisted in `profiles.json`, not `settings.json`, because it names a profile; in memory and in the IPC snapshot it stays in `settings`. It is updated in `update/connection.rs` on `Msg::Connected` and saved via `Effect::PersistConfirmedProfiles`.
 - `Model::new()` calls `resolve_startup_state()` to check `auto_connect` + `last_connected_profile`. If both are set and the profile exists, the model starts in `ConnectionState::Connecting` with that profile pre-selected, and sets the `Connection` status `Auto-connecting to {name}…`; it is set before any TUI attaches, so no toast shows it.
 - The user can toggle `auto_connect` at runtime with the `Shift+A` keybinding, the Connection settings overlay, or IPC `SetAutoConnect`. Disabling saves immediately. Enabling first emits `Effect::CheckAutoConnectPolkit` (with `Model::auto_connect_pending` set): the daemon runs `doctor::polkit_readiness()` and replies with `Msg::AutoConnectPolkitChecked`. The flag is flipped and saved only when passwordless polkit is set up and the `kvn-tui` group is active in the daemon's session; otherwise auto-connect stays off and the reason is shown as an error toast and written to the app log.
 - `sudo kvn clean --polkit` / `--killswitch` connect to the invoking user's daemon (`/run/user/$SUDO_UID/kvn-tui.sock`) and send `SetAutoConnect`/`SetKillSwitch { enabled: false }`, so the daemon saves the config as the user. If the daemon is not running, startup reconciliation handles it: `reconcile_kill_switch_state` for the kill switch, and `reconcile_auto_connect_state` turns auto-connect off (before the first tick connects) when `doctor::polkit_authorization_denied()`.

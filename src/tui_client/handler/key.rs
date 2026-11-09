@@ -69,6 +69,11 @@ fn overlay(state: &mut ClientLoop, key: KeyEvent, completes_go_first: bool) -> R
         state.needs_redraw = true;
         return Ok(Flow::Continue);
     }
+    if key.code == KeyCode::Char('e') && edits_settings_file(&state.model.overlay) {
+        let pointer = state.model.settings_file_pointer();
+        editor::open(state, editor::EditedFile::Settings { pointer })?;
+        return Ok(Flow::Continue);
+    }
     if state.model.overlay == Overlay::SettingsMenu(SettingsMenuPage::Routing) {
         match key.code {
             KeyCode::Char('e') => {
@@ -84,6 +89,15 @@ fn overlay(state: &mut ClientLoop, key: KeyEvent, completes_go_first: bool) -> R
     }
     state.forward_key(key)?;
     Ok(Flow::Continue)
+}
+
+fn edits_settings_file(overlay: &Overlay) -> bool {
+    matches!(
+        overlay,
+        Overlay::SettingsMenu(
+            SettingsMenuPage::Root | SettingsMenuPage::Connection | SettingsMenuPage::Interface
+        ) | Overlay::DnsSettings
+    )
 }
 
 fn sources(state: &mut ClientLoop, key: KeyEvent) -> Result<Flow> {

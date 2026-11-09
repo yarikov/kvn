@@ -21,7 +21,8 @@ use crate::app::update::update;
 use crate::ipc::{IpcServer, cleanup_socket};
 use crate::runtime_lock::RuntimeLock;
 
-use config_io::commit_config_change;
+use crate::config::profile::ConfigFile;
+use config_io::commit_file_change;
 use effect::{EditReply, execute_daemon_effect};
 use process_slot::{ProcessSlot, lock_process_slot, spawn_ticker, stop_retired};
 
@@ -140,10 +141,17 @@ fn run_loop(
             Msg::IpcRequest { request_id, .. } => Some(*request_id),
             _ => None,
         };
-        let config_edit_requested = matches!(
+        let profiles_edit_requested = matches!(
             &msg,
             Msg::IpcRequest {
-                command: IpcCommand::ApplyEditedConfig { .. },
+                command: IpcCommand::ApplyEditedProfiles { .. },
+                ..
+            }
+        );
+        let settings_edit_requested = matches!(
+            &msg,
+            Msg::IpcRequest {
+                command: IpcCommand::ApplyEditedSettings { .. },
                 ..
             }
         );
@@ -154,8 +162,10 @@ fn run_loop(
                 ..
             }
         );
-        let edit_requested = config_edit_requested || routing_edit_requested;
-        let mut config_edit_result = config_edit_requested.then(missing_edit_result);
+        let edit_requested =
+            profiles_edit_requested || settings_edit_requested || routing_edit_requested;
+        let mut profiles_edit_result = profiles_edit_requested.then(missing_edit_result);
+        let mut settings_edit_result = settings_edit_requested.then(missing_edit_result);
         let mut routing_edit_result = routing_edit_requested.then(missing_edit_result);
         let before = config_io::UpdateBaseline::capture(model);
         let mut effects = update(model, msg);
@@ -171,8 +181,10 @@ fn run_loop(
                     | Effect::DownloadRuleSets { .. }
                     | Effect::ResetGeoUpdateSchedules
                     | Effect::WriteState
-                    | Effect::SaveConfig
-                    | Effect::PersistConfirmedState
+                    | Effect::SaveProfiles
+                    | Effect::SaveSettings
+                    | Effect::PersistConfirmedProfiles
+                    | Effect::PersistConfirmedSettings
                     | Effect::PersistSupportPrompt { .. }
                     | Effect::PersistOnboarding { .. }
                     | Effect::CommitEditedConfig { .. }
@@ -188,8 +200,19 @@ fn run_loop(
 
         for effect in effects {
             match execute_daemon_effect(effect, tx, model, shared, edit_requested) {
-                Some(EditReply::Config(result)) if config_edit_requested => {
-                    config_edit_result = Some(result);
+                Some(EditReply::Config {
+                    file: ConfigFile::Profiles,
+                    result,
+                }) if profiles_edit_requested => {
+                    profiles_edit_result =
+                        Some(result.map_current(|current| current.profiles_document()));
+                }
+                Some(EditReply::Config {
+                    file: ConfigFile::Settings,
+                    result,
+                }) if settings_edit_requested => {
+                    settings_edit_result =
+                        Some(result.map_current(|current| current.settings_document()));
                 }
                 Some(EditReply::Routing(result)) if routing_edit_requested => {
                     routing_edit_result = Some(result);
@@ -204,7 +227,8 @@ fn run_loop(
 
         if should_broadcast {
             let mut snapshot = build_snapshot(model, log_session_offsets, response_to);
-            snapshot.config_edit_result = config_edit_result;
+            snapshot.profiles_edit_result = profiles_edit_result;
+            snapshot.settings_edit_result = settings_edit_result;
             snapshot.routing_edit_result = routing_edit_result;
             if response_to.is_some() {
                 snapshot.scroll_result = model.scroll_result.take();
@@ -238,7 +262,7 @@ fn reconcile_kill_switch_state(model: &mut Model) {
         let base = model.config.clone();
         let mut edited = base.clone();
         edited.settings.kill_switch = active;
-        match commit_config_change(model, &base, &edited) {
+        match commit_file_change(model, ConfigFile::Settings, &base, &edited) {
             Ok(config) => model.replace_config_preserving_selection(config),
             Err(e) => {
                 tracing::warn!("Failed to persist reconciled kill switch state: {}", e);
@@ -263,7 +287,7 @@ fn reconcile_auto_connect_state(model: &mut Model) {
     let base = model.config.clone();
     let mut edited = base.clone();
     edited.settings.auto_connect = false;
-    match commit_config_change(model, &base, &edited) {
+    match commit_file_change(model, ConfigFile::Settings, &base, &edited) {
         Ok(config) => model.replace_config_preserving_selection(config),
         Err(e) => {
             tracing::warn!("Failed to persist disabled auto-connect: {}", e);
@@ -297,7 +321,8 @@ pub(crate) fn build_snapshot(
         ipc_version: crate::ipc::IPC_VERSION,
         supports_viewport_scroll: true,
         response_to,
-        config_edit_result: None,
+        profiles_edit_result: None,
+        settings_edit_result: None,
         routing_edit_result: None,
         scroll_result: None,
         connection: model.connection,
@@ -384,7 +409,6 @@ mod tests {
     fn editor_requests_report_commit_results_without_leaking_into_later_snapshots() {
         use super::*;
         use crate::app::msg::ConfigEditResult;
-        use crate::config::profile::Config;
         use crate::ipc::IpcClient;
         use crate::test_helpers::{ENV_LOCK, EnvVarGuard};
         use std::time::Duration;
@@ -393,7 +417,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let _runtime = EnvVarGuard::set("XDG_RUNTIME_DIR", dir.path());
         let _config = EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
-        let base = Config::default();
+        let base = crate::test_helpers::saved_config();
         let mut current = base.clone();
         current.settings.theme = "nord".into();
         crate::config::save_config(&current).unwrap();
@@ -423,25 +447,26 @@ mod tests {
         };
         let mut edited = base.clone();
         edited.settings.theme = "catppuccin".into();
-        let response = request(IpcCommand::ApplyEditedConfig {
-            base: Box::new(base),
-            edited: Box::new(edited.clone()),
+        let response = request(IpcCommand::ApplyEditedSettings {
+            base: Box::new(base.settings_document()),
+            edited: Box::new(edited.settings_document()),
         });
         assert!(
-            matches!(response.config_edit_result, Some(ConfigEditResult::Conflict { current: actual, paths }) if *actual == current && paths == vec!["settings.theme"])
+            matches!(response.settings_edit_result, Some(ConfigEditResult::Conflict { current: actual, paths }) if *actual == current.settings_document() && paths == vec!["theme"])
         );
         let response = request(IpcCommand::Attach);
-        assert!(response.config_edit_result.is_none());
-        let response = request(IpcCommand::ApplyEditedConfig {
-            base: Box::new(current),
-            edited: Box::new(edited.clone()),
+        assert!(response.settings_edit_result.is_none());
+        let response = request(IpcCommand::ApplyEditedSettings {
+            base: Box::new(current.settings_document()),
+            edited: Box::new(edited.settings_document()),
         });
         assert!(matches!(
-            response.config_edit_result,
+            response.settings_edit_result,
             Some(ConfigEditResult::Saved)
         ));
         assert_eq!(
-            crate::config::load_config_at_read_only(&crate::paths::profiles_path().unwrap())
+            crate::config::load_config_read_only()
+                .into_result()
                 .unwrap()
                 .settings
                 .theme,
@@ -511,7 +536,7 @@ mod tests {
             response.routing_edit_result,
             Some(RoutingEditResult::Saved)
         ));
-        assert!(response.config_edit_result.is_none());
+        assert!(response.profiles_edit_result.is_none());
         assert_eq!(response.routing, edited);
         assert!(request(IpcCommand::Attach).routing_edit_result.is_none());
         client.send(&IpcCommand::Quit).unwrap();

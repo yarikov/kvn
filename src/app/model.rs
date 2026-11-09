@@ -4,6 +4,7 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use crate::config::load_config;
+use crate::config::profile::ConfigFile;
 use crate::config::profile::{Config, Profile};
 use crate::config::routing::{ModeRule, RoutingConfig};
 use crate::ui::styles::Theme;
@@ -62,6 +63,15 @@ pub enum SettingsMenuEntry {
 
 impl SettingsMenuEntry {
     pub const ALL: [Self; 4] = [Self::Connection, Self::Dns, Self::Interface, Self::Routing];
+
+    pub fn settings_pointer(self) -> &'static str {
+        match self {
+            Self::Connection => "/auto_connect",
+            Self::Dns => "/dns",
+            Self::Interface => "/theme",
+            Self::Routing => "/geo_routing",
+        }
+    }
 
     pub fn key(self) -> char {
         match self {
@@ -366,8 +376,8 @@ pub struct Model {
     pub config: Config,
     pub routing: RoutingConfig,
     pub routing_error: Option<String>,
-    pub config_persistence_blocked: bool,
-    pub unsaved_state_merge_base: Option<Config>,
+    pub profiles_persistence: FilePersistence,
+    pub settings_persistence: FilePersistence,
     pub support_prompt: crate::support_prompt::SupportPromptState,
     pub onboarding: crate::onboarding::OnboardingProgress,
     pub integration_setup: crate::onboarding::IntegrationSetup,
@@ -412,6 +422,21 @@ pub struct Model {
     pub profile_latencies: HashMap<Uuid, Option<u64>>,
     pub testing_profiles: HashSet<Uuid>,
     pub pending_tests: VecDeque<Uuid>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FilePersistence {
+    pub blocked: bool,
+    pub unsaved_merge_base: Option<Config>,
+}
+
+impl FilePersistence {
+    fn after_load(error: Option<&anyhow::Error>) -> Self {
+        Self {
+            blocked: error.is_some(),
+            unsaved_merge_base: None,
+        }
+    }
 }
 
 fn note_startup_error(startup_error: &mut Option<String>, message: String) {
@@ -544,6 +569,32 @@ impl Model {
         }
     }
 
+    pub fn persistence(&self, file: ConfigFile) -> &FilePersistence {
+        match file {
+            ConfigFile::Profiles => &self.profiles_persistence,
+            ConfigFile::Settings => &self.settings_persistence,
+        }
+    }
+
+    pub fn persistence_mut(&mut self, file: ConfigFile) -> &mut FilePersistence {
+        match file {
+            ConfigFile::Profiles => &mut self.profiles_persistence,
+            ConfigFile::Settings => &mut self.settings_persistence,
+        }
+    }
+
+    pub fn persistence_blocked(&self, file: ConfigFile) -> bool {
+        self.persistence(file).blocked
+    }
+
+    pub fn unsaved_merge_base(&self, file: ConfigFile) -> Option<&Config> {
+        self.persistence(file).unsaved_merge_base.as_ref()
+    }
+
+    pub fn unsaved_merge_base_mut(&mut self, file: ConfigFile) -> &mut Option<Config> {
+        &mut self.persistence_mut(file).unsaved_merge_base
+    }
+
     pub fn clear_error_status(&mut self, status_revision: u64) -> bool {
         if self.status_revision != status_revision
             || !matches!(self.status, Some(AppStatus::Error(_)))
@@ -556,33 +607,26 @@ impl Model {
 
     pub fn new() -> anyhow::Result<Self> {
         let mut startup_error: Option<String> = None;
-        let mut config_persistence_blocked = false;
-        let mut config = match load_config() {
-            Ok(cfg) => match cfg.validate() {
-                Ok(()) => cfg,
-                Err(e) => {
-                    note_startup_error(
-                        &mut startup_error,
-                        format!("Configuration load failed: invalid config; using defaults: {e:#}"),
-                    );
-                    config_persistence_blocked = true;
-                    Config::default()
-                }
-            },
-            Err(e) => {
+        let load = load_config();
+        for file in [ConfigFile::Profiles, ConfigFile::Settings] {
+            if let Some(error) = load.error(file) {
                 note_startup_error(
                     &mut startup_error,
-                    format!("Configuration load failed; using defaults: {e:#}"),
+                    format!(
+                        "Configuration load failed: {} is invalid; using defaults: {error:#}",
+                        file.name()
+                    ),
                 );
-                config_persistence_blocked = true;
-                Config::default()
             }
-        };
+        }
+        let profiles_persistence = FilePersistence::after_load(load.profiles_error.as_ref());
+        let settings_persistence = FilePersistence::after_load(load.settings_error.as_ref());
+        let mut config = load.config;
         let predates_mode_selection = config.settings.geo_routing.predates_mode_selection();
         let mut routing_error = None;
         let mut routing = match crate::config::load_routing(
             &config.settings.geo_routing,
-            !config_persistence_blocked,
+            !settings_persistence.blocked,
         ) {
             Ok(routing) => routing,
             Err(e) => {
@@ -597,7 +641,7 @@ impl Model {
             }
         };
         config.settings.geo_routing.forget_legacy_regions();
-        if routing_error.is_none() && !config_persistence_blocked {
+        if routing_error.is_none() && !settings_persistence.blocked {
             match crate::config::move_service_routes(&mut config, &mut routing) {
                 Ok(true) => {
                     tracing::info!("Moved the Steam and Telegram overrides into routing.json rules")
@@ -657,8 +701,8 @@ impl Model {
             config,
             routing,
             routing_error,
-            config_persistence_blocked,
-            unsaved_state_merge_base: None,
+            profiles_persistence,
+            settings_persistence,
             support_prompt,
             onboarding,
             integration_setup: crate::onboarding::IntegrationSetup::default(),
@@ -731,8 +775,8 @@ impl Model {
             config,
             routing: RoutingConfig::default(),
             routing_error: None,
-            config_persistence_blocked: false,
-            unsaved_state_merge_base: None,
+            profiles_persistence: FilePersistence::default(),
+            settings_persistence: FilePersistence::default(),
             support_prompt: crate::support_prompt::SupportPromptState::default(),
             onboarding: crate::onboarding::OnboardingProgress::new(
                 crate::onboarding::OnboardingState::default(),
@@ -964,6 +1008,28 @@ impl Model {
         self.settings_menu_selected.min(last)
     }
 
+    pub fn settings_file_pointer(&self) -> Option<&'static str> {
+        let selected = self.settings_menu_selected;
+        match self.overlay {
+            Overlay::SettingsMenu(SettingsMenuPage::Root) => SettingsMenuEntry::ALL
+                .get(selected)
+                .map(|entry| entry.settings_pointer()),
+            Overlay::SettingsMenu(SettingsMenuPage::Connection) => {
+                Some(["/auto_connect", "/kill_switch"][selected.min(1)])
+            }
+            Overlay::SettingsMenu(SettingsMenuPage::Interface) => {
+                Some(["/theme", "/icons"][selected.min(1)])
+            }
+            Overlay::DnsSettings => {
+                DnsSettingsItem::from_index(self.dns_selected).map(|item| match item {
+                    DnsSettingsItem::Preset => "/dns/current_preset",
+                    DnsSettingsItem::ToggleFakeIp => "/dns/fakeip_enabled",
+                })
+            }
+            _ => None,
+        }
+    }
+
     pub fn routing_settings_row(&self) -> RoutingSettingsRow {
         let rules = self.shown_mode_rules().len();
         match self.routing_settings_selected() {
@@ -1072,8 +1138,8 @@ impl Model {
             config,
             routing: RoutingConfig::default(),
             routing_error: None,
-            config_persistence_blocked: false,
-            unsaved_state_merge_base: None,
+            profiles_persistence: FilePersistence::default(),
+            settings_persistence: FilePersistence::default(),
             support_prompt: crate::support_prompt::SupportPromptState::default(),
             onboarding: crate::onboarding::OnboardingProgress::default(),
             integration_setup: crate::onboarding::IntegrationSetup::default(),
@@ -1135,6 +1201,40 @@ impl Model {
 mod tests {
     use super::*;
     use crate::test_helpers::*;
+
+    #[test]
+    fn settings_file_pointer_follows_the_selected_row() {
+        let mut model = Model::test_new(Config::default());
+        let mut pointer = |overlay, selected| {
+            model.overlay = overlay;
+            model.settings_menu_selected = selected;
+            model.dns_selected = selected;
+            model.settings_file_pointer()
+        };
+        let page = Overlay::SettingsMenu;
+        assert_eq!(pointer(page(SettingsMenuPage::Root), 1), Some("/dns"));
+        assert_eq!(
+            pointer(page(SettingsMenuPage::Root), 3),
+            Some("/geo_routing")
+        );
+        assert_eq!(
+            pointer(page(SettingsMenuPage::Connection), 1),
+            Some("/kill_switch")
+        );
+        assert_eq!(
+            pointer(page(SettingsMenuPage::Interface), 1),
+            Some("/icons")
+        );
+        assert_eq!(
+            pointer(Overlay::DnsSettings, 0),
+            Some("/dns/current_preset")
+        );
+        assert_eq!(
+            pointer(Overlay::DnsSettings, 1),
+            Some("/dns/fakeip_enabled")
+        );
+        assert_eq!(pointer(Overlay::None, 0), None);
+    }
 
     #[test]
     fn settings_menu_overlay_serde_roundtrip() {
@@ -1363,7 +1463,7 @@ mod tests {
         let profiles = crate::paths::profiles_path().unwrap();
         std::fs::write(
             &profiles,
-            r#"{ "schema_version": 7, "settings": { "geo_routing": {
+            r#"{ "schema_version": 7, "settings": { "hwid": "lnx-d415f1264a264924aa76e7f55380b0c7", "geo_routing": {
                 "current_region": "cn",
                 "selected_region_modes": { "ru": "bypass_ru", "cn": "only_cn" }
             } } }"#,
@@ -1389,10 +1489,12 @@ mod tests {
         assert_eq!(model.routing, on_disk);
         assert!(!model.config.settings.geo_routing.predates_mode_selection());
         assert!(model.onboarding.is_complete());
-        let saved: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&profiles).unwrap()).unwrap();
-        assert_eq!(saved["schema_version"], 8);
-        assert_eq!(saved["settings"]["geo_routing"]["mode"], "only_cn");
+        let read = |path: std::path::PathBuf| -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+        };
+        assert_eq!(read(profiles)["schema_version"], 9);
+        let settings = read(crate::paths::settings_path().unwrap());
+        assert_eq!(settings["geo_routing"]["mode"], "only_cn");
     }
 
     #[test]
@@ -1511,12 +1613,12 @@ mod tests {
             443,
             uuid::Uuid::new_v4().to_string(),
         );
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         config.settings.auto_connect = true;
         config.settings.last_connected_profile = Some(profile.id);
         config.settings.geo_routing.set_mode("bypass_ru");
         config.profiles.push(profile);
-        crate::config::save_config_at(&crate::paths::profiles_path().unwrap(), &config).unwrap();
+        crate::config::save_config(&config).unwrap();
         let routing = crate::paths::routing_path().unwrap();
         std::fs::write(&routing, "{ not json").unwrap();
 
@@ -1562,7 +1664,8 @@ mod tests {
             "logs: {:?}",
             model.logs,
         );
-        assert!(model.config_persistence_blocked);
+        assert!(model.profiles_persistence.blocked);
+        assert!(model.settings_persistence.blocked);
         assert_eq!(std::fs::read_to_string(path).unwrap(), "not json at all");
     }
 

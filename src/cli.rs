@@ -138,7 +138,7 @@ enum Command {
         support_prompt: bool,
     },
 
-    /// Reset or recover profiles.json and routing.json while the daemon is stopped.
+    /// Reset or recover profiles.json, settings.json and routing.json while the daemon is stopped.
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
@@ -1727,7 +1727,8 @@ esac
             ipc_version: crate::ipc::IPC_VERSION,
             supports_viewport_scroll: true,
             response_to: None,
-            config_edit_result: None,
+            profiles_edit_result: None,
+            settings_edit_result: None,
             routing_edit_result: None,
             scroll_result: None,
             connection: ConnectionState::Idle,

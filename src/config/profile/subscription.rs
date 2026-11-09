@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn config_validate_accepts_effective_subscription_hwid() {
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         config.settings.hwid = "lnx-installation-hwid".to_string();
         config
             .subscriptions
@@ -109,20 +109,19 @@ mod tests {
     }
 
     #[test]
-    fn config_validate_rejects_empty_effective_subscription_hwid() {
+    fn a_missing_settings_hwid_is_reported_once_for_subscriptions_that_send_it() {
         let mut config = Config::default();
         config
             .subscriptions
             .push(subscription_with_hwid(true, None));
         let diagnostic = crate::test_helpers::single_diagnostic(config.diagnostics());
         assert_eq!(diagnostic.pointer, "/settings/hwid");
-        assert!(diagnostic.message.contains("Subscription 1"));
-        assert!(diagnostic.message.contains("must not be empty"));
+        assert!(diagnostic.message.contains("kvn config reset --hwid"));
     }
 
     #[test]
     fn config_validate_rejects_empty_subscription_hwid_override() {
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         config.settings.hwid = "lnx-installation-hwid".to_string();
         config
             .subscriptions
@@ -140,7 +139,7 @@ mod tests {
             "device 0001x",
             "устройство01",
         ] {
-            let mut config = Config::default();
+            let mut config = crate::test_helpers::saved_config();
             config
                 .subscriptions
                 .push(subscription_with_hwid(true, Some(hwid)));
@@ -158,7 +157,7 @@ mod tests {
             ("a".repeat(64), true),
             ("a".repeat(65), false),
         ] {
-            let mut config = Config::default();
+            let mut config = crate::test_helpers::saved_config();
             config
                 .subscriptions
                 .push(subscription_with_hwid(true, Some(&hwid)));
@@ -168,7 +167,7 @@ mod tests {
 
     #[test]
     fn config_validate_ignores_unused_hwid() {
-        let mut config = Config::default();
+        let mut config = crate::test_helpers::saved_config();
         config
             .subscriptions
             .push(subscription_with_hwid(false, Some("device\r\ninjected")));

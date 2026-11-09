@@ -29,7 +29,7 @@ pub(in crate::app::update) fn handle_confirm_delete(
                 | Some(crate::app::model::SourceRow::SubscriptionProfile { .. }) => {
                     let name = model.selected_profile().map(|p| p.name.clone());
                     model.delete_selected();
-                    let mut effects = vec![Effect::SaveConfig];
+                    let mut effects = vec![Effect::SaveProfiles];
                     if let Some(name) = name {
                         push_status(
                             &mut effects,
@@ -46,7 +46,7 @@ pub(in crate::app::update) fn handle_confirm_delete(
                 Some(crate::app::model::SourceRow::SubscriptionHeader(_)) => {
                     let name = model.selected_subscription().map(|s| s.name.clone());
                     model.delete_selected();
-                    let mut effects = vec![Effect::SaveConfig];
+                    let mut effects = vec![Effect::SaveProfiles];
                     if let Some(name) = name {
                         push_status(
                             &mut effects,
@@ -93,7 +93,7 @@ mod tests {
         assert_eq!(model.overlay, Overlay::None);
         assert_eq!(
             effects,
-            vec![Effect::SaveConfig, app_log_info("Profile deleted: A")]
+            vec![Effect::SaveProfiles, app_log_info("Profile deleted: A")]
         );
     }
 
@@ -145,7 +145,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                Effect::SaveConfig,
+                Effect::SaveProfiles,
                 app_log_info("Subscription deleted: Sub")
             ]
         );
@@ -168,7 +168,7 @@ mod tests {
         assert_eq!(model.config.profiles.len(), 1);
         assert_eq!(model.overlay, Overlay::None);
         assert_eq!(model.status_text(), "Delete failed: disconnect first");
-        assert!(!effects.contains(&Effect::SaveConfig));
+        assert!(!effects.contains(&Effect::SaveProfiles));
     }
 
     #[test]
@@ -183,7 +183,7 @@ mod tests {
         let effects = handle_confirm_delete(&mut model, enter());
         assert!(model.config.profiles.is_empty());
         assert_eq!(model.overlay, Overlay::None);
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert!(effects.contains(&Effect::SaveProfiles));
     }
 
     #[test]

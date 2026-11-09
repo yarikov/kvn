@@ -1,6 +1,6 @@
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey};
-use crate::config::profile::Profile;
+use crate::config::profile::{ConfigFile, Profile};
 use uuid::Uuid;
 
 use crate::app::update::connection::reconnect_with_new_settings;
@@ -12,6 +12,26 @@ use crate::config::routing::RoutingConfig;
 use crate::route_plan::RoutePlan;
 
 pub(crate) fn handle_config_reloaded(
+    model: &mut Model,
+    result: Result<crate::config::profile::Config, crate::app::msg::IpcError>,
+) -> Vec<Effect> {
+    if result.is_ok() {
+        model.profiles_persistence = Default::default();
+        model.settings_persistence = Default::default();
+    }
+    apply_config(model, result)
+}
+
+pub(crate) fn handle_config_edit_saved(
+    model: &mut Model,
+    file: ConfigFile,
+    config: crate::config::profile::Config,
+) -> Vec<Effect> {
+    *model.persistence_mut(file) = Default::default();
+    apply_config(model, Ok(config))
+}
+
+fn apply_config(
     model: &mut Model,
     result: Result<crate::config::profile::Config, crate::app::msg::IpcError>,
 ) -> Vec<Effect> {
@@ -39,8 +59,6 @@ pub(crate) fn handle_config_reloaded(
                 .connecting_profile_id
                 .is_some_and(|id| !config.profiles.iter().any(|profile| profile.id == id));
             model.replace_config_preserving_selection(config);
-            model.config_persistence_blocked = false;
-            model.unsaved_state_merge_base = None;
             let mut effects = vec![Effect::BroadcastState];
             if active_missing || connecting_missing {
                 effects.push(Effect::Disconnect);
@@ -237,6 +255,19 @@ mod tests {
     use crate::test_helpers::*;
 
     #[test]
+    fn a_saved_edit_resets_only_the_state_of_its_own_file() {
+        let mut model = model_with_profiles(vec![]);
+        let config = model.config.clone();
+        model.settings_persistence.unsaved_merge_base = Some(config.clone());
+        model.profiles_persistence.unsaved_merge_base = Some(config.clone());
+
+        handle_config_edit_saved(&mut model, ConfigFile::Profiles, config.clone());
+
+        assert_eq!(model.profiles_persistence, Default::default());
+        assert_eq!(model.settings_persistence.unsaved_merge_base, Some(config));
+    }
+
+    #[test]
     fn config_reloaded_updates_model() {
         let mut model = model_with_profiles(vec![Profile::new_vless(
             "A".to_string(),
@@ -246,11 +277,11 @@ mod tests {
         )]);
         model.routing.add_region_modes(GeoRegion::Ru);
         let config = model.config.clone();
-        model.config_persistence_blocked = true;
-        model.unsaved_state_merge_base = Some(config.clone());
+        model.settings_persistence.blocked = true;
+        model.profiles_persistence.unsaved_merge_base = Some(config.clone());
         let effects = update(&mut model, Msg::ConfigReloaded(Box::new(Ok(config))));
-        assert!(!model.config_persistence_blocked);
-        assert_eq!(model.unsaved_state_merge_base, None);
+        assert_eq!(model.settings_persistence, Default::default());
+        assert_eq!(model.profiles_persistence, Default::default());
         assert_eq!(
             effects,
             vec![

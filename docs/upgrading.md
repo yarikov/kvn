@@ -18,6 +18,35 @@ Until then, `kvn connect`, `kvn toggle` and the other one-shot commands refuse
 to talk to the outdated daemon. Run `kvn doctor` if an upgrade needs
 attention.
 
+## v0.37.0
+
+Settings move out of `profiles.json` into a new file,
+`~/.config/kvn-tui/settings.json`. The first start after the upgrade moves
+them: the old `profiles.json` is kept in `~/.config/kvn-tui/recovery/` as
+`profiles.json.before-migration-*`, `settings.json` is written first, and only
+then is `profiles.json` rewritten with profiles and subscriptions alone, so an
+interrupted upgrade repeats the move instead of losing settings. Nothing needs
+to be done by hand. See [Configuration](configuration.md).
+
+kvn 0.36 and older cannot read the new `profiles.json`: started after the
+upgrade, they report it as newer than they support. To go back, restore the
+preserved copy with the daemon stopped:
+`kvn config recover --profiles <file>` on the new version, or copy the file
+over `profiles.json` before starting the old one.
+
+`e` in the Profiles list now opens only `profiles.json`. Settings, custom DNS
+presets among them, are edited with `e` on a Settings page (`Space`,
+`Space c`, `Space d`, `Space i`), which opens `settings.json`.
+
+`settings.json` must keep its `hwid`: a file without it is refused, and
+`kvn config reset --hwid` creates a new one. A `profiles.json` without
+`schema_version` is refused too.
+
+`kvn config reset --profiles` now resets only profiles and subscriptions; the
+new `--settings` resets the settings, and `kvn config recover --settings
+<file>` restores them. A `profiles.json` from kvn 0.36 or older can be passed
+to both `--profiles` and `--settings`. See [CLI](cli.md#config).
+
 ## v0.36.0
 
 Rule-sets and routing modes move to a new file,

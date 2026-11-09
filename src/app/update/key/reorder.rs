@@ -25,7 +25,7 @@ pub(in crate::app::update) fn move_selected_source(
     match moved_to_row {
         Some(row) => {
             model.selected = row;
-            vec![Effect::SaveConfig]
+            vec![Effect::SaveProfiles]
         }
         None => vec![],
     }
@@ -118,7 +118,7 @@ mod tests {
 
         let effects = move_selected_source(&mut model, Direction::Down);
 
-        assert_eq!(effects, vec![Effect::SaveConfig]);
+        assert_eq!(effects, vec![Effect::SaveProfiles]);
         assert_eq!(row_names(&model), ["B", "A", "S1", "P1", "P2", "S2", "Q1"]);
         assert_eq!(selected_name(&model), "A");
     }
@@ -141,7 +141,7 @@ mod tests {
 
         let effects = move_selected_source(&mut model, Direction::Up);
 
-        assert_eq!(effects, vec![Effect::SaveConfig]);
+        assert_eq!(effects, vec![Effect::SaveProfiles]);
         assert_eq!(row_names(&model), ["A", "B", "S1", "P2", "P1", "S2", "Q1"]);
         assert_eq!(selected_name(&model), "P2");
     }
@@ -164,7 +164,7 @@ mod tests {
 
         let effects = move_selected_source(&mut model, Direction::Up);
 
-        assert_eq!(effects, vec![Effect::SaveConfig]);
+        assert_eq!(effects, vec![Effect::SaveProfiles]);
         assert_eq!(row_names(&model), ["A", "B", "S2", "Q1", "S1", "P1", "P2"]);
         assert_eq!(selected_name(&model), "S2");
     }

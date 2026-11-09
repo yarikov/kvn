@@ -16,10 +16,11 @@ pacman writes the new sing-box binary (a spawn while it is still open for writin
 
 ## Config Saves
 
-`config_io::persist_config_changes` commits `profiles.json` after each `update`, before any effect runs. The update chooses how a failed write is undone:
+`config_io::persist_config_changes` commits `settings.json` and `profiles.json` after each `update`, before any effect runs, each on its own (`commit_file_change`: read the file's revision, three-way merge only that file's part with `merge::merge_file`, write with `write_if_unchanged`), settings first. An effect names its file; the update chooses how a failed write is undone:
 
-- **`Effect::SaveConfig`** — a change the user asked for. A failed write restores the config, support prompt and tour progress from before the update, preserves the edited version under `recovery/`, and drops every effect except `BroadcastState` and `AppendAppLog`: the change did not happen.
-- **`Effect::PersistConfirmedState`** — a record of something the system already did (`KillSwitchApplied`, `Connected`). A failed write keeps the model and every other effect, such as `WriteState`, and only reports the error: the model must describe the firewall and the tunnel as they are. The config the write was based on is kept in `Model::unsaved_state_merge_base` and used as the merge base of every later save, so the unsaved state reads as the model's own change and wins over the older value on disk. A successful write or a reload from disk clears it.
+- **`Effect::SaveProfiles` / `Effect::SaveSettings`** — a change the user asked for. A failed write restores that file's part of the config (and every file not yet committed) from before the update, together with the support prompt and tour progress, preserves the edited version under `recovery/` (`profiles.json.conflict-*` / `settings.json.conflict-*`), and drops every effect except `BroadcastState` and `AppendAppLog`: the change did not happen. A file committed before the failure stays committed.
+- **`Effect::PersistConfirmedProfiles` / `Effect::PersistConfirmedSettings`** — a record of something the system already did (`Connected` writes `last_connected_profile` to `profiles.json`, `KillSwitchApplied` writes `kill_switch` to `settings.json`). A failed write keeps the model and every other effect, such as `WriteState`, and only reports the error: the model must describe the firewall and the tunnel as they are. The config the write was based on is kept in that file's `FilePersistence::unsaved_merge_base` and used as the merge base of every later save of the same file, so the unsaved state reads as the model's own change and wins over the older value on disk. A successful write of that file or a reload from disk clears it.
+- A file that failed to load (`FilePersistence::blocked`) refuses every save of its own and of the editor; the other file saves as usual.
 
 ## Connect Attempts and the Latency Probe
 

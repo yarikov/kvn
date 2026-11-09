@@ -49,7 +49,7 @@ flowchart TB
 **The daemon** (`kvn --daemon`, started by the `kvn-tui.service` user unit, or
 on demand by `kvn`, `kvn connect` and `kvn toggle`, which fall back to spawning
 it directly when the unit cannot be started) controls the running VPN: while it runs, every change goes through it. It owns
-the canonical application state, `profiles.json`, the sing-box process, geo rule-set downloads, suspend
+the canonical application state, `profiles.json` and `settings.json`, the sing-box process, geo rule-set downloads, suspend
 and resume handling, and it turns the kill switch on and off. It runs headless, so the VPN does not
 depend on a terminal being open.
 
@@ -265,8 +265,8 @@ needs the terminal or the desktop:
 
 - clipboard import and copy (`wl-paste`/`wl-copy` on Wayland, `xclip`/`xsel`
   on X11), bracketed paste;
-- editing `profiles.json` in `$EDITOR`, with validation and conflict
-  resolution in the same session;
+- editing `profiles.json`, `settings.json` and `routing.json` in `$EDITOR`,
+  with validation and conflict resolution in the same session;
 - reading the log files and the log pane: cursor, mouse clicks, wheel
   scrolling and text selection;
 - the theme: one of the bundled palettes, or the active Omarchy theme, which
@@ -294,9 +294,14 @@ are described in the [configuration guide](configuration.md).
 
 ## Configuration and state
 
-- **`profiles.json`** holds profiles, subscriptions and settings. It carries a
-  `schema_version`. Loading runs the ordered schema migrations and saves the
-  result, and a file from a newer kvn is refused instead of being damaged.
+- **`profiles.json`** holds profiles and subscriptions, **`settings.json`**
+  the settings, and **`routing.json`** the rule-sets and modes. Each carries
+  its own `schema_version` and is saved, merged and validated on its own: a
+  settings change never rewrites `profiles.json`, and a subscription update
+  never rewrites `settings.json`. Loading runs the ordered schema migrations
+  and saves the result, and a file from a newer kvn is refused instead of
+  being damaged. In memory the daemon keeps both files as one `Config`, so the
+  IPC snapshot carries `profiles` and `settings` as before.
 - **Writes are atomic** (temporary file, fsync, rename) and checked against
   the revision the daemon last read. A file changed on disk in the meantime is
   merged three-way instead of overwritten, and real conflicts are reported.
@@ -338,7 +343,7 @@ is listed in [System integration](system-integration.md).
 | `src/ipc.rs` | Socket server and client, commands, `StateSnapshot` |
 | `src/tui_client.rs`, `src/tui_client/` | Terminal session, input handling, clipboard, editor, theme watcher |
 | `src/ui/` | ratatui layout, widgets, overlays, palettes, icons |
-| `src/config.rs`, `src/config/` | `profiles.json` I/O, profile and settings types, share links, schema, merge, subscriptions |
+| `src/config.rs`, `src/config/` | `profiles.json` and `settings.json` I/O, profile and settings types, share links, schema, merge, subscriptions |
 | `src/singbox/` | Config generation, process runner, Clash API client |
 | `src/route_plan.rs` | What each routing mode routes and the rule-sets it needs |
 | `src/geo.rs` | Rule-set catalog, region rule-sets, downloads and cache |

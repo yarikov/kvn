@@ -74,6 +74,10 @@ pub fn profiles_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("profiles.json"))
 }
 
+pub fn settings_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("settings.json"))
+}
+
 pub fn singbox_log_path() -> PathBuf {
     config_dir()
         .map(|d| d.join("logs/sing-box.log"))

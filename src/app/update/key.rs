@@ -176,7 +176,7 @@ mod tests {
             model.config.settings.geo_routing.auto_update,
             previous_schedule
         );
-        assert!(effects.contains(&Effect::SaveConfig));
+        assert!(effects.contains(&Effect::SaveSettings));
 
         model.connection = ConnectionState::Connected;
         model.active_profile_id = Some(profile_id);

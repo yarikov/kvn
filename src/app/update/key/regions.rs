@@ -125,7 +125,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                Effect::SaveConfig,
+                Effect::SaveSettings,
                 app_log_info("Routing mode changed: Only RU")
             ]
         );
@@ -221,7 +221,7 @@ mod tests {
 
             assert_eq!(model.routing, routing);
             assert_eq!(model.config.settings.geo_routing.mode, "only_ru");
-            assert!(!effects.contains(&Effect::SaveConfig));
+            assert!(!effects.contains(&Effect::SaveSettings));
             assert!(!downloads_rule_sets(&effects));
             assert!(!model.status_text().contains("Checking geo databases"));
         }
@@ -234,7 +234,7 @@ mod tests {
 
         let effects = commit_routing_mode(&mut model, "only_ru");
 
-        assert!(!effects.contains(&Effect::SaveConfig));
+        assert!(!effects.contains(&Effect::SaveSettings));
         assert_eq!(model.config.settings.geo_routing.mode, "global");
         assert!(
             model

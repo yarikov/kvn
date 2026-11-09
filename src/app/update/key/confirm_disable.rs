@@ -80,7 +80,7 @@ mod tests {
             let effects = handle_key(&mut model, confirm);
             assert_eq!(model.overlay, Overlay::None);
             assert!(!model.config.settings.auto_connect);
-            assert!(effects.contains(&Effect::SaveConfig));
+            assert!(effects.contains(&Effect::SaveSettings));
         }
     }
 

@@ -1,4 +1,4 @@
-use crate::config::profile::{Config, Profile, Settings};
+use crate::config::profile::{Config, ConfigFile, Profile, Settings};
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq)]
@@ -19,8 +19,10 @@ pub enum Effect {
     RefreshRuleSetStates,
     ResetGeoUpdateSchedules,
     WriteState,
-    SaveConfig,
-    PersistConfirmedState,
+    SaveProfiles,
+    SaveSettings,
+    PersistConfirmedProfiles,
+    PersistConfirmedSettings,
     PersistSupportPrompt {
         previous: crate::support_prompt::SupportPromptState,
         reopen_prompt: bool,
@@ -30,10 +32,12 @@ pub enum Effect {
         recovery: crate::onboarding::OnboardingRecovery,
     },
     SaveConfigConflict {
+        file: ConfigFile,
         edited: Box<Config>,
         conflicts: Vec<String>,
     },
     CommitEditedConfig {
+        file: ConfigFile,
         base: Box<Config>,
         edited: Box<Config>,
     },

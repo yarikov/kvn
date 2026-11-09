@@ -2,9 +2,12 @@ use std::sync::LazyLock;
 
 use serde_json::{Map, Value};
 
-use super::{CURRENT_SCHEMA_VERSION, Config, ConfigDiagnostic, ProtocolConfig};
+use super::{
+    CURRENT_SCHEMA_VERSION, ConfigDiagnostic, ProfilesDocument, ProtocolConfig, SettingsDocument,
+};
 
-static SCHEMA: LazyLock<Value> = LazyLock::new(config_json_schema);
+static PROFILES_SCHEMA: LazyLock<Value> = LazyLock::new(profiles_json_schema);
+static SETTINGS_SCHEMA: LazyLock<Value> = LazyLock::new(settings_json_schema);
 
 pub(super) fn without_default(schema: &mut schemars::Schema) {
     schema.remove("default");
@@ -26,6 +29,7 @@ pub(super) fn pin_current_schema_version(schema: &mut schemars::Schema) {
         .entry("required")
         .or_insert_with(|| Value::Array(Vec::new()))
         .as_array_mut()
+        && !required.contains(&"schema_version".into())
     {
         required.push("schema_version".into());
     }
@@ -101,15 +105,27 @@ fn strict_protocols() -> Vec<Value> {
         .collect()
 }
 
-pub fn config_json_schema() -> Value {
+fn json_schema_for<T: schemars::JsonSchema>() -> Value {
     schemars::generate::SchemaSettings::draft07()
         .into_generator()
-        .into_root_schema_for::<Config>()
+        .into_root_schema_for::<T>()
         .to_value()
 }
 
-pub fn schema_diagnostics(document: &Value) -> Vec<ConfigDiagnostic> {
-    schema_diagnostics_against(&SCHEMA, document)
+pub fn profiles_json_schema() -> Value {
+    json_schema_for::<ProfilesDocument>()
+}
+
+pub fn settings_json_schema() -> Value {
+    json_schema_for::<SettingsDocument>()
+}
+
+pub fn profiles_schema_diagnostics(document: &Value) -> Vec<ConfigDiagnostic> {
+    schema_diagnostics_against(&PROFILES_SCHEMA, document)
+}
+
+pub fn settings_schema_diagnostics(document: &Value) -> Vec<ConfigDiagnostic> {
+    schema_diagnostics_against(&SETTINGS_SCHEMA, document)
 }
 
 pub(crate) fn schema_diagnostics_against(
@@ -472,11 +488,47 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn pointers(document: Value) -> Vec<(String, String)> {
-        schema_diagnostics(&document)
+    fn pointers(mut document: Value) -> Vec<(String, String)> {
+        let settings = document
+            .as_object_mut()
+            .and_then(|fields| fields.remove("settings"));
+        let mut found: Vec<_> = profiles_schema_diagnostics(&document)
             .into_iter()
             .map(|diagnostic| (diagnostic.pointer, diagnostic.message))
-            .collect()
+            .collect();
+        if let Some(mut settings) = settings {
+            settings["schema_version"] = super::super::SETTINGS_SCHEMA_VERSION.into();
+            found.extend(
+                settings_schema_diagnostics(&settings)
+                    .into_iter()
+                    .map(|diagnostic| {
+                        (
+                            format!("/settings{}", diagnostic.pointer),
+                            diagnostic.message,
+                        )
+                    }),
+            );
+        }
+        found
+    }
+
+    fn combined(config: &super::super::Config) -> Value {
+        let mut document = serde_json::to_value(config.profiles_document()).unwrap();
+        document["settings"] = serde_json::to_value(config.settings_document()).unwrap();
+        document
+    }
+
+    fn parse_combined(mut document: Value) -> super::super::Config {
+        let mut settings = document
+            .as_object_mut()
+            .unwrap()
+            .remove("settings")
+            .unwrap();
+        settings["schema_version"] = super::super::SETTINGS_SCHEMA_VERSION.into();
+        super::super::Config::from_documents(
+            serde_json::from_value(document).unwrap(),
+            serde_json::from_value(settings).unwrap(),
+        )
     }
 
     fn config_with_every_shape() -> Value {
@@ -554,8 +606,8 @@ mod tests {
                 "retry_state": { "consecutive_failures": 1, "retry_at": "2026-01-01T01:00:00+03:00", "attempt_date": "2026-01-01" },
                 "send_hwid": true, "hwid": "device-0001"
             }],
+            "last_connected_profile": uuid,
             "settings": {
-                "last_connected_profile": uuid,
                 "tun_interface": "kvn0", "auto_connect": true, "kill_switch": true,
                 "theme": "nord", "icons": "unicode", "hwid": "h",
                 "allow_insecure_http_subscriptions": true,
@@ -591,19 +643,19 @@ mod tests {
     #[test]
     fn every_config_shape_serde_accepts_matches_the_schema() {
         let document = config_with_every_shape();
-        let config: Config = serde_json::from_value(document.clone()).unwrap();
+        let config = parse_combined(document.clone());
         assert_eq!(config.diagnostics(), []);
         assert_eq!(pointers(document), []);
-        assert_eq!(pointers(serde_json::to_value(&config).unwrap()), []);
+        assert_eq!(pointers(combined(&config)), []);
         assert_eq!(
-            pointers(serde_json::to_value(Config::for_first_run()).unwrap()),
+            pointers(combined(&super::super::Config::for_first_run())),
             []
         );
     }
 
     #[test]
     fn profile_checks_the_protocol_branches_only_for_a_known_protocol() {
-        let profile = &config_json_schema()["definitions"]["Profile"];
+        let profile = &profiles_json_schema()["definitions"]["Profile"];
         let branch_protocols: Vec<&Value> = profile["then"]["oneOf"]
             .as_array()
             .unwrap()
@@ -625,7 +677,7 @@ mod tests {
 
     #[test]
     fn every_protocol_branch_lists_the_shared_profile_fields() {
-        let profile = &config_json_schema()["definitions"]["Profile"];
+        let profile = &profiles_json_schema()["definitions"]["Profile"];
         for branch in profile["then"]["oneOf"].as_array().unwrap() {
             for field in ["id", "name", "address", "port", "tags", "subscription_id"] {
                 assert!(
@@ -667,10 +719,7 @@ mod tests {
                 .1
                 .starts_with("/profiles/2/protocol: must be one of \"vless\", \"vmess\"")
         );
-        assert_eq!(
-            found[4].1,
-            "/settings/unknown: unknown property \"unknown\""
-        );
+        assert_eq!(found[4].1, "/unknown: unknown property \"unknown\"");
     }
 
     #[test]
@@ -699,9 +748,9 @@ mod tests {
                 "/profiles/0/reality: \"short_id\" is a required property",
                 "/profiles/0/reality: \"server_name\" is a required property",
                 "/profiles/0/reality: \"spider_x\" is a required property",
-                "/settings/dns/custom_presets/0/servers/0: \"server\" is a required property",
-                "/settings/icons: must be one of \"nerd\", \"unicode\"",
                 "/subscriptions/0/last_updated: value is not a valid date-time",
+                "/dns/custom_presets/0/servers/0: \"server\" is a required property",
+                "/icons: must be one of \"nerd\", \"unicode\"",
             ]
         );
     }
@@ -748,7 +797,8 @@ mod tests {
                 "/settings/dns/custom_presets/0/servers/0/typo",
             ]
         );
-        let lenient: Result<Config, _> = serde_json::from_value(json!({
+        let lenient: Result<ProfilesDocument, _> = serde_json::from_value(json!({
+            "schema_version": CURRENT_SCHEMA_VERSION,
             "profiles": [profile("vless", json!({ "uuid": crate::test_helpers::TEST_UUID }))]
         }));
         assert!(
@@ -783,7 +833,7 @@ mod tests {
             .map(|(_, message)| message)
             .collect();
         let theme = messages.pop().unwrap();
-        assert!(theme.starts_with("/settings/theme: must be one of \"omarchy\", "));
+        assert!(theme.starts_with("/theme: must be one of \"omarchy\", "));
         assert_eq!(
             messages,
             [
@@ -792,9 +842,9 @@ mod tests {
                 "/profiles/0/port: value is less than the minimum of 1",
                 "/profiles/0/password: must not be empty",
                 "/profiles/1/ss_password: must not be empty",
-                "/settings/dns/custom_presets/0/name: must not be empty",
-                "/settings/logs/level: must be one of \"trace\", \"debug\", \"info\", \"warn\", \"error\"",
-                "/settings/logs/line_retention/app: value is less than the minimum of 1000",
+                "/dns/custom_presets/0/name: must not be empty",
+                "/logs/level: must be one of \"trace\", \"debug\", \"info\", \"warn\", \"error\"",
+                "/logs/line_retention/app: value is less than the minimum of 1000",
             ]
         );
         let themes = std::iter::once(super::super::OMARCHY_THEME_SENTINEL)
@@ -802,6 +852,7 @@ mod tests {
         let levels = super::super::settings::LOG_LEVELS.iter().copied();
         for (theme, level) in themes.zip(levels.cycle()) {
             let settings = json!({
+                "hwid": crate::test_helpers::TEST_HWID,
                 "theme": theme,
                 "logs": { "level": level, "line_retention": { "app": 1_000, "singbox": 1_000 } }
             });
@@ -849,6 +900,11 @@ mod tests {
                 format!("/schema_version: must be {CURRENT_SCHEMA_VERSION}")
             )]
         );
+        let settings_version: Vec<_> = settings_schema_diagnostics(&json!({ "schema_version": 2 }))
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect();
+        assert_eq!(settings_version, ["/schema_version: must be 1"]);
     }
 
     #[test]
@@ -907,7 +963,8 @@ mod tests {
             }
         }
         let mut found = std::collections::BTreeSet::new();
-        walk(&config_json_schema(), &mut found);
+        walk(&profiles_json_schema(), &mut found);
+        walk(&settings_json_schema(), &mut found);
         let unknown: Vec<_> = found
             .iter()
             .filter(|keyword| {
@@ -922,7 +979,7 @@ mod tests {
 
     #[test]
     fn generated_ids_carry_no_fixed_default() {
-        let schema = config_json_schema();
+        let schema = profiles_json_schema();
         for definition in ["Profile", "Subscription"] {
             assert_eq!(
                 schema["definitions"][definition]["properties"]["id"].get("default"),

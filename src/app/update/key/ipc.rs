@@ -3,6 +3,7 @@ mod support;
 
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, Model, Overlay, StatusKey};
+use crate::config::profile::{Config, ConfigFile};
 
 use crate::app::update::key::handle_key;
 use crate::app::update::key::settings_menu::{set_auto_connect, set_kill_switch};
@@ -91,7 +92,16 @@ pub(in crate::app::update) fn handle_ipc_command(
         IpcCommand::Paste { text } => handle_clipboard_text(model, &text),
         IpcCommand::Copied { target } => handle_copied_status(model, target),
         IpcCommand::ReloadConfig => vec![Effect::ReloadConfig],
-        IpcCommand::ApplyEditedConfig { base, edited } => apply_edited_config(model, base, edited),
+        IpcCommand::ApplyEditedProfiles { base, edited } => {
+            let base = model.config.with_profiles(*base);
+            let edited = model.config.with_profiles(*edited);
+            apply_edited_config(model, ConfigFile::Profiles, base, edited)
+        }
+        IpcCommand::ApplyEditedSettings { base, edited } => {
+            let base = model.config.with_settings(*base);
+            let edited = model.config.with_settings(*edited);
+            apply_edited_config(model, ConfigFile::Settings, base, edited)
+        }
         IpcCommand::ApplyEditedRouting { base, edited } => {
             vec![Effect::CommitEditedRouting { base, edited }]
         }
@@ -114,19 +124,29 @@ pub(in crate::app::update) fn handle_ipc_command(
 
 fn apply_edited_config(
     model: &mut Model,
-    base: Box<crate::config::profile::Config>,
-    edited: Box<crate::config::profile::Config>,
+    file: ConfigFile,
+    base: Config,
+    edited: Config,
 ) -> Vec<Effect> {
-    if !model.config_persistence_blocked {
-        return vec![Effect::CommitEditedConfig { base, edited }];
+    let base = Box::new(base);
+    let edited = Box::new(edited);
+    if !model.persistence_blocked(file) {
+        return vec![Effect::CommitEditedConfig { file, base, edited }];
     }
     let conflicts = vec!["persisted config failed to load".to_string()];
-    let mut effects = vec![Effect::SaveConfigConflict { edited, conflicts }];
+    let mut effects = vec![Effect::SaveConfigConflict {
+        file,
+        edited,
+        conflicts,
+    }];
     push_status(
         &mut effects,
         model,
         StatusKey::Config,
-        AppStatus::Error("Configuration edit failed: profiles.json is unreadable".into()),
+        AppStatus::Error(format!(
+            "Configuration edit failed: {} is unreadable",
+            file.name()
+        )),
     );
     effects
 }
@@ -291,9 +311,9 @@ mod tests {
 
         let effects = handle_ipc_command(
             &mut model,
-            crate::app::msg::IpcCommand::ApplyEditedConfig {
-                base: Box::new(base),
-                edited: Box::new(edited),
+            crate::app::msg::IpcCommand::ApplyEditedSettings {
+                base: Box::new(base.settings_document()),
+                edited: Box::new(edited.settings_document()),
             },
         );
 
@@ -301,7 +321,7 @@ mod tests {
         assert_eq!(model.config.settings.theme, "tokyo-night");
         assert!(matches!(
             &effects[0],
-            Effect::CommitEditedConfig { base: effect_base, edited: effect_edited }
+            Effect::CommitEditedConfig { file: ConfigFile::Settings, base: effect_base, edited: effect_edited }
                 if effect_base.settings.theme == "tokyo-night" && effect_edited.settings.theme == "nord"
         ));
     }
@@ -316,9 +336,9 @@ mod tests {
 
         let effects = handle_ipc_command(
             &mut model,
-            crate::app::msg::IpcCommand::ApplyEditedConfig {
-                base: Box::new(base),
-                edited: Box::new(edited),
+            crate::app::msg::IpcCommand::ApplyEditedSettings {
+                base: Box::new(base.settings_document()),
+                edited: Box::new(edited.settings_document()),
             },
         );
 
@@ -361,7 +381,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                Effect::SaveConfig,
+                Effect::SaveSettings,
                 app_log_info("Routing mode changed: Bypass RU — reconnecting"),
                 Effect::BroadcastState,
             ]
@@ -381,7 +401,7 @@ mod tests {
             model.config.settings.geo_routing.mode(&model.routing),
             "global"
         );
-        assert!(!effects.contains(&Effect::SaveConfig));
+        assert!(!effects.contains(&Effect::SaveSettings));
         assert_eq!(
             effects,
             vec![
@@ -448,7 +468,7 @@ mod tests {
             effects,
             vec![
                 app_log_info("Auto-connect enabled"),
-                Effect::SaveConfig,
+                Effect::SaveSettings,
                 Effect::BroadcastState,
             ]
         );
