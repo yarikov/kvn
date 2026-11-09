@@ -64,6 +64,15 @@ pub enum SettingsMenuEntry {
 impl SettingsMenuEntry {
     pub const ALL: [Self; 4] = [Self::Connection, Self::Dns, Self::Interface, Self::Routing];
 
+    pub fn settings_pointer(self) -> &'static str {
+        match self {
+            Self::Connection => "/auto_connect",
+            Self::Dns => "/dns",
+            Self::Interface => "/theme",
+            Self::Routing => "/geo_routing",
+        }
+    }
+
     pub fn key(self) -> char {
         match self {
             Self::Connection => 'c',
@@ -999,6 +1008,28 @@ impl Model {
         self.settings_menu_selected.min(last)
     }
 
+    pub fn settings_file_pointer(&self) -> Option<&'static str> {
+        let selected = self.settings_menu_selected;
+        match self.overlay {
+            Overlay::SettingsMenu(SettingsMenuPage::Root) => SettingsMenuEntry::ALL
+                .get(selected)
+                .map(|entry| entry.settings_pointer()),
+            Overlay::SettingsMenu(SettingsMenuPage::Connection) => {
+                Some(["/auto_connect", "/kill_switch"][selected.min(1)])
+            }
+            Overlay::SettingsMenu(SettingsMenuPage::Interface) => {
+                Some(["/theme", "/icons"][selected.min(1)])
+            }
+            Overlay::DnsSettings => {
+                DnsSettingsItem::from_index(self.dns_selected).map(|item| match item {
+                    DnsSettingsItem::Preset => "/dns/current_preset",
+                    DnsSettingsItem::ToggleFakeIp => "/dns/fakeip_enabled",
+                })
+            }
+            _ => None,
+        }
+    }
+
     pub fn routing_settings_row(&self) -> RoutingSettingsRow {
         let rules = self.shown_mode_rules().len();
         match self.routing_settings_selected() {
@@ -1170,6 +1201,40 @@ impl Model {
 mod tests {
     use super::*;
     use crate::test_helpers::*;
+
+    #[test]
+    fn settings_file_pointer_follows_the_selected_row() {
+        let mut model = Model::test_new(Config::default());
+        let mut pointer = |overlay, selected| {
+            model.overlay = overlay;
+            model.settings_menu_selected = selected;
+            model.dns_selected = selected;
+            model.settings_file_pointer()
+        };
+        let page = Overlay::SettingsMenu;
+        assert_eq!(pointer(page(SettingsMenuPage::Root), 1), Some("/dns"));
+        assert_eq!(
+            pointer(page(SettingsMenuPage::Root), 3),
+            Some("/geo_routing")
+        );
+        assert_eq!(
+            pointer(page(SettingsMenuPage::Connection), 1),
+            Some("/kill_switch")
+        );
+        assert_eq!(
+            pointer(page(SettingsMenuPage::Interface), 1),
+            Some("/icons")
+        );
+        assert_eq!(
+            pointer(Overlay::DnsSettings, 0),
+            Some("/dns/current_preset")
+        );
+        assert_eq!(
+            pointer(Overlay::DnsSettings, 1),
+            Some("/dns/fakeip_enabled")
+        );
+        assert_eq!(pointer(Overlay::None, 0), None);
+    }
 
     #[test]
     fn settings_menu_overlay_serde_roundtrip() {

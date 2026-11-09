@@ -16,7 +16,7 @@ changes from Settings, the CLI, waybar and the Omarchy bar write only
 
 Press `e` in the Profiles list to edit a private copy of `profiles.json`, or on
 a Settings page (`Space`, `Space c`, `Space d`, `Space i`) to edit a copy of
-`settings.json`, with `$VISUAL` or `$EDITOR`.
+`settings.json` at the selected setting, with `$VISUAL` or `$EDITOR`.
 VS Code, VSCodium, Cursor, Zed and Sublime Text get `--wait` unless the
 command already has `--wait` or `-w`, so kvn waits until the editor is closed.
 When the command is Omarchy's `omarchy-launch-editor`, kvn runs the editor

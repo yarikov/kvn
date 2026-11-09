@@ -154,6 +154,11 @@ fn find_target_line(path: &Path, pointer: &str) -> Option<usize> {
     JsonIndex::new(&content).line(pointer)
 }
 
+fn find_nearest_line(path: &Path, pointer: &str) -> Option<usize> {
+    let content = fs::read_to_string(path).ok()?;
+    JsonIndex::new(&content).nearest_line(pointer)
+}
+
 fn editor_args(editor: &str, path: &Path, line: usize) -> Vec<String> {
     let path_with_line = format!("{}:{}", path.display(), line);
     match line_jump(editor) {
@@ -256,7 +261,10 @@ fn edit_config_file<D: ConfigDocument>(
     original.push(b'\n');
     crate::atomic_write::write(&path, &original).context("Failed to finish editor snapshot")?;
 
-    let line = target.and_then(|pointer| find_target_line(&path, &pointer));
+    let line = target.and_then(|pointer| match D::FILE {
+        ConfigFile::Profiles => find_target_line(&path, &pointer),
+        ConfigFile::Settings => find_nearest_line(&path, &pointer),
+    });
     let mut session = ConfigEdit {
         base: D::of(&config),
         context: config,
@@ -989,6 +997,26 @@ mod tests {
 
         assert!(path.exists());
         assert!(error.to_string().contains(path.to_str().unwrap()));
+    }
+
+    #[test]
+    fn a_setting_left_out_of_the_file_opens_at_its_section() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        let contents =
+            serde_json::to_string_pretty(&crate::test_helpers::saved_config().settings_document())
+                .unwrap();
+        fs::write(&path, &contents).unwrap();
+        let dns_line = contents
+            .lines()
+            .position(|line| line.contains("\"dns\""))
+            .unwrap()
+            + 1;
+
+        assert_eq!(
+            find_nearest_line(&path, "/dns/fakeip_enabled"),
+            Some(dns_line)
+        );
     }
 
     #[test]

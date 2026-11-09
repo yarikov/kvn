@@ -104,7 +104,7 @@ This guide extends the root [`AGENTS.md`](../../AGENTS.md), whose rules apply he
   loaded config that no longer validates — for example a HWID a stricter rule
   now refuses — can still be opened and fixed; the edited result is checked
   before it is applied, and neither file is ever saved invalid.
-- `e` in the Profiles list opens `profiles.json`; `e` on the Settings root, Connection, Interface and DNS pages opens `settings.json` at `/auto_connect`, `/theme` or `/dns` (`tui_client::editor::open_config_editor`). Both run one session type, `ConfigEdit<D>` over the `ConfigDocument` trait (`ProfilesDocument`, `SettingsDocument`): the document's schema, snapshot path and IPC command; the other file comes from the snapshot as context for the cross-file checks.
+- `e` in the Profiles list opens `profiles.json`; `e` on the Settings root, Connection, Interface and DNS pages opens `settings.json` at the field of the selected row (`Model::settings_file_pointer`: the Root entries open their section, Connection `/auto_connect` or `/kill_switch`, Interface `/theme` or `/icons`, DNS `/dns/current_preset` or `/dns/fakeip_enabled`; `tui_client::editor::open_config_editor`). Both run one session type, `ConfigEdit<D>` over the `ConfigDocument` trait (`ProfilesDocument`, `SettingsDocument`): the document's schema, snapshot path and IPC command; the other file comes from the snapshot as context for the cross-file checks.
 - JSON and validation errors offer another editor pass or explicit cancellation.
   Validation is collected, not fail-fast: `Config::diagnostics` returns every
   problem as a `ConfigDiagnostic` with the JSON pointer of the offending value
