@@ -241,22 +241,6 @@ pub(super) fn disconnect(model: &mut Model, shared: &DaemonShared) {
     );
     model.overlay = Overlay::None;
     crate::services::waybar::write_state(model);
-    if model.config.settings.kill_switch
-        && let Err(e) = crate::services::killswitch::revoke()
-    {
-        tracing::warn!("Failed to flush kill switch handshake set: {}", e);
-    }
-}
-
-pub(super) fn revoke_kill_switch_exceptions(model: &Model) {
-    if model.config.settings.kill_switch
-        && let Err(e) = crate::services::killswitch::revoke()
-    {
-        tracing::warn!(
-            "Failed to flush kill switch handshake set after sing-box exit: {}",
-            e
-        );
-    }
 }
 
 pub(super) fn apply_kill_switch(tx: &Sender<Msg>, enabled: bool) {

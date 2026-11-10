@@ -102,10 +102,6 @@ fn group_list_includes_integration_group(output: &[u8]) -> bool {
         .any(|group| group == INTEGRATION_GROUP)
 }
 
-pub fn revoke() -> Result<()> {
-    run_helper(&["revoke"])
-}
-
 pub fn is_active() -> Result<bool> {
     let output = Command::new("systemctl")
         .arg("is-active")

@@ -117,11 +117,6 @@ fn run(mut model: Model) -> Result<()> {
         .unwrap_or_else(|p| p.into_inner());
     lock_process_slot(&shared.process_slot).retire_handle();
     stop_retired(&shared.process_slot);
-    if model.config.settings.kill_switch
-        && let Err(e) = crate::services::killswitch::revoke()
-    {
-        tracing::warn!("Failed to flush kill switch handshake set on exit: {}", e);
-    }
     cleanup_socket();
 
     result

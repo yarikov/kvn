@@ -128,8 +128,6 @@ accepts only:
 - `check` (read-only authorization/installation probe)
 - `enable`
 - `disable`
-- `revoke`
-- `allow <ip> <tcp|udp> <port>`
 
 The nftables policy drops other input and output traffic while allowing
 loopback, `kvn*`, private LAN ranges, DHCP, ICMP, and packets marked by
@@ -137,9 +135,7 @@ sing-box; input also admits replies on established connections, while output
 does not, so direct connections opened before the kill switch stop. Forwarded
 traffic is allowed only out through `kvn*` and back on established connections
 from `kvn*`. kvn adds no temporary exceptions:
-sing-box's connection to the VPN server and its DNS queries are marked. The
-`allow` operation remains for compatibility, and `revoke` flushes exceptions an
-older kvn left behind.
+sing-box's connection to the VPN server and its DNS queries are marked.
 
 Marked traffic includes the sing-box `direct` outbound. This is required for
 Bypass/Only modes and means their direct destinations leave through the

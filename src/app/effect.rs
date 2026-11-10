@@ -10,7 +10,6 @@ pub enum Effect {
         attempt_id: u64,
     },
     Disconnect,
-    RevokeKillSwitchExceptions,
     DownloadRuleSets {
         rule_sets: Vec<crate::geo::RuleSet>,
         only_missing: bool,

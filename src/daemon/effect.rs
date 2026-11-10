@@ -30,7 +30,6 @@ pub(super) fn execute_daemon_effect(
             attempt_id,
         } => connection::connect(tx, model, shared, profile, settings, attempt_id),
         Effect::Disconnect => connection::disconnect(model, shared),
-        Effect::RevokeKillSwitchExceptions => connection::revoke_kill_switch_exceptions(model),
         Effect::ApplyKillSwitch { enabled } => connection::apply_kill_switch(tx, enabled),
         Effect::CheckAutoConnectPolkit => connection::check_auto_connect_polkit(tx),
         Effect::CheckIntegrationSetup => connection::check_integration_setup(tx),
