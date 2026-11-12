@@ -17,18 +17,6 @@ flush chain inet kvn_tui_killswitch input
 flush chain inet kvn_tui_killswitch output
 flush chain inet kvn_tui_killswitch forward
 table inet kvn_tui_killswitch {
-    # Dynamic sets populated by the daemon during the connect handshake.
-    # IPv6 uses `meta l4proto` so extension headers are followed to the actual
-    # transport protocol; IPv4's protocol field already identifies it directly.
-    set handshake_v4 {
-        type ipv4_addr . inet_proto . inet_service
-        flags interval
-    }
-    set handshake_v6 {
-        type ipv6_addr . inet_proto . inet_service
-        flags interval
-    }
-
     chain input {
         type filter hook input priority -10; policy drop;
         iifname "lo" accept
@@ -57,8 +45,6 @@ table inet kvn_tui_killswitch {
         ip daddr { 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12 } accept
         ip6 daddr { fc00::/7, fe80::/10 } accept
         meta l4proto { icmp, icmpv6 } accept
-        ip daddr . ip protocol . th dport @handshake_v4 accept
-        ip6 daddr . meta l4proto . th dport @handshake_v6 accept
         udp sport 68 udp dport 67 accept
         udp sport 546 udp dport 547 accept
     }

@@ -148,11 +148,7 @@ pub(in crate::app::update) fn on_singbox_exited(
         }
         (None, None) => "sing-box exited unexpectedly".to_string(),
     };
-    let mut effects = vec![
-        Effect::WriteState,
-        Effect::RevokeKillSwitchExceptions,
-        Effect::BroadcastState,
-    ];
+    let mut effects = vec![Effect::WriteState, Effect::BroadcastState];
     push_status(
         &mut effects,
         model,
@@ -477,7 +473,6 @@ mod tests {
             effects,
             vec![
                 Effect::WriteState,
-                Effect::RevokeKillSwitchExceptions,
                 Effect::BroadcastState,
                 app_log_error("sing-box exited unexpectedly (code 17)"),
             ]

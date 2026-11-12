@@ -1588,21 +1588,6 @@ esac
         assert!(killswitch.contains("killswitch-sudoers.sha256"));
     }
 
-    fn helper_accepts_allow_args(args: &[&str]) -> bool {
-        let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
-        ProcessCommand::new("bash")
-            .args([
-                "-c",
-                "source \"$1\"; shift; validate_allow_args \"$@\"",
-                "helper-test",
-                concat!(env!("CARGO_MANIFEST_DIR"), "/contrib/killswitch-helper.sh"),
-            ])
-            .args(args)
-            .status()
-            .unwrap()
-            .success()
-    }
-
     fn helper_accepts_command_args(args: &[&str]) -> bool {
         let _lock = crate::test_helpers::ENV_LOCK.lock().unwrap();
         ProcessCommand::new("bash")
@@ -1620,13 +1605,7 @@ esac
 
     #[test]
     fn killswitch_helper_enforces_the_command_surface() {
-        for args in [
-            &["check"][..],
-            &["enable"][..],
-            &["disable"][..],
-            &["revoke"][..],
-            &["allow", "192.0.2.1", "tcp", "443"][..],
-        ] {
+        for args in [&["check"][..], &["enable"][..], &["disable"][..]] {
             assert!(helper_accepts_command_args(args), "rejected {args:?}");
         }
         for args in [
@@ -1635,39 +1614,10 @@ esac
             &["check", "extra"][..],
             &["enable", "extra"][..],
             &["disable", "extra"][..],
-            &["revoke", "extra"][..],
-            &["allow", "192.0.2.1", "tcp", "443", "extra"][..],
+            &["revoke"][..],
+            &["allow", "192.0.2.1", "tcp", "443"][..],
         ] {
             assert!(!helper_accepts_command_args(args), "accepted {args:?}");
-        }
-    }
-
-    #[test]
-    fn killswitch_helper_validates_allow_arguments() {
-        for args in [
-            &["192.0.2.1", "tcp", "443"][..],
-            &["255.255.255.255", "udp", "65535"][..],
-            &["2001:db8::1", "tcp", "1"][..],
-            &["::1", "udp", "53"][..],
-        ] {
-            assert!(helper_accepts_allow_args(args), "rejected {args:?}");
-        }
-
-        for args in [
-            &[][..],
-            &["192.0.2.1", "tcp"][..],
-            &["192.0.2.1", "tcp", "443", "extra"][..],
-            &["256.1.1.1", "tcp", "443"][..],
-            &["::::", "tcp", "443"][..],
-            &["example.com", "tcp", "443"][..],
-            &["192.0.2.1;id", "tcp", "443"][..],
-            &["192.0.2.1", "sctp", "443"][..],
-            &["192.0.2.1", "tcp", "0"][..],
-            &["192.0.2.1", "tcp", "65536"][..],
-            &["192.0.2.1", "tcp", "$(id)"][..],
-            &["192.0.2.1\n127.0.0.1", "tcp", "443"][..],
-        ] {
-            assert!(!helper_accepts_allow_args(args), "accepted {args:?}");
         }
     }
 
