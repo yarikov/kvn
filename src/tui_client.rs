@@ -26,6 +26,7 @@ use crate::app::model::{ConnectionState, Model};
 use crate::app::msg::{IpcCommand, Msg};
 use crate::ipc::IpcClient;
 use crate::services::LogTailer;
+use crate::singbox::process_handle::STOP_GRACE_PERIOD;
 use crate::ui::palette::to_rgb;
 use ratatui::style::Color;
 
@@ -33,6 +34,10 @@ pub(crate) fn osc_color(slot: u8, color: Color) -> String {
     let (r, g, b) = to_rgb(color);
     format!("\x1b]{slot};#{r:02x}{g:02x}{b:02x}\x1b\\")
 }
+
+const DAEMON_SHUTDOWN_MARGIN: Duration = Duration::from_secs(3);
+const OUTDATED_DAEMON_EXIT_TIMEOUT: Duration =
+    STOP_GRACE_PERIOD.saturating_add(DAEMON_SHUTDOWN_MARGIN);
 
 pub(crate) const OSC_RESET_COLORS: &str = "\x1b]110\x1b\\\x1b]111\x1b\\";
 pub(crate) const OSC_POINTER_INTERACTIVE: &str = "\x1b]22;pointer\x1b\\";
@@ -237,7 +242,7 @@ fn connect_to_current_daemon() -> Result<(IpcClient, crate::app::msg::StateSnaps
 
         if io::stderr().is_terminal() {
             eprintln!(
-                "kvn: restarting outdated daemon (version {})…",
+                "kvn: restarting outdated daemon (version {}), waiting for sing-box to stop…",
                 if daemon_version.is_empty() {
                     "unknown"
                 } else {
@@ -250,8 +255,9 @@ fn connect_to_current_daemon() -> Result<(IpcClient, crate::app::msg::StateSnaps
             .context("Failed to ask outdated daemon to stop")?;
         drop(client);
         anyhow::ensure!(
-            crate::ipc::wait_for_daemon_exit(Duration::from_secs(5)),
-            "outdated daemon did not stop within 5s"
+            crate::ipc::wait_for_daemon_exit(OUTDATED_DAEMON_EXIT_TIMEOUT),
+            "outdated daemon did not stop within {}s",
+            OUTDATED_DAEMON_EXIT_TIMEOUT.as_secs()
         );
         crate::start_current_daemon().context("Failed to start updated daemon")?;
         anyhow::ensure!(
