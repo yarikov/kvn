@@ -269,6 +269,7 @@ detected problems.
 | Key | Action |
 |-----|--------|
 | `Space` | Open settings menu |
+| `Space e` | Open `settings.json` in `$VISUAL` or `$EDITOR` |
 | `Space c` | Connection settings |
 | `Space d` | DNS settings |
 | `Space i` | Interface settings |
@@ -300,8 +301,8 @@ their physical US key positions regardless of the active keyboard layout.
 
 Configuration is stored in `~/.config/kvn-tui/`: profiles and subscriptions in
 `profiles.json`, settings in `settings.json`, rule-sets and modes in
-`routing.json`. Press `e` in the Profiles list to edit `profiles.json`, `e` on
-a Settings page for `settings.json`, and `Space r e` for `routing.json`.
+`routing.json`. Press `e` in the Profiles list or on a Settings page to open
+the matching file in the editor.
 
 See the [configuration guide](docs/configuration.md) for the JSON structure,
 advanced DNS and routing, validation, migrations, and runtime file locations.
