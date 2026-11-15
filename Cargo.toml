@@ -72,6 +72,9 @@ notify = "8"
 # Unique temp files for atomic writes.
 tempfile = "3"
 
+[features]
+docs-preview = []
+
 [build-dependencies]
 serde = { version = "1.0", features = ["derive"] }
 toml = "1.1"

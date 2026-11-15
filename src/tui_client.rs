@@ -1,11 +1,13 @@
 mod browser;
 mod clipboard;
+#[cfg(any(test, feature = "docs-preview"))]
 mod docs_preview;
 mod editor;
 mod handler;
 mod input;
 pub(crate) mod theme_watch;
 
+#[cfg(any(test, feature = "docs-preview"))]
 pub(crate) use docs_preview::run_docs_preview;
 
 use std::io::{self, IsTerminal, Write};

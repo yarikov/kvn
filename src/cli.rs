@@ -74,6 +74,7 @@ fn should_warn_for_legacy_invocation(args: &[OsString]) -> bool {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Render a side-effect-free fixture used to capture documentation images.
+    #[cfg(any(test, feature = "docs-preview"))]
     #[command(hide = true)]
     DocsPreview {
         /// Bundled theme slug to render.
@@ -800,6 +801,7 @@ fn format_rate(bytes_per_sec: u64) -> String {
 
 pub fn try_run_from_parsed(cli: &Cli) -> Option<Result<()>> {
     match &cli.command {
+        #[cfg(any(test, feature = "docs-preview"))]
         Some(Command::DocsPreview { theme }) => {
             return Some(crate::tui_client::run_docs_preview(theme));
         }
