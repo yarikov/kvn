@@ -533,6 +533,7 @@ impl Model {
             .min()
     }
 
+    #[cfg(any(test, feature = "docs-preview"))]
     pub fn mark_selectable_rule_sets_checked(&mut self, checked_at: DateTime<Local>) {
         for rule_set in self.selectable_rule_sets() {
             self.rule_set_states
@@ -1125,6 +1126,7 @@ impl Model {
 }
 
 impl Model {
+    #[cfg(any(test, feature = "docs-preview"))]
     pub(crate) fn in_memory(config: Config) -> Self {
         let selected = 0;
         Self {

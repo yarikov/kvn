@@ -153,7 +153,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 cd "$repo_dir"
-cargo build --release
+cargo build --release --features docs-preview
 hyprctl clients -j >"$clients_before"
 focus_workspace 1
 while IFS= read -r address; do

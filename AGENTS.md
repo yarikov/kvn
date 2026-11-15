@@ -24,6 +24,7 @@ INSTA_UPDATE=always cargo test # run tests and auto-accept snapshot changes
 cargo insta test --check --unreferenced=reject  # what CI checks: snapshots match, none orphaned
 cargo fmt                      # format (required before committing)
 cargo clippy --all-targets --all-features -- -D warnings  # lint; CI fails on any warning
+cargo clippy -- -D warnings    # lint the release configuration: no features, no test targets (CI gate)
 cargo llvm-cov --summary-only  # coverage report; both region & line totals must stay ≥ 90 % (CI gate)
 cargo deny check all           # dependency licenses, advisories, bans, sources (CI gate, deny.toml)
 ```
@@ -208,7 +209,7 @@ Rules of thumb:
 
 ### Formatting & Linting
 - Run `cargo fmt` before committing to keep the codebase consistent.
-- Run `cargo clippy --all-targets --all-features` and fix any warnings before committing.
+- Run both clippy passes from § Commands — `cargo clippy --all-targets --all-features -- -D warnings` and `cargo clippy -- -D warnings` for the release configuration — and fix any warnings before committing.
 - The project uses the default `rustfmt` configuration (no `rustfmt.toml`).
 
 ### Naming
@@ -367,7 +368,7 @@ Any added, removed, or changed CLI command, option, or output updates
 3. Are tests added for new public functions, and does `cargo llvm-cov --summary-only` still report **≥ 90 %** region and line coverage?
 4. Are you respecting the Arch-only constraint (no support for other distros or BSDs added silently)?
 5. Does the sing-box config generation remain valid for sing-box 1.14+?
-6. Have you run `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, and (after a dependency change) `cargo deny check all`, and fixed what they report?
+6. Have you run `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo clippy -- -D warnings`, and (after a dependency change) `cargo deny check all`, and fixed what they report?
 7. Do all new files and directories use `kvn` rather than the legacy `kvn-tui` path namespace?
 8. Does the documentation match every changed path, file, command, configuration field, and user-visible behavior?
 9. Did you read the subsystem guide (§ Subsystem Guides) for every subsystem you changed, and put any new convention in exactly one guide?
