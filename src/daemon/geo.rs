@@ -103,7 +103,7 @@ mod tests {
                 .or_default()
                 .retry = Some(RetryState {
                 consecutive_failures: 2,
-                retry_at: chrono::Local::now(),
+                retry_at: jiff::Timestamp::now(),
                 attempt_date: None,
             });
         }

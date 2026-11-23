@@ -165,7 +165,7 @@ fn recovery_path(dir: &Path, kind: RecoveryKind) -> PathBuf {
     dir.join(format!(
         "{}{}-{}",
         kind.prefix(),
-        chrono::Local::now().format("%Y%m%dT%H%M%S%6f"),
+        jiff::Zoned::now().strftime("%Y%m%dT%H%M%S%6f"),
         uuid::Uuid::new_v4()
     ))
 }
@@ -240,6 +240,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let env = crate::test_helpers::EnvVarGuard::set("XDG_CONFIG_HOME", dir.path());
         (guard, env, dir)
+    }
+
+    #[test]
+    fn recovery_filename_keeps_the_six_digit_fraction() {
+        let kind = RecoveryKind::Conflict;
+        let path = recovery_path(Path::new("/recovery"), kind);
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let (timestamp, id) = name
+            .strip_prefix(kind.prefix())
+            .unwrap()
+            .split_once('-')
+            .unwrap();
+        assert_eq!(timestamp.len(), 21);
+        assert!(jiff::civil::DateTime::strptime("%Y%m%dT%H%M%S%6f", timestamp).is_ok());
+        assert!(uuid::Uuid::parse_str(id).is_ok());
     }
 
     #[test]

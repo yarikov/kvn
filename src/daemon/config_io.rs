@@ -236,7 +236,7 @@ pub(super) fn persist_support_prompt(
         .and_then(|path| crate::support_prompt::save_at(&path, &model.support_prompt));
     if let Err(error) = result {
         model.support_prompt = previous;
-        if reopen_prompt && model.support_prompt.is_due(chrono::Utc::now()) {
+        if reopen_prompt && model.support_prompt.is_due(jiff::Timestamp::now()) {
             model.overlay = Overlay::Support;
         }
         let message = format!("Support prompt save failed: {error:#}");
@@ -446,6 +446,7 @@ mod tests {
         OnboardingProgress, OnboardingRecovery, OnboardingState, OnboardingStep,
     };
     use crate::test_helpers::{ENV_LOCK, EnvVarGuard, enter, model_with_profiles};
+    use jiff::{ToSpan, tz::TimeZone};
     use std::path::Path;
 
     fn unwritable_state_home(dir: &Path) -> EnvVarGuard {
@@ -553,9 +554,11 @@ mod tests {
         let completed_at = model.onboarding.state.completed_at.unwrap();
         apply_onboarding_writes(&mut model, effects);
 
+        let deadline =
+            completed_at.to_zoned(TimeZone::UTC) + crate::support_prompt::INITIAL_DELAY_DAYS.days();
         assert_eq!(
             model.support_prompt.next_show_at,
-            Some(completed_at + chrono::Duration::days(crate::support_prompt::INITIAL_DELAY_DAYS))
+            Some(deadline.timestamp())
         );
         assert_eq!(
             crate::support_prompt::load_at(&crate::paths::support_prompt_path().unwrap()).unwrap(),
@@ -581,7 +584,7 @@ mod tests {
     #[test]
     fn restoring_after_a_failure_repairs_the_screen_the_recovery_names() {
         let mut completed = OnboardingState::default();
-        completed.complete(chrono::Utc::now());
+        completed.complete(jiff::Timestamp::now());
         let previous = OnboardingProgress {
             state: OnboardingState {
                 step: OnboardingStep::Region,

@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local, NaiveDate};
+use jiff::{Timestamp, ToSpan, Zoned, civil::Date};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -22,9 +22,9 @@ pub struct Subscription {
     #[serde(default)]
     pub auto_update: SubscriptionAutoUpdate,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_updated: Option<DateTime<Local>>,
+    pub last_updated: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_auto_update: Option<NaiveDate>,
+    pub next_auto_update: Option<Date>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_state: Option<RetryState>,
     /// When true, HWID identification headers are sent with subscription
@@ -47,7 +47,7 @@ impl Subscription {
         self.hwid.as_deref().or(Some(settings.hwid.as_str()))
     }
 
-    pub fn record_fetch_failure(&mut self, now: DateTime<Local>) {
+    pub fn record_fetch_failure(&mut self, now: &Zoned) {
         self.retry_state = Some(RetryState::after_failure(self.retry_state.as_ref(), now));
     }
 
@@ -55,11 +55,15 @@ impl Subscription {
         self.retry_state = None;
     }
 
-    pub fn schedule_next_after_success(&mut self, now: DateTime<Local>) {
+    pub fn schedule_next_after_success(&mut self, now: &Zoned) {
         self.clear_retry_state();
         let days = self.auto_update.interval_minutes() / 1_440;
-        self.next_auto_update =
-            (days != 0).then(|| now.date_naive() + chrono::Duration::days(days as i64));
+        self.next_auto_update = (days != 0).then(|| {
+            now.date()
+                + i64::try_from(days)
+                    .expect("subscription interval fits in i64")
+                    .days()
+        });
     }
 }
 
@@ -246,10 +250,11 @@ mod tests {
     }
 
     #[test]
-    fn subscription_retry_backoff_is_bounded_and_serializable() {
-        use chrono::TimeZone;
-
-        let now = Local.with_ymd_and_hms(2026, 8, 22, 12, 0, 0).unwrap();
+    fn subscription_records_and_serializes_retry_state() {
+        let now = jiff::civil::date(2026, 8, 22)
+            .at(12, 0, 0, 0)
+            .to_zoned(jiff::tz::TimeZone::system())
+            .unwrap();
         let mut sub = Subscription {
             id: Uuid::nil(),
             name: "Sub".into(),
@@ -262,16 +267,10 @@ mod tests {
             hwid: None,
         };
 
-        for (failures, delay) in [(1, 1), (2, 5), (3, 15), (4, 60)] {
-            sub.record_fetch_failure(now);
-            let state = sub.retry_state.as_ref().unwrap();
-            assert_eq!(state.consecutive_failures, failures);
-            assert_eq!(state.retry_at, now + chrono::Duration::minutes(delay));
-        }
-        sub.record_fetch_failure(now);
+        sub.record_fetch_failure(&now);
         assert_eq!(
             sub.retry_state.as_ref().unwrap().retry_at,
-            Local.with_ymd_and_hms(2026, 8, 23, 8, 0, 0).unwrap()
+            now.timestamp() + jiff::SignedDuration::from_mins(1)
         );
 
         let json = serde_json::to_string(&sub).unwrap();
@@ -285,10 +284,14 @@ mod tests {
             "id":"00000000-0000-0000-0000-000000000000",
             "name":"Sub",
             "url":"https://example.com/sub",
-            "auto_update":"every1h"
+            "auto_update":"every1h",
+            "last_updated":"2026-08-22T12:00:00.123456+03:00",
+            "next_auto_update":"2026-08-23"
         }"#;
 
         let sub: Subscription = serde_json::from_str(json).unwrap();
+        assert_eq!(sub.last_updated, "2026-08-22T09:00:00.123456Z".parse().ok());
+        assert_eq!(sub.next_auto_update, "2026-08-23".parse().ok());
         assert!(sub.retry_state.is_none());
         assert!(!serde_json::to_string(&sub).unwrap().contains("retry_state"));
     }

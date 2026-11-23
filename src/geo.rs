@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local, NaiveDate};
+use jiff::{Timestamp, ToSpan, Zoned, civil::Date};
 use serde::{Deserialize, Serialize};
 
 use crate::config::profile::{GeoRegion, RetryState};
@@ -115,11 +115,11 @@ struct RuleSetRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     etag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    checked_at: Option<DateTime<Local>>,
+    checked_at: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     retry: Option<RetryState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    next_update: Option<NaiveDate>,
+    next_update: Option<Date>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -170,11 +170,11 @@ struct GeoMetadataRaw {
     #[serde(default)]
     etags: HashMap<String, String>,
     #[serde(default)]
-    checked_at: HashMap<GeoRegion, DateTime<Local>>,
+    checked_at: HashMap<GeoRegion, Timestamp>,
     #[serde(default, alias = "retry_states")]
     region_retry_states: HashMap<GeoRegion, RetryState>,
     #[serde(default)]
-    region_next_update: HashMap<GeoRegion, NaiveDate>,
+    region_next_update: HashMap<GeoRegion, Date>,
     #[serde(default)]
     geoip_ru_etag: Option<String>,
     #[serde(default)]
@@ -232,9 +232,9 @@ impl From<GeoMetadataRaw> for GeoMetadata {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuleSetState {
     pub present: bool,
-    pub checked_at: Option<DateTime<Local>>,
+    pub checked_at: Option<Timestamp>,
     pub retry: Option<RetryState>,
-    pub next_update: Option<NaiveDate>,
+    pub next_update: Option<Date>,
 }
 
 pub type RuleSetStates = HashMap<String, RuleSetState>;
@@ -261,7 +261,7 @@ pub struct RuleSetReport {
 
 struct RecordedOutcome {
     etag: Option<String>,
-    checked: Option<DateTime<Local>>,
+    checked: Option<Timestamp>,
     failed: bool,
     already_present: bool,
 }
@@ -355,7 +355,7 @@ impl GeoManager {
                     self.refresh_rule_set(&saved, rule_set, saved_etag.as_deref())
                 };
                 let checked = (!already_present && !matches!(outcome, RuleSetOutcome::Failed(_)))
-                    .then(Local::now);
+                    .then(Timestamp::now);
                 let failed = matches!(outcome, RuleSetOutcome::Failed(_));
                 if let Err(e) = self.record_outcome(
                     rule_set,
@@ -425,7 +425,7 @@ impl GeoManager {
         outcome: RecordedOutcome,
         schedule: Option<ScheduleWrite>,
     ) -> Result<()> {
-        let now = Local::now();
+        let now = Zoned::now();
         self.update_metadata(|meta| {
             let schedule = schedule.filter(|write| write.epoch == meta.schedule_epoch);
             if outcome.etag.is_none() && outcome.checked.is_none() && schedule.is_none() {
@@ -442,12 +442,11 @@ impl GeoManager {
             }
             if let Some(schedule) = schedule {
                 if outcome.failed {
-                    record.retry = Some(RetryState::after_failure(record.retry.as_ref(), now));
+                    record.retry = Some(RetryState::after_failure(record.retry.as_ref(), &now));
                 } else {
                     record.retry = None;
                     if !outcome.already_present {
-                        record.next_update =
-                            Some(now.date_naive() + chrono::Duration::days(schedule.interval_days));
+                        record.next_update = Some(now.date() + schedule.interval_days.days());
                     }
                 }
             }
@@ -456,7 +455,7 @@ impl GeoManager {
     }
 
     pub fn reset_update_schedules(&self, rule_sets: &[RuleSet], enabled: bool) -> Result<u64> {
-        let next = crate::config::profile::next_update_window_date(Local::now());
+        let next = crate::config::profile::next_update_window_date(&Zoned::now());
         let mut schedule_epoch = 0;
         self.update_metadata(|meta| {
             meta.schedule_epoch = meta.schedule_epoch.wrapping_add(1);
@@ -481,7 +480,7 @@ impl GeoManager {
         if !enabled {
             return Ok(());
         }
-        let next = crate::config::profile::next_update_window_date(Local::now());
+        let next = crate::config::profile::next_update_window_date(&Zoned::now());
         self.update_schedule(schedule_epoch, |meta| {
             let mut changed = false;
             for rule_set in rule_sets {
@@ -979,7 +978,7 @@ mod tests {
         assert!(missing_state.checked_at.is_some());
         assert_eq!(
             missing_state.next_update,
-            Some(Local::now().date_naive() + chrono::Duration::days(7))
+            Some(Zoned::now().date() + 7.days())
         );
     }
 
@@ -1038,7 +1037,9 @@ mod tests {
         assert!(reset.retry.is_none());
         assert_eq!(
             reset.next_update,
-            Some(crate::config::profile::next_update_window_date(Local::now()))
+            Some(crate::config::profile::next_update_window_date(
+                &Zoned::now()
+            ))
         );
 
         gm.reset_update_schedules(std::slice::from_ref(&dead), false)
@@ -1057,7 +1058,7 @@ mod tests {
             .unwrap();
         gm.update_metadata(|meta| {
             meta.rule_sets.entry(seeded.key()).or_default().next_update =
-                NaiveDate::from_ymd_opt(2030, 1, 1);
+                Date::new(2030, 1, 1).ok();
             true
         })
         .unwrap();
@@ -1068,10 +1069,7 @@ mod tests {
 
         gm.ensure_update_schedules(&[seeded.clone(), fresh.clone()], true, current)
             .unwrap();
-        assert_eq!(
-            state(&gm, &seeded).next_update,
-            NaiveDate::from_ymd_opt(2030, 1, 1)
-        );
+        assert_eq!(state(&gm, &seeded).next_update, Date::new(2030, 1, 1).ok());
         assert!(state(&gm, &fresh).next_update.is_some());
     }
 
@@ -1089,7 +1087,7 @@ mod tests {
             let record = meta.rule_sets.entry(old.key()).or_default();
             record.url = Some(old.url.to_string());
             record.etag = Some("old".into());
-            record.checked_at = Some(Local::now());
+            record.checked_at = Some(Timestamp::now());
             true
         })
         .unwrap();
@@ -1136,7 +1134,7 @@ mod tests {
     fn a_record_without_a_url_belongs_to_the_current_source() {
         let (_guard, _dir, gm) = temp_manager();
         let current = unreachable_rule_set("geoip-current");
-        let checked_at = Local::now();
+        let checked_at = Timestamp::now();
         fs::write(
             gm.rule_set_path(&current),
             crate::test_helpers::RULE_SET_BYTES,
@@ -1217,9 +1215,9 @@ mod tests {
             RuleSetRecord {
                 url: Some("https://example.com/geoip-ru.srs".into()),
                 etag: Some("e".into()),
-                checked_at: Some(Local::now()),
+                checked_at: Some(Timestamp::now()),
                 retry: None,
-                next_update: NaiveDate::from_ymd_opt(2030, 1, 1),
+                next_update: Date::new(2030, 1, 1).ok(),
             },
         );
         gm.save_metadata(&meta).unwrap();
@@ -1250,13 +1248,8 @@ mod tests {
 
         let ru_ip = &loaded.rule_sets["geoip-ru.srs"];
         assert_eq!(ru_ip.etag.as_deref(), Some("modern"));
-        assert_eq!(
-            ru_ip.checked_at,
-            DateTime::parse_from_rfc3339("2026-10-02T08:00:00+03:00")
-                .ok()
-                .map(|time| time.with_timezone(&Local))
-        );
-        assert_eq!(ru_ip.next_update, NaiveDate::from_ymd_opt(2026, 10, 9));
+        assert_eq!(ru_ip.checked_at, "2026-10-02T05:00:00Z".parse().ok());
+        assert_eq!(ru_ip.next_update, Date::new(2026, 10, 9).ok());
         assert_eq!(
             loaded.rule_sets["geosite-category-ru.srs"].etag.as_deref(),
             Some("legacy-ru-site")

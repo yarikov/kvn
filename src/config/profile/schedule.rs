@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
+use jiff::{SignedDuration, Timestamp, Zoned, civil::Date};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -114,7 +114,7 @@ impl GeoAutoUpdate {
     }
 }
 
-const UPDATE_WINDOW_HOUR: u32 = 8;
+const UPDATE_WINDOW_HOUR: i8 = 8;
 const MAX_CONSECUTIVE_FAILURES: u32 = 5;
 
 /// Retry bookkeeping after a failed background update.
@@ -124,71 +124,67 @@ pub struct RetryState {
     /// Failed attempts in a row on `attempt_date`; retries stop after five.
     pub consecutive_failures: u32,
     /// Earliest time of the next automatic retry.
-    pub retry_at: DateTime<Local>,
+    pub retry_at: Timestamp,
     /// Local date of the failures counted; a failure on a later date starts
     /// the count again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attempt_date: Option<NaiveDate>,
+    pub attempt_date: Option<Date>,
 }
 
 impl RetryState {
-    pub fn after_failure(previous: Option<&RetryState>, now: DateTime<Local>) -> Self {
-        let today = now.date_naive();
+    pub fn after_failure(previous: Option<&RetryState>, now: &Zoned) -> Self {
+        let today = now.date();
         let consecutive_failures = previous
             .filter(|state| state.attempt_date == Some(today))
             .map_or(1, |state| state.consecutive_failures.saturating_add(1));
         Self {
             consecutive_failures,
-            retry_at: now
-                + chrono::Duration::minutes(retry_delay_minutes(consecutive_failures, now)),
+            retry_at: next_retry_at(consecutive_failures, now),
             attempt_date: Some(today),
         }
     }
 
-    pub fn governs(&self, now: DateTime<Local>) -> bool {
-        self.attempt_date
-            .is_none_or(|date| date == now.date_naive())
+    pub fn governs(&self, now: &Zoned) -> bool {
+        self.attempt_date.is_none_or(|date| date == now.date())
     }
 
-    pub fn retry_due(&self, now: DateTime<Local>) -> bool {
+    pub fn retry_due(&self, now: Timestamp) -> bool {
         self.consecutive_failures < MAX_CONSECUTIVE_FAILURES && now >= self.retry_at
     }
 }
 
-pub fn update_window_open(now: DateTime<Local>) -> bool {
+pub fn update_window_open(now: &Zoned) -> bool {
     now.hour() >= UPDATE_WINDOW_HOUR
 }
 
-pub fn next_update_window_date(now: DateTime<Local>) -> NaiveDate {
+pub fn next_update_window_date(now: &Zoned) -> Date {
     if update_window_open(now) {
-        now.date_naive()
-            .succ_opt()
-            .expect("local date must advance")
+        now.date().tomorrow().expect("local date must advance")
     } else {
-        now.date_naive()
+        now.date()
     }
 }
 
-fn retry_delay_minutes(failure: u32, now: DateTime<Local>) -> i64 {
-    match failure {
+fn next_retry_at(failure: u32, now: &Zoned) -> Timestamp {
+    let minutes = match failure {
         1 => 1,
         2 => 5,
         3 => 15,
         4 => 60,
-        _ => minutes_until_next_update_window(now),
-    }
-}
-
-fn minutes_until_next_update_window(now: DateTime<Local>) -> i64 {
-    let next = next_update_window_date(now);
-    let days = next.num_days_from_ce() - now.date_naive().num_days_from_ce();
-    i64::from(days) * 1_440 - i64::from(now.hour()) * 60 - i64::from(now.minute())
-        + i64::from(UPDATE_WINDOW_HOUR) * 60
+        _ => {
+            return now
+                .time_zone()
+                .to_timestamp(next_update_window_date(now).at(UPDATE_WINDOW_HOUR, 0, 0, 0))
+                .expect("next update window must be representable");
+        }
+    };
+    now.timestamp() + SignedDuration::from_mins(minutes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jiff::ToSpan;
 
     #[test]
     fn geo_auto_update_serde_values_round_trip() {
@@ -252,51 +248,64 @@ mod tests {
 
     #[test]
     fn update_window_is_fixed_at_eight_local_time() {
-        use chrono::TimeZone;
-
-        let before = Local.with_ymd_and_hms(2026, 8, 22, 7, 59, 0).unwrap();
-        let after = Local.with_ymd_and_hms(2026, 8, 22, 11, 0, 0).unwrap();
-        assert_eq!(next_update_window_date(before), before.date_naive());
+        let before = jiff::civil::date(2026, 8, 22)
+            .at(7, 59, 0, 0)
+            .to_zoned(jiff::tz::TimeZone::system())
+            .unwrap();
+        let after = jiff::civil::date(2026, 8, 22)
+            .at(11, 0, 0, 0)
+            .to_zoned(jiff::tz::TimeZone::system())
+            .unwrap();
+        assert_eq!(next_update_window_date(&before), before.date());
         assert_eq!(
-            next_update_window_date(after),
-            after.date_naive().succ_opt().unwrap()
+            next_update_window_date(&after),
+            after.date().tomorrow().unwrap()
         );
     }
 
     #[test]
     fn retry_state_governs_only_its_attempt_day_and_stops_after_five_failures() {
-        use chrono::TimeZone;
-
-        let now = Local.with_ymd_and_hms(2026, 8, 22, 12, 0, 0).unwrap();
+        let now = jiff::civil::date(2026, 8, 22)
+            .at(12, 0, 0, 0)
+            .to_zoned(jiff::tz::TimeZone::system())
+            .unwrap();
         let state = RetryState {
             consecutive_failures: 4,
-            retry_at: now,
-            attempt_date: Some(now.date_naive()),
+            retry_at: now.timestamp(),
+            attempt_date: Some(now.date()),
         };
-        assert!(state.governs(now));
-        assert!(!state.governs(now + chrono::Duration::days(1)));
-        assert!(state.retry_due(now));
+        assert!(state.governs(&now));
+        assert!(!state.governs(&(&now + 1.days())));
+        assert!(state.retry_due(now.timestamp()));
 
-        let exhausted = RetryState::after_failure(Some(&state), now);
+        let exhausted = RetryState::after_failure(Some(&state), &now);
         assert_eq!(exhausted.consecutive_failures, 5);
         assert!(!exhausted.retry_due(exhausted.retry_at));
     }
 
     #[test]
     fn retry_state_backs_off_then_waits_for_the_next_update_window() {
-        use chrono::TimeZone;
-
-        let now = Local.with_ymd_and_hms(2026, 8, 22, 12, 0, 0).unwrap();
+        let zone = jiff::tz::TimeZone::get("Europe/Berlin").unwrap();
+        let now = "2026-03-28T11:00:30Z"
+            .parse::<Timestamp>()
+            .unwrap()
+            .to_zoned(zone);
         let mut state = None;
         for (failures, delay) in [(1, 1), (2, 5), (3, 15), (4, 60)] {
-            let next = RetryState::after_failure(state.as_ref(), now);
+            let next = RetryState::after_failure(state.as_ref(), &now);
             assert_eq!(next.consecutive_failures, failures);
-            assert_eq!(next.retry_at, now + chrono::Duration::minutes(delay));
+            assert_eq!(
+                next.retry_at,
+                now.timestamp() + SignedDuration::from_mins(delay)
+            );
             state = Some(next);
         }
-        let fifth = RetryState::after_failure(state.as_ref(), now);
+        let fifth = RetryState::after_failure(state.as_ref(), &now);
         assert_eq!(fifth.consecutive_failures, 5);
-        assert!(fifth.retry_at.date_naive() > now.date_naive());
+        assert_eq!(
+            fifth.retry_at,
+            "2026-03-29T06:00:00Z".parse::<Timestamp>().unwrap()
+        );
     }
 
     #[test]

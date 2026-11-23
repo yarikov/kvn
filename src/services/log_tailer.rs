@@ -1,4 +1,4 @@
-use chrono::{DateTime, FixedOffset, Local, TimeZone};
+use jiff::{Timestamp, Zoned, tz::TimeZone};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -55,14 +55,13 @@ fn tail_start(file: &mut File, file_len: u64, max_lines: usize) -> std::io::Resu
 }
 
 pub fn append_app_log(level: &str, message: &str) {
-    let now = Local::now();
+    let now = Zoned::now();
     let path = crate::paths::app_log_path();
     if let Ok(mut file) = OpenOptions::new().append(true).create(true).open(&path) {
         let _ = writeln!(
             file,
-            "{} {} {} {}",
-            now.format("%z"),
-            now.format("%Y-%m-%d %H:%M:%S"),
+            "{} {} {}",
+            now.strftime("%z %Y-%m-%d %H:%M:%S"),
             level,
             message
         );
@@ -92,7 +91,7 @@ impl LogTailer {
     }
 
     pub fn tail(&mut self) -> Vec<String> {
-        let mut entries: Vec<(DateTime<FixedOffset>, String)> = Vec::new();
+        let mut entries: Vec<(Timestamp, String)> = Vec::new();
 
         for (path, tag, pos) in self.files.iter_mut() {
             let Ok(mut file) = File::open(path) else {
@@ -165,19 +164,18 @@ impl LogTailer {
     }
 }
 
-fn format_entry(line: &str, tag: &str) -> (DateTime<FixedOffset>, String) {
+fn format_entry(line: &str, tag: &str) -> (Timestamp, String) {
     let parsed = parse_timestamp(line);
-    let formatted = if let Some((dt, prefix_len)) = parsed {
-        let remainder = line.get(prefix_len..).unwrap_or_default();
-        format!("{} {}{}", tag, dt.format("%H:%M:%S"), remainder)
+    let formatted = if let Some((dt, prefix_len)) = &parsed {
+        let remainder = line.get(*prefix_len..).unwrap_or_default();
+        format!("{} {}{}", tag, dt.strftime("%H:%M:%S"), remainder)
     } else {
         format!("{} {}", tag, line)
     };
-    let sort_key = parsed.map(|(dt, _)| dt).unwrap_or_else(|| {
-        FixedOffset::east_opt(0)
-            .unwrap()
-            .from_utc_datetime(&Local::now().naive_local())
-    });
+    let sort_key = parsed.map_or_else(
+        || TimeZone::UTC.to_timestamp(Zoned::now().datetime()).unwrap(),
+        |(dt, _)| dt.timestamp(),
+    );
     (sort_key, formatted)
 }
 
@@ -209,14 +207,15 @@ fn read_last_lines(file: &mut File, start: u64, end: u64, limit: usize) -> Vec<S
         .collect()
 }
 
-fn parse_timestamp(line: &str) -> Option<(DateTime<FixedOffset>, usize)> {
+fn parse_timestamp(line: &str) -> Option<(Zoned, usize)> {
     if let Some(prefix) = line.get(..29)
-        && let Ok(dt) = DateTime::parse_from_str(prefix, "%z %Y-%m-%d %H:%M:%S%.3f")
+        && prefix.as_bytes()[25] == b'.'
+        && let Ok(dt) = Zoned::strptime("%z %Y-%m-%d %H:%M:%S%.3f", prefix)
     {
         return Some((dt, 29));
     }
     if let Some(prefix) = line.get(..25)
-        && let Ok(dt) = DateTime::parse_from_str(prefix, "%z %Y-%m-%d %H:%M:%S")
+        && let Ok(dt) = Zoned::strptime("%z %Y-%m-%d %H:%M:%S", prefix)
     {
         return Some((dt, 25));
     }
@@ -366,11 +365,15 @@ mod tests {
         let mut temp1 = tempfile::NamedTempFile::new().unwrap();
         let mut temp2 = tempfile::NamedTempFile::new().unwrap();
 
-        writeln!(temp1, "+0000 2024-01-01 00:00:02 INFO from file 1").unwrap();
-        writeln!(temp1, "+0000 2024-01-01 00:00:04 INFO from file 1 again").unwrap();
+        writeln!(temp1, "+0300 2024-01-01 03:00:02 INFO from file 1").unwrap();
+        writeln!(temp1, "+0300 2024-01-01 03:00:04 INFO from file 1 again").unwrap();
 
         writeln!(temp2, "+0000 2024-01-01 00:00:01 INFO from file 2").unwrap();
-        writeln!(temp2, "+0000 2024-01-01 00:00:03 INFO from file 2 again").unwrap();
+        writeln!(
+            temp2,
+            "+0000 2024-01-01 00:00:02.001 INFO from file 2 again"
+        )
+        .unwrap();
 
         let path1 = temp1.path().to_path_buf();
         let path2 = temp2.path().to_path_buf();
@@ -379,9 +382,9 @@ mod tests {
         let lines = tailer.tail();
         assert_eq!(lines.len(), 4);
         assert!(lines[0].starts_with("[sb] 00:00:01"));
-        assert!(lines[1].starts_with("[app] 00:00:02"));
-        assert!(lines[2].starts_with("[sb] 00:00:03"));
-        assert!(lines[3].starts_with("[app] 00:00:04"));
+        assert!(lines[1].starts_with("[app] 03:00:02"));
+        assert!(lines[2].starts_with("[sb] 00:00:02"));
+        assert!(lines[3].starts_with("[app] 03:00:04"));
     }
 
     #[test]
@@ -449,7 +452,6 @@ mod tests {
 
     #[test]
     fn parse_timestamp_valid() {
-        use chrono::Datelike;
         let line = "+0300 2026-06-09 21:28:34 INFO hello";
         let (dt, prefix_len) = parse_timestamp(line).unwrap();
         assert_eq!(dt.year(), 2026);
@@ -460,7 +462,6 @@ mod tests {
 
     #[test]
     fn parse_timestamp_from_real_singbox_line() {
-        use chrono::Timelike;
         let line = "+0300 2026-06-10 09:35:55 DEBUG [4216981911 0ms] router: match[1] inbound=tun-in port=53 => hijack-dns";
         let (dt, prefix_len) = parse_timestamp(line).unwrap();
         assert_eq!(dt.hour(), 9);

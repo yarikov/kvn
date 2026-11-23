@@ -63,7 +63,7 @@ pub(in crate::app::update) fn handle_sources(model: &mut Model, key: KeyEvent) -
                     sub.clear_retry_state();
                     sub.next_auto_update =
                         (sub.auto_update != SubscriptionAutoUpdate::Off).then(|| {
-                            crate::config::profile::next_update_window_date(chrono::Local::now())
+                            crate::config::profile::next_update_window_date(&jiff::Zoned::now())
                         });
                     (sub.id, sub.name.clone(), sub.auto_update.label())
                 } else {
@@ -337,8 +337,8 @@ mod tests {
     use crate::app::update::update;
     use crate::config::profile::{GeoAutoUpdate, GeoRegion, Profile, Subscription};
     use crate::test_helpers::*;
-    use chrono::Local;
     use crossterm::event::KeyModifiers;
+    use jiff::Zoned;
     use uuid::Uuid;
 
     #[test]
@@ -772,7 +772,7 @@ mod tests {
             hwid: None,
         });
         model.selected = 0;
-        model.config.subscriptions[0].record_fetch_failure(Local::now());
+        model.config.subscriptions[0].record_fetch_failure(&Zoned::now());
         let effects = handle_sources(&mut model, KeyEvent::from(KeyCode::Char('i')));
         assert_eq!(
             model.config.subscriptions[0].auto_update,

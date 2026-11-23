@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Duration, Utc};
+use jiff::{Timestamp, ToSpan, tz::TimeZone};
 use serde::{Deserialize, Serialize};
 
 pub const INITIAL_DELAY_DAYS: i64 = 14;
@@ -13,32 +13,32 @@ pub const SUPPORT_URL: &str = "https://web.tribute.tg/d/QUv";
 #[serde(deny_unknown_fields)]
 pub struct SupportPromptState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_show_at: Option<DateTime<Utc>>,
+    pub next_show_at: Option<Timestamp>,
     #[serde(default)]
     pub dismissed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub supported_at: Option<DateTime<Utc>>,
+    pub supported_at: Option<Timestamp>,
 }
 
 impl SupportPromptState {
-    pub fn schedule_initial(&mut self, now: DateTime<Utc>) -> bool {
+    pub fn schedule_initial(&mut self, now: Timestamp) -> bool {
         if self.is_closed() || self.next_show_at.is_some() {
             return false;
         }
-        self.next_show_at = Some(now + Duration::days(INITIAL_DELAY_DAYS));
+        self.next_show_at = Some(deadline_after_days(now, INITIAL_DELAY_DAYS));
         true
     }
 
-    pub fn is_due(&self, now: DateTime<Utc>) -> bool {
+    pub fn is_due(&self, now: Timestamp) -> bool {
         !self.is_closed() && self.next_show_at.is_some_and(|deadline| now >= deadline)
     }
 
-    pub fn remind_later(&mut self, now: DateTime<Utc>) {
+    pub fn remind_later(&mut self, now: Timestamp) {
         self.dismissed = false;
-        self.next_show_at = Some(now + Duration::days(REMINDER_DELAY_DAYS));
+        self.next_show_at = Some(deadline_after_days(now, REMINDER_DELAY_DAYS));
     }
 
-    pub fn supported(&mut self, now: DateTime<Utc>) {
+    pub fn supported(&mut self, now: Timestamp) {
         self.supported_at = Some(now);
         self.next_show_at = None;
     }
@@ -51,6 +51,13 @@ impl SupportPromptState {
     fn is_closed(&self) -> bool {
         self.dismissed || self.supported_at.is_some()
     }
+}
+
+fn deadline_after_days(now: Timestamp, days: i64) -> Timestamp {
+    now.to_zoned(TimeZone::UTC)
+        .checked_add(days.days())
+        .map(|deadline| deadline.timestamp())
+        .unwrap_or(Timestamp::MAX)
 }
 
 pub fn load_at(path: &Path) -> Result<Option<SupportPromptState>> {
@@ -89,7 +96,7 @@ pub fn dismiss_at(path: &Path) -> Result<()> {
 // onboarding write and its support-prompt write. The live daemon arms the
 // deadline from `daemon::config_io::persist_onboarding`, because a daemon can
 // run for weeks without restarting.
-pub fn load_for_daemon(onboarding_completed_at: Option<DateTime<Utc>>) -> SupportPromptState {
+pub fn load_for_daemon(onboarding_completed_at: Option<Timestamp>) -> SupportPromptState {
     let Some(path) = crate::paths::support_prompt_path() else {
         tracing::warn!("Failed to determine support prompt state path");
         return SupportPromptState::default();
@@ -114,29 +121,31 @@ pub fn load_for_daemon(onboarding_completed_at: Option<DateTime<Utc>>) -> Suppor
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+    use jiff::SignedDuration;
 
-    fn now() -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 9, 10, 12, 0, 0).unwrap()
+    fn now() -> Timestamp {
+        "2026-09-10T12:00:00Z".parse().unwrap()
     }
 
     #[test]
     fn initial_schedule_becomes_due_after_fourteen_days() {
         let now = now();
+        let deadline: Timestamp = "2026-09-24T12:00:00Z".parse().unwrap();
         let mut state = SupportPromptState::default();
         assert!(state.schedule_initial(now));
-        assert!(!state.is_due(now + Duration::days(14) - Duration::seconds(1)));
-        assert!(state.is_due(now + Duration::days(14)));
-        assert!(!state.schedule_initial(now + Duration::days(1)));
+        assert!(!state.is_due(deadline - SignedDuration::from_secs(1)));
+        assert!(state.is_due(deadline));
+        assert!(!state.schedule_initial(deadline));
     }
 
     #[test]
     fn reminder_moves_deadline_thirty_days() {
-        let now = now();
+        let now = "2026-03-20T12:00:00Z".parse().unwrap();
+        let deadline: Timestamp = "2026-04-19T12:00:00Z".parse().unwrap();
         let mut state = SupportPromptState::default();
         state.remind_later(now);
-        assert!(!state.is_due(now + Duration::days(30) - Duration::seconds(1)));
-        assert!(state.is_due(now + Duration::days(30)));
+        assert!(!state.is_due(deadline - SignedDuration::from_secs(1)));
+        assert!(state.is_due(deadline));
     }
 
     #[test]
@@ -147,7 +156,7 @@ mod tests {
         state.supported(now);
         assert_eq!(state.supported_at, Some(now));
         assert!(!state.dismissed);
-        assert!(!state.is_due(now + Duration::days(3650)));
+        assert!(!state.is_due("2036-09-10T12:00:00Z".parse().unwrap()));
         assert!(!state.schedule_initial(now));
     }
 
@@ -157,16 +166,21 @@ mod tests {
         let mut state = SupportPromptState::default();
         state.schedule_initial(now);
         state.dismiss();
-        assert!(!state.is_due(now + Duration::days(3650)));
+        assert!(!state.is_due("2036-09-10T12:00:00Z".parse().unwrap()));
         assert!(!state.schedule_initial(now));
     }
 
     #[test]
     fn state_roundtrips_atomically() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("state/support-prompt.json");
-        let mut state = SupportPromptState::default();
-        state.remind_later(now());
+        let path = dir.path().join("support-prompt.json");
+        fs::write(
+            &path,
+            r#"{"next_show_at":"2026-10-10T12:00:00.123Z","dismissed":false}"#,
+        )
+        .unwrap();
+        let state = load_at(&path).unwrap().unwrap();
+        assert_eq!(state.next_show_at, "2026-10-10T12:00:00.123Z".parse().ok());
         save_at(&path, &state).unwrap();
         assert_eq!(load_at(&path).unwrap(), Some(state));
         assert!(!path.with_extension("json.tmp").exists());
@@ -224,11 +238,11 @@ mod tests {
         assert_eq!(load_for_daemon(None), SupportPromptState::default());
         assert!(!path.exists());
 
-        let completed_at = now() - Duration::days(3);
+        let completed_at = "2026-09-07T12:00:00Z".parse().unwrap();
         let state = load_for_daemon(Some(completed_at));
         assert_eq!(
             state.next_show_at,
-            Some(completed_at + Duration::days(INITIAL_DELAY_DAYS))
+            Some("2026-09-21T12:00:00Z".parse().unwrap())
         );
         assert_eq!(load_at(&path).unwrap(), Some(state));
     }
@@ -245,7 +259,7 @@ mod tests {
         let state = load_for_daemon(Some(now()));
         assert_eq!(
             state.next_show_at,
-            Some(now() + Duration::days(INITIAL_DELAY_DAYS))
+            Some("2026-09-24T12:00:00Z".parse().unwrap())
         );
         assert_eq!(load_at(&path).unwrap(), Some(state));
     }

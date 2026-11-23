@@ -1,7 +1,7 @@
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey, UpdateTrigger};
 use crate::config::profile::{Profile, SubscriptionAutoUpdate};
-use chrono::Local;
+use jiff::Zoned;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -14,14 +14,14 @@ pub(in crate::app::update) fn handle_subscription_result(
     id: Uuid,
     result: Result<Vec<Profile>, crate::app::msg::IpcError>,
 ) -> Vec<Effect> {
-    handle_subscription_result_at(model, id, result, Local::now())
+    handle_subscription_result_at(model, id, result, &Zoned::now())
 }
 
 fn handle_subscription_result_at(
     model: &mut Model,
     id: Uuid,
     result: Result<Vec<Profile>, crate::app::msg::IpcError>,
-    now: chrono::DateTime<Local>,
+    now: &Zoned,
 ) -> Vec<Effect> {
     let automatic = model.subscription_updates.remove(&id) == Some(UpdateTrigger::Automatic);
     let Some(sub_idx) = model.config.subscriptions.iter().position(|s| s.id == id) else {
@@ -51,7 +51,7 @@ fn handle_subscription_result_at(
             let reused_ids = reuse_previous_ids(&previous_profiles, &mut profiles);
             let fetched = keep_previous_order(&previous_profiles, profiles, reused_ids);
             let sub = &mut model.config.subscriptions[sub_idx];
-            sub.last_updated = Some(now);
+            sub.last_updated = Some(now.timestamp());
             if automatic {
                 sub.schedule_next_after_success(now);
             }
@@ -468,7 +468,7 @@ mod tests {
         );
         existing.subscription_id = Some(sub_id);
         let existing_id = existing.id;
-        let last_updated = Local::now() - chrono::Duration::try_hours(2).unwrap();
+        let last_updated = jiff::Timestamp::now() - jiff::SignedDuration::from_hours(2);
         let mut model = model_with_profiles(vec![existing]);
         model.config.subscriptions.push(Subscription {
             id: sub_id,
@@ -485,12 +485,12 @@ mod tests {
             .subscription_updates
             .insert(sub_id, UpdateTrigger::Automatic);
 
-        let failed_at = Local::now();
+        let failed_at = Zoned::now();
         let effects = handle_subscription_result_at(
             &mut model,
             sub_id,
             Err(crate::app::msg::IpcError::new("network down")),
-            failed_at,
+            &failed_at,
         );
 
         assert_eq!(model.config.profiles.len(), 1);
@@ -503,8 +503,8 @@ mod tests {
             model.config.subscriptions[0].retry_state,
             Some(crate::config::profile::RetryState {
                 consecutive_failures: 1,
-                retry_at: failed_at + chrono::Duration::minutes(1),
-                attempt_date: Some(failed_at.date_naive()),
+                retry_at: failed_at.timestamp() + jiff::SignedDuration::from_mins(1),
+                attempt_date: Some(failed_at.date()),
             })
         );
         assert_eq!(
@@ -622,7 +622,7 @@ mod tests {
             send_hwid: false,
             hwid: None,
         });
-        model.config.subscriptions[0].record_fetch_failure(Local::now());
+        model.config.subscriptions[0].record_fetch_failure(&Zoned::now());
         model
             .subscription_updates
             .insert(sub_id, UpdateTrigger::Automatic);
@@ -864,13 +864,13 @@ mod tests {
 
     #[test]
     fn manual_subscription_result_does_not_change_automatic_schedule() {
-        let now = Local::now();
+        let now = Zoned::now();
         let id = Uuid::new_v4();
         let mut model = model_with_profiles(vec![]);
         let retry = crate::config::profile::RetryState {
             consecutive_failures: 2,
-            retry_at: now + chrono::Duration::minutes(5),
-            attempt_date: Some(now.date_naive()),
+            retry_at: now.timestamp() + jiff::SignedDuration::from_mins(5),
+            attempt_date: Some(now.date()),
         };
         model.config.subscriptions.push(Subscription {
             id,
@@ -878,18 +878,18 @@ mod tests {
             url: "https://example.com/sub".into(),
             auto_update: SubscriptionAutoUpdate::Every3d,
             last_updated: None,
-            next_auto_update: Some(now.date_naive()),
+            next_auto_update: Some(now.date()),
             retry_state: Some(retry),
             send_hwid: false,
             hwid: None,
         });
 
-        handle_subscription_result_at(&mut model, id, Ok(Vec::new()), now);
+        handle_subscription_result_at(&mut model, id, Ok(Vec::new()), &now);
 
         assert_eq!(model.config.subscriptions[0].retry_state, Some(retry));
         assert_eq!(
             model.config.subscriptions[0].next_auto_update,
-            Some(now.date_naive())
+            Some(now.date())
         );
     }
 

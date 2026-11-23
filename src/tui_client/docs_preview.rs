@@ -50,18 +50,17 @@ struct DocsPreviewState {
 }
 
 fn build_docs_preview_state(theme_slug: &str) -> Result<DocsPreviewState> {
-    build_docs_preview_state_at(theme_slug, chrono::Local::now())
+    build_docs_preview_state_at(theme_slug, &jiff::Zoned::now())
 }
 
 fn build_docs_preview_state_at(
     theme_slug: &str,
-    preview_now: chrono::DateTime<chrono::Local>,
+    preview_now: &jiff::Zoned,
 ) -> Result<DocsPreviewState> {
     use crate::config::profile::{
         Config, GeoAutoUpdate, Hysteria2Config, ProtocolConfig, Subscription,
         SubscriptionAutoUpdate, TrojanConfig, TuicConfig, VlessConfig, VmessConfig,
     };
-    use chrono::Timelike;
     use uuid::Uuid;
 
     let Some(palette) = crate::ui::palette::Palette::lookup(theme_slug) else {
@@ -225,10 +224,8 @@ fn build_docs_preview_state_at(
     model.status = Some(AppStatus::Info("Connected to 🇺🇸 United States".into()));
     model.mark_selectable_rule_sets_checked(
         preview_now
-            .with_hour(8)
-            .and_then(|time| time.with_minute(0))
-            .and_then(|time| time.with_second(0))
-            .and_then(|time| time.with_nanosecond(0))
+            .time_zone()
+            .to_timestamp(preview_now.date().at(8, 0, 0, 0))
             .context("could not set documentation-preview rule-set time to 08:00")?,
     );
     model.traffic = TrafficStats {
@@ -353,15 +350,14 @@ fn preview_uuid() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     #[test]
     fn docs_preview_shows_realistic_logs_and_kill_switch_toast() {
-        let preview_now = chrono::Local
-            .with_ymd_and_hms(2026, 9, 8, 11, 19, 42)
-            .single()
+        let preview_now = jiff::civil::date(2026, 9, 8)
+            .at(11, 19, 42, 0)
+            .to_zoned(jiff::tz::TimeZone::system())
             .unwrap();
-        let state = build_docs_preview_state_at("tokyo-night", preview_now).unwrap();
+        let state = build_docs_preview_state_at("tokyo-night", &preview_now).unwrap();
         let logs: Vec<_> = state.model.logs.iter().map(String::as_str).collect();
         let shown_logs = &logs[EARLIER_LOG_LINES as usize..];
         let endpoints: Vec<_> = state
@@ -392,9 +388,8 @@ mod tests {
         );
         assert_eq!(
             state.model.selectable_rule_sets_checked_at().unwrap(),
-            chrono::Local
-                .with_ymd_and_hms(2026, 9, 8, 8, 0, 0)
-                .single()
+            jiff::tz::TimeZone::system()
+                .to_timestamp(jiff::civil::date(2026, 9, 8).at(8, 0, 0, 0))
                 .unwrap()
         );
         assert!(logs.iter().any(|line| line.starts_with("[sb] ")));

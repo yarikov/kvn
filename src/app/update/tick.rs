@@ -2,25 +2,25 @@ use crate::app::effect::Effect;
 use crate::app::model::{ConnectionState, Model, Overlay, UpdateTrigger};
 use crate::config::profile::update_window_open;
 use crate::geo::{RuleSet, RuleSetState};
-use chrono::Local;
+use jiff::{SignedDuration, Timestamp, Zoned};
 use std::time::Instant;
 
 use crate::app::update::traffic::TRAFFIC_POLL_INTERVAL;
 
-const AUTOMATIC_ATTEMPT_SPACING: chrono::TimeDelta = chrono::TimeDelta::minutes(1);
+const AUTOMATIC_ATTEMPT_SPACING: SignedDuration = SignedDuration::from_mins(1);
 
 pub(in crate::app::update) fn handle_tick(model: &mut Model) -> Vec<Effect> {
-    handle_tick_at(model, Local::now())
+    handle_tick_at(model, &Zoned::now())
 }
 
-fn handle_tick_at(model: &mut Model, now: chrono::DateTime<Local>) -> Vec<Effect> {
+fn handle_tick_at(model: &mut Model, now: &Zoned) -> Vec<Effect> {
     let mut effects = Vec::new();
 
     let due = due_rule_sets(model, now);
     for rule_set in &due {
         model
             .rule_set_automatic_attempts
-            .insert(rule_set.key(), now);
+            .insert(rule_set.key(), now.timestamp());
     }
     effects.extend(crate::app::update::geo::start_rule_set_download(
         model,
@@ -91,7 +91,7 @@ fn tick_running_work(model: &mut Model) -> Vec<Effect> {
     effects
 }
 
-fn due_rule_sets(model: &Model, now: chrono::DateTime<Local>) -> Vec<RuleSet> {
+fn due_rule_sets(model: &Model, now: &Zoned) -> Vec<RuleSet> {
     if model.config.settings.kill_switch && model.connection != ConnectionState::Connected {
         return Vec::new();
     }
@@ -111,38 +111,38 @@ fn due_rule_sets(model: &Model, now: chrono::DateTime<Local>) -> Vec<RuleSet> {
         .collect();
     let any_due = idle.iter().any(|rule_set| {
         let key = rule_set.key();
-        !attempted_recently(model, &key, now)
+        !attempted_recently(model, &key, now.timestamp())
             && rule_set_due(model.rule_set_states.get(&key), interval, now)
     });
     if any_due { idle } else { Vec::new() }
 }
 
-fn attempted_recently(model: &Model, key: &str, now: chrono::DateTime<Local>) -> bool {
+fn attempted_recently(model: &Model, key: &str, now: Timestamp) -> bool {
     model
         .rule_set_automatic_attempts
         .get(key)
-        .is_some_and(|attempt| now.signed_duration_since(*attempt) < AUTOMATIC_ATTEMPT_SPACING)
+        .is_some_and(|attempt| now.duration_since(*attempt) < AUTOMATIC_ATTEMPT_SPACING)
 }
 
-fn rule_set_due(state: Option<&RuleSetState>, interval: u64, now: chrono::DateTime<Local>) -> bool {
+fn rule_set_due(state: Option<&RuleSetState>, interval: u64, now: &Zoned) -> bool {
     let state = state.cloned().unwrap_or_default();
     if let Some(retry) = state.retry
         && retry.governs(now)
     {
-        return retry.retry_due(now);
+        return retry.retry_due(now.timestamp());
     }
     update_window_open(now)
         && state.next_update.map_or_else(
             || {
                 state.checked_at.is_none_or(|checked| {
-                    now.signed_duration_since(checked).num_minutes() >= interval as i64
+                    now.timestamp().duration_since(checked).as_mins() >= interval as i64
                 })
             },
-            |date| now.date_naive() >= date,
+            |date| now.date() >= date,
         )
 }
 
-fn check_due_subscriptions_at(model: &mut Model, now: chrono::DateTime<Local>) -> Vec<Effect> {
+fn check_due_subscriptions_at(model: &mut Model, now: &Zoned) -> Vec<Effect> {
     if model.config.settings.kill_switch && model.connection != ConnectionState::Connected {
         return Vec::new();
     }
@@ -156,15 +156,15 @@ fn check_due_subscriptions_at(model: &mut Model, now: chrono::DateTime<Local>) -
         if model.subscription_updates.contains_key(&sub.id) {
             continue;
         }
-        let today = now.date_naive();
+        let today = now.date();
         let due = match &sub.retry_state {
-            Some(state) if state.governs(now) => state.retry_due(now),
+            Some(state) if state.governs(now) => state.retry_due(now.timestamp()),
             _ => {
                 update_window_open(now)
                     && sub.next_auto_update.map_or_else(
                         || {
                             sub.last_updated.is_none_or(|last| {
-                                now.signed_duration_since(last).num_minutes() >= interval as i64
+                                now.timestamp().duration_since(last).as_mins() >= interval as i64
                             })
                         },
                         |date| today >= date,
@@ -193,6 +193,7 @@ mod tests {
     };
     use crate::test_helpers::*;
     use crossterm::event::{KeyCode, KeyEvent};
+    use jiff::{ToSpan, tz::TimeZone};
     use uuid::Uuid;
 
     fn ru_auto_updated() -> Model {
@@ -204,7 +205,7 @@ mod tests {
         model
     }
 
-    fn is_due(model: &Model, now: chrono::DateTime<Local>) -> bool {
+    fn is_due(model: &Model, now: &Zoned) -> bool {
         !due_rule_sets(model, now).is_empty()
     }
 
@@ -212,7 +213,7 @@ mod tests {
     fn rule_set_auto_update_is_due_without_a_previous_check() {
         let mut model = ru_auto_updated();
 
-        let effects = handle_tick_at(&mut model, after_update_window());
+        let effects = handle_tick_at(&mut model, &after_update_window());
 
         assert!(effects.contains(&Effect::DownloadRuleSets {
             rule_sets: crate::test_helpers::region_rule_sets(GeoRegion::Ru),
@@ -231,11 +232,11 @@ mod tests {
     fn rule_set_auto_update_respects_the_interval_since_the_last_check() {
         let mut model = ru_auto_updated();
         let now = after_update_window();
-        model.mark_selectable_rule_sets_checked(now - chrono::Duration::try_hours(23).unwrap());
-        assert!(!is_due(&model, now));
+        model.mark_selectable_rule_sets_checked(now.timestamp() - SignedDuration::from_hours(23));
+        assert!(!is_due(&model, &now));
 
-        model.mark_selectable_rule_sets_checked(now - chrono::Duration::try_hours(25).unwrap());
-        assert!(is_due(&model, now));
+        model.mark_selectable_rule_sets_checked(now.timestamp() - SignedDuration::from_hours(25));
+        assert!(is_due(&model, &now));
     }
 
     #[test]
@@ -246,16 +247,16 @@ mod tests {
             crate::test_helpers::region_rule_sets(GeoRegion::Ru),
         )
         .unwrap();
-        model.mark_selectable_rule_sets_checked(now);
-        assert!(!is_due(&model, now));
+        model.mark_selectable_rule_sets_checked(now.timestamp());
+        assert!(!is_due(&model, &now));
         model
             .rule_set_states
             .get_mut(&geoip.key())
             .unwrap()
-            .next_update = Some(now.date_naive());
+            .next_update = Some(now.date());
 
         assert_eq!(
-            due_rule_sets(&model, now),
+            due_rule_sets(&model, &now),
             crate::test_helpers::region_rule_sets(GeoRegion::Ru)
         );
     }
@@ -264,29 +265,30 @@ mod tests {
     fn an_automatic_attempt_waits_a_minute_even_when_its_result_was_not_saved() {
         let mut model = ru_auto_updated();
         let now = after_update_window();
-        handle_tick_at(&mut model, now);
+        handle_tick_at(&mut model, &now);
         model.rule_set_updates.clear();
 
-        assert!(!is_due(&model, now + chrono::Duration::seconds(59)));
-        assert!(is_due(&model, now + chrono::Duration::minutes(1)));
+        assert!(!is_due(&model, &(&now + SignedDuration::from_secs(59))));
+        assert!(is_due(&model, &(&now + SignedDuration::from_mins(1))));
     }
 
     #[test]
     fn rule_set_auto_update_honors_a_retry_deadline_before_the_interval() {
         let mut model = ru_auto_updated();
         let now = after_update_window();
-        model.mark_selectable_rule_sets_checked(now - chrono::Duration::days(2));
+        let checked_at = now.with_time_zone(TimeZone::UTC) - 2.days();
+        model.mark_selectable_rule_sets_checked(checked_at.timestamp());
         for state in model.rule_set_states.values_mut() {
             state.retry = Some(crate::config::profile::RetryState {
                 consecutive_failures: 2,
-                retry_at: now + chrono::Duration::minutes(5),
+                retry_at: now.timestamp() + SignedDuration::from_mins(5),
                 attempt_date: None,
             });
         }
 
-        assert!(!is_due(&model, now));
-        assert!(!is_due(&model, now + chrono::Duration::minutes(4)));
-        assert!(is_due(&model, now + chrono::Duration::minutes(5)));
+        assert!(!is_due(&model, &now));
+        assert!(!is_due(&model, &(&now + SignedDuration::from_mins(4))));
+        assert!(is_due(&model, &(&now + SignedDuration::from_mins(5))));
     }
 
     #[test]
@@ -296,13 +298,13 @@ mod tests {
         let now = after_update_window();
 
         model.connection = ConnectionState::Connecting;
-        assert!(!is_due(&model, now));
+        assert!(!is_due(&model, &now));
 
         model.connection = ConnectionState::ConnectPending;
-        assert!(!is_due(&model, now));
+        assert!(!is_due(&model, &now));
 
         model.connection = ConnectionState::Connected;
-        assert!(is_due(&model, now));
+        assert!(is_due(&model, &now));
     }
 
     #[test]
@@ -312,14 +314,14 @@ mod tests {
         model
             .routing
             .add_region_modes(crate::config::profile::GeoRegion::Ru);
-        assert!(!is_due(&model, now));
+        assert!(!is_due(&model, &now));
 
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;
         let ru_modes = std::mem::replace(
             &mut model.routing,
             crate::config::routing::RoutingConfig::for_new_file(&Default::default()),
         );
-        assert!(!is_due(&model, now));
+        assert!(!is_due(&model, &now));
 
         model.routing = ru_modes;
         for rule_set in crate::test_helpers::region_rule_sets(GeoRegion::Ru) {
@@ -327,7 +329,7 @@ mod tests {
                 .rule_set_updates
                 .insert(rule_set.key(), UpdateTrigger::Manual);
         }
-        assert!(!is_due(&model, now));
+        assert!(!is_due(&model, &now));
     }
 
     #[test]
@@ -362,14 +364,14 @@ mod tests {
             name: "Sub".to_string(),
             url: "http://example.com/sub".to_string(),
             auto_update: SubscriptionAutoUpdate::Every1d,
-            last_updated: Some(now - chrono::Duration::try_hours(25).unwrap()),
+            last_updated: Some(now.timestamp() - SignedDuration::from_hours(25)),
             next_auto_update: None,
             retry_state: None,
             send_hwid: false,
             hwid: None,
         });
 
-        let effects = check_due_subscriptions_at(&mut model, now);
+        let effects = check_due_subscriptions_at(&mut model, &now);
 
         assert_eq!(effects, vec![Effect::UpdateSubscription { id: sub_id }]);
         assert_eq!(
@@ -381,63 +383,71 @@ mod tests {
     #[test]
     fn failed_subscription_waits_until_retry_deadline() {
         let sub_id = Uuid::new_v4();
-        let now = Local::now();
+        let now = Zoned::now();
         let mut model = model_with_profiles(vec![]);
         let mut sub = Subscription {
             id: sub_id,
             name: "Sub".to_string(),
             url: "http://example.com/sub".to_string(),
             auto_update: SubscriptionAutoUpdate::Every1d,
-            last_updated: Some(now - chrono::Duration::hours(2)),
+            last_updated: Some(now.timestamp() - SignedDuration::from_hours(2)),
             next_auto_update: None,
             retry_state: None,
             send_hwid: false,
             hwid: None,
         };
-        sub.record_fetch_failure(now);
+        sub.record_fetch_failure(&now);
         model.config.subscriptions.push(sub);
 
-        assert!(check_due_subscriptions_at(&mut model, now).is_empty());
+        assert!(check_due_subscriptions_at(&mut model, &now).is_empty());
         assert!(
-            check_due_subscriptions_at(&mut model, now + chrono::Duration::seconds(59)).is_empty()
+            check_due_subscriptions_at(&mut model, &(&now + SignedDuration::from_secs(59)))
+                .is_empty()
         );
         assert_eq!(
-            check_due_subscriptions_at(&mut model, now + chrono::Duration::minutes(1)),
+            check_due_subscriptions_at(&mut model, &(&now + SignedDuration::from_mins(1))),
             vec![Effect::UpdateSubscription { id: sub_id }]
         );
     }
 
     #[test]
-    fn subscription_stops_after_five_failures_and_reopens_at_eight_next_day() {
-        use chrono::TimeZone;
+    fn subscription_stops_after_five_failures_and_reopens_at_eight_across_dst() {
+        let zone = jiff::tz::TimeZone::get("Europe/Berlin").unwrap();
+        for (day, expected_utc) in [
+            (jiff::civil::date(2026, 3, 28), "2026-03-29T06:00:00Z"),
+            (jiff::civil::date(2026, 10, 24), "2026-10-25T07:00:00Z"),
+        ] {
+            let last_attempt = zone.to_zoned(day.at(12, 0, 0, 0)).unwrap();
+            let mut model = model_with_profiles(vec![]);
+            let id = Uuid::new_v4();
+            model.config.subscriptions.push(Subscription {
+                id,
+                name: "Sub".into(),
+                url: "https://example.com/sub".into(),
+                auto_update: SubscriptionAutoUpdate::Every1d,
+                last_updated: None,
+                next_auto_update: Some(day),
+                retry_state: Some(crate::config::profile::RetryState {
+                    consecutive_failures: 5,
+                    retry_at: last_attempt.timestamp(),
+                    attempt_date: Some(day),
+                }),
+                send_hwid: false,
+                hwid: None,
+            });
 
-        let today = Local.with_ymd_and_hms(2026, 8, 22, 12, 0, 0).unwrap();
-        let mut model = model_with_profiles(vec![]);
-        let id = Uuid::new_v4();
-        model.config.subscriptions.push(Subscription {
-            id,
-            name: "Sub".into(),
-            url: "https://example.com/sub".into(),
-            auto_update: SubscriptionAutoUpdate::Every1d,
-            last_updated: None,
-            next_auto_update: Some(today.date_naive()),
-            retry_state: Some(crate::config::profile::RetryState {
-                consecutive_failures: 5,
-                retry_at: today,
-                attempt_date: Some(today.date_naive()),
-            }),
-            send_hwid: false,
-            hwid: None,
-        });
-
-        assert!(check_due_subscriptions_at(&mut model, today).is_empty());
-        let before_window = today + chrono::Duration::hours(19);
-        assert!(check_due_subscriptions_at(&mut model, before_window).is_empty());
-        let at_window = today + chrono::Duration::hours(20);
-        assert_eq!(
-            check_due_subscriptions_at(&mut model, at_window),
-            vec![Effect::UpdateSubscription { id }]
-        );
+            assert!(check_due_subscriptions_at(&mut model, &last_attempt).is_empty());
+            let at_window = expected_utc
+                .parse::<Timestamp>()
+                .unwrap()
+                .to_zoned(zone.clone());
+            let before_window = &at_window - SignedDuration::from_secs(1);
+            assert!(check_due_subscriptions_at(&mut model, &before_window).is_empty());
+            assert_eq!(
+                check_due_subscriptions_at(&mut model, &at_window),
+                vec![Effect::UpdateSubscription { id }]
+            );
+        }
     }
 
     #[test]
@@ -455,7 +465,7 @@ mod tests {
             send_hwid: false,
             hwid: None,
         };
-        sub.record_fetch_failure(Local::now());
+        sub.record_fetch_failure(&Zoned::now());
         model.config.subscriptions.push(sub);
         model.selected = 0;
 
@@ -484,16 +494,16 @@ mod tests {
         let now = after_update_window();
 
         model.connection = ConnectionState::Connecting;
-        assert!(check_due_subscriptions_at(&mut model, now).is_empty());
+        assert!(check_due_subscriptions_at(&mut model, &now).is_empty());
         assert!(!model.subscription_updates.contains_key(&sub_id));
 
         model.connection = ConnectionState::ConnectPending;
-        assert!(check_due_subscriptions_at(&mut model, now).is_empty());
+        assert!(check_due_subscriptions_at(&mut model, &now).is_empty());
         assert!(!model.subscription_updates.contains_key(&sub_id));
 
         model.connection = ConnectionState::Connected;
         assert_eq!(
-            check_due_subscriptions_at(&mut model, now),
+            check_due_subscriptions_at(&mut model, &now),
             vec![Effect::UpdateSubscription { id: sub_id }]
         );
         assert!(model.subscription_updates.contains_key(&sub_id));
@@ -509,14 +519,14 @@ mod tests {
             name: "Sub".to_string(),
             url: "http://example.com/sub".to_string(),
             auto_update: SubscriptionAutoUpdate::Every1d,
-            last_updated: Some(now),
+            last_updated: Some(now.timestamp()),
             next_auto_update: None,
             retry_state: None,
             send_hwid: false,
             hwid: None,
         });
 
-        let effects = check_due_subscriptions_at(&mut model, now);
+        let effects = check_due_subscriptions_at(&mut model, &now);
 
         assert!(effects.is_empty());
         assert!(!model.subscription_updates.contains_key(&sub_id));
@@ -525,7 +535,7 @@ mod tests {
     #[test]
     fn disabled_subscription_does_not_retry_persisted_failure() {
         let sub_id = Uuid::new_v4();
-        let now = Local::now();
+        let now = Zoned::now();
         let mut model = model_with_profiles(vec![]);
         let mut sub = Subscription {
             id: sub_id,
@@ -538,10 +548,10 @@ mod tests {
             send_hwid: false,
             hwid: None,
         };
-        sub.record_fetch_failure(now - chrono::Duration::hours(1));
+        sub.record_fetch_failure(&(&now - SignedDuration::from_hours(1)));
         model.config.subscriptions.push(sub);
 
-        assert!(check_due_subscriptions_at(&mut model, now).is_empty());
+        assert!(check_due_subscriptions_at(&mut model, &now).is_empty());
         assert!(!model.subscription_updates.contains_key(&sub_id));
     }
 

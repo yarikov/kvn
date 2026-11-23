@@ -285,7 +285,7 @@ fn without_status_stubs(
 }
 
 fn now_unix() -> u64 {
-    u64::try_from(chrono::Utc::now().timestamp()).unwrap_or(0)
+    u64::try_from(jiff::Timestamp::now().as_second()).unwrap_or(0)
 }
 
 fn http_status_error(status: u16, redacted_url: &str) -> String {

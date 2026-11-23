@@ -1,5 +1,5 @@
-use chrono::{DateTime, Local, Timelike};
 use crossterm::event::{KeyCode, KeyEvent};
+use jiff::Zoned;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::style::Style;
@@ -254,13 +254,14 @@ pub fn connected_model() -> (Model, Uuid) {
     (model, a_id)
 }
 
-pub fn after_update_window() -> DateTime<Local> {
-    Local::now()
-        .with_hour(9)
-        .unwrap()
-        .with_minute(0)
-        .unwrap()
-        .with_second(0)
+pub fn after_update_window() -> Zoned {
+    Zoned::now()
+        .with()
+        .hour(9)
+        .minute(0)
+        .second(0)
+        .subsec_nanosecond(0)
+        .build()
         .unwrap()
 }
 

@@ -129,7 +129,7 @@ pub(in crate::app::update) fn fetch_skipped_rule_sets(
         StatusKey::Geo,
         AppStatus::Info(format!("Not routed until downloaded: {}", tags.join(", "))),
     );
-    let now = chrono::Local::now();
+    let now = jiff::Timestamp::now();
     let due: Vec<RuleSet> = skipped
         .into_iter()
         .filter(|rule_set| !model.rule_set_retry_pending(rule_set, now))
@@ -230,7 +230,7 @@ mod tests {
     use crate::config::profile::{GeoRegion, Profile, RetryState};
     use crate::geo::RuleSetState;
     use crate::test_helpers::*;
-    use chrono::Local;
+    use jiff::Timestamp;
 
     fn ru_rule_sets() -> Vec<RuleSet> {
         crate::test_helpers::region_rule_sets(GeoRegion::Ru)
@@ -250,7 +250,7 @@ mod tests {
             .map(|rule_set| {
                 let state = RuleSetState {
                     present,
-                    checked_at: present.then(Local::now),
+                    checked_at: present.then(Timestamp::now),
                     ..RuleSetState::default()
                 };
                 (rule_set.key(), state)
@@ -269,7 +269,7 @@ mod tests {
     fn retry_state(consecutive_failures: u32) -> RetryState {
         RetryState {
             consecutive_failures,
-            retry_at: Local::now(),
+            retry_at: Timestamp::now(),
             attempt_date: None,
         }
     }
@@ -293,7 +293,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.geo_schedule_epoch = 2;
         let geoip = ru_rule_sets()[1].clone();
-        let reset_next = Some(Local::now().date_naive());
+        let reset_next = Some(jiff::Zoned::now().date());
         model.rule_set_states.insert(
             geoip.key(),
             RuleSetState {
@@ -301,7 +301,7 @@ mod tests {
                 ..RuleSetState::default()
             },
         );
-        let checked_at = Local::now();
+        let checked_at = Timestamp::now();
         let stale = RuleSetState {
             present: true,
             checked_at: Some(checked_at),
@@ -775,7 +775,7 @@ mod tests {
             crate::geo::RuleSetState {
                 retry: Some(RetryState {
                     consecutive_failures: 1,
-                    retry_at: Local::now() + chrono::Duration::hours(1),
+                    retry_at: Timestamp::now() + jiff::SignedDuration::from_hours(1),
                     attempt_date: None,
                 }),
                 ..Default::default()
