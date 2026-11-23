@@ -165,7 +165,7 @@ fn recovery_path(dir: &Path, kind: RecoveryKind) -> PathBuf {
     dir.join(format!(
         "{}{}-{}",
         kind.prefix(),
-        jiff::Zoned::now().strftime("%Y%m%dT%H%M%S%6f"),
+        jiff::ZonedDateTime::now().strftime("%Y%m%dT%H%M%S%6f"),
         uuid::Uuid::new_v4()
     ))
 }

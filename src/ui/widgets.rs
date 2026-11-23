@@ -53,7 +53,7 @@ fn rule_set_freshness(model: &Model, now: Timestamp) -> RuleSetFreshness {
 fn rule_set_badge(model: &Model, now: Timestamp) -> Option<(String, ratatui::style::Style)> {
     let format_local = |checked_at: Timestamp| {
         checked_at
-            .to_zoned(TimeZone::system())
+            .to_zoned_datetime(TimeZone::system())
             .strftime("%d %b %H:%M")
             .to_string()
     };
@@ -468,7 +468,7 @@ mod tests {
         let mut model = model_with_region_rule_sets();
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every3d;
         let checked_at = local_time(11, 12);
-        let interval_end = (checked_at.to_zoned(TimeZone::UTC) + 3.days()).timestamp();
+        let interval_end = (checked_at.to_zoned_datetime(TimeZone::UTC) + 3.days()).timestamp();
         model.mark_selectable_rule_sets_checked(checked_at);
 
         assert_eq!(

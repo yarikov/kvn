@@ -679,6 +679,27 @@ mod tests {
     }
 
     #[test]
+    fn subscription_schema_keeps_the_date_and_timestamp_formats() {
+        let schema = profiles_json_schema();
+        let subscription = &schema["definitions"]["Subscription"]["properties"];
+        let retry = &schema["definitions"]["RetryState"];
+        let optional_string = json!(["string", "null"]);
+
+        assert_eq!(subscription["last_updated"]["type"], optional_string);
+        assert_eq!(subscription["last_updated"]["format"], "date-time");
+        assert_eq!(subscription["next_auto_update"]["type"], optional_string);
+        assert_eq!(subscription["next_auto_update"]["format"], "date");
+        assert_eq!(retry["properties"]["retry_at"]["type"], "string");
+        assert_eq!(retry["properties"]["retry_at"]["format"], "date-time");
+        assert_eq!(retry["properties"]["attempt_date"]["type"], optional_string);
+        assert_eq!(retry["properties"]["attempt_date"]["format"], "date");
+        assert_eq!(
+            retry["required"],
+            json!(["consecutive_failures", "retry_at"])
+        );
+    }
+
+    #[test]
     fn profile_checks_the_protocol_branches_only_for_a_known_protocol() {
         let profile = &profiles_json_schema()["definitions"]["Profile"];
         let branch_protocols: Vec<&Value> = profile["then"]["oneOf"]

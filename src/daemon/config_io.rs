@@ -554,8 +554,8 @@ mod tests {
         let completed_at = model.onboarding.state.completed_at.unwrap();
         apply_onboarding_writes(&mut model, effects);
 
-        let deadline =
-            completed_at.to_zoned(TimeZone::UTC) + crate::support_prompt::INITIAL_DELAY_DAYS.days();
+        let deadline = completed_at.to_zoned_datetime(TimeZone::UTC)
+            + crate::support_prompt::INITIAL_DELAY_DAYS.days();
         assert_eq!(
             model.support_prompt.next_show_at,
             Some(deadline.timestamp())

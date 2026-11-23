@@ -50,12 +50,12 @@ struct DocsPreviewState {
 }
 
 fn build_docs_preview_state(theme_slug: &str) -> Result<DocsPreviewState> {
-    build_docs_preview_state_at(theme_slug, &jiff::Zoned::now())
+    build_docs_preview_state_at(theme_slug, &jiff::ZonedDateTime::now())
 }
 
 fn build_docs_preview_state_at(
     theme_slug: &str,
-    preview_now: &jiff::Zoned,
+    preview_now: &jiff::ZonedDateTime,
 ) -> Result<DocsPreviewState> {
     use crate::config::profile::{
         Config, GeoAutoUpdate, Hysteria2Config, ProtocolConfig, Subscription,
@@ -355,7 +355,7 @@ mod tests {
     fn docs_preview_shows_realistic_logs_and_kill_switch_toast() {
         let preview_now = jiff::civil::date(2026, 9, 8)
             .at(11, 19, 42, 0)
-            .to_zoned(jiff::tz::TimeZone::system())
+            .to_zoned_datetime(jiff::tz::TimeZone::system())
             .unwrap();
         let state = build_docs_preview_state_at("tokyo-night", &preview_now).unwrap();
         let logs: Vec<_> = state.model.logs.iter().map(String::as_str).collect();

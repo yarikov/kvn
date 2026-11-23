@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use jiff::{Timestamp, ToSpan, Zoned, civil::Date};
+use jiff::{Timestamp, ToSpan, ZonedDateTime, civil::Date};
 use serde::{Deserialize, Serialize};
 
 use crate::config::profile::{GeoRegion, RetryState};
@@ -425,7 +425,7 @@ impl GeoManager {
         outcome: RecordedOutcome,
         schedule: Option<ScheduleWrite>,
     ) -> Result<()> {
-        let now = Zoned::now();
+        let now = ZonedDateTime::now();
         self.update_metadata(|meta| {
             let schedule = schedule.filter(|write| write.epoch == meta.schedule_epoch);
             if outcome.etag.is_none() && outcome.checked.is_none() && schedule.is_none() {
@@ -455,7 +455,7 @@ impl GeoManager {
     }
 
     pub fn reset_update_schedules(&self, rule_sets: &[RuleSet], enabled: bool) -> Result<u64> {
-        let next = crate::config::profile::next_update_window_date(&Zoned::now());
+        let next = crate::config::profile::next_update_window_date(&ZonedDateTime::now());
         let mut schedule_epoch = 0;
         self.update_metadata(|meta| {
             meta.schedule_epoch = meta.schedule_epoch.wrapping_add(1);
@@ -480,7 +480,7 @@ impl GeoManager {
         if !enabled {
             return Ok(());
         }
-        let next = crate::config::profile::next_update_window_date(&Zoned::now());
+        let next = crate::config::profile::next_update_window_date(&ZonedDateTime::now());
         self.update_schedule(schedule_epoch, |meta| {
             let mut changed = false;
             for rule_set in rule_sets {
@@ -978,7 +978,7 @@ mod tests {
         assert!(missing_state.checked_at.is_some());
         assert_eq!(
             missing_state.next_update,
-            Some(Zoned::now().date() + 7.days())
+            Some(ZonedDateTime::now().date() + 7.days())
         );
     }
 
@@ -1038,7 +1038,7 @@ mod tests {
         assert_eq!(
             reset.next_update,
             Some(crate::config::profile::next_update_window_date(
-                &Zoned::now()
+                &ZonedDateTime::now()
             ))
         );
 

@@ -89,7 +89,7 @@ mod tests {
 
         let mut model = crate::test_helpers::model_with_profiles(vec![]);
         model.overlay = Overlay::Support;
-        let now = jiff::Timestamp::now().to_zoned(TimeZone::UTC);
+        let now = jiff::Timestamp::now().to_zoned_datetime(TimeZone::UTC);
         model.support_prompt.next_show_at = Some((&now - 1.days()).timestamp());
         let previous = model.support_prompt.clone();
         let effects = handle_ipc_command(

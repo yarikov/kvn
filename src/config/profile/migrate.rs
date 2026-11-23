@@ -1,4 +1,4 @@
-use jiff::{Zoned, civil::Date};
+use jiff::{ZonedDateTime, civil::Date};
 
 use super::dns::DnsStrategy;
 use super::schedule::next_update_window_date;
@@ -14,7 +14,10 @@ impl Config {
     }
 
     pub(crate) fn migrate_to(&mut self, target_version: u32) -> anyhow::Result<()> {
-        self.migrate_with_update_date_to(target_version, next_update_window_date(&Zoned::now()))
+        self.migrate_with_update_date_to(
+            target_version,
+            next_update_window_date(&ZonedDateTime::now()),
+        )
     }
 
     fn migrate_with_update_date_to(

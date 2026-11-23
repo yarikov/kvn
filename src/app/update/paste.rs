@@ -92,7 +92,7 @@ fn add_and_fetch_subscription(model: &mut Model, url: &str) -> Vec<Effect> {
         auto_update: SubscriptionAutoUpdate::Every1d,
         last_updated: None,
         next_auto_update: Some(crate::config::profile::next_update_window_date(
-            &jiff::Zoned::now(),
+            &jiff::ZonedDateTime::now(),
         )),
         retry_state: None,
         send_hwid: false,
@@ -283,7 +283,7 @@ mod tests {
         assert_eq!(
             sub.next_auto_update,
             Some(crate::config::profile::next_update_window_date(
-                &jiff::Zoned::now()
+                &jiff::ZonedDateTime::now()
             ))
         );
     }
