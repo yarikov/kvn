@@ -293,7 +293,7 @@ mod tests {
         let mut model = model_with_profiles(vec![]);
         model.geo_schedule_epoch = 2;
         let geoip = ru_rule_sets()[1].clone();
-        let reset_next = Some(jiff::Zoned::now().date());
+        let reset_next = Some(jiff::ZonedDateTime::now().date());
         model.rule_set_states.insert(
             geoip.key(),
             RuleSetState {

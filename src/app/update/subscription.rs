@@ -1,7 +1,7 @@
 use crate::app::effect::Effect;
 use crate::app::model::{AppStatus, ConnectionState, Model, StatusKey, UpdateTrigger};
 use crate::config::profile::{Profile, SubscriptionAutoUpdate};
-use jiff::Zoned;
+use jiff::ZonedDateTime;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -14,14 +14,14 @@ pub(in crate::app::update) fn handle_subscription_result(
     id: Uuid,
     result: Result<Vec<Profile>, crate::app::msg::IpcError>,
 ) -> Vec<Effect> {
-    handle_subscription_result_at(model, id, result, &Zoned::now())
+    handle_subscription_result_at(model, id, result, &ZonedDateTime::now())
 }
 
 fn handle_subscription_result_at(
     model: &mut Model,
     id: Uuid,
     result: Result<Vec<Profile>, crate::app::msg::IpcError>,
-    now: &Zoned,
+    now: &ZonedDateTime,
 ) -> Vec<Effect> {
     let automatic = model.subscription_updates.remove(&id) == Some(UpdateTrigger::Automatic);
     let Some(sub_idx) = model.config.subscriptions.iter().position(|s| s.id == id) else {
@@ -485,7 +485,7 @@ mod tests {
             .subscription_updates
             .insert(sub_id, UpdateTrigger::Automatic);
 
-        let failed_at = Zoned::now();
+        let failed_at = ZonedDateTime::now();
         let effects = handle_subscription_result_at(
             &mut model,
             sub_id,
@@ -622,7 +622,7 @@ mod tests {
             send_hwid: false,
             hwid: None,
         });
-        model.config.subscriptions[0].record_fetch_failure(&Zoned::now());
+        model.config.subscriptions[0].record_fetch_failure(&ZonedDateTime::now());
         model
             .subscription_updates
             .insert(sub_id, UpdateTrigger::Automatic);
@@ -864,7 +864,7 @@ mod tests {
 
     #[test]
     fn manual_subscription_result_does_not_change_automatic_schedule() {
-        let now = Zoned::now();
+        let now = ZonedDateTime::now();
         let id = Uuid::new_v4();
         let mut model = model_with_profiles(vec![]);
         let retry = crate::config::profile::RetryState {

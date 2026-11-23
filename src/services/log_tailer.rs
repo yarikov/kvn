@@ -1,4 +1,4 @@
-use jiff::{Timestamp, Zoned, tz::TimeZone};
+use jiff::{Timestamp, ZonedDateTime, tz::TimeZone};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -55,7 +55,7 @@ fn tail_start(file: &mut File, file_len: u64, max_lines: usize) -> std::io::Resu
 }
 
 pub fn append_app_log(level: &str, message: &str) {
-    let now = Zoned::now();
+    let now = ZonedDateTime::now();
     let path = crate::paths::app_log_path();
     if let Ok(mut file) = OpenOptions::new().append(true).create(true).open(&path) {
         let _ = writeln!(
@@ -173,7 +173,11 @@ fn format_entry(line: &str, tag: &str) -> (Timestamp, String) {
         format!("{} {}", tag, line)
     };
     let sort_key = parsed.map_or_else(
-        || TimeZone::UTC.to_timestamp(Zoned::now().datetime()).unwrap(),
+        || {
+            TimeZone::UTC
+                .to_timestamp(ZonedDateTime::now().datetime())
+                .unwrap()
+        },
         |(dt, _)| dt.timestamp(),
     );
     (sort_key, formatted)
@@ -207,15 +211,15 @@ fn read_last_lines(file: &mut File, start: u64, end: u64, limit: usize) -> Vec<S
         .collect()
 }
 
-fn parse_timestamp(line: &str) -> Option<(Zoned, usize)> {
+fn parse_timestamp(line: &str) -> Option<(ZonedDateTime, usize)> {
     if let Some(prefix) = line.get(..29)
         && prefix.as_bytes()[25] == b'.'
-        && let Ok(dt) = Zoned::strptime("%z %Y-%m-%d %H:%M:%S%.3f", prefix)
+        && let Ok(dt) = ZonedDateTime::strptime("%z %Y-%m-%d %H:%M:%S%.3f", prefix)
     {
         return Some((dt, 29));
     }
     if let Some(prefix) = line.get(..25)
-        && let Ok(dt) = Zoned::strptime("%z %Y-%m-%d %H:%M:%S", prefix)
+        && let Ok(dt) = ZonedDateTime::strptime("%z %Y-%m-%d %H:%M:%S", prefix)
     {
         return Some((dt, 25));
     }

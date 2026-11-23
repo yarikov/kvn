@@ -16,7 +16,7 @@ crossterm = "0.29"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-schemars = { version = "1.2", features = ["uuid1", "jiff02"] }
+schemars = { version = "1.2", features = ["uuid1"] }
 toml = "1.1"
 semver = { version = "1.0", features = ["serde"] }
 
@@ -46,7 +46,7 @@ url = "2.5.9"
 unicode-width = "0.2"
 
 # Dates, timestamps, and time zones
-jiff = { version = "0.2", features = ["serde"] }
+jiff = { version = "1.0.2", features = ["serde"] }
 
 # URL encoding / decoding
 urlencoding = "2.1"

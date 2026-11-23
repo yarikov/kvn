@@ -54,7 +54,7 @@ impl SupportPromptState {
 }
 
 fn deadline_after_days(now: Timestamp, days: i64) -> Timestamp {
-    now.to_zoned(TimeZone::UTC)
+    now.to_zoned_datetime(TimeZone::UTC)
         .checked_add(days.days())
         .map(|deadline| deadline.timestamp())
         .unwrap_or(Timestamp::MAX)

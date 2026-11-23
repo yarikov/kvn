@@ -2,7 +2,7 @@ use crate::app::effect::Effect;
 use crate::app::model::{ConnectionState, Model, Overlay, UpdateTrigger};
 use crate::config::profile::update_window_open;
 use crate::geo::{RuleSet, RuleSetState};
-use jiff::{SignedDuration, Timestamp, Zoned};
+use jiff::{SignedDuration, Timestamp, ZonedDateTime};
 use std::time::Instant;
 
 use crate::app::update::traffic::TRAFFIC_POLL_INTERVAL;
@@ -10,10 +10,10 @@ use crate::app::update::traffic::TRAFFIC_POLL_INTERVAL;
 const AUTOMATIC_ATTEMPT_SPACING: SignedDuration = SignedDuration::from_mins(1);
 
 pub(in crate::app::update) fn handle_tick(model: &mut Model) -> Vec<Effect> {
-    handle_tick_at(model, &Zoned::now())
+    handle_tick_at(model, &ZonedDateTime::now())
 }
 
-fn handle_tick_at(model: &mut Model, now: &Zoned) -> Vec<Effect> {
+fn handle_tick_at(model: &mut Model, now: &ZonedDateTime) -> Vec<Effect> {
     let mut effects = Vec::new();
 
     let due = due_rule_sets(model, now);
@@ -91,7 +91,7 @@ fn tick_running_work(model: &mut Model) -> Vec<Effect> {
     effects
 }
 
-fn due_rule_sets(model: &Model, now: &Zoned) -> Vec<RuleSet> {
+fn due_rule_sets(model: &Model, now: &ZonedDateTime) -> Vec<RuleSet> {
     if model.config.settings.kill_switch && model.connection != ConnectionState::Connected {
         return Vec::new();
     }
@@ -124,7 +124,7 @@ fn attempted_recently(model: &Model, key: &str, now: Timestamp) -> bool {
         .is_some_and(|attempt| now.duration_since(*attempt) < AUTOMATIC_ATTEMPT_SPACING)
 }
 
-fn rule_set_due(state: Option<&RuleSetState>, interval: u64, now: &Zoned) -> bool {
+fn rule_set_due(state: Option<&RuleSetState>, interval: u64, now: &ZonedDateTime) -> bool {
     let state = state.cloned().unwrap_or_default();
     if let Some(retry) = state.retry
         && retry.governs(now)
@@ -142,7 +142,7 @@ fn rule_set_due(state: Option<&RuleSetState>, interval: u64, now: &Zoned) -> boo
         )
 }
 
-fn check_due_subscriptions_at(model: &mut Model, now: &Zoned) -> Vec<Effect> {
+fn check_due_subscriptions_at(model: &mut Model, now: &ZonedDateTime) -> Vec<Effect> {
     if model.config.settings.kill_switch && model.connection != ConnectionState::Connected {
         return Vec::new();
     }
@@ -205,7 +205,7 @@ mod tests {
         model
     }
 
-    fn is_due(model: &Model, now: &Zoned) -> bool {
+    fn is_due(model: &Model, now: &ZonedDateTime) -> bool {
         !due_rule_sets(model, now).is_empty()
     }
 
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn failed_subscription_waits_until_retry_deadline() {
         let sub_id = Uuid::new_v4();
-        let now = Zoned::now();
+        let now = ZonedDateTime::now();
         let mut model = model_with_profiles(vec![]);
         let mut sub = Subscription {
             id: sub_id,
@@ -417,7 +417,7 @@ mod tests {
             (jiff::civil::date(2026, 3, 28), "2026-03-29T06:00:00Z"),
             (jiff::civil::date(2026, 10, 24), "2026-10-25T07:00:00Z"),
         ] {
-            let last_attempt = zone.to_zoned(day.at(12, 0, 0, 0)).unwrap();
+            let last_attempt = zone.to_zoned_datetime(day.at(12, 0, 0, 0)).unwrap();
             let mut model = model_with_profiles(vec![]);
             let id = Uuid::new_v4();
             model.config.subscriptions.push(Subscription {
@@ -440,7 +440,7 @@ mod tests {
             let at_window = expected_utc
                 .parse::<Timestamp>()
                 .unwrap()
-                .to_zoned(zone.clone());
+                .to_zoned_datetime(zone.clone());
             let before_window = &at_window - SignedDuration::from_secs(1);
             assert!(check_due_subscriptions_at(&mut model, &before_window).is_empty());
             assert_eq!(
@@ -465,7 +465,7 @@ mod tests {
             send_hwid: false,
             hwid: None,
         };
-        sub.record_fetch_failure(&Zoned::now());
+        sub.record_fetch_failure(&ZonedDateTime::now());
         model.config.subscriptions.push(sub);
         model.selected = 0;
 
@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn disabled_subscription_does_not_retry_persisted_failure() {
         let sub_id = Uuid::new_v4();
-        let now = Zoned::now();
+        let now = ZonedDateTime::now();
         let mut model = model_with_profiles(vec![]);
         let mut sub = Subscription {
             id: sub_id,

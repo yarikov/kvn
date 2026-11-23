@@ -1,4 +1,4 @@
-use jiff::{SignedDuration, Timestamp, Zoned, civil::Date};
+use jiff::{SignedDuration, Timestamp, ZonedDateTime, civil::Date};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -124,15 +124,17 @@ pub struct RetryState {
     /// Failed attempts in a row on `attempt_date`; retries stop after five.
     pub consecutive_failures: u32,
     /// Earliest time of the next automatic retry.
+    #[schemars(with = "String", extend("format" = "date-time"))]
     pub retry_at: Timestamp,
     /// Local date of the failures counted; a failure on a later date starts
     /// the count again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>", extend("format" = "date"))]
     pub attempt_date: Option<Date>,
 }
 
 impl RetryState {
-    pub fn after_failure(previous: Option<&RetryState>, now: &Zoned) -> Self {
+    pub fn after_failure(previous: Option<&RetryState>, now: &ZonedDateTime) -> Self {
         let today = now.date();
         let consecutive_failures = previous
             .filter(|state| state.attempt_date == Some(today))
@@ -144,7 +146,7 @@ impl RetryState {
         }
     }
 
-    pub fn governs(&self, now: &Zoned) -> bool {
+    pub fn governs(&self, now: &ZonedDateTime) -> bool {
         self.attempt_date.is_none_or(|date| date == now.date())
     }
 
@@ -153,11 +155,11 @@ impl RetryState {
     }
 }
 
-pub fn update_window_open(now: &Zoned) -> bool {
+pub fn update_window_open(now: &ZonedDateTime) -> bool {
     now.hour() >= UPDATE_WINDOW_HOUR
 }
 
-pub fn next_update_window_date(now: &Zoned) -> Date {
+pub fn next_update_window_date(now: &ZonedDateTime) -> Date {
     if update_window_open(now) {
         now.date().tomorrow().expect("local date must advance")
     } else {
@@ -165,7 +167,7 @@ pub fn next_update_window_date(now: &Zoned) -> Date {
     }
 }
 
-fn next_retry_at(failure: u32, now: &Zoned) -> Timestamp {
+fn next_retry_at(failure: u32, now: &ZonedDateTime) -> Timestamp {
     let minutes = match failure {
         1 => 1,
         2 => 5,
@@ -250,11 +252,11 @@ mod tests {
     fn update_window_is_fixed_at_eight_local_time() {
         let before = jiff::civil::date(2026, 8, 22)
             .at(7, 59, 0, 0)
-            .to_zoned(jiff::tz::TimeZone::system())
+            .to_zoned_datetime(jiff::tz::TimeZone::system())
             .unwrap();
         let after = jiff::civil::date(2026, 8, 22)
             .at(11, 0, 0, 0)
-            .to_zoned(jiff::tz::TimeZone::system())
+            .to_zoned_datetime(jiff::tz::TimeZone::system())
             .unwrap();
         assert_eq!(next_update_window_date(&before), before.date());
         assert_eq!(
@@ -267,7 +269,7 @@ mod tests {
     fn retry_state_governs_only_its_attempt_day_and_stops_after_five_failures() {
         let now = jiff::civil::date(2026, 8, 22)
             .at(12, 0, 0, 0)
-            .to_zoned(jiff::tz::TimeZone::system())
+            .to_zoned_datetime(jiff::tz::TimeZone::system())
             .unwrap();
         let state = RetryState {
             consecutive_failures: 4,
@@ -289,7 +291,7 @@ mod tests {
         let now = "2026-03-28T11:00:30Z"
             .parse::<Timestamp>()
             .unwrap()
-            .to_zoned(zone);
+            .to_zoned_datetime(zone);
         let mut state = None;
         for (failures, delay) in [(1, 1), (2, 5), (3, 15), (4, 60)] {
             let next = RetryState::after_failure(state.as_ref(), &now);

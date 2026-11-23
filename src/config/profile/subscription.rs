@@ -1,4 +1,4 @@
-use jiff::{Timestamp, ToSpan, Zoned, civil::Date};
+use jiff::{Timestamp, ToSpan, ZonedDateTime, civil::Date};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -22,8 +22,10 @@ pub struct Subscription {
     #[serde(default)]
     pub auto_update: SubscriptionAutoUpdate,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>", extend("format" = "date-time"))]
     pub last_updated: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>", extend("format" = "date"))]
     pub next_auto_update: Option<Date>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_state: Option<RetryState>,
@@ -47,7 +49,7 @@ impl Subscription {
         self.hwid.as_deref().or(Some(settings.hwid.as_str()))
     }
 
-    pub fn record_fetch_failure(&mut self, now: &Zoned) {
+    pub fn record_fetch_failure(&mut self, now: &ZonedDateTime) {
         self.retry_state = Some(RetryState::after_failure(self.retry_state.as_ref(), now));
     }
 
@@ -55,7 +57,7 @@ impl Subscription {
         self.retry_state = None;
     }
 
-    pub fn schedule_next_after_success(&mut self, now: &Zoned) {
+    pub fn schedule_next_after_success(&mut self, now: &ZonedDateTime) {
         self.clear_retry_state();
         let days = self.auto_update.interval_minutes() / 1_440;
         self.next_auto_update = (days != 0).then(|| {
@@ -253,7 +255,7 @@ mod tests {
     fn subscription_records_and_serializes_retry_state() {
         let now = jiff::civil::date(2026, 8, 22)
             .at(12, 0, 0, 0)
-            .to_zoned(jiff::tz::TimeZone::system())
+            .to_zoned_datetime(jiff::tz::TimeZone::system())
             .unwrap();
         let mut sub = Subscription {
             id: Uuid::nil(),

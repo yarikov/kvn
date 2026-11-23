@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use jiff::Zoned;
+use jiff::ZonedDateTime;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::style::Style;
@@ -254,8 +254,8 @@ pub fn connected_model() -> (Model, Uuid) {
     (model, a_id)
 }
 
-pub fn after_update_window() -> Zoned {
-    Zoned::now()
+pub fn after_update_window() -> ZonedDateTime {
+    ZonedDateTime::now()
         .with()
         .hour(9)
         .minute(0)
