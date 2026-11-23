@@ -466,8 +466,8 @@ fn check_format(schema: &Map<String, Value>, value: &Value, pointer: &str, out: 
     };
     let valid = match format {
         "uuid" => uuid::Uuid::parse_str(text).is_ok(),
-        "date" => chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d").is_ok(),
-        "date-time" => chrono::DateTime::parse_from_rfc3339(text).is_ok(),
+        "date" => jiff::civil::Date::strptime("%Y-%m-%d", text).is_ok(),
+        "date-time" => is_rfc3339(text),
         _ => true,
     };
     if !valid {
@@ -476,6 +476,31 @@ fn check_format(schema: &Map<String, Value>, value: &Value, pointer: &str, out: 
             format!("value is not a valid {format}"),
         ));
     }
+}
+
+fn is_rfc3339(text: &str) -> bool {
+    let Some((date_time, rest)) = text.as_bytes().split_at_checked(19) else {
+        return false;
+    };
+    if (date_time[4], date_time[7], date_time[13], date_time[16]) != (b'-', b'-', b':', b':')
+        || !matches!(date_time[10], b'T' | b't' | b' ')
+    {
+        return false;
+    }
+    let (fraction, offset) = match rest.last() {
+        Some(b'Z' | b'z') => rest.split_at(rest.len() - 1),
+        _ if rest.len() >= 6 => rest.split_at(rest.len() - 6),
+        _ => return false,
+    };
+    (fraction.is_empty()
+        || matches!(fraction, [b'.', digits @ ..] if !digits.is_empty() && digits.iter().all(u8::is_ascii_digit)))
+        && matches!(
+            offset,
+            [b'Z' | b'z']
+                | [b'+' | b'-', b'0'..=b'1', b'0'..=b'9', b':', _, _]
+                | [b'+' | b'-', b'2', b'0'..=b'3', b':', _, _]
+        )
+        && text.parse::<jiff::Timestamp>().is_ok()
 }
 
 fn list(values: &[Value]) -> String {
@@ -720,6 +745,25 @@ mod tests {
                 .starts_with("/profiles/2/protocol: must be one of \"vless\", \"vmess\"")
         );
         assert_eq!(found[4].1, "/unknown: unknown property \"unknown\"");
+    }
+
+    #[test]
+    fn date_time_validation_retains_rfc3339_syntax() {
+        for valid in [
+            "2026-01-01T00:00:00Z",
+            "2026-01-01t00:00:00.123456789z",
+            "2026-01-01 01:00:00+03:00",
+        ] {
+            assert!(is_rfc3339(valid), "{valid}");
+        }
+        for invalid in [
+            "2026-01-01T00:00Z",
+            "2026-01-01T00:00:00+0300",
+            "2026-01-01T00:00:00+24:00",
+            "2026-01-01T00:00:00+03:00[Europe/Moscow]",
+        ] {
+            assert!(!is_rfc3339(invalid), "{invalid}");
+        }
     }
 
     #[test]

@@ -501,6 +501,31 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_reads_legacy_rule_set_timestamps_and_dates() {
+        let mut value = serde_json::to_value(sample_snapshot()).unwrap();
+        value["rule_set_states"] = serde_json::json!({
+            "geoip-ru.srs": {
+                "present": true,
+                "checked_at": "2026-10-02T08:00:00.123+03:00",
+                "retry": {
+                    "consecutive_failures": 1,
+                    "retry_at": "2026-10-02T08:01:00.123+03:00",
+                    "attempt_date": "2026-10-02"
+                },
+                "next_update": "2026-10-03"
+            }
+        });
+
+        let snapshot: StateSnapshot = serde_json::from_value(value).unwrap();
+        let encoded = serde_json::to_value(snapshot).unwrap();
+        let state = &encoded["rule_set_states"]["geoip-ru.srs"];
+        assert_eq!(state["checked_at"], "2026-10-02T05:00:00.123Z");
+        assert_eq!(state["retry"]["retry_at"], "2026-10-02T05:01:00.123Z");
+        assert_eq!(state["retry"]["attempt_date"], "2026-10-02");
+        assert_eq!(state["next_update"], "2026-10-03");
+    }
+
+    #[test]
     fn snapshots_without_editor_results_remain_compatible() {
         let value = serde_json::to_value(sample_snapshot()).unwrap();
         assert!(value.get("profiles_edit_result").is_none());

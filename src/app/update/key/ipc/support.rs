@@ -5,7 +5,7 @@ use crate::app::msg::SupportPromptResolution;
 pub(super) fn check_prompt(model: &mut Model) -> Vec<Effect> {
     if model.overlay == Overlay::None
         && model.onboarding.is_complete()
-        && model.support_prompt.is_due(chrono::Utc::now())
+        && model.support_prompt.is_due(jiff::Timestamp::now())
     {
         model.support_selected = 0;
         model.overlay = Overlay::Support;
@@ -23,10 +23,10 @@ pub(super) fn resolve_prompt(
     let previous = model.support_prompt.clone();
     match resolution {
         SupportPromptResolution::RemindLater => {
-            model.support_prompt.remind_later(chrono::Utc::now());
+            model.support_prompt.remind_later(jiff::Timestamp::now());
         }
         SupportPromptResolution::Supported => {
-            model.support_prompt.supported(chrono::Utc::now());
+            model.support_prompt.supported(jiff::Timestamp::now());
         }
         SupportPromptResolution::Dismiss => {
             model.support_prompt.dismiss();
@@ -64,17 +64,19 @@ mod tests {
     use super::*;
     use crate::app::msg::IpcCommand;
     use crate::app::update::key::ipc::handle_ipc_command;
+    use jiff::{ToSpan, tz::TimeZone};
 
     #[test]
     fn support_prompt_check_requires_finished_onboarding_and_due_deadline() {
         let mut model = crate::test_helpers::model_with_profiles(vec![]);
-        model.support_prompt.next_show_at = Some(chrono::Utc::now() - chrono::Duration::seconds(1));
+        model.support_prompt.next_show_at =
+            Some(jiff::Timestamp::now() - jiff::SignedDuration::from_secs(1));
 
         let effects = handle_ipc_command(&mut model, IpcCommand::CheckSupportPrompt);
         assert_eq!(model.overlay, Overlay::None);
         assert_eq!(effects, vec![Effect::BroadcastState]);
 
-        model.onboarding.state.complete(chrono::Utc::now());
+        model.onboarding.state.complete(jiff::Timestamp::now());
         let effects = handle_ipc_command(&mut model, IpcCommand::CheckSupportPrompt);
         assert_eq!(model.overlay, Overlay::Support);
         assert_eq!(model.support_selected, 0);
@@ -87,7 +89,8 @@ mod tests {
 
         let mut model = crate::test_helpers::model_with_profiles(vec![]);
         model.overlay = Overlay::Support;
-        model.support_prompt.next_show_at = Some(chrono::Utc::now() - chrono::Duration::days(1));
+        let now = jiff::Timestamp::now().to_zoned(TimeZone::UTC);
+        model.support_prompt.next_show_at = Some((&now - 1.days()).timestamp());
         let previous = model.support_prompt.clone();
         let effects = handle_ipc_command(
             &mut model,
@@ -96,10 +99,8 @@ mod tests {
             },
         );
         assert_eq!(model.overlay, Overlay::None);
-        assert!(
-            model.support_prompt.next_show_at
-                > Some(chrono::Utc::now() + chrono::Duration::days(29))
-        );
+        let earliest_reminder = (now + 29.days()).timestamp();
+        assert!(model.support_prompt.next_show_at > Some(earliest_reminder));
         assert_eq!(
             effects,
             vec![
@@ -127,7 +128,7 @@ mod tests {
     fn dismiss_command_closes_open_prompt_and_persists() {
         let mut model = crate::test_helpers::model_with_profiles(vec![]);
         model.overlay = Overlay::Support;
-        model.support_prompt.next_show_at = Some(chrono::Utc::now());
+        model.support_prompt.next_show_at = Some(jiff::Timestamp::now());
         let previous = model.support_prompt.clone();
 
         let effects = handle_ipc_command(&mut model, IpcCommand::DismissSupportPrompt);

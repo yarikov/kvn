@@ -1,3 +1,4 @@
+use jiff::{Timestamp, tz::TimeZone};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::text::{Line, Span};
@@ -14,12 +15,12 @@ enum RuleSetFreshness {
     Disabled,
     Updating,
     Never,
-    Fresh(chrono::DateTime<chrono::Local>),
-    Stale(chrono::DateTime<chrono::Local>),
-    Manual(chrono::DateTime<chrono::Local>),
+    Fresh(Timestamp),
+    Stale(Timestamp),
+    Manual(Timestamp),
 }
 
-fn rule_set_freshness(model: &Model, now: chrono::DateTime<chrono::Local>) -> RuleSetFreshness {
+fn rule_set_freshness(model: &Model, now: Timestamp) -> RuleSetFreshness {
     let routing = &model.config.settings.geo_routing;
     let selectable = model.selectable_rule_sets();
 
@@ -42,17 +43,20 @@ fn rule_set_freshness(model: &Model, now: chrono::DateTime<chrono::Local>) -> Ru
         return RuleSetFreshness::Manual(last_checked_at);
     }
     let stale_after = interval.saturating_add(RULE_SET_STALE_GRACE_MINUTES);
-    if now.signed_duration_since(last_checked_at).num_minutes() >= stale_after as i64 {
+    if now.duration_since(last_checked_at).as_mins() >= stale_after as i64 {
         RuleSetFreshness::Stale(last_checked_at)
     } else {
         RuleSetFreshness::Fresh(last_checked_at)
     }
 }
 
-fn rule_set_badge(
-    model: &Model,
-    now: chrono::DateTime<chrono::Local>,
-) -> Option<(String, ratatui::style::Style)> {
+fn rule_set_badge(model: &Model, now: Timestamp) -> Option<(String, ratatui::style::Style)> {
+    let format_local = |checked_at: Timestamp| {
+        checked_at
+            .to_zoned(TimeZone::system())
+            .strftime("%d %b %H:%M")
+            .to_string()
+    };
     let (text, style) = match rule_set_freshness(model, now) {
         RuleSetFreshness::Disabled => return None,
         RuleSetFreshness::Updating => (
@@ -60,18 +64,15 @@ fn rule_set_badge(
             model.theme.ruleset_updating_badge(),
         ),
         RuleSetFreshness::Never => ("never".to_string(), model.theme.ruleset_stale_badge()),
-        RuleSetFreshness::Fresh(checked_at) => (
-            checked_at.format("%d %b %H:%M").to_string(),
-            model.theme.ruleset_fresh_badge(),
-        ),
-        RuleSetFreshness::Stale(checked_at) => (
-            checked_at.format("%d %b %H:%M").to_string(),
-            model.theme.ruleset_stale_badge(),
-        ),
-        RuleSetFreshness::Manual(checked_at) => (
-            checked_at.format("%d %b %H:%M").to_string(),
-            model.theme.ruleset_manual_badge(),
-        ),
+        RuleSetFreshness::Fresh(checked_at) => {
+            (format_local(checked_at), model.theme.ruleset_fresh_badge())
+        }
+        RuleSetFreshness::Stale(checked_at) => {
+            (format_local(checked_at), model.theme.ruleset_stale_badge())
+        }
+        RuleSetFreshness::Manual(checked_at) => {
+            (format_local(checked_at), model.theme.ruleset_manual_badge())
+        }
     };
     let refresh = crate::ui::icons::icons(model.icon_set()).refresh;
     let schedule = model.config.settings.geo_routing.auto_update.label();
@@ -225,7 +226,7 @@ impl<'a> Widget for StatusBar<'a> {
                 3,
             ),
         });
-        if let Some((label, style)) = rule_set_badge(self.model, chrono::Local::now()) {
+        if let Some((label, style)) = rule_set_badge(self.model, Timestamp::now()) {
             right.push((label, style, 2));
         }
 
@@ -404,7 +405,8 @@ mod tests {
     use crate::test_helpers::{
         APP_WINDOW_COLS, buffer_to_string, buffer_to_styled_string, model_with_profiles,
     };
-    use chrono::{Duration, TimeZone};
+
+    use jiff::{SignedDuration, ToSpan};
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
 
@@ -415,10 +417,9 @@ mod tests {
         buffer_to_styled_string(&buf)
     }
 
-    fn local_time(day: u32, hour: u32) -> chrono::DateTime<chrono::Local> {
-        chrono::Local
-            .with_ymd_and_hms(2026, 8, day, hour, 20, 0)
-            .single()
+    fn local_time(day: i8, hour: i8) -> Timestamp {
+        TimeZone::system()
+            .to_timestamp(jiff::civil::date(2026, 8, day).at(hour, 20, 0, 0))
             .unwrap()
     }
 
@@ -467,21 +468,19 @@ mod tests {
         let mut model = model_with_region_rule_sets();
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every3d;
         let checked_at = local_time(11, 12);
+        let interval_end = (checked_at.to_zoned(TimeZone::UTC) + 3.days()).timestamp();
         model.mark_selectable_rule_sets_checked(checked_at);
 
         assert_eq!(
-            rule_set_freshness(&model, checked_at + Duration::days(3)),
+            rule_set_freshness(&model, interval_end),
             RuleSetFreshness::Fresh(checked_at)
         );
         assert_eq!(
-            rule_set_freshness(
-                &model,
-                checked_at + Duration::days(3) + Duration::minutes(59)
-            ),
+            rule_set_freshness(&model, interval_end + SignedDuration::from_mins(59)),
             RuleSetFreshness::Fresh(checked_at)
         );
         assert_eq!(
-            rule_set_freshness(&model, checked_at + Duration::days(3) + Duration::hours(1)),
+            rule_set_freshness(&model, interval_end + SignedDuration::from_hours(1)),
             RuleSetFreshness::Stale(checked_at)
         );
     }
@@ -710,7 +709,7 @@ mod tests {
         model
             .routing
             .add_region_modes(crate::config::profile::GeoRegion::Ru);
-        model.mark_selectable_rule_sets_checked(chrono::Local::now());
+        model.mark_selectable_rule_sets_checked(Timestamp::now());
         let area = Rect::new(0, 0, 18, 1);
         let mut buf = Buffer::empty(area);
         StatusBar::new(&model).render(area, &mut buf);
@@ -732,9 +731,8 @@ mod tests {
             .routing
             .add_region_modes(crate::config::profile::GeoRegion::Ru);
         model.mark_selectable_rule_sets_checked(
-            chrono::Local
-                .with_ymd_and_hms(2026, 5, 31, 13, 41, 0)
-                .single()
+            TimeZone::system()
+                .to_timestamp(jiff::civil::date(2026, 5, 31).at(13, 41, 0, 0))
                 .unwrap(),
         );
         model.config.settings.geo_routing.auto_update = GeoAutoUpdate::Every1d;

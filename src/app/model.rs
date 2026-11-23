@@ -8,7 +8,7 @@ use crate::config::profile::ConfigFile;
 use crate::config::profile::{Config, Profile};
 use crate::config::routing::{ModeRule, RoutingConfig};
 use crate::ui::styles::Theme;
-use chrono::{DateTime, Local};
+use jiff::Timestamp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Overlay {
@@ -405,7 +405,7 @@ pub struct Model {
     pub logs: VecDeque<String>,
     pub rule_set_updates: HashMap<String, UpdateTrigger>,
     pub rule_set_states: crate::geo::RuleSetStates,
-    pub rule_set_automatic_attempts: HashMap<String, DateTime<Local>>,
+    pub rule_set_automatic_attempts: HashMap<String, Timestamp>,
     pub subscription_updates: HashMap<Uuid, UpdateTrigger>,
     pub needs_redraw: bool,
     pub should_quit: bool,
@@ -520,7 +520,7 @@ impl Model {
         crate::route_plan::selectable_rule_sets(&self.routing)
     }
 
-    pub fn selectable_rule_sets_checked_at(&self) -> Option<DateTime<Local>> {
+    pub fn selectable_rule_sets_checked_at(&self) -> Option<Timestamp> {
         self.selectable_rule_sets()
             .iter()
             .map(|rule_set| {
@@ -534,7 +534,7 @@ impl Model {
     }
 
     #[cfg(any(test, feature = "docs-preview"))]
-    pub fn mark_selectable_rule_sets_checked(&mut self, checked_at: DateTime<Local>) {
+    pub fn mark_selectable_rule_sets_checked(&mut self, checked_at: Timestamp) {
         for rule_set in self.selectable_rule_sets() {
             self.rule_set_states
                 .entry(rule_set.key())
@@ -547,11 +547,7 @@ impl Model {
         crate::geo::rule_set_present(&self.rule_set_states, rule_set)
     }
 
-    pub fn rule_set_retry_pending(
-        &self,
-        rule_set: &crate::geo::RuleSet,
-        now: chrono::DateTime<chrono::Local>,
-    ) -> bool {
+    pub fn rule_set_retry_pending(&self, rule_set: &crate::geo::RuleSet, now: Timestamp) -> bool {
         self.rule_set_states
             .get(&rule_set.key())
             .and_then(|state| state.retry.as_ref())
@@ -673,7 +669,7 @@ impl Model {
             }
         };
 
-        let now = chrono::Utc::now();
+        let now = Timestamp::now();
         let onboarding = crate::onboarding::OnboardingProgress::new(
             crate::onboarding::load_for_daemon(predates_mode_selection, now),
             show_omarchy_card(),
@@ -1509,7 +1505,7 @@ mod tests {
         let _state_home = crate::test_helpers::EnvVarGuard::set("XDG_STATE_HOME", state_dir.path());
 
         let mut ended = crate::onboarding::OnboardingState::default();
-        ended.complete(chrono::Utc::now());
+        ended.complete(jiff::Timestamp::now());
         crate::onboarding::save_at(&crate::paths::onboarding_path().unwrap(), &ended).unwrap();
 
         let model = Model::new().unwrap();

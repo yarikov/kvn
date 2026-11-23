@@ -519,7 +519,6 @@ mod tests {
     #[test]
     fn draw_sources_subscription_with_last_updated_snapshot() {
         use crate::config::profile::{Subscription, SubscriptionAutoUpdate};
-        use chrono::TimeZone;
         use uuid::Uuid;
 
         let sub_id = Uuid::new_v4();
@@ -531,8 +530,8 @@ mod tests {
         );
         profile.subscription_id = Some(sub_id);
         let mut model = model_with_profiles(vec![profile]);
-        let last_updated = chrono::Local
-            .with_ymd_and_hms(2026, 6, 14, 9, 30, 0)
+        let last_updated = jiff::tz::TimeZone::system()
+            .to_timestamp(jiff::civil::date(2026, 6, 14).at(9, 30, 0, 0))
             .unwrap();
         model.config.subscriptions.push(Subscription {
             id: sub_id,

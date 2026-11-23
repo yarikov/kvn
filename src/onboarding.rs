@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::config::routing::RoutingConfig;
@@ -140,7 +140,7 @@ pub struct OnboardingState {
     #[serde(default)]
     pub step: OnboardingStep,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub completed_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<Timestamp>,
 }
 
 impl OnboardingState {
@@ -148,7 +148,7 @@ impl OnboardingState {
         self.completed_at.is_some()
     }
 
-    pub fn complete(&mut self, now: DateTime<Utc>) {
+    pub fn complete(&mut self, now: Timestamp) {
         self.completed_at = Some(now);
     }
 }
@@ -205,7 +205,7 @@ pub fn save_at(path: &Path, state: &OnboardingState) -> Result<()> {
     crate::atomic_write::write(path, json.as_bytes())
 }
 
-pub fn load_for_daemon(region_configured: bool, now: DateTime<Utc>) -> OnboardingState {
+pub fn load_for_daemon(region_configured: bool, now: Timestamp) -> OnboardingState {
     let Some(path) = crate::paths::onboarding_path() else {
         tracing::warn!("Failed to determine onboarding state path");
         return initial_state(region_configured, now);
@@ -233,7 +233,7 @@ pub fn load_for_daemon(region_configured: bool, now: DateTime<Utc>) -> Onboardin
 // recorded as complete rather than shown a first-run flow it does not need.
 // This is also what arms the support prompt for those users (see
 // `support_prompt::load_for_daemon`).
-fn initial_state(region_configured: bool, now: DateTime<Utc>) -> OnboardingState {
+fn initial_state(region_configured: bool, now: Timestamp) -> OnboardingState {
     let mut state = OnboardingState::default();
     if region_configured {
         state.step = OnboardingStep::Finish;
@@ -245,10 +245,9 @@ fn initial_state(region_configured: bool, now: DateTime<Utc>) -> OnboardingState
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
-    fn now() -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 9, 10, 12, 0, 0).unwrap()
+    fn now() -> Timestamp {
+        "2026-09-10T12:00:00Z".parse().unwrap()
     }
 
     #[test]
@@ -471,11 +470,17 @@ mod tests {
     #[test]
     fn state_roundtrips_atomically() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("state/onboarding.json");
-        let state = OnboardingState {
-            step: OnboardingStep::Profiles,
-            ..OnboardingState::default()
-        };
+        let path = dir.path().join("onboarding.json");
+        fs::write(
+            &path,
+            r#"{"step":"finish","completed_at":"2026-09-10T12:00:00.123456Z"}"#,
+        )
+        .unwrap();
+        let state = load_at(&path).unwrap().unwrap();
+        assert_eq!(
+            state.completed_at,
+            "2026-09-10T12:00:00.123456Z".parse().ok()
+        );
         save_at(&path, &state).unwrap();
         assert_eq!(load_at(&path).unwrap(), Some(state));
         assert!(!path.with_extension("json.tmp").exists());

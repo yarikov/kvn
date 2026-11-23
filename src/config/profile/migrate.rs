@@ -1,4 +1,4 @@
-use chrono::{Local, NaiveDate};
+use jiff::{Zoned, civil::Date};
 
 use super::dns::DnsStrategy;
 use super::schedule::next_update_window_date;
@@ -14,13 +14,13 @@ impl Config {
     }
 
     pub(crate) fn migrate_to(&mut self, target_version: u32) -> anyhow::Result<()> {
-        self.migrate_with_update_date_to(target_version, next_update_window_date(Local::now()))
+        self.migrate_with_update_date_to(target_version, next_update_window_date(&Zoned::now()))
     }
 
     fn migrate_with_update_date_to(
         &mut self,
         target_version: u32,
-        next_update_date: NaiveDate,
+        next_update_date: Date,
     ) -> anyhow::Result<()> {
         if self.schema_version > CURRENT_SCHEMA_VERSION {
             anyhow::bail!(
@@ -100,7 +100,7 @@ impl Config {
         }
     }
 
-    fn migrate_v2_to_v3(&mut self, next: NaiveDate) {
+    fn migrate_v2_to_v3(&mut self, next: Date) {
         for subscription in &mut self.subscriptions {
             if matches!(
                 subscription.auto_update,

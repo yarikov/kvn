@@ -131,7 +131,7 @@ pub(in crate::app::update) fn advance(model: &mut Model, step: OnboardingStep) -
 
 pub(in crate::app::update) fn finish(model: &mut Model) -> Vec<Effect> {
     let previous = model.onboarding;
-    model.onboarding.state.complete(chrono::Utc::now());
+    model.onboarding.state.complete(jiff::Timestamp::now());
     model.onboarding.awaiting = None;
     model.onboarding.card_pending = false;
     model.overlay = Overlay::None;
@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn resume_ignores_a_finished_tour() {
         let mut model = model_with_profiles(vec![]);
-        model.onboarding.state.complete(chrono::Utc::now());
+        model.onboarding.state.complete(jiff::Timestamp::now());
 
         assert!(resume(&mut model).is_empty());
         assert_eq!(model.overlay, Overlay::None);
@@ -406,7 +406,7 @@ mod tests {
     fn open_when_idle_ignores_a_finished_tour() {
         let mut model = model_with_profiles(vec![]);
         model.onboarding.card_pending = true;
-        model.onboarding.state.complete(chrono::Utc::now());
+        model.onboarding.state.complete(jiff::Timestamp::now());
         assert!(open_when_idle(&mut model).is_empty());
         assert_eq!(model.overlay, Overlay::None);
     }

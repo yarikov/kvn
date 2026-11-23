@@ -16,7 +16,7 @@ crossterm = "0.29"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-schemars = { version = "1.2", features = ["uuid1", "chrono04"] }
+schemars = { version = "1.2", features = ["uuid1", "jiff02"] }
 toml = "1.1"
 semver = { version = "1.0", features = ["serde"] }
 
@@ -40,13 +40,13 @@ anyhow = "1.0"
 dirs = "7.0"
 
 # URL parsing
-url = "2.5"
+url = "2.5.9"
 
 # Unicode width for visual truncation
 unicode-width = "0.2"
 
-# Chrono for timestamps
-chrono = { version = "0.4", features = ["clock", "serde"], default-features = false }
+# Dates, timestamps, and time zones
+jiff = { version = "0.2", features = ["serde"] }
 
 # URL encoding / decoding
 urlencoding = "2.1"

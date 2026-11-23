@@ -370,7 +370,7 @@ is listed in [System integration](system-integration.md).
 | Linux integration | [zbus](https://docs.rs/zbus/latest/zbus/), `notify`, `signal-hook` | Suspend/resume, theme watching, and Unix signals |
 | CLI | [clap](https://docs.rs/clap/) | Commands, setup options, and diagnostics |
 | Observability | [tracing](https://github.com/tokio-rs/tracing) | Filtered application and daemon logs |
-| Core utilities | `anyhow`, `uuid`, `chrono`, `url`, `base64`, `dirs` | Errors, IDs, timestamps, share links, and XDG paths |
+| Core utilities | `anyhow`, `uuid`, `jiff`, `url`, `base64`, `dirs` | Errors, IDs, timestamps, share links, and XDG paths |
 | Testing | [insta](https://insta.rs/) | Snapshot tests of rendered screens |
 
 ## Testing
