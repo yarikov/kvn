@@ -12,9 +12,9 @@ pub(crate) use docs_preview::run_docs_preview;
 
 use std::io::{self, IsTerminal, Write};
 use std::sync::Arc;
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossterm::ExecutableCommand;
@@ -38,8 +38,7 @@ pub(crate) fn osc_color(slot: u8, color: Color) -> String {
 }
 
 const DAEMON_SHUTDOWN_MARGIN: Duration = Duration::from_secs(3);
-const OUTDATED_DAEMON_EXIT_TIMEOUT: Duration =
-    STOP_GRACE_PERIOD.saturating_add(DAEMON_SHUTDOWN_MARGIN);
+const DAEMON_EXIT_TIMEOUT: Duration = STOP_GRACE_PERIOD.saturating_add(DAEMON_SHUTDOWN_MARGIN);
 
 pub(crate) const OSC_RESET_COLORS: &str = "\x1b]110\x1b\\\x1b]111\x1b\\";
 pub(crate) const OSC_POINTER_INTERACTIVE: &str = "\x1b]22;pointer\x1b\\";
@@ -257,9 +256,9 @@ fn connect_to_current_daemon() -> Result<(IpcClient, crate::app::msg::StateSnaps
             .context("Failed to ask outdated daemon to stop")?;
         drop(client);
         anyhow::ensure!(
-            crate::ipc::wait_for_daemon_exit(OUTDATED_DAEMON_EXIT_TIMEOUT),
+            crate::ipc::wait_for_daemon_exit(DAEMON_EXIT_TIMEOUT),
             "outdated daemon did not stop within {}s",
-            OUTDATED_DAEMON_EXIT_TIMEOUT.as_secs()
+            DAEMON_EXIT_TIMEOUT.as_secs()
         );
         crate::start_current_daemon().context("Failed to start updated daemon")?;
         anyhow::ensure!(
@@ -303,7 +302,7 @@ fn apply_initial_snapshot(
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     model: &mut Model,
-    rx: std::sync::mpsc::Receiver<Msg>,
+    rx: Receiver<Msg>,
     client: &mut IpcClient,
     tx: Sender<Msg>,
     log_tailer: &mut LogTailer,
@@ -321,7 +320,20 @@ fn run_loop(
     loop {
         match state.handle(rx.recv()?)? {
             handler::Flow::Continue => {}
+            handler::Flow::WaitForDaemonExit { deadline } => {
+                wait_for_daemon_disconnect(&rx, deadline);
+                return Ok(TuiExit::Normal);
+            }
             handler::Flow::Exit(exit) => return Ok(exit),
+        }
+    }
+}
+
+fn wait_for_daemon_disconnect(rx: &Receiver<Msg>, deadline: Instant) {
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        match rx.recv_timeout(remaining) {
+            Ok(Msg::DaemonDisconnected) | Err(_) => return,
+            Ok(_) => {}
         }
     }
 }
@@ -406,6 +418,29 @@ fn spawn_ticker(tx: Sender<Msg>) {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn shutdown_wait_ends_at_daemon_disconnect() {
+        let (tx, rx) = channel();
+        tx.send(Msg::Tick).unwrap();
+        tx.send(Msg::DaemonDisconnected).unwrap();
+        tx.send(Msg::Resize).unwrap();
+
+        wait_for_daemon_disconnect(&rx, Instant::now() + Duration::from_secs(1));
+
+        assert!(matches!(rx.try_recv(), Ok(Msg::Resize)));
+    }
+
+    #[test]
+    fn shutdown_wait_times_out_while_daemon_stays_connected() {
+        let (_tx, rx) = channel();
+        let timeout = Duration::from_millis(20);
+        let start = Instant::now();
+
+        wait_for_daemon_disconnect(&rx, start + timeout);
+
+        assert!(start.elapsed() >= timeout);
+    }
 
     #[test]
     fn interface_drafts_preview_theme_and_icons_until_closed() {

@@ -79,7 +79,10 @@ work on files and system integration directly; see the
 
 Closing the TUI with `q` sends `Detach` and exits the TUI process. The daemon
 and the tunnel keep running, and running `kvn` again reattaches instantly.
-`Ctrl+C` in the TUI sends `Quit`, which stops sing-box and the daemon.
+`Ctrl+C` in the TUI sends `Quit`, which stops sing-box and the daemon. The
+TUI exits when the daemon closes the IPC connection or the 15-second deadline
+expires. Sending `Quit` and waiting for the connection to close share that
+deadline.
 
 **sing-box** is a child of the daemon. It creates the TUN interface, speaks
 the VPN protocol and does DNS and routing. The daemon reads live traffic

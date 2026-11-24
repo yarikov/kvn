@@ -1,11 +1,10 @@
-use std::thread;
-use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::msg::IpcCommand;
-use crate::tui_client::TuiExit;
+use crate::tui_client::{DAEMON_EXIT_TIMEOUT, TuiExit};
 
 use super::super::{ClientLoop, Flow};
 
@@ -25,9 +24,9 @@ pub(super) fn detach(state: &mut ClientLoop) -> Result<Flow> {
 }
 
 pub(super) fn stop_daemon(state: &mut ClientLoop) -> Flow {
-    let _ = state.client.send(&IpcCommand::Quit);
-    thread::sleep(Duration::from_millis(300));
-    Flow::Exit(TuiExit::Normal)
+    let deadline = Instant::now() + DAEMON_EXIT_TIMEOUT;
+    let _ = state.client.send_quit(deadline);
+    Flow::WaitForDaemonExit { deadline }
 }
 
 pub(super) fn is_interrupt(key: &KeyEvent) -> bool {

@@ -33,6 +33,7 @@ const DAEMON_RECONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(super) enum Flow {
     Continue,
+    WaitForDaemonExit { deadline: Instant },
     Exit(TuiExit),
 }
 
