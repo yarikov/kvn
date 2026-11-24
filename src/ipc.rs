@@ -7,7 +7,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use anyhow::Context;
@@ -233,6 +233,27 @@ impl IpcClient {
 
     pub fn send(&mut self, cmd: &IpcCommand) -> anyhow::Result<()> {
         self.write_line(serde_json::to_string(cmd)? + "\n")
+    }
+
+    pub fn send_quit(&mut self, deadline: Instant) -> anyhow::Result<()> {
+        use std::io::ErrorKind;
+
+        let line = serde_json::to_string(&IpcCommand::Quit)? + "\n";
+        let mut pending = line.as_bytes();
+        while !pending.is_empty() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            anyhow::ensure!(!remaining.is_zero(), "Timed out sending Quit to the daemon");
+            self.stream
+                .set_write_timeout(Some(remaining))
+                .context("Failed to set the IPC write timeout for Quit")?;
+            match self.stream.write(pending) {
+                Ok(0) => anyhow::bail!("Failed to write Quit to the daemon"),
+                Ok(written) => pending = &pending[written..],
+                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
     }
 
     pub fn send_request(&mut self, cmd: &IpcCommand) -> anyhow::Result<Uuid> {
@@ -638,6 +659,39 @@ mod tests {
 
         let error = client.send(&IpcCommand::Attach).unwrap_err();
         assert!(error.downcast_ref::<DaemonConnectionLost>().is_some());
+    }
+
+    #[test]
+    fn sending_quit_times_out_when_the_daemon_stops_reading() {
+        use std::io::{Error, ErrorKind};
+
+        let (mut client_stream, _daemon_stream) = UnixStream::pair().unwrap();
+        client_stream.set_nonblocking(true).unwrap();
+        while let Ok(written) = client_stream.write(&[0; 4096]) {
+            assert!(written > 0);
+        }
+        assert_eq!(
+            client_stream.write(b"x").unwrap_err().kind(),
+            ErrorKind::WouldBlock
+        );
+        client_stream.set_nonblocking(false).unwrap();
+        client_stream
+            .set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut client = IpcClient {
+            stream: client_stream,
+        };
+        let start = Instant::now();
+
+        let error = client
+            .send_quit(start + Duration::from_millis(30))
+            .unwrap_err();
+
+        assert!(matches!(
+            error.downcast_ref::<Error>().map(Error::kind),
+            Some(ErrorKind::WouldBlock | ErrorKind::TimedOut)
+        ));
+        assert!(start.elapsed() < Duration::from_secs(2));
     }
 
     #[test]
