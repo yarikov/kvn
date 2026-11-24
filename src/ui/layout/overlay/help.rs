@@ -105,7 +105,7 @@ pub(in crate::ui::layout) fn popup_area(area: Rect, total: usize) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::model::Overlay;
+    use crate::app::model::{HelpContext, HelpState, Overlay, SettingsMenuPage};
     use crate::test_helpers::{
         APP_WINDOW_COLS, APP_WINDOW_ROWS, model_with_profiles, render_to_string, snapshot_terminal,
     };
@@ -140,6 +140,7 @@ mod tests {
             ("Space r", "Routing"),
             ("Space i", "Interface"),
             ("Space c", "Connection"),
+            ("Space e", "Open settings.json in $EDITOR"),
             ("q/Esc", "Detach TUI from main screen"),
             ("Ctrl+C", "Quit daemon"),
             ("?", "Open or close help"),
@@ -184,6 +185,16 @@ mod tests {
         model.overlay = Overlay::Help(crate::app::model::HelpState {
             context: crate::app::model::HelpContext::Logs,
             selected: 12,
+        });
+        insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
+    }
+
+    #[test]
+    fn draw_settings_help_overlay_snapshot() {
+        let mut model = model_with_profiles(vec![]);
+        model.overlay = Overlay::Help(HelpState {
+            context: HelpContext::SettingsMenu(SettingsMenuPage::Root),
+            ..HelpState::default()
         });
         insta::assert_snapshot!(snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS));
     }
