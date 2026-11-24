@@ -1,0 +1,40 @@
+---
+source: src/ui/layout/overlay/help.rs
+expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
+---
+┌ Traffic ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ↑ 0.0 KB/s  ↓ 0.0 KB/s    Total: ↑ 0.0 KB  ↓ 0.0 KB    0 connections                                          │
+└───────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Profiles ─────────────────────────────────────────────┐┌ Logs ────────────────────────────────────────────────┐
+│ No sources. Press p to paste ┌─────────────────────────────────────────────────┐                              │
+│URL from clipboard.           │ Navigation                                      ┃                              │
+│                              │ Ctrl+h/←   Focus left pane                      ┃                              │
+│                              │ Ctrl+l/→   Focus right pane                     ┃                              │
+│                              │ j/k, ↑/↓   Move or scroll                       ┃                              │
+│                              │ gg/G       Go to first / last                   ┃                              │
+│                              │                                                 ┃                              │
+│                              │ Settings                                        ┃                              │
+│                              │ Space      Open settings menu                   ┃                              │
+│                              │ Space e    Open settings.json in $EDITOR        ┃                              │
+│                              │ Space c    Connection                           ┃                              │
+│                              │ Space d    DNS                                  ┃                              │
+│                              │ Space i    Interface                            ┃                              │
+│                              │ Space r    Routing                              │                              │
+│                              │                                                 │                              │
+│                              │ Dialogs                                         │                              │
+│                              │ h/l, ←/→   Change selected value                │                              │
+│                              │ Enter      Confirm selection or changes         │                              │
+│                              │ y/n        Confirm / cancel action              │                              │
+│                              │ q/Esc      Cancel dialog                        │                              │
+│                              │                                                 │                              │
+│                              │ Profiles                                        │                              │
+│                              │ Enter      Connect selected profile             │                              │
+│                              │ e          Open profiles.json in $EDITOR        │                              │
+│                              │ y          Yank profile or subscription         │                              │
+│                              │                                                 │                              │
+│                              │                    q/󱊷 close                    │                              │
+│                              └─────────────────────────────────────────────────┘                              │
+│                                                       ││                                                      │
+└───────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
+ DISCONNECTED                                                                                         DoH  Global
+[113x35]

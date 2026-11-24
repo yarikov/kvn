@@ -23,7 +23,6 @@ enum HelpGroup {
     Logs,
     Connection,
     Settings,
-    SettingsPage,
     RoutingSettings,
     Dialogs,
     General,
@@ -75,13 +74,12 @@ const CONNECTION: &[(&str, &str)] = &[
 
 const SETTINGS: &[(&str, &str)] = &[
     ("Space", "Open settings menu"),
+    ("Space e", "Open settings.json in $EDITOR"),
     ("Space c", "Connection"),
     ("Space d", "DNS"),
     ("Space i", "Interface"),
     ("Space r", "Routing"),
 ];
-
-const SETTINGS_PAGE: &[(&str, &str)] = &[("e", "Open settings.json in $EDITOR")];
 
 const ROUTING_SETTINGS: &[(&str, &str)] = &[
     ("e", "Open routing.json in $EDITOR"),
@@ -111,7 +109,6 @@ impl HelpGroup {
             Self::Logs => "Logs",
             Self::Connection => "Connection",
             Self::Settings => "Settings",
-            Self::SettingsPage => "Settings page",
             Self::RoutingSettings => "Routing",
             Self::Dialogs => "Dialogs",
             Self::General => "General",
@@ -125,7 +122,6 @@ impl HelpGroup {
             Self::Logs => LOGS,
             Self::Connection => CONNECTION,
             Self::Settings => SETTINGS,
-            Self::SettingsPage => SETTINGS_PAGE,
             Self::RoutingSettings => ROUTING_SETTINGS,
             Self::Dialogs => DIALOGS,
             Self::General => GENERAL,
@@ -142,12 +138,9 @@ fn relevant_groups(context: HelpContext) -> &'static [HelpGroup] {
             HelpGroup::Dialogs,
             HelpGroup::Settings,
         ],
-        HelpContext::SettingsMenu(_) => &[
-            HelpGroup::SettingsPage,
-            HelpGroup::Dialogs,
-            HelpGroup::Settings,
-        ],
-        HelpContext::DnsSettings => &[HelpGroup::SettingsPage, HelpGroup::Dialogs],
+        HelpContext::SettingsMenu(_) | HelpContext::DnsSettings => {
+            &[HelpGroup::Settings, HelpGroup::Dialogs]
+        }
         HelpContext::ConfirmDelete
         | HelpContext::ConfirmDisable(_)
         | HelpContext::RoutingMode
@@ -259,12 +252,11 @@ mod tests {
             headings(HelpContext::DnsSettings),
             [
                 "Navigation",
-                "Settings page",
+                "Settings",
                 "Dialogs",
                 "Profiles",
                 "Logs",
                 "Connection",
-                "Settings",
                 "General",
             ]
         );
@@ -274,9 +266,8 @@ mod tests {
             )),
             [
                 "Navigation",
-                "Settings page",
-                "Dialogs",
                 "Settings",
+                "Dialogs",
                 "Profiles",
                 "Logs",
                 "Connection",
@@ -316,16 +307,8 @@ mod tests {
         ] {
             let routing_settings =
                 context == HelpContext::SettingsMenu(crate::app::model::SettingsMenuPage::Routing);
-            let settings_page = matches!(
-                context,
-                HelpContext::SettingsMenu(crate::app::model::SettingsMenuPage::Root)
-                    | HelpContext::DnsSettings
-            );
             let headings = headings(context);
-            assert_eq!(
-                headings.len(),
-                7 + usize::from(routing_settings) + usize::from(settings_page)
-            );
+            assert_eq!(headings.len(), 7 + usize::from(routing_settings));
             for expected in [
                 "Navigation",
                 "Profiles",
