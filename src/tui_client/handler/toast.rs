@@ -375,7 +375,7 @@ mod tests {
         assert_eq!(
             toasts.statuses(),
             [&AppStatus::Error(
-                "omakvn 1.1.0 is required; run: omarchy plugin update yarikov.omakvn".into()
+                "omakvn 1.2.0 is required; run: omarchy plugin update yarikov.omakvn".into()
             )]
         );
 

@@ -32,7 +32,7 @@ pub fn theme_colors_path() -> Option<PathBuf> {
 }
 
 pub const OMAKVN_PLUGIN_ID: &str = "yarikov.omakvn";
-pub const OMAKVN_MIN_VERSION: Version = Version::new(1, 1, 0);
+pub const OMAKVN_MIN_VERSION: Version = Version::new(1, 2, 0);
 pub const OMAKVN_UPDATE_COMMAND: &str = "omarchy plugin update yarikov.omakvn";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -331,9 +331,9 @@ mod tests {
     #[test]
     fn the_omakvn_state_compares_the_manifest_version_with_the_required_one() {
         for (version, expected) in [
-            (Some("1.1.0"), OmakvnState::Installed),
+            (Some("1.2.0"), OmakvnState::Installed),
             (Some("9.0.0"), OmakvnState::Installed),
-            (Some("1.0.1"), OmakvnState::Outdated),
+            (Some("1.1.0"), OmakvnState::Outdated),
             (Some("not a version"), OmakvnState::Outdated),
             (None, OmakvnState::Outdated),
         ] {
@@ -370,7 +370,7 @@ mod tests {
             omakvn_status(),
             OmakvnStatus {
                 state: OmakvnState::Outdated,
-                required_version: "1.1.0".into(),
+                required_version: "1.2.0".into(),
             }
         );
     }
