@@ -4,6 +4,7 @@ set -euo pipefail
 RULE_FILE="/etc/polkit-1/rules.d/49-kvn-tui.rules"
 GROUP_NAME="kvn-tui"
 STAMP_DIR="/var/lib/kvn/integrations"
+STAMP_FILE="$STAMP_DIR/polkit.sha256"
 RULE_SOURCE="${1:?missing embedded polkit rule source}"
 REFRESH="${KVN_SETUP_REFRESH:-0}"
 
@@ -35,18 +36,29 @@ RULE_TMP="$(mktemp)"
 trap 'rm -f "$RULE_TMP"' EXIT
 printf '%s' "$RULE_SOURCE" >"$RULE_TMP"
 
-install -m 0644 -o root -g root "$RULE_TMP" "$RULE_FILE"
-install -dm755 "$STAMP_DIR"
-sha256sum "$RULE_FILE" | cut -d' ' -f1 > "$STAMP_DIR/polkit.sha256"
-chmod 644 "$STAMP_DIR/polkit.sha256"
-
-if [[ "$REFRESH" == "1" ]]; then
-    echo "Updated $RULE_FILE."
-    exit 0
+RULE_MESSAGE="Installed $RULE_FILE with four systemd-resolved permissions."
+if [[ "$REFRESH" != "1" && -f "$RULE_FILE" && ! -L "$RULE_FILE" ]] &&
+    cmp -s -- "$RULE_TMP" "$RULE_FILE" &&
+    [[ "$(stat -c '%u:%g:%a' -- "$RULE_FILE")" == "0:0:644" ]]; then
+    RULE_MESSAGE="Polkit rule is already up to date."
+else
+    if [[ "$REFRESH" == "1" || -e "$RULE_FILE" || -L "$RULE_FILE" ]]; then
+        RULE_MESSAGE="Updated $RULE_FILE."
+    fi
+    install -T -m 0644 -o root -g root "$RULE_TMP" "$RULE_FILE"
 fi
 
-echo "Installed $RULE_FILE with four systemd-resolved permissions."
-echo "NetworkManager permissions are not granted."
+STAMP="$(sha256sum < "$RULE_FILE" | cut -d' ' -f1)"
+if [[ "$REFRESH" == "1" || ! -f "$STAMP_FILE" ]] ||
+    ! printf '%s\n' "$STAMP" | cmp -s -- - "$STAMP_FILE" ||
+    [[ "$(stat -c '%a' -- "$STAMP_FILE")" != "644" ||
+        "$(stat -c '%a' -- "$STAMP_DIR")" != "755" ]]; then
+    install -dm755 "$STAMP_DIR"
+    printf '%s\n' "$STAMP" > "$STAMP_FILE"
+    chmod 644 "$STAMP_FILE"
+fi
+
+echo "$RULE_MESSAGE"
 if [[ "$ADDED_TO_GROUP" == "1" ]]; then
     echo "User '$USER_NAME' was added to '$GROUP_NAME'."
     echo "Reboot to activate the kvn-tui group."
