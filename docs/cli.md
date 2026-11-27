@@ -245,6 +245,9 @@ sudo kvn setup --polkit --killswitch
 be combined with the other two. `--polkit` and `--killswitch` must be run
 through `sudo` from the account that uses kvn.
 
+`setup --omarchy` updates the official `yarikov.omakvn` checkout and replaces
+other contents at the plugin's installation path.
+
 ### refresh
 
 ```bash

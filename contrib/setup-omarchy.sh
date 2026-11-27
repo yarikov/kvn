@@ -175,17 +175,19 @@ append_marker_block() {
 }
 
 plugin_dir_created=0
-legacy_plugin_staged=0
-legacy_plugin_target=""
 
+is_omakvn_origin() {
+  local url=${1%/}
+  case "${url%.git}" in
+  https://github.com/yarikov/omakvn | ssh://git@github.com/yarikov/omakvn | git@github.com:yarikov/omakvn)
+    return 0 ;;
+  *) return 1 ;;
+  esac
+}
 
-# Install or update the standalone Git-managed Quickshell plugin. Legacy
-# releases copied the QML files directly; stage that copy until the remote
-# install succeeds so a network failure cannot leave the user without it.
 install_omarchy_v4_plugin() {
   local dir="$HOME/.config/omarchy/plugins/yarikov.omakvn"
-  local legacy_dir="$HOME/.config/omarchy/plugins/kvn.tui"
-  local origin=""
+  local configured_urls fetch_url
 
   omarchy plugin add --help >/dev/null 2>&1 || {
     echo "Error: this Omarchy build lacks the shell plugin registry;" >&2
@@ -194,47 +196,27 @@ install_omarchy_v4_plugin() {
   }
 
   if [[ -d $dir/.git ]]; then
-    origin=$(git -C "$dir" remote get-url origin 2>/dev/null || true)
-    case "$origin" in
-    https://github.com/yarikov/omakvn | https://github.com/yarikov/omakvn.git | git@github.com:yarikov/omakvn.git)
+    fetch_url=$(git -C "$dir" remote get-url origin) || return 1
+    configured_urls=$(git -C "$dir" config --get-all remote.origin.url) || {
+      echo "Error: could not read the configured origin URL in $dir." >&2
+      return 1
+    }
+    if is_omakvn_origin "${configured_urls%%$'\n'*}" || is_omakvn_origin "$fetch_url"; then
       echo "Updating the yarikov.omakvn bar plugin from $OMAKVN_REPO..."
       omarchy plugin update yarikov.omakvn --yes || {
         echo "Error: failed to update the yarikov.omakvn bar plugin from $OMAKVN_REPO." >&2
         return 1
       }
       return 0
-      ;;
-    *)
-      echo "Error: yarikov.omakvn is managed by a different Git repository: ${origin:-<unknown>}" >&2
-      echo "Refusing to overwrite $dir." >&2
-      return 1
-      ;;
-    esac
+    fi
   fi
 
-  if [[ -e $dir ]]; then
-    if ! jq -e '.id == "yarikov.omakvn"' "$dir/manifest.json" >/dev/null 2>&1; then
-      echo "Error: refusing to replace unrecognized plugin directory: $dir" >&2
-      return 1
-    fi
-    echo "Migrating the embedded yarikov.omakvn plugin to its standalone repository..."
-    mv -- "$dir" "$V4_TRANSACTION_DIR/legacy-kvn.tui"
-    legacy_plugin_staged=1
-    legacy_plugin_target=$dir
-  elif [[ -e $legacy_dir ]]; then
-    if ! jq -e '.id == "kvn.tui"' "$legacy_dir/manifest.json" >/dev/null 2>&1; then
-      echo "Error: refusing to replace unrecognized plugin directory: $legacy_dir" >&2
-      return 1
-    fi
-    echo "Migrating the kvn.tui plugin to the new yarikov.omakvn ID..."
-    mv -- "$legacy_dir" "$V4_TRANSACTION_DIR/legacy-kvn.tui"
-    legacy_plugin_staged=1
-    legacy_plugin_target=$legacy_dir
-    plugin_dir_created=1
-  else
-    plugin_dir_created=1
+  if [[ -e $dir || -L $dir ]]; then
+    echo "Replacing the existing plugin at $dir..."
+    rm -rf -- "$dir" || return 1
   fi
 
+  plugin_dir_created=1
   echo "Installing the yarikov.omakvn bar plugin from $OMAKVN_REPO..."
   if omarchy plugin add "$OMAKVN_REPO" --yes; then
     return 0
@@ -319,10 +301,6 @@ EOF
     fi
     if (( plugin_dir_created )); then
       rm -rf -- "$HOME/.config/omarchy/plugins/yarikov.omakvn"
-    fi
-    if (( legacy_plugin_staged )) && [[ -d $V4_TRANSACTION_DIR/legacy-kvn.tui ]]; then
-      rm -rf -- "$HOME/.config/omarchy/plugins/yarikov.omakvn"
-      mv -- "$V4_TRANSACTION_DIR/legacy-kvn.tui" "$legacy_plugin_target"
     fi
     hyprctl reload >/dev/null 2>&1 || true
   }

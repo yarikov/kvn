@@ -2029,64 +2029,65 @@ esac
 
     #[test]
     fn omarchy_v4_installer_upgrades_command_module_to_plugin() {
-        let (root, home) = installer_fixture(4);
-        let shell_config = home.join(".config/omarchy/shell.json");
-        write_omarchy_v4_config(&home);
-        let mut shell: serde_json::Value =
-            serde_json::from_slice(&fs::read(&shell_config).unwrap()).unwrap();
-        shell["bar"]["layout"]["right"]
-            .as_array_mut()
-            .unwrap()
-            .insert(
-                0,
-                serde_json::json!({"id": "kvn-tui", "type": "command", "exec": "kvn-tui --waybar-status", "interval": 5, "onClick": "omarchy-launch-kvn-tui"}),
+        for exec in ["kvn-tui --waybar-status", "kvn --waybar-status"] {
+            let (root, home) = installer_fixture(4);
+            let shell_config = home.join(".config/omarchy/shell.json");
+            write_omarchy_v4_config(&home);
+            let mut shell: serde_json::Value =
+                serde_json::from_slice(&fs::read(&shell_config).unwrap()).unwrap();
+            shell["bar"]["layout"]["left"] = serde_json::json!([{
+                "id": "kvn-tui",
+                "type": "command",
+                "exec": exec,
+                "interval": 5,
+                "tooltip": "kvn VPN client",
+                "onClick": "omarchy-launch-kvn-tui"
+            }]);
+            fs::write(&shell_config, serde_json::to_vec(&shell).unwrap()).unwrap();
+
+            assert_success(&run_installer(&root, &home, "n\n"));
+
+            let shell: serde_json::Value =
+                serde_json::from_slice(&fs::read(&shell_config).unwrap()).unwrap();
+            assert_eq!(
+                shell["bar"]["layout"],
+                serde_json::json!({
+                    "left": [],
+                    "center": [],
+                    "right": [
+                        {"id": "omarchy.tray"},
+                        {"id": "yarikov.omakvn"},
+                        {"id": "omarchy.bluetooth"},
+                        {"id": "omarchy.network"}
+                    ]
+                }),
+                "{exec}"
             );
-        fs::write(&shell_config, serde_json::to_vec_pretty(&shell).unwrap()).unwrap();
-
-        assert_success(&run_installer(&root, &home, "y\n\n"));
-
-        let shell: serde_json::Value =
-            serde_json::from_slice(&fs::read(&shell_config).unwrap()).unwrap();
-        let ids: Vec<&str> = shell["bar"]["layout"]["right"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|e| e["id"].as_str().unwrap())
-            .collect();
-        assert_eq!(ids.iter().filter(|id| **id == "yarikov.omakvn").count(), 1);
-        assert!(!ids.contains(&"kvn-tui"));
+        }
     }
 
     #[test]
-    fn omarchy_v4_installer_migrates_embedded_plugin_to_git_checkout() {
+    fn omarchy_v4_installer_leaves_the_old_plugin_directory_in_place() {
         let (root, home) = installer_fixture(4);
         write_omarchy_v4_config(&home);
         let legacy_plugin = home.join(".config/omarchy/plugins/kvn.tui");
         fs::create_dir_all(&legacy_plugin).unwrap();
-        fs::write(legacy_plugin.join("manifest.json"), r#"{"id":"kvn.tui"}"#).unwrap();
+        let manifest = r#"{"id":"kvn.tui"}"#;
+        fs::write(legacy_plugin.join("manifest.json"), manifest).unwrap();
         fs::write(legacy_plugin.join("Widget.qml"), "legacy").unwrap();
 
         assert_success(&run_installer(&root, &home, "\n"));
 
-        let plugin = home.join(".config/omarchy/plugins/yarikov.omakvn");
-        assert!(!legacy_plugin.exists());
-        assert!(plugin.join(".git").is_dir());
-        assert_eq!(
-            ProcessCommand::new("git")
-                .args([
-                    "-C",
-                    plugin.to_str().unwrap(),
-                    "remote",
-                    "get-url",
-                    "origin"
-                ])
-                .output()
-                .unwrap()
-                .stdout,
-            b"https://github.com/yarikov/omakvn.git\n"
+        assert!(
+            home.join(".config/omarchy/plugins/yarikov.omakvn/.git")
+                .is_dir()
         );
-        assert_ne!(
-            fs::read_to_string(plugin.join("Widget.qml")).unwrap(),
+        assert_eq!(
+            fs::read_to_string(legacy_plugin.join("manifest.json")).unwrap(),
+            manifest
+        );
+        assert_eq!(
+            fs::read_to_string(legacy_plugin.join("Widget.qml")).unwrap(),
             "legacy"
         );
     }
@@ -2121,6 +2122,11 @@ esac
     #[test]
     fn omarchy_installer_fails_when_updating_the_plugin_fails() {
         let (root, home) = installer_fixture(4);
+        fs::write(
+            home.join(".gitconfig"),
+            "[url \"ssh://mirror/\"]\n\tinsteadOf = https://github.com/\n",
+        )
+        .unwrap();
         write_omarchy_v4_config(&home);
         let plugin = home.join(".config/omarchy/plugins/yarikov.omakvn");
         fs::create_dir_all(&plugin).unwrap();
@@ -2158,41 +2164,8 @@ esac
             "stderr:\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        assert!(plugin.join(".git").is_dir());
         assert_eq!(fs::read_to_string(&shell_config).unwrap(), before);
-    }
-
-    #[test]
-    fn omarchy_v4_installer_refuses_conflicting_git_origin() {
-        let (root, home) = installer_fixture(4);
-        write_omarchy_v4_config(&home);
-        let plugin = home.join(".config/omarchy/plugins/yarikov.omakvn");
-        fs::create_dir_all(&plugin).unwrap();
-        assert_success(
-            &ProcessCommand::new("git")
-                .args(["-C", plugin.to_str().unwrap(), "init", "-q"])
-                .output()
-                .unwrap(),
-        );
-        assert_success(
-            &ProcessCommand::new("git")
-                .args([
-                    "-C",
-                    plugin.to_str().unwrap(),
-                    "remote",
-                    "add",
-                    "origin",
-                    "https://example.com/not-omakvn.git",
-                ])
-                .output()
-                .unwrap(),
-        );
-
-        let output = run_installer(&root, &home, "\n");
-        assert!(!output.status.success());
-        assert!(
-            String::from_utf8_lossy(&output.stderr)
-                .contains("managed by a different Git repository")
-        );
     }
 
     #[test]
@@ -2313,6 +2286,33 @@ esac
         let shell_before = fs::read(&shell_config).unwrap();
         assert_success(&run_omarchy_removal(&root, &home));
         assert_eq!(fs::read(&shell_config).unwrap(), shell_before);
+    }
+
+    #[test]
+    fn omarchy_removal_cleans_up_legacy_bar_entries() {
+        let (root, home) = installer_fixture(4);
+        write_omarchy_v4_config(&home);
+        let shell_config = home.join(".config/omarchy/shell.json");
+        let shell = serde_json::json!({
+            "version": 1,
+            "bar": { "layout": {
+                "left": [{"id": "kvn-tui", "type": "command", "exec": "kvn-tui --waybar-status"}],
+                "center": [{"id": "kvn-tui", "type": "command", "exec": "kvn --waybar-status"}],
+                "right": ["kvn.tui", {"id": "omarchy.network"}]
+            }}
+        });
+        fs::write(&shell_config, serde_json::to_vec(&shell).unwrap()).unwrap();
+
+        assert_success(&run_omarchy_removal(&root, &home));
+
+        let shell: serde_json::Value =
+            serde_json::from_slice(&fs::read(&shell_config).unwrap()).unwrap();
+        assert_eq!(
+            shell["bar"]["layout"],
+            serde_json::json!({
+                "left": [], "center": [], "right": [{"id": "omarchy.network"}]
+            })
+        );
     }
 
     #[test]
