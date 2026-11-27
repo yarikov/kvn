@@ -83,6 +83,7 @@ impl ConfigLoad {
 }
 
 const LAST_SCHEMA_WITHOUT_HWID: u32 = 4;
+const LAST_COMBINED_SCHEMA_VERSION: u32 = 8;
 const COMBINED_KEYS: [&str; 3] = ["settings", "profiles", "subscriptions"];
 
 #[derive(serde::Deserialize)]
@@ -117,7 +118,7 @@ fn profiles_version(contents: &str, path: &Path) -> Result<u32> {
 }
 
 fn is_combined(version: u32) -> bool {
-    version < CURRENT_SCHEMA_VERSION
+    version <= LAST_COMBINED_SCHEMA_VERSION
 }
 
 fn read_optional(path: &Path) -> Result<Option<String>> {
@@ -663,6 +664,14 @@ mod tests {
             r#"{{"schema_version":8,"profiles":[{{"name":"A","protocol":"vless","address":"a","port":1,"uuid":"{}"}}],"settings":{{"theme":"{theme}","hwid":"lnx-d415f1264a264924aa76e7f55380b0c7"}}}}"#,
             crate::test_helpers::TEST_UUID
         )
+    }
+
+    #[test]
+    fn profiles_schema_v8_is_the_last_combined_version() {
+        for version in 0..=8 {
+            assert!(is_combined(version), "schema v{version}");
+        }
+        assert!(!is_combined(9));
     }
 
     #[test]
