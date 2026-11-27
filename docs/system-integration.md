@@ -217,18 +217,17 @@ The launcher mode is `0755`.
   The widget connects to the daemon's Unix socket
   (`$XDG_RUNTIME_DIR/kvn-tui.sock`) and exchanges NDJSON: snapshots in,
   semantic commands (`ConnectProfile`, `Disconnect`, `SetRoutingMode`,
-  `SetKillSwitch`, `SetAutoConnect`) out. Existing embedded
-  copies and older `command` bar modules are migrated automatically. Each kvn
-  release requires a minimum plugin version; when the installed plugin is
-  older, the TUI shows a toast and `kvn doctor` a warning, both with
-  `omarchy plugin update yarikov.omakvn`, and the snapshot's `omakvn.state` is
-  `outdated`. kvn never updates the plugin itself. The
-  plugin is mandatory: when the shell plugin registry is unavailable or the
-  install fails, setup aborts and rolls back instead of installing a reduced
-  integration;
+  `SetKillSwitch`, `SetAutoConnect`) out. Running setup again updates the
+  official Git checkout. If the path contains anything else, setup removes
+  it before installing the official plugin. Each kvn release requires a
+  minimum plugin version. When the installed plugin is older, the TUI and
+  `kvn doctor` show a warning with `omarchy plugin update yarikov.omakvn`,
+  and the snapshot's `omakvn.state` is `outdated`. Setup exits with an error
+  if the shell plugin registry is unavailable or the install fails;
 - `~/.config/omarchy/shell.json` — the `yarikov.omakvn` bar entry, inserted in
   the right section before `omarchy.bluetooth`, or before `omarchy.network`, or
-  at its end. `jq` must be installed;
+  at its end. Setup replaces an older `kvn-tui` command module with this entry.
+  `jq` must be installed;
 - `~/.config/hypr/bindings.lua` — optional launcher binding;
 - `~/.config/hypr/hyprland.lua` — floating-window rule.
 - `~/.local/share/applications/kvn-tui.desktop` — Apps menu entry searchable by
@@ -242,7 +241,7 @@ re-login.
 
 The selected shortcut is explicitly unbound before being assigned to kvn.
 The suggested `Super + Ctrl + K` shortcut replaces the default Herdr binding.
-Changes are applied as a transaction and rolled back if setup fails or
+Configuration changes are rolled back if setup fails or
 Hyprland reports new configuration errors.
 
 ### Backups and removal
