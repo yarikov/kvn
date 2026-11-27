@@ -268,7 +268,7 @@ detected problems.
 
 | Key | Action |
 |-----|--------|
-| `Space` | Open settings menu |
+| `Space` | Open or close settings |
 | `Space e` | Open `settings.json` in `$VISUAL` or `$EDITOR` |
 | `Space c` | Connection settings |
 | `Space d` | DNS settings |

@@ -121,13 +121,16 @@ mod tests {
     }
 
     #[test]
-    fn space_opens_settings_menu_from_both_main_panes() {
+    fn space_toggles_settings_menu_from_both_main_panes() {
         for focus in [MainPaneFocus::Sources, MainPaneFocus::Logs] {
             let mut model = model_with_profiles(vec![]);
             model.main_pane_focus = focus;
 
             assert!(handle_key(&mut model, key(' ')).is_empty());
             assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
+
+            assert!(handle_key(&mut model, key(' ')).is_empty());
+            assert_eq!(model.overlay, Overlay::None);
         }
     }
 

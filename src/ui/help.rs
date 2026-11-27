@@ -73,7 +73,7 @@ const CONNECTION: &[(&str, &str)] = &[
 ];
 
 const SETTINGS: &[(&str, &str)] = &[
-    ("Space", "Open settings menu"),
+    ("Space", "Open or close settings"),
     ("Space e", "Open settings.json in $EDITOR"),
     ("Space c", "Connection"),
     ("Space d", "DNS"),
@@ -374,6 +374,6 @@ mod tests {
 
     #[test]
     fn settings_starts_with_menu_entry() {
-        assert_eq!(SETTINGS[0], ("Space", "Open settings menu"));
+        assert_eq!(SETTINGS[0], ("Space", "Open or close settings"));
     }
 }

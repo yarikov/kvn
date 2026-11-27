@@ -14,7 +14,7 @@ expression: "snapshot_terminal(&model, APP_WINDOW_COLS, APP_WINDOW_ROWS)"
 │                              │ gg/G       Go to first / last                   ┃                              │
 │                              │                                                 ┃                              │
 │                              │ Settings                                        ┃                              │
-│                              │ Space      Open settings menu                   ┃                              │
+│                              │ Space      Open or close settings               ┃                              │
 │                              │ Space e    Open settings.json in $EDITOR        ┃                              │
 │                              │ Space c    Connection                           ┃                              │
 │                              │ Space d    DNS                                  ┃                              │
