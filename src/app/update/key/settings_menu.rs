@@ -118,7 +118,7 @@ pub(in crate::app::update) fn handle_settings_menu(
             clear_settings_drafts(model);
             model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
         }
-        (_, KeyCode::Char('q') | KeyCode::Esc) => {
+        (_, KeyCode::Char('q' | ' ') | KeyCode::Esc) => {
             clear_settings_drafts(model);
             model.overlay = Overlay::None;
         }
@@ -831,20 +831,24 @@ mod tests {
             assert_eq!(model.overlay, Overlay::None);
         }
 
-        for code in [KeyCode::Char(' '), KeyCode::Backspace, KeyCode::Char('x')] {
+        for code in [KeyCode::Backspace, KeyCode::Char('x')] {
             let mut model = model_with_profiles(vec![]);
             model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Root);
             handle_key(&mut model, KeyEvent::from(code));
             assert_eq!(model.overlay, Overlay::SettingsMenu(SettingsMenuPage::Root));
         }
+    }
 
-        let mut model = model_with_profiles(vec![]);
-        model.overlay = Overlay::SettingsMenu(SettingsMenuPage::Routing);
-        handle_key(&mut model, key(' '));
-        assert_eq!(
-            model.overlay,
-            Overlay::SettingsMenu(SettingsMenuPage::Routing)
-        );
+    #[test]
+    fn space_closes_each_settings_page() {
+        for entry in SettingsMenuEntry::ALL {
+            let mut model = model_with_profiles(vec![]);
+            handle_key(&mut model, key(' '));
+            handle_key(&mut model, key(entry.key()));
+
+            assert!(handle_key(&mut model, key(' ')).is_empty());
+            assert_eq!(model.overlay, Overlay::None, "{entry:?}");
+        }
     }
 
     #[test]

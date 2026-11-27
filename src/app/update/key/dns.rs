@@ -40,7 +40,7 @@ pub(in crate::app::update) fn handle_dns_settings(model: &mut Model, key: KeyEve
             model.dns_fakeip_draft = Some(!current);
         }
         KeyCode::Enter => return commit_dns_drafts(model),
-        KeyCode::Char('q') | KeyCode::Esc => {
+        KeyCode::Char('q' | ' ') | KeyCode::Esc => {
             model.overlay = Overlay::None;
             model.dns_preset_draft = None;
             model.dns_fakeip_draft = None;
